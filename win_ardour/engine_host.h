@@ -1,9 +1,8 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * UI-thread engine attach for win_ardour.
- * Audio callbacks stay on the backend realtime thread; the shell only
- * starts/stops and reads stable status fields from the UI thread.
+ * UI-thread engine + minimal Session attach for win_ardour.
+ * Peak meters and transport time come from Session when available.
  */
 
 #pragma once
@@ -12,13 +11,20 @@
 #include <string>
 
 struct EngineSnapshot {
+	static constexpr int kMeters = 3;
+
 	bool         available; /* compiled with AIRDOUR_WIN_SHELL_WITH_ENGINE */
 	bool         running;
+	bool         session_ok;
+	bool         transport_rolling;
+	bool         meters_real; /* PeakMeter (not stub) */
 	std::wstring backend;
 	uint32_t     sample_rate;
 	uint32_t     period_frames;
-	float        gain;   /* stub linear 0..1 until Session routes */
-	std::wstring detail; /* error or idle note */
+	float        gain; /* track 0 stub/session gain */
+	float        meter_peak[kMeters]; /* linear 0..1 */
+	float        transport_sec;
+	std::wstring detail;
 };
 
 class EngineHost
@@ -30,21 +36,23 @@ public:
 	EngineHost (const EngineHost&) = delete;
 	EngineHost& operator= (const EngineHost&) = delete;
 
-	/** Remember backend for later Play; does not start I/O. */
 	void prepare (const std::string& backend_name);
 
-	/** Start backend on the calling (UI) thread. Restart-safe after stop(). */
+	/** Start backend + scaffold minimal Session (tracks + demo tones). */
 	bool start ();
 	bool start (const std::string& backend_name);
 
-	/** Stop backend I/O on the UI thread. Avoids AudioEngine::stop lock/join hang. */
+	/** Tear down Session + stop backend I/O (UI thread). */
 	void stop ();
 
-	/** UI-thread poll of stable engine fields (SR/period/name). */
+	/** Session transport roll / stop (keeps engine running). */
+	void transport_play ();
+	void transport_stop ();
+
 	void poll ();
 
-	/** Stub monitor/track gain (no Session yet). Visual + snapshot only. */
 	void  set_gain (float linear);
+	void  set_track_gain (int track, float linear);
 	float gain () const;
 
 	EngineSnapshot snapshot () const;
@@ -53,10 +61,14 @@ public:
 
 private:
 	void refresh_snapshot ();
+	bool ensure_session ();
+	void destroy_session ();
+	void read_meters ();
 
 	bool        _started;
 	std::string _backend_name;
 	float       _gain;
+	float       _track_gain[EngineSnapshot::kMeters];
 	EngineSnapshot _snap;
 
 #ifdef AIRDOUR_WIN_SHELL_WITH_ENGINE

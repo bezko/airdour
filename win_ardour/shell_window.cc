@@ -155,11 +155,17 @@ ShellWindow::attach_engine (const std::string& backend_name)
 		return false;
 	}
 	bool ok = _engine.start (backend_name);
+	if (ok) {
+		_engine.transport_play ();
+	}
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	if (ok) {
 		_transport_playing = true;
 		_transport.set_playing (true);
+		if (_engine_snap.session_ok) {
+			_playhead_sec = _engine_snap.transport_sec;
+		}
 	}
 	return ok;
 }
@@ -173,6 +179,7 @@ ShellWindow::transport_play ()
 			InvalidateRect (_hwnd, nullptr, FALSE);
 			return;
 		}
+		_engine.transport_play ();
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 	}
@@ -188,8 +195,8 @@ ShellWindow::transport_stop ()
 	_transport_playing = false;
 	_transport.set_playing (false);
 	_playhead_sec = 0.f;
-	if (_engine.is_linked () && _engine_snap.running) {
-		_engine.stop ();
+	if (_engine.is_linked ()) {
+		_engine.transport_stop ();
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 	}
@@ -235,7 +242,7 @@ ShellWindow::stub_meter_peak (int track, float dt) const
 		return 0.f;
 	}
 	float g = _mixers[track].gain ();
-	/* Honest stub: no Session PeakMeter yet — animate from transport + gain. */
+	/* Fallback only when Session PeakMeter is unavailable. */
 	float t = _playhead_sec * (3.1f + track * 0.7f) + track * 0.4f;
 	float pulse = 0.55f + 0.45f * std::sin (t);
 	float beat = std::fmod (_playhead_sec * 2.f + track * 0.17f, 1.f);
@@ -613,8 +620,8 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_drag = DragMode::Fader;
 		_drag_index = mi;
 		_mixers[mi].drag_to (y);
+		_engine.set_track_gain (mi, _mixers[mi].gain ());
 		if (mi == 0) {
-			_engine.set_gain (_mixers[0].gain ());
 			_engine_snap.gain = _mixers[0].gain ();
 		}
 		SetCapture (_hwnd);
@@ -646,8 +653,8 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 
 	if (_drag == DragMode::Fader && _drag_index >= 0 && _drag_index < kTracks) {
 		if (_mixers[_drag_index].drag_to (y)) {
+			_engine.set_track_gain (_drag_index, _mixers[_drag_index].gain ());
 			if (_drag_index == 0) {
-				_engine.set_gain (_mixers[0].gain ());
 				_engine_snap.gain = _mixers[0].gain ();
 			}
 			InvalidateRect (_hwnd, nullptr, FALSE);
@@ -739,15 +746,20 @@ ShellWindow::on_tick ()
 	float t = (now - _start_tick) * 0.001f;
 	_pulse = 0.5f + 0.5f * std::sin (t * 1.6f);
 
-	if (_transport_playing) {
-		_playhead_sec += dt;
-	}
-
+	/* Poll engine often enough for meters while playing. */
 	static DWORD last_poll = 0;
-	if (now - last_poll > 250) {
+	DWORD poll_ms = _transport_playing ? 33u : 250u;
+	if (now - last_poll > poll_ms) {
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 		last_poll = now;
+	}
+
+	if (_engine_snap.running && (_transport_playing || _engine_snap.transport_rolling)) {
+		/* Prefer engine clock (Session transport_sample or processed_samples). */
+		_playhead_sec = _engine_snap.transport_sec;
+	} else if (_transport_playing) {
+		_playhead_sec += dt; /* UI-only fallback */
 	}
 
 	WaveStripParams wp;
@@ -763,7 +775,12 @@ ShellWindow::on_tick ()
 		wp.track_seed = _lanes[i].seed;
 		_lanes[i].strip.update (wp);
 
-		float peak = stub_meter_peak (i, dt);
+		float peak = 0.f;
+		if (_engine_snap.meters_real && i < EngineSnapshot::kMeters) {
+			peak = _engine_snap.meter_peak[i];
+		} else {
+			peak = stub_meter_peak (i, dt);
+		}
 		_mixers[i].set_meter_peak (peak);
 		_mixers[i].meter_tick (dt);
 	}
@@ -837,9 +854,11 @@ ShellWindow::draw_mixer_pane ()
 	                             r.left + inset + 70.f * _dpi_scale, r.top + 30.f * _dpi_scale),
 	                _brush_brand);
 
-	const wchar_t* hint = _transport_playing
-		? L"Meters: stub (play-synced) — no Session PeakMeter"
-		: L"Meters idle until Play  ·  drag faders";
+	const wchar_t* hint = _engine_snap.meters_real
+		? L"Meters: Session PeakMeter"
+		: (_transport_playing
+			? L"Meters: play stub — Session PeakMeter gated (see docs)"
+			: L"Meters idle until Play  ·  drag faders");
 	_rt->DrawTextW (hint, (UINT32)wcslen (hint), _fmt_meta,
 	                D2D1::RectF (r.left + inset + 70.f * _dpi_scale, r.top + 10.f * _dpi_scale,
 	                             r.right - inset, r.top + 30.f * _dpi_scale),
@@ -886,11 +905,11 @@ ShellWindow::on_paint ()
 	wchar_t status[320];
 	if (_engine_snap.running) {
 		_snwprintf_s (status, _TRUNCATE,
-		              L"Engine  %s  ·  %u Hz  ·  %u frames  ·  %d tracks  ·  dpi %u",
+		              L"Engine  %s  ·  %u Hz  ·  t=%.1fs  ·  %s  ·  dpi %u",
 		              _engine_snap.backend.c_str (),
 		              _engine_snap.sample_rate,
-		              _engine_snap.period_frames,
-		              kTracks,
+		              _playhead_sec,
+		              _engine_snap.meters_real ? L"PeakMeter" : L"stub meters",
 		              _dpi);
 	} else if (_engine_snap.available) {
 		_snwprintf_s (status, _TRUNCATE,

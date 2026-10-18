@@ -7,8 +7,8 @@
 - Brand window (**Airdour**), DPI-aware layout
 - **Transport** — Play / Stop (+ spacebar); engine start/stop; playhead locked to content
 - **Editor** — 3 stacked wave lanes (Audio 1–3), linked zoom/pan, labels
-- **Mixer** — 3 strips with faders + play-synced stub meters (no Session PeakMeter yet)
-- Demo peaks improved / quieter when stopped; denser near playhead
+- **Mixer** — 3 strips with faders + meters (Session PeakMeter when `AIRDOUR_WIN_SHELL_SESSION=1` works; else play stub)
+- Playhead follows **engine** `processed_samples` (or Session transport when attached)
 - Optional **engine attach** (Dummy or WASAPI shared)
 - `--timeout N` for unattended smoke
 
