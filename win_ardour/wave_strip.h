@@ -1,8 +1,8 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Wave strip v0 — peak/RMS columns drawn with Direct2D (not Cairo WaveView).
- * Uses synthetic demo peaks until session audio buffers are wired.
+ * Wave strip — Direct2D peak/RMS + canvas zoom/pan (not Cairo WaveView).
+ * Synthetic demo peaks until session audio buffers are wired.
  */
 
 #pragma once
@@ -31,16 +31,14 @@ class WaveStrip
 {
 public:
 	static constexpr size_t kMaxColumns = 256;
+	static constexpr float  kZoomMin    = 0.25f;
+	static constexpr float  kZoomMax    = 16.f;
 
 	WaveStrip ();
 
-	/** Rebuild column count for the drawable width (DIP pixels). */
 	void resize_for_width (float width_px);
-
-	/** UI-thread: refresh synthetic peak/RMS (demo until session audio exists). */
 	void update (const WaveStripParams& params);
 
-	/** Draw into |bounds| using existing RT brushes (peak + rms + mid). */
 	void draw (ID2D1RenderTarget* rt,
 	           const D2D1_RECT_F& bounds,
 	           ID2D1SolidColorBrush* peak_brush,
@@ -48,11 +46,22 @@ public:
 	           ID2D1SolidColorBrush* mid_brush,
 	           float dpi_scale) const;
 
+	/** Zoom toward |norm_x| in [0,1] across the strip (wheel). */
+	void zoom_at (float factor, float norm_x);
+	/** Pan by delta in strip widths (negative = earlier). */
+	void pan_by (float delta_widths);
+	void reset_view ();
+
+	float  zoom () const { return _zoom; }
+	float  pan () const { return _pan; }
+	bool   interacting () const { return _user_view; }
 	size_t column_count () const { return _peaks.size (); }
-	bool   demo_mode () const { return true; }
 
 private:
-	std::vector<float> _peaks; /* 0..1 */
-	std::vector<float> _rms;   /* 0..1 */
-	float              _scroll;
+	std::vector<float> _peaks;
+	std::vector<float> _rms;
+	float              _auto_scroll; /* clock-driven */
+	float              _pan;         /* user offset in "widths" of content */
+	float              _zoom;        /* 1 = default; >1 zoomed in */
+	bool               _user_view;   /* true after wheel/drag until reset */
 };

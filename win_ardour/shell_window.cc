@@ -88,6 +88,8 @@ ShellWindow::ShellWindow ()
 	, _running (false)
 	, _start_tick (0)
 	, _timeout_secs (0)
+	, _panning (false)
+	, _pan_last_x (0.f)
 	, _brand_bar ()
 	, _editor_pane ()
 	, _mixer_pane ()
@@ -429,7 +431,29 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 	case WM_KEYDOWN:
 		if (wparam == VK_ESCAPE) {
 			PostQuitMessage (0);
+		} else if (wparam == VK_HOME || wparam == '0') {
+			_wave.reset_view ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
 		}
+		return 0;
+	case WM_MOUSEWHEEL:
+		if (on_mouse_wheel (wparam, lparam)) {
+			return 0;
+		}
+		break;
+	case WM_LBUTTONDOWN:
+		if (on_mouse_down (lparam)) {
+			return 0;
+		}
+		break;
+	case WM_MOUSEMOVE:
+		if (on_mouse_move (lparam)) {
+			return 0;
+		}
+		break;
+	case WM_LBUTTONUP:
+	case WM_CAPTURECHANGED:
+		on_mouse_up ();
 		return 0;
 	case WM_DESTROY:
 		KillTimer (_hwnd, 1);
@@ -439,6 +463,91 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		return 0;
 	default:
 		return DefWindowProcW (_hwnd, msg, wparam, lparam);
+	}
+	return DefWindowProcW (_hwnd, msg, wparam, lparam);
+}
+
+bool
+ShellWindow::hit_wave (float x, float y) const
+{
+	return x >= _wave_bounds.left && x <= _wave_bounds.right
+	    && y >= _wave_bounds.top && y <= _wave_bounds.bottom;
+}
+
+void
+ShellWindow::client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const
+{
+	*out_x = (float)(short)LOWORD (lparam);
+	*out_y = (float)(short)HIWORD (lparam);
+}
+
+bool
+ShellWindow::on_mouse_wheel (WPARAM wparam, LPARAM lparam)
+{
+	POINT pt;
+	pt.x = (short)LOWORD (lparam);
+	pt.y = (short)HIWORD (lparam);
+	ScreenToClient (_hwnd, &pt);
+	float x = (float)pt.x;
+	float y = (float)pt.y;
+	if (!hit_wave (x, y)) {
+		return false;
+	}
+
+	float w = _wave_bounds.right - _wave_bounds.left;
+	float norm_x = w > 1.f ? (x - _wave_bounds.left) / w : 0.5f;
+	int delta = GET_WHEEL_DELTA_WPARAM (wparam);
+	/* One notch ≈ 10% zoom; Ctrl slows it. */
+	float step = (GetKeyState (VK_CONTROL) & 0x8000) ? 1.05f : 1.12f;
+	float factor = (delta > 0) ? step : (1.f / step);
+	_wave.zoom_at (factor, norm_x);
+	InvalidateRect (_hwnd, nullptr, FALSE);
+	return true;
+}
+
+bool
+ShellWindow::on_mouse_down (LPARAM lparam)
+{
+	float x, y;
+	client_from_lparam (lparam, &x, &y);
+	if (!hit_wave (x, y)) {
+		return false;
+	}
+	_panning = true;
+	_pan_last_x = x;
+	SetCapture (_hwnd);
+	SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
+	return true;
+}
+
+bool
+ShellWindow::on_mouse_move (LPARAM lparam)
+{
+	if (!_panning) {
+		return false;
+	}
+	float x, y;
+	client_from_lparam (lparam, &x, &y);
+	float w = _wave_bounds.right - _wave_bounds.left;
+	if (w > 1.f) {
+		float delta_widths = (_pan_last_x - x) / w;
+		if (delta_widths != 0.f) {
+			_wave.pan_by (delta_widths);
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+	}
+	_pan_last_x = x;
+	return true;
+}
+
+void
+ShellWindow::on_mouse_up ()
+{
+	if (_panning) {
+		_panning = false;
+		if (GetCapture () == _hwnd) {
+			ReleaseCapture ();
+		}
 	}
 }
 
@@ -529,12 +638,18 @@ ShellWindow::draw_editor_pane ()
 	                D2D1::RectF (r.left + inset, r.top + inset, r.right - inset, r.top + inset + 22.f * _dpi_scale),
 	                _brush_brand);
 
-	wchar_t caption[128];
-	if (_engine_snap.running) {
-		_snwprintf_s (caption, _TRUNCATE, L"Wave strip v0 (demo peaks/RMS)  ·  live %s",
+	wchar_t caption[160];
+	if (_wave.interacting ()) {
+		_snwprintf_s (caption, _TRUNCATE,
+		              L"Canvas  ·  zoom %.2fx  ·  wheel zoom / drag pan  ·  Home reset",
+		              _wave.zoom ());
+	} else if (_engine_snap.running) {
+		_snwprintf_s (caption, _TRUNCATE,
+		              L"Wave strip  ·  wheel zoom / drag pan  ·  live %s",
 		              _engine_snap.backend.c_str ());
 	} else {
-		_snwprintf_s (caption, _TRUNCATE, L"Wave strip v0 (demo peaks/RMS)  ·  Direct2D, not Cairo");
+		_snwprintf_s (caption, _TRUNCATE,
+		              L"Wave strip  ·  wheel zoom / drag pan  ·  Direct2D, not Cairo");
 	}
 	_rt->DrawTextW (caption, (UINT32)wcslen (caption), _fmt_meta,
 	                D2D1::RectF (r.left + inset + 90.f * _dpi_scale, r.top + inset + 2.f * _dpi_scale,

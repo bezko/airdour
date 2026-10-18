@@ -8,7 +8,10 @@
 #include <cmath>
 
 WaveStrip::WaveStrip ()
-	: _scroll (0.f)
+	: _auto_scroll (0.f)
+	, _pan (0.f)
+	, _zoom (1.f)
+	, _user_view (false)
 {
 	_peaks.assign (128, 0.f);
 	_rms.assign (128, 0.f);
@@ -26,6 +29,37 @@ WaveStrip::resize_for_width (float width_px)
 }
 
 void
+WaveStrip::zoom_at (float factor, float norm_x)
+{
+	norm_x = std::max (0.f, std::min (1.f, norm_x));
+	float old_zoom = _zoom;
+	_zoom = std::max (kZoomMin, std::min (kZoomMax, _zoom * factor));
+	if (_zoom == old_zoom) {
+		return;
+	}
+	/* Keep the point under the cursor stable in content space. */
+	float content_at_cursor = _pan + norm_x / old_zoom;
+	_pan = content_at_cursor - norm_x / _zoom;
+	_user_view = true;
+}
+
+void
+WaveStrip::pan_by (float delta_widths)
+{
+	/* delta_widths is in screen widths; convert to content units. */
+	_pan += delta_widths / std::max (0.001f, _zoom);
+	_user_view = true;
+}
+
+void
+WaveStrip::reset_view ()
+{
+	_zoom = 1.f;
+	_pan = 0.f;
+	_user_view = false;
+}
+
+void
 WaveStrip::update (const WaveStripParams& params)
 {
 	const size_t n = _peaks.size ();
@@ -33,29 +67,35 @@ WaveStrip::update (const WaveStripParams& params)
 		return;
 	}
 
-	/* Scroll rate: when engine runs, advance by periods; else wall-clock. */
 	float scroll_hz = 0.35f;
 	if (params.engine_running && params.sample_rate > 0 && params.period_frames > 0) {
 		float period_sec = (float)params.period_frames / (float)params.sample_rate;
 		scroll_hz = std::max (0.2f, std::min (2.5f, 0.08f / std::max (0.001f, period_sec)));
 	}
-	_scroll = params.time_sec * scroll_hz;
+	_auto_scroll = params.time_sec * scroll_hz;
+
+	/* Content origin: auto-scroll unless user has taken the view. */
+	float origin = _user_view ? _pan : (_auto_scroll + _pan);
+	/* Visible content span shrinks as zoom increases. */
+	float span = 1.f / std::max (0.001f, _zoom);
 
 	for (size_t i = 0; i < n; ++i) {
 		float x = (float)i / (float)n;
-		float phase = x * 6.2831853f * 3.f + _scroll * 6.2831853f;
+		float content_x = origin + x * span;
+		float phase = content_x * 6.2831853f * 3.f;
 
-		/* Layered tones + soft noise → peak envelope (demo audio shape). */
 		float s1 = std::sin (phase);
 		float s2 = 0.45f * std::sin (phase * 2.17f + 0.7f);
-		float s3 = 0.25f * std::sin (phase * 5.3f + _scroll);
-		float noise = 0.08f * std::sin (phase * 17.f + _scroll * 3.f);
+		float s3 = 0.25f * std::sin (phase * 5.3f + content_x);
+		float noise = 0.08f * std::sin (phase * 17.f + content_x * 3.f);
 		float sample = s1 + s2 + s3 + noise;
 		float peak = std::min (1.f, std::fabs (sample) * 0.85f);
 
-		/* Transient bumps every ~bar when "engine" feels live. */
 		if (params.engine_running) {
-			float beat = std::fmod (_scroll * 2.f + x * 4.f, 1.f);
+			float beat = std::fmod (content_x * 2.f + x * 4.f, 1.f);
+			if (beat < 0.f) {
+				beat += 1.f;
+			}
 			if (beat < 0.06f) {
 				peak = std::min (1.f, peak + 0.55f * (1.f - beat / 0.06f));
 			}
@@ -64,9 +104,8 @@ WaveStrip::update (const WaveStripParams& params)
 		float rms = peak * (0.55f + 0.2f * std::sin (phase * 0.5f));
 		rms = std::min (peak, std::max (0.02f, rms));
 
-		/* Light smoothing so columns don't sparkle every frame. */
-		_peaks[i] = _peaks[i] * 0.65f + peak * 0.35f;
-		_rms[i] = _rms[i] * 0.7f + rms * 0.3f;
+		_peaks[i] = _peaks[i] * 0.55f + peak * 0.45f;
+		_rms[i] = _rms[i] * 0.6f + rms * 0.4f;
 	}
 }
 
@@ -93,7 +132,6 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 	const float col_w = w / (float)n;
 	const float gap = std::max (0.5f, 1.f * dpi_scale);
 
-	/* Center line. */
 	mid_brush->SetOpacity (0.35f);
 	rt->DrawLine (D2D1::Point2F (bounds.left, mid_y),
 	              D2D1::Point2F (bounds.right, mid_y),
@@ -110,10 +148,7 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 		float peak_h = _peaks[i] * (h * 0.48f);
 		float rms_h = _rms[i] * (h * 0.48f);
 
-		/* RMS body (wider feel, lower opacity via separate brush color). */
 		rt->FillRectangle (D2D1::RectF (x0, mid_y - rms_h, x1, mid_y + rms_h), rms_brush);
-
-		/* Peak outline as thin bipolar bars. */
 		rt->FillRectangle (D2D1::RectF (x0, mid_y - peak_h, x1, mid_y - peak_h + 2.f * dpi_scale), peak_brush);
 		rt->FillRectangle (D2D1::RectF (x0, mid_y + peak_h - 2.f * dpi_scale, x1, mid_y + peak_h), peak_brush);
 	}

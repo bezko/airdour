@@ -6,7 +6,8 @@
 
 - Brand window (**Airdour**), DPI-aware layout
 - Editor / Mixer panes (D2D only)
-- **Wave strip v0** in Editor — Direct2D peak/RMS demo (not Cairo)
+- **Wave strip** in Editor — Direct2D peak/RMS demo (not Cairo)
+- **Canvas zoom/pan** — mouse wheel zoom (cursor-anchored), drag to pan, Home/`0` reset
 - Optional **engine attach** to waf-built libardour (Dummy or WASAPI shared)
 - Status bar: backend name, sample rate, period
 - `--timeout N` for unattended smoke

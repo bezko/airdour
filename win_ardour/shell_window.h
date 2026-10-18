@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Win32 + Direct2D + DirectWrite shell: DPI-aware host surface,
- * editor/mixer panes, wave strip v0, live engine status.
+ * editor/mixer panes, wave strip zoom/pan, live engine status.
  */
 
 #pragma once
@@ -55,6 +55,12 @@ private:
 	void on_tick ();
 	void layout_panes ();
 	void draw_editor_pane ();
+	bool hit_wave (float x, float y) const;
+	void client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const;
+	bool on_mouse_wheel (WPARAM wparam, LPARAM lparam);
+	bool on_mouse_down (LPARAM lparam);
+	bool on_mouse_move (LPARAM lparam);
+	void on_mouse_up ();
 	float dip (float px) const { return px * _dpi_scale; }
 
 	HWND _hwnd;
@@ -65,6 +71,8 @@ private:
 	bool _running;
 	DWORD _start_tick;
 	unsigned _timeout_secs;
+	bool _panning;
+	float _pan_last_x;
 
 	D2D1_RECT_F _brand_bar;
 	D2D1_RECT_F _editor_pane;
