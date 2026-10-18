@@ -5,13 +5,16 @@
  *
  * Usage:
  *   airdour_win_shell.exe [--timeout N] [--backend Dummy|WASAPI] [--no-engine]
- *                         [--smoke-import] [--smoke-record]
+ *                         [--smoke-import] [--smoke-record] [--smoke-save-load]
+ *                         [--session DIR]
  *
- * --timeout N      Auto-quit after N seconds (unattended smoke).
- * --backend NAME   Attach AudioEngine (when built WITH_ENGINE). Default: Dummy.
- * --no-engine      Skip engine attach even if linked.
- * --smoke-import   Write+import a test WAV onto track 0 (waveforms without DEMO_TONES).
- * --smoke-record   Arm track 0, enable session record, capture ~1s, stop (shows take peaks).
+ * --timeout N       Auto-quit after N seconds (unattended smoke).
+ * --backend NAME    Attach AudioEngine (when built WITH_ENGINE). Default: Dummy.
+ * --no-engine       Skip engine attach even if linked.
+ * --smoke-import    Write+import a test WAV onto track 0.
+ * --smoke-record    Arm track 0, capture ~1s, stop (region peaks).
+ * --smoke-save-load Import (if needed), save_state, reopen — peaks must return.
+ * --session DIR     Open existing session folder after engine start.
  */
 
 #include "shell_window.h"
@@ -21,6 +24,10 @@
 #include <cstring>
 #include <string>
 
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #include <objbase.h>
 
 #pragma comment(lib, "ole32.lib")
@@ -52,6 +59,19 @@ parse_backend (int argc, wchar_t** argv)
 	return "Dummy";
 }
 
+static std::string
+parse_session_path (int argc, wchar_t** argv)
+{
+	for (int i = 1; i < argc; ++i) {
+		if (wcscmp (argv[i], L"--session") == 0 && i + 1 < argc) {
+			char buf[MAX_PATH * 4];
+			WideCharToMultiByte (CP_UTF8, 0, argv[i + 1], -1, buf, sizeof (buf), nullptr, nullptr);
+			return std::string (buf);
+		}
+	}
+	return std::string ();
+}
+
 static bool
 parse_flag (int argc, wchar_t** argv, const wchar_t* name)
 {
@@ -71,6 +91,8 @@ wmain (int argc, wchar_t** argv)
 	bool no_engine = parse_flag (argc, argv, L"--no-engine");
 	bool smoke_import = parse_flag (argc, argv, L"--smoke-import");
 	bool smoke_record = parse_flag (argc, argv, L"--smoke-record");
+	bool smoke_save_load = parse_flag (argc, argv, L"--smoke-save-load");
+	std::string session_path = parse_session_path (argc, argv);
 	HINSTANCE instance = GetModuleHandleW (nullptr);
 
 	/* STA for UI. WASAPI opens on this thread; process load under Session can
@@ -93,7 +115,8 @@ wmain (int argc, wchar_t** argv)
 	               timeout);
 
 	if (!no_engine) {
-		if (shell.attach_engine (backend, timeout, smoke_import, smoke_record)) {
+		if (shell.attach_engine (backend, timeout, smoke_import, smoke_record,
+		                         smoke_save_load, session_path)) {
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", backend.c_str ());
 		} else {
 			std::fwprintf (stderr, L"airdour_win_shell: engine not attached (ok for UI-only / CI)\n");

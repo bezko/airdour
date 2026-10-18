@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * UI-thread engine + minimal Session attach for win_ardour.
- * Peak meters, transport, record arm, and WAV import for Editor waves.
+ * Peak meters, transport, record arm, WAV import, save/load.
  */
 
 #pragma once
@@ -21,7 +21,9 @@ struct EngineSnapshot {
 	bool         waves_from_session; /* Editor peaks from playlist (may still be empty) */
 	bool         session_record_armed; /* Session record enable (may not be rolling yet) */
 	bool         session_recording; /* actively capturing */
+	bool         session_saved; /* last save_state succeeded */
 	std::wstring backend;
+	std::wstring session_path; /* current session folder */
 	uint32_t     sample_rate;
 	uint32_t     period_frames;
 	float        gain; /* track 0 stub/session gain */
@@ -83,6 +85,20 @@ public:
 	 */
 	bool import_test_tone (int track, float freq_hz = 220.f, float seconds = 2.f);
 
+	/** Persist current Session state (regions, routes) to disk. */
+	bool save_session ();
+
+	/**
+	 * Close current Session (leak until process exit) and open an existing
+	 * session folder. snapshot_name defaults to "win_shell".
+	 */
+	bool open_session (const std::string& session_dir, const std::string& snapshot_name = "win_shell");
+
+	/** Save then reopen the current session path (smoke / Ctrl+S round-trip). */
+	bool reload_session ();
+
+	std::string session_dir () const;
+
 	EngineSnapshot snapshot () const;
 
 	/**
@@ -106,6 +122,8 @@ private:
 	void read_meters ();
 	void refresh_region_flags ();
 	void refresh_record_flags ();
+	void collect_tracks ();
+	void update_session_path_snap ();
 
 	bool        _started;
 	std::string _backend_name;

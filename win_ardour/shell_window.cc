@@ -153,7 +153,9 @@ bool
 ShellWindow::attach_engine (const std::string& backend_name,
                             unsigned smoke_timeout_secs,
                             bool smoke_import,
-                            bool smoke_record)
+                            bool smoke_record,
+                            bool smoke_save_load,
+                            const std::string& open_session_path)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -164,8 +166,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	/* Unattended --timeout: keep Session + PeakMeter (not stubs) but skip
 	 * auto-roll — rolling under Debug has intermittent AVs on Dummy/WASAPI
 	 * that prevent ExitProcess(0). Interactive runs still auto-play.
-	 * --smoke-record drives its own short roll; --smoke-import needs no roll. */
+	 * --smoke-record drives its own short roll; import/save-load need no roll. */
 	const bool autoplay = ok && (smoke_timeout_secs == 0) && !smoke_record;
+
+	if (ok && !open_session_path.empty ()) {
+		if (_engine.open_session (open_session_path)) {
+			std::fprintf (stderr, "airdour_win_shell: opened --session path\n");
+		} else {
+			std::fprintf (stderr, "airdour_win_shell: --session open failed\n");
+			ok = false;
+		}
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_import && _engine.snapshot ().session_ok) {
 		if (_engine.import_test_tone (0, 220.f, 2.f)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-import ok (track 0)\n");
@@ -174,6 +187,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		}
 		std::fflush (stderr);
 	}
+
+	if (ok && smoke_save_load && _engine.snapshot ().session_ok) {
+		if (!_engine.snapshot ().track_has_regions[0]) {
+			_engine.import_test_tone (0, 330.f, 1.5f);
+		}
+		if (_engine.reload_session () && _engine.snapshot ().track_has_regions[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-save-load ok (regions restored)\n");
+		} else {
+			std::fprintf (stderr, "airdour_win_shell: smoke-save-load FAILED (saved=%d regions0=%d)\n",
+			              _engine.snapshot ().session_saved ? 1 : 0,
+			              _engine.snapshot ().track_has_regions[0] ? 1 : 0);
+		}
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_record && _engine.snapshot ().session_ok) {
 		_smoke_record = SmokeRecordPhase::NeedArm;
 		std::fprintf (stderr, "airdour_win_shell: smoke-record scheduled (arm → ~1.2s take)\n");
@@ -218,6 +246,81 @@ ShellWindow::transport_toggle_record ()
 		return;
 	}
 	_engine.toggle_session_record ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_arm_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_save_session ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	_engine.save_session ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::prompt_open_session ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+
+	wchar_t path[MAX_PATH] = {};
+	OPENFILENAMEW ofn = {};
+	ofn.lStructSize = sizeof (ofn);
+	ofn.hwndOwner = _hwnd;
+	ofn.lpstrFilter = L"Airdour session (*.ardour)\0*.ardour\0All files (*.*)\0*.*\0";
+	ofn.lpstrFile = path;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+	ofn.lpstrTitle = L"Airdour — open session";
+	if (!GetOpenFileNameW (&ofn)) {
+		return;
+	}
+
+	/* path = ...\session_dir\snapshot.ardour → dir + snapshot stem */
+	wchar_t* slash = wcsrchr (path, L'\\');
+	if (!slash) {
+		slash = wcsrchr (path, L'/');
+	}
+	if (!slash) {
+		return;
+	}
+	*slash = L'\0';
+	const wchar_t* file = slash + 1;
+	std::wstring snap_w (file);
+	size_t dot = snap_w.find_last_of (L'.');
+	if (dot != std::wstring::npos) {
+		snap_w = snap_w.substr (0, dot);
+	}
+
+	char dir_utf8[MAX_PATH * 4];
+	char snap_utf8[MAX_PATH];
+	WideCharToMultiByte (CP_UTF8, 0, path, -1, dir_utf8, sizeof (dir_utf8), nullptr, nullptr);
+	WideCharToMultiByte (CP_UTF8, 0, snap_w.c_str (), -1, snap_utf8, sizeof (snap_utf8), nullptr, nullptr);
+
+	if (_engine.open_session (dir_utf8, snap_utf8)) {
+		std::fprintf (stderr, "airdour_win_shell: open dialog ok\n");
+	} else {
+		std::fprintf (stderr, "airdour_win_shell: open dialog failed\n");
+	}
+	std::fflush (stderr);
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_mixer_arm_from_engine ();
@@ -669,6 +772,10 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (wparam == VK_HOME || wparam == '0') {
 			reset_shared_view ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
+			do_save_session ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'O' || wparam == 'o')) {
+			prompt_open_session ();
 		}
 		return 0;
 	case WM_MOUSEWHEEL:
@@ -790,6 +897,14 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::Import) {
 		prompt_import_audio ();
+		return true;
+	}
+	if (th == TransportHit::Save) {
+		do_save_session ();
+		return true;
+	}
+	if (th == TransportHit::Open) {
+		prompt_open_session ();
 		return true;
 	}
 
@@ -1131,15 +1246,15 @@ ShellWindow::on_paint ()
 	draw_editor_pane ();
 	draw_mixer_pane ();
 
-	wchar_t status[320];
+	wchar_t status[384];
 	if (_engine_snap.running) {
 		_snwprintf_s (status, _TRUNCATE,
-		              L"Engine  %s  ·  %u Hz  ·  t=%.1fs  ·  %s  ·  dpi %u",
+		              L"Engine  %s  ·  %u Hz  ·  t=%.1fs  ·  %s  ·  %s",
 		              _engine_snap.backend.c_str (),
 		              _engine_snap.sample_rate,
 		              _playhead_sec,
 		              _engine_snap.meters_real ? L"PeakMeter" : L"stub meters",
-		              _dpi);
+		              _engine_snap.detail.c_str ());
 	} else if (_engine_snap.available) {
 		_snwprintf_s (status, _TRUNCATE,
 		              L"Engine idle  ·  %d tracks  ·  %s",

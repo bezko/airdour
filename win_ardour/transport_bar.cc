@@ -23,6 +23,8 @@ TransportBar::TransportBar ()
 	, _stop_btn ()
 	, _rec_btn ()
 	, _import_btn ()
+	, _save_btn ()
+	, _open_btn ()
 	, _playing (false)
 	, _recording (false)
 	, _record_armed (false)
@@ -35,14 +37,21 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	_bounds = bounds;
 	float h = bounds.bottom - bounds.top;
 	float btn_h = h - 10.f * dpi_scale;
-	float btn_w = 64.f * dpi_scale;
+	float btn_w = 54.f * dpi_scale;
 	float y0 = bounds.top + 5.f * dpi_scale;
-	float x0 = bounds.left + 16.f * dpi_scale;
-	float gap = 6.f * dpi_scale;
-	_play_btn = D2D1::RectF (x0, y0, x0 + btn_w, y0 + btn_h);
-	_stop_btn = D2D1::RectF (_play_btn.right + gap, y0, _play_btn.right + gap + btn_w, y0 + btn_h);
-	_rec_btn = D2D1::RectF (_stop_btn.right + gap, y0, _stop_btn.right + gap + btn_w, y0 + btn_h);
-	_import_btn = D2D1::RectF (_rec_btn.right + gap, y0, _rec_btn.right + gap + btn_w * 1.15f, y0 + btn_h);
+	float x0 = bounds.left + 12.f * dpi_scale;
+	float gap = 5.f * dpi_scale;
+	auto place = [&] (D2D1_RECT_F& out, float& x, float w) {
+		out = D2D1::RectF (x, y0, x + w, y0 + btn_h);
+		x = out.right + gap;
+	};
+	float x = x0;
+	place (_play_btn, x, btn_w);
+	place (_stop_btn, x, btn_w);
+	place (_rec_btn, x, btn_w);
+	place (_import_btn, x, btn_w * 1.15f);
+	place (_save_btn, x, btn_w);
+	place (_open_btn, x, btn_w);
 }
 
 TransportHit
@@ -59,6 +68,12 @@ TransportBar::hit_test (float x, float y) const
 	}
 	if (contains (_import_btn, x, y)) {
 		return TransportHit::Import;
+	}
+	if (contains (_save_btn, x, y)) {
+		return TransportHit::Save;
+	}
+	if (contains (_open_btn, x, y)) {
+		return TransportHit::Open;
 	}
 	return TransportHit::None;
 }
@@ -100,8 +115,10 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_stop_btn, L"Stop", !_playing);
 	draw_btn (_rec_btn, L"Rec", _recording || _record_armed);
 	draw_btn (_import_btn, L"Import", false);
+	draw_btn (_save_btn, L"Save", false);
+	draw_btn (_open_btn, L"Open", false);
 
-	wchar_t clock[64];
+	wchar_t clock[72];
 	int m = (int)(playhead_sec / 60.f);
 	float s = playhead_sec - (float)m * 60.f;
 	if (_recording) {
@@ -109,16 +126,16 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	} else if (_record_armed) {
 		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  rec armed", m, s);
 	} else {
-		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  space toggle", m, s);
+		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  Ctrl+S/O", m, s);
 	}
 
-	float clock_left = _import_btn.right + 16.f * dpi_scale;
+	float clock_left = _open_btn.right + 12.f * dpi_scale;
 	DWRITE_TEXT_ALIGNMENT ta = fmt->GetTextAlignment ();
 	DWRITE_PARAGRAPH_ALIGNMENT pa = fmt->GetParagraphAlignment ();
 	fmt->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
 	fmt->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 	rt->DrawTextW (clock, (UINT32)wcslen (clock), fmt,
-	               D2D1::RectF (clock_left, _bounds.top, _bounds.right - 16.f * dpi_scale, _bounds.bottom),
+	               D2D1::RectF (clock_left, _bounds.top, _bounds.right - 12.f * dpi_scale, _bounds.bottom),
 	               body);
 	fmt->SetTextAlignment (ta);
 	fmt->SetParagraphAlignment (pa);

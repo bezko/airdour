@@ -291,11 +291,13 @@ EngineHost::EngineHost ()
 	_snap.waves_from_session = false;
 	_snap.session_record_armed = false;
 	_snap.session_recording = false;
+	_snap.session_saved = false;
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
 	_snap.transport_sec = 0.f;
 	_snap.backend = L"(idle)";
+	_snap.session_path.clear ();
 	_snap.detail = L"engine linked — not started";
 }
 
@@ -405,6 +407,7 @@ EngineHost::ensure_session ()
 		for (AudioTrackList::iterator it = created.begin (); it != created.end (); ++it) {
 			_impl->tracks.push_back (*it);
 		}
+		update_session_path_snap ();
 
 		if (want_tones) {
 			samplecnt_t sr = (samplecnt_t)_impl->engine->sample_rate ();
@@ -514,27 +517,253 @@ EngineHost::destroy_session ()
 		return;
 	}
 	_impl->tracks.clear ();
-	if (_impl->engine && _impl->session) {
+	if (_impl->session) {
 		try {
 			_impl->session->request_stop (false, false, TRS_UI);
 		} catch (...) {
 		}
-		_impl->engine->remove_session ();
+		/* Must delete so Session::destroy() unregisters LTC/click ports and
+		 * clears SessionHandleRefs — otherwise reopen fails (LTC-Out exists).
+		 * Process-exit --timeout still ExitProcess(0) and skips this path. */
+		Session* doomed = _impl->session;
+		_impl->session = nullptr;
+		try {
+			delete doomed;
+		} catch (...) {
+			std::fprintf (stderr, "airdour_win_shell: Session delete threw\n");
+			std::fflush (stderr);
+		}
 	}
-	/* Do not delete Session on Windows engine-only teardown: Session/~AudioEngine
-	 * join paths can hang (same class of issue as AudioEngine::stop). Leak the
-	 * object until process exit — acceptable for shell smoke / UI lifetime. */
-	_impl->session = nullptr;
 	_snap.session_ok = false;
 	_snap.meters_real = false;
 	_snap.waves_from_session = false;
 	_snap.transport_rolling = false;
 	_snap.session_record_armed = false;
 	_snap.session_recording = false;
+	_snap.session_saved = false;
+	_snap.session_path.clear ();
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
 	}
+}
+
+void
+EngineHost::collect_tracks ()
+{
+	_impl->tracks.clear ();
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	try {
+		std::shared_ptr<RouteList> routes = _impl->session->get_tracks ();
+		if (!routes) {
+			return;
+		}
+		for (RouteList::const_iterator it = routes->begin (); it != routes->end (); ++it) {
+			std::shared_ptr<AudioTrack> at = std::dynamic_pointer_cast<AudioTrack> (*it);
+			if (!at) {
+				continue;
+			}
+			_impl->tracks.push_back (at);
+			if (_impl->tracks.size () >= (size_t)EngineSnapshot::kMeters) {
+				break;
+			}
+		}
+	} catch (...) {
+	}
+}
+
+void
+EngineHost::update_session_path_snap ()
+{
+	if (_impl && !_impl->session_dir.empty ()) {
+		_snap.session_path = utf8_to_wide (_impl->session_dir);
+	} else if (_impl && _impl->session) {
+		_impl->session_dir = _impl->session->path ();
+		_snap.session_path = utf8_to_wide (_impl->session_dir);
+	} else {
+		_snap.session_path.clear ();
+	}
+}
+
+std::string
+EngineHost::session_dir () const
+{
+	if (_impl) {
+		return _impl->session_dir;
+	}
+	return std::string ();
+}
+
+bool
+EngineHost::save_session ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"save failed — no Session";
+		_snap.session_saved = false;
+		return false;
+	}
+	try {
+		int rc = _impl->session->save_state ("");
+		if (rc != 0) {
+			std::fprintf (stderr, "airdour_win_shell: save_state rc=%d writable=%d cannot_save=%d\n",
+			              rc,
+			              _impl->session->writable () ? 1 : 0,
+			              _impl->session->cannot_save () ? 1 : 0);
+			std::fflush (stderr);
+			_snap.detail = L"save_state failed";
+			_snap.session_saved = false;
+			return false;
+		}
+		try {
+			_impl->session->end_unnamed_status ();
+		} catch (...) {
+		}
+		update_session_path_snap ();
+		_snap.session_saved = true;
+		_snap.detail = L"session saved";
+		std::fprintf (stderr, "airdour_win_shell: session saved under %s\n",
+		              _impl->session_dir.c_str ());
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: save exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"save exception";
+		_snap.session_saved = false;
+		return false;
+	} catch (...) {
+		_snap.detail = L"save unknown failure";
+		_snap.session_saved = false;
+		return false;
+	}
+}
+
+bool
+EngineHost::open_session (const std::string& session_dir, const std::string& snapshot_name)
+{
+	if (!_impl || !_impl->engine || !_started) {
+		_snap.detail = L"open failed — engine not running";
+		return false;
+	}
+	if (session_dir.empty ()) {
+		_snap.detail = L"open failed — empty path";
+		return false;
+	}
+
+	DWORD attrs = GetFileAttributesW (utf8_path_to_wide (session_dir).c_str ());
+	if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+		_snap.detail = L"open failed — session folder missing";
+		std::fprintf (stderr, "airdour_win_shell: open: not a directory: %s\n", session_dir.c_str ());
+		std::fflush (stderr);
+		return false;
+	}
+
+	auto step = [] (const char* msg) {
+		std::fprintf (stderr, "airdour_win_shell: open: %s\n", msg);
+		std::fflush (stderr);
+	};
+
+	try {
+		if (!_impl->event_loop) {
+			_impl->event_loop = new ShellEventLoop ();
+			EventLoop::set_event_loop_for_thread (_impl->event_loop);
+		}
+
+		step ("detach current Session");
+		destroy_session ();
+
+		_impl->session_dir = session_dir;
+		std::string snap = snapshot_name.empty () ? "win_shell" : snapshot_name;
+
+		step (("Session ctor load " + session_dir).c_str ());
+		/* Path exists → load_state. unnamed=false so it is a normal reopen. */
+		_impl->session = new Session (*_impl->engine, session_dir, snap,
+		                              nullptr, std::string (), false);
+		step ("Session load done");
+		/* Session ctor already called engine->set_session(this). */
+
+		collect_tracks ();
+		if (_impl->tracks.empty ()) {
+			step ("no audio tracks after load — creating 3");
+			AudioTrackList created = _impl->session->new_audio_track (
+				1, 2,
+				std::shared_ptr<RouteGroup> (),
+				(uint32_t)EngineSnapshot::kMeters,
+				"Audio",
+				PresentationInfo::max_order);
+			for (AudioTrackList::iterator it = created.begin (); it != created.end (); ++it) {
+				_impl->tracks.push_back (*it);
+			}
+		}
+
+		for (size_t t = 0; t < _impl->tracks.size () && t < (size_t)EngineSnapshot::kMeters; ++t) {
+			if (_impl->tracks[t] && _impl->tracks[t]->gain_control ()) {
+				_impl->tracks[t]->gain_control ()->set_value (_track_gain[t], Controllable::NoGroup);
+			}
+		}
+
+		_snap.session_ok = true;
+		_snap.meters_real = true;
+		_snap.waves_from_session = true;
+		_snap.session_saved = true;
+		update_session_path_snap ();
+		refresh_region_flags ();
+		refresh_record_flags ();
+		_snap.detail = L"session reopened — Editor peaks from disk";
+		std::fprintf (stderr, "airdour_win_shell: opened %s (tracks=%u regions0=%d)\n",
+		              session_dir.c_str (),
+		              (unsigned)_impl->tracks.size (),
+		              _snap.track_has_regions[0] ? 1 : 0);
+		std::fflush (stderr);
+		return true;
+	} catch (SessionException& e) {
+		std::fprintf (stderr, "airdour_win_shell: open SessionException: %s\n", e.what ());
+		std::fflush (stderr);
+		destroy_session ();
+		_snap.detail = L"open SessionException";
+		return false;
+	} catch (failed_constructor& e) {
+		std::fprintf (stderr, "airdour_win_shell: open failed_constructor: %s\n", e.what ());
+		std::fflush (stderr);
+		destroy_session ();
+		_snap.detail = L"open failed_constructor";
+		return false;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: open exception: %s\n", e.what ());
+		std::fflush (stderr);
+		destroy_session ();
+		_snap.detail = L"open exception";
+		return false;
+	} catch (...) {
+		std::fprintf (stderr, "airdour_win_shell: open unknown failure\n");
+		std::fflush (stderr);
+		destroy_session ();
+		_snap.detail = L"open unknown failure";
+		return false;
+	}
+}
+
+bool
+EngineHost::reload_session ()
+{
+	if (!_impl || _impl->session_dir.empty ()) {
+		_snap.detail = L"reload failed — no session path";
+		return false;
+	}
+	std::string path = _impl->session_dir;
+	std::string snap = "win_shell";
+	if (_impl->session) {
+		snap = _impl->session->snap_name ();
+		if (snap.empty ()) {
+			snap = "win_shell";
+		}
+	}
+	if (!save_session ()) {
+		return false;
+	}
+	return open_session (path, snap);
 }
 
 bool
@@ -1186,11 +1415,13 @@ EngineHost::EngineHost ()
 	_snap.waves_from_session = false;
 	_snap.session_record_armed = false;
 	_snap.session_recording = false;
+	_snap.session_saved = false;
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
 	_snap.transport_sec = 0.f;
 	_snap.backend = L"(not linked)";
+	_snap.session_path.clear ();
 	_snap.detail = L"build with AIRDOUR_WIN_SHELL_WITH_ENGINE + waf libs";
 }
 
@@ -1353,6 +1584,42 @@ EngineHost::import_test_tone (int track, float freq_hz, float seconds)
 	(void)freq_hz;
 	(void)seconds;
 	return false;
+}
+
+bool
+EngineHost::save_session ()
+{
+	return false;
+}
+
+bool
+EngineHost::open_session (const std::string& session_dir, const std::string& snapshot_name)
+{
+	(void)session_dir;
+	(void)snapshot_name;
+	return false;
+}
+
+bool
+EngineHost::reload_session ()
+{
+	return false;
+}
+
+std::string
+EngineHost::session_dir () const
+{
+	return std::string ();
+}
+
+void
+EngineHost::collect_tracks ()
+{
+}
+
+void
+EngineHost::update_session_path_snap ()
+{
 }
 
 bool
