@@ -306,6 +306,27 @@ if(AIRDOUR_BUILD_WIN_SHELL)
       evoral
       ardourcp
     )
+    # Side-by-side waf DLLs so Explorer / incomplete PATH still finds
+    # ptformat.dll (and friends) — avoids "ptformat.dll was not found".
+    set(_waf_runtime_dlls
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/ardour/ardour.dll"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/pbd/pbd.dll"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/temporal/temporal.dll"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/midi++2/midipp.dll"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/evoral/evoral.dll"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/audiographer/audiographer.dll"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/ptformat/ptformat.dll"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/ctrl-interface/control_protocol/ardourcp.dll"
+    )
+    foreach(_dll IN LISTS _waf_runtime_dlls)
+      if(EXISTS "${_dll}")
+        add_custom_command(TARGET airdour_win_shell POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_dll}" "$<TARGET_FILE_DIR:airdour_win_shell>"
+          COMMENT "Copy ${_dll} next to airdour_win_shell"
+        )
+      endif()
+    endforeach()
     message(STATUS "Airdour win64: airdour_win_shell WITH engine (waf libs @ ${AIRDOUR_WAF_BUILD_DIR})")
   elseif(AIRDOUR_WIN_SHELL_WITH_ENGINE)
     message(WARNING "AIRDOUR_WIN_SHELL_WITH_ENGINE set but ${_waf_ardour_lib} missing — building UI-only")

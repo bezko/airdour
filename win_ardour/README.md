@@ -42,14 +42,25 @@ cmake -S cmake\win64 -B build-win64-gui-engine -G "Visual Studio 17 2022" -A x64
 cmake --build build-win64-gui-engine --config Debug --target airdour_win_shell
 ```
 
-Set `PATH` to vcpkg bins + `build\libs\...`, plus:
+**Do not double-click the exe alone** — without PATH you get `ptformat.dll was not found` (and other waf DLLs). Prefer the launcher:
 
 ```bat
+win_ardour\run-engine-shell.bat --timeout 3 --backend Dummy
+win_ardour\run-engine-shell.bat --timeout 3 --backend WASAPI
+win_ardour\run-engine-shell.bat
+```
+
+Or set PATH yourself (include **`build\libs\ptformat`**):
+
+```bat
+set PATH=%CD%\tools\win-native\vcpkg_installed\x64-windows\debug\bin;%CD%\tools\win-native\vcpkg_installed\x64-windows\bin;%CD%\build\libs\pbd;%CD%\build\libs\temporal;%CD%\build\libs\midi++2;%CD%\build\libs\evoral;%CD%\build\libs\ardour;%CD%\build\libs\audiographer;%CD%\build\libs\ptformat;%CD%\build\libs\ctrl-interface\control_protocol;%CD%\build\libs\backends\dummy;%CD%\build\libs\backends\wasapi;%CD%\build\libs\ardour\panners;%PATH%
 set ARDOUR_BACKEND_PATH=%CD%\build\libs\backends\dummy;%CD%\build\libs\backends\wasapi
 set ARDOUR_DLL_PATH=%CD%\build\libs\ardour
 build-win64-gui-engine\artifacts\Debug\airdour_win_shell.exe --timeout 3 --backend Dummy
 build-win64-gui-engine\artifacts\Debug\airdour_win_shell.exe --timeout 3 --backend WASAPI
 ```
+
+Engine builds also **copy** `ptformat.dll` / `ardour.dll` / … next to the exe on POST_BUILD (still need vcpkg + VsDevCmd CRT on PATH).
 
 ## Session / PeakMeter
 
