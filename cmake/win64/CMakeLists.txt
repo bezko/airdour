@@ -19,12 +19,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(AIRDOUR_BUILD_WASAPI_IO_SMOKE "Build WasapiIO smoke static lib (Windows SDK only)" ON)
 option(AIRDOUR_BUILD_DEPS_HEADLESS_SMOKE "Build headless vcpkg C-deps probe executable" OFF)
 option(AIRDOUR_BUILD_DEPS_GLIBMM_SMOKE "Build overlay glibmm-2.4 + sigc++-2.0 probe executable" OFF)
+option(AIRDOUR_BUILD_WIN_SHELL "Build minimal Win32+Direct2D Airdour shell (no GTK)" ON)
 
 if(NOT WIN32)
   message(WARNING "cmake/win64 is intended for MSVC/Win64; smoke lib disabled off-Windows.")
   set(AIRDOUR_BUILD_WASAPI_IO_SMOKE OFF)
   set(AIRDOUR_BUILD_DEPS_HEADLESS_SMOKE OFF)
   set(AIRDOUR_BUILD_DEPS_GLIBMM_SMOKE OFF)
+  set(AIRDOUR_BUILD_WIN_SHELL OFF)
 endif()
 
 add_compile_definitions(
@@ -199,4 +201,35 @@ if(AIRDOUR_BUILD_DEPS_GLIBMM_SMOKE)
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
   )
   message(STATUS "Airdour win64: deps_glibmm_smoke enabled (overlay glibmm-2.4)")
+endif()
+
+# --- Minimal Win32 + Direct2D + DirectWrite GUI shell (no GTK2) ---
+if(AIRDOUR_BUILD_WIN_SHELL)
+  add_executable(airdour_win_shell
+    "${AIRDOUR_SRC_ROOT}/win_ardour/main.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/shell_window.cc"
+  )
+  target_include_directories(airdour_win_shell PRIVATE
+    "${AIRDOUR_SRC_ROOT}/win_ardour"
+  )
+  target_compile_definitions(airdour_win_shell PRIVATE
+    UNICODE
+    _UNICODE
+    PLATFORM_WINDOWS=1
+    AIRDOUR_WINDOWS_ONLY=1
+  )
+  target_link_libraries(airdour_win_shell PRIVATE
+    d2d1
+    dwrite
+    user32
+    gdi32
+    ole32
+    shell32
+  )
+  # Console subsystem so --timeout smoke logs are capturable; still creates a HWND.
+  set_target_properties(airdour_win_shell PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
+    OUTPUT_NAME "airdour_win_shell"
+  )
+  message(STATUS "Airdour win64: airdour_win_shell (Win32+D2D+DirectWrite) enabled")
 endif()

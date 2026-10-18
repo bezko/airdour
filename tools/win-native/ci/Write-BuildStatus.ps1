@@ -3,13 +3,20 @@ param(
     [Parameter(Mandatory = $true)][string]$OutFile,
     [Parameter(Mandatory = $true)][string]$GitSha,
     [Parameter(Mandatory = $true)][string]$GitRef,
-    [string]$WasapiSmokePath = ""
+    [string]$WasapiSmokePath = "",
+    [string]$WinShellPath = ""
 )
 
 $smokeLine = if ($WasapiSmokePath -and (Test-Path $WasapiSmokePath)) {
     "GREEN  wasapi_io_smoke static lib: $WasapiSmokePath"
 } else {
     "MISSING wasapi_io_smoke (compile may have been skipped)"
+}
+
+$guiLine = if ($WinShellPath -and (Test-Path $WinShellPath)) {
+    "GREEN  airdour_win_shell (Win32+D2D+DirectWrite): $WinShellPath"
+} else {
+    "MISSING airdour_win_shell (GUI shell may have been skipped)"
 }
 
 $status = @"
@@ -19,33 +26,32 @@ git_ref:  $GitRef
 git_sha:  $GitSha
 host:     windows-latest (MSVC / Win64)
 audio:    WASAPI shared only (no exclusive, DirectSound, or ASIO)
+gui:      Win32 + Direct2D/DirectWrite (no GTK2)
 product:  AIRDOUR_WINDOWS_ONLY / --windows-only
 
 What is in this artifact
 ------------------------
 $smokeLine
+$guiLine
 GREEN  cmake/win64 spine configured
 GREEN  libs/backends/wasapi sources (shared-mode implementation)
+GREEN  win_ardour minimal shell sources
 GREEN  tools/win-native docs and packaging scripts
 
 What is NOT in this artifact yet
 --------------------------------
-BLOCKED  libpbd / libardour / hardour (headless) — needs MSVC dep prefix
-BLOCKED  gtk2_ardour GUI — needs GTK2/Cairo/Pango stack on MSVC (hard)
-BLOCKED  WinMME MIDI inside wasapi backend
+STAGED   libpbd / libardour / hardour — laptop-proven; wire into CI next
+STAGED   WinMME MIDI inside wasapi backend
+OUT      gtk2_ardour / libs/tk on MSVC (dead end; use win_ardour)
 BLOCKED  NSIS / MSIX installer (zip only for now)
 
-Dependency expectations (next stage)
-------------------------------------
+Dependency expectations (headless product)
+------------------------------------------
 Prefer vcpkg (x64-windows) with binary caching:
   glib libxml2 libsndfile curl libarchive liblo taglib
-  libsigcpp glibmm (versions matching Ardour's waf checks)
+  overlay glibmm-2.4 + sigc++-2.0 (not stock glibmm 2.68+)
   rubberband vamp-sdk
   pthreads4w (until Win32 thread migration completes)
-
-GTK2 on MSVC is the main GUI blocker; upstream Windows builds historically
-used MinGW. Airdour either ports bundled libs/tk to MSVC or replaces UI
-surfaces with Direct2D before a full GUI release zip is realistic.
 
 Secrets
 -------

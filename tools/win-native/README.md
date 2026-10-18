@@ -11,16 +11,18 @@
 1. Visual Studio 2022+ (Desktop C++, MSVC) + Windows 10/11 SDK (x64)
 2. CMake ≥ 3.20
 3. vcpkg at a **short path** (recommended `C:\vcpkg`) — see `Install-HeadlessDeps.ps1`
-4. **No** Steinberg ASIO SDK; **no** GTK2 expectation for headless
+4. **No** Steinberg ASIO SDK; **no** GTK2 (GUI is `win_ardour` Direct2D)
 
 ## Quick smoke (what CI builds today)
 
 ```bat
-cmake -S cmake\win64 -B build-win64 -G "Visual Studio 17 2022" -A x64 -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON
+cmake -S cmake\win64 -B build-win64 -G "Visual Studio 17 2022" -A x64 -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON -DAIRDOUR_BUILD_WIN_SHELL=ON
 cmake --build build-win64 --config Release --target wasapi_io_smoke
+cmake --build build-win64 --config Release --target airdour_win_shell
+build-win64\artifacts\Release\airdour_win_shell.exe --timeout 3
 ```
 
-Produces `airdour_wasapi_io.lib` (WasapiIO + Windows SDK). Does **not** link libardour.
+Produces `airdour_wasapi_io.lib` (WasapiIO + Windows SDK) and `airdour_win_shell.exe` (Win32+D2D+DirectWrite, no GTK). Does **not** link libardour into the shell yet.
 
 ## Headless C deps (next slice on laptop)
 
@@ -81,11 +83,12 @@ Manifest for the next deps stage: `tools/win-native/vcpkg.json` (core only — n
 2. [x] Laptop: vcpkg headless C deps + `deps_headless_smoke` target wired
 3. [x] Overlay `glibmm-2.4` + `sigc++-2.0` installed; waf past glibmm; `deps_glibmm_smoke`
 4. [x] waf Windows-only configure green; MSVC link `libpbd` (`build\libs\pbd\pbd.dll`)
-5. [ ] MSVC link `libardour` → `hardour` (dummy + WASAPI)
-6. [ ] Dummy backend processes a session headless
-7. [ ] Load `wasapi_audiobackend`; open shared-mode Default device
-8. [ ] Tune period/CPU on a cheap laptop
-8. [ ] Port WinMME MIDI; GUI / installer release (not GTK2-on-MSVC)
+5. [x] MSVC link `libardour` → `hardour` (dummy + WASAPI) — laptop
+6. [x] hardour engine-only smoke (dummy + WASAPI shared)
+7. [x] Minimal Win32+D2D shell (`airdour_win_shell`) — laptop + CI target
+8. [ ] Tune period/CPU on a cheap laptop; measured WasapiIO latency
+9. [ ] Port WinMME MIDI; grow `win_ardour` (engine attach, wave strip)
+10. [ ] Installer release zip (no GTK2-on-MSVC)
 
 ## Success for this phase
 

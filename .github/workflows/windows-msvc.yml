@@ -44,25 +44,40 @@ jobs:
       - name: Setup CMake
         uses: lukka/get-cmake@latest
 
-      - name: Configure cmake/win64 (WASAPI smoke)
+      - name: Configure cmake/win64 (WASAPI + Win shell)
         run: |
           cmake -S cmake/win64 -B build-win64 `
             -G "Visual Studio 17 2022" -A x64 `
-            -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON
+            -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON `
+            -DAIRDOUR_BUILD_WIN_SHELL=ON
         shell: pwsh
 
       - name: Build wasapi_io_smoke
         run: cmake --build build-win64 --config Release --target wasapi_io_smoke -j $env:NUMBER_OF_PROCESSORS
         shell: pwsh
 
+      - name: Build airdour_win_shell
+        run: cmake --build build-win64 --config Release --target airdour_win_shell -j $env:NUMBER_OF_PROCESSORS
+        shell: pwsh
+
+      - name: Smoke airdour_win_shell (--timeout 2)
+        run: |
+          $exe = Get-ChildItem -Path build-win64 -Recurse -Filter "airdour_win_shell.exe" | Select-Object -First 1
+          if (-not $exe) { throw "airdour_win_shell.exe not found" }
+          & $exe.FullName --timeout 2
+          if ($LASTEXITCODE -ne 0) { throw "win_shell smoke exit $LASTEXITCODE" }
+        shell: pwsh
+
       - name: Write BUILD_STATUS
         run: |
           $lib = Get-ChildItem -Path build-win64 -Recurse -Filter "airdour_wasapi_io.lib" | Select-Object -First 1
+          $gui = Get-ChildItem -Path build-win64 -Recurse -Filter "airdour_win_shell.exe" | Select-Object -First 1
           .\tools\win-native\ci\Write-BuildStatus.ps1 `
             -OutFile build-win64\BUILD_STATUS.txt `
             -GitSha "${{ github.sha }}" `
             -GitRef "${{ github.ref }}" `
-            -WasapiSmokePath $(if ($lib) { $lib.FullName } else { "" })
+            -WasapiSmokePath $(if ($lib) { $lib.FullName } else { "" }) `
+            -WinShellPath $(if ($gui) { $gui.FullName } else { "" })
           Get-Content build-win64\BUILD_STATUS.txt
         shell: pwsh
 
@@ -72,8 +87,10 @@ jobs:
           name: airdour-win64-ci-${{ github.sha }}
           path: |
             build-win64/**/airdour_wasapi_io.lib
+            build-win64/**/airdour_win_shell.exe
             build-win64/BUILD_STATUS.txt
             libs/backends/wasapi/**
+            win_ardour/**
             cmake/win64/**
             tools/win-native/**
           if-no-files-found: error
@@ -95,8 +112,8 @@ jobs:
             - then overlay glibmm-2.4 + sigc++-2.0 (stock vcpkg glibmm/libsigcpp are WRONG generation)
             - then libpbd → libardour → hardour (dummy + WASAPI)
 
-          Blocked:
-            - glibmm-2.4 / sigc++-2.0 overlay (required for libpbd)
-            - GTK2-on-MSVC (dead end; GUI is GTK3/gvsbuild or Direct2D later)
+          Blocked / out of scope:
+            - GTK2-on-MSVC (dead end; GUI is win_ardour Direct2D)
             - No ASIO/DirectSound in product path
+            - Full gtk2_ardour port (not planned)
           "@
