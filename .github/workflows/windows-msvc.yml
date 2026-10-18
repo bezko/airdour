@@ -89,12 +89,14 @@ jobs:
         shell: pwsh
         run: |
           Write-Host @"
-          Next CI stage (not enabled yet):
-            - lukka/run-vcpkg with manifest tools/win-native/vcpkg.json
-            - packages: glib, libxml2, libsndfile, curl, libarchive, libsigcpp, glibmm, pthreads4w, ...
-            - then waf --dist-target=msvc --windows-only OR grow cmake targets for libpbd→hardour
+          Next CI stage (laptop-proven path first):
+            - tools/win-native/Install-HeadlessDeps.ps1 + vcpkg.json (glib, libxml2, sndfile, curl, archive, pthreads, boost-*, …)
+            - cmake -DAIRDOUR_BUILD_DEPS_HEADLESS_SMOKE=ON with CMAKE_TOOLCHAIN_FILE=vcpkg.cmake
+            - then overlay glibmm-2.4 + sigc++-2.0 (stock vcpkg glibmm/libsigcpp are WRONG generation)
+            - then libpbd → libardour → hardour (dummy + WASAPI)
 
-          Blocked for full GUI:
-            - GTK2/Cairo/Pango MSVC stack (upstream Windows used MinGW)
+          Blocked:
+            - glibmm-2.4 / sigc++-2.0 overlay (required for libpbd)
+            - GTK2-on-MSVC (dead end; GUI is GTK3/gvsbuild or Direct2D later)
             - No ASIO/DirectSound in product path
           "@

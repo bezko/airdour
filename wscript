@@ -991,7 +991,8 @@ def configure(conf):
     if Options.options.dist_target == 'msvc':
         conf.env['MSVC_TARGETS'] = ['x64']
         conf.load('msvc')
-        conf.find_program('llvm-nm', var = 'llvm_nm')
+        # Optional: gendef.py no-ops without llvm-nm. Required only when generating .def from DLLs.
+        conf.find_program('llvm-nm', var = 'llvm_nm', mandatory = False)
         conf.load('gendef', tooldir = 'tools')
 
     if Options.options.debug and not Options.options.keepflags:

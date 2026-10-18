@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "airdour-win64-deps",
-  "version-string": "0.1.0",
-  "description": "Staged MSVC dependency set for Airdour headless/core. GTK2 GUI stack is intentionally omitted (main full-app blocker on MSVC).",
+  "version-string": "0.2.0",
+  "description": "MSVC headless/core deps for Airdour. Honest minimum for the next cmake/win64 slice past wasapi_io_smoke. GTK2 GUI intentionally omitted (dead end on MSVC). Stock vcpkg glibmm/libsigcpp are NOT Ardour-compatible — see features and overlays/README.md.",
   "dependencies": [
     "glib",
     "libxml2",
@@ -12,16 +12,30 @@
     "liblo",
     "taglib",
     "pthreads",
+    "boost-uuid",
+    "boost-tokenizer",
+    "boost-bind",
+    "boost-smart-ptr",
+    "boost-multiprecision",
+    "boost-type-traits",
     {
       "name": "getopt-win32",
       "platform": "windows"
+    },
+    {
+      "name": "pkgconf",
+      "host": true
     }
   ],
   "features": {
-    "cxx-glib": {
-      "description": "C++ wrappers — enable once versions match Ardour waf checks",
-      "dependencies": ["glibmm", "libsigcpp"]
+    "cxx-glib-modern-incompatible": {
+      "description": "Pulls current vcpkg glibmm (2.68+/2.90) + libsigcpp 3.x. Ardour/libpbd still requires glibmm-2.4 + sigc++-2.0 — do NOT enable for product link until an overlay supplies those ABIs.",
+      "dependencies": [
+        "glibmm",
+        "libsigcpp"
+      ]
     }
   },
+  "default-features": [],
   "supports": "windows & x64 & !uwp"
 }

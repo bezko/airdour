@@ -152,3 +152,11 @@ waf3-*
 
 # misc custom files git should ignore
 /local
+
+# Windows-native MSVC local build / vcpkg
+/build-win64/
+/build-win64-*/
+/build-win64-logs/
+/tools/win-native/vcpkg_installed/
+/tools/win-native/vcpkg-configuration.json
+

@@ -8,10 +8,10 @@
 
 ## Local prerequisites
 
-1. Visual Studio 2022 (Desktop C++, MSVC v143) + Windows 10/11 SDK (x64)
+1. Visual Studio 2022+ (Desktop C++, MSVC) + Windows 10/11 SDK (x64)
 2. CMake ≥ 3.20
-3. Optional later: vcpkg manifest `tools/win-native/vcpkg.json` for core deps
-4. **No** Steinberg ASIO SDK
+3. vcpkg at a **short path** (recommended `C:\vcpkg`) — see `Install-HeadlessDeps.ps1`
+4. **No** Steinberg ASIO SDK; **no** GTK2 expectation for headless
 
 ## Quick smoke (what CI builds today)
 
@@ -22,6 +22,26 @@ cmake --build build-win64 --config Release --target wasapi_io_smoke
 
 Produces `airdour_wasapi_io.lib` (WasapiIO + Windows SDK). Does **not** link libardour.
 
+## Headless C deps (next slice on laptop)
+
+```bat
+powershell -ExecutionPolicy Bypass -File tools\win-native\Install-HeadlessDeps.ps1 -VcpkgRoot C:\vcpkg
+
+cmake -S cmake\win64 -B build-win64-deps -G "Visual Studio 17 2022" -A x64 ^
+  -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
+  -DVCPKG_MANIFEST_DIR=%CD%/tools/win-native ^
+  -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON ^
+  -DAIRDOUR_BUILD_DEPS_HEADLESS_SMOKE=ON
+
+cmake --build build-win64-deps --config Release --target deps_headless_smoke
+```
+
+`deps_headless_smoke` links **glib / libxml2 / libsndfile / curl / libarchive / pthreads** from the manifest. It does **not** link `libpbd`.
+
+### Blocker before `libpbd`
+
+Stock vcpkg `glibmm` / `libsigcpp` are **2.68+/3.x**. Ardour needs **glibmm-2.4 + sigc++-2.0**. Overlay plan: `tools/win-native/overlays/README.md`. Do not enable feature `cxx-glib-modern-incompatible` for product builds.
+
 ## Full product (not green in CI yet)
 
 ```bat
@@ -30,7 +50,7 @@ python waf configure --dist-target=msvc --windows-only --prefix=C:\airdour-build
 python waf build -j %NUMBER_OF_PROCESSORS%
 ```
 
-Default backends: **dummy** + **wasapi**. Needs a full MSVC dependency prefix (see vcpkg.json).
+Default backends: **dummy** + **wasapi**. Needs MSVC deps above **plus** the glibmm-2.4 overlay.
 
 ## GitHub Actions
 
@@ -58,11 +78,13 @@ Manifest for the next deps stage: `tools/win-native/vcpkg.json` (core only — n
 ## Bring-up checklist
 
 1. [x] CI compiles WasapiIO with MSVC (smoke)
-2. [ ] MSVC link `libpbd` → `libardour` → `hardour`
-3. [ ] Dummy backend processes a session headless
-4. [ ] Load `wasapi_audiobackend`; open shared-mode Default device
-5. [ ] Tune period/CPU on a cheap laptop
-6. [ ] Port WinMME MIDI; GUI / installer release
+2. [x] Laptop: vcpkg headless C deps + `deps_headless_smoke` target wired
+3. [ ] Overlay `glibmm-2.4` + `sigc++-2.0` → MSVC link `libpbd`
+4. [ ] MSVC link `libardour` → `hardour` (dummy + WASAPI)
+5. [ ] Dummy backend processes a session headless
+6. [ ] Load `wasapi_audiobackend`; open shared-mode Default device
+7. [ ] Tune period/CPU on a cheap laptop
+8. [ ] Port WinMME MIDI; GUI / installer release (not GTK2-on-MSVC)
 
 ## Success for this phase
 

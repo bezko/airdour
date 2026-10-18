@@ -1,11 +1,13 @@
 # Airdour win64 / MSVC first-slice spine
 #
 # Stages:
-#   1) wasapi_io_smoke  — compiles/links WasapiIO with Windows SDK only (CI green path)
-#   2) INTERFACE notes for full wasapi_backend (needs libardour — not linked in CI yet)
+#   1) wasapi_io_smoke     — WasapiIO + Windows SDK only (CI green path)
+#   2) deps_headless_smoke — vcpkg C stack (glib/xml/sndfile/curl/archive/pthread)
+#   3) INTERFACE notes for full wasapi_backend / libpbd (needs glibmm-2.4 overlay)
 #
 # Audio product path: WASAPI shared (libs/backends/wasapi).
 # Exclusive / DirectSound / ASIO: out of scope.
+# GTK2: out of scope for this spine.
 
 cmake_minimum_required(VERSION 3.20)
 project(airdour_win64 LANGUAGES C CXX)
@@ -14,17 +16,26 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(AIRDOUR_BUILD_WASAPI_IO_SMOKE "Build WasapiIO smoke static lib (Windows SDK only)" ON)
+option(AIRDOUR_BUILD_DEPS_HEADLESS_SMOKE "Build headless vcpkg C-deps probe executable" OFF)
 
 if(NOT WIN32)
   message(WARNING "cmake/win64 is intended for MSVC/Win64; smoke lib disabled off-Windows.")
   set(AIRDOUR_BUILD_WASAPI_IO_SMOKE OFF)
+  set(AIRDOUR_BUILD_DEPS_HEADLESS_SMOKE OFF)
 endif()
 
 add_compile_definitions(
   PLATFORM_WINDOWS=1
   AIRDOUR_WINDOWS_ONLY=1
   _USE_MATH_DEFINES=1
+  NOMINMAX
+  WIN32_LEAN_AND_MEAN
 )
+
+# Multi-config (VS) + vcpkg: map Release consumers onto RelWithDebInfo/Release imported locs.
+set(CMAKE_MAP_IMPORTED_CONFIG_RELEASE RelWithDebInfo Release MinSizeRel "")
+set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO RelWithDebInfo Release MinSizeRel "")
+set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL MinSizeRel Release RelWithDebInfo "")
 
 set(AIRDOUR_DEPS_ROOT "" CACHE PATH "MSVC dependency root (glib, sndfile, …)")
 if(AIRDOUR_DEPS_ROOT)
@@ -35,6 +46,7 @@ set(AIRDOUR_SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 
 # --- Slice order (full product) ---
 # 1. pbd  2. temporal / midipp / evoral  3. ardour  4. dummy + wasapi  5. headless
+# Blocked for pbd: glibmm-2.4 + sigc++-2.0 overlay (stock vcpkg is 2.68+/3.x).
 
 set(WASAPI_IO_SOURCES
   "${AIRDOUR_SRC_ROOT}/libs/backends/wasapi/wasapi_io.cc"
@@ -47,6 +59,7 @@ set(WASAPI_BACKEND_SOURCES
 add_custom_target(airdour_slice_notes
   COMMAND ${CMAKE_COMMAND} -E echo "Build order: pbd -> temporal/midi/evoral -> ardour -> dummy+wasapi -> hardour"
   COMMAND ${CMAKE_COMMAND} -E echo "CI smoke: wasapi_io_smoke (Windows SDK only)"
+  COMMAND ${CMAKE_COMMAND} -E echo "Next: deps_headless_smoke (vcpkg C stack); libpbd needs glibmm-2.4 overlay"
 )
 
 if(AIRDOUR_BUILD_WASAPI_IO_SMOKE)
@@ -86,3 +99,52 @@ if(WIN32)
 endif()
 
 message(STATUS "Airdour win64: full wasapi_backend remains INTERFACE until libardour links")
+
+# --- Headless C deps probe (vcpkg) ---
+# Prefer CMake CONFIG/BUILTIN packages so multi-config Release does not pull debug/*.lib.
+if(AIRDOUR_BUILD_DEPS_HEADLESS_SMOKE)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0)
+
+  find_package(LibXml2 REQUIRED)
+  find_package(CURL REQUIRED)
+  find_package(SndFile CONFIG REQUIRED)
+  find_package(PThreads4W CONFIG REQUIRED)
+
+  # VS multi-config + pkg-config often resolves to debug/*.lib; prefer explicit release paths.
+  if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+    set(_vcpkg_lib "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib")
+    set(_vcpkg_inc "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include")
+  else()
+    set(_vcpkg_lib "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/lib")
+    set(_vcpkg_inc "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/include")
+  endif()
+
+  add_executable(deps_headless_smoke
+    "${CMAKE_CURRENT_SOURCE_DIR}/deps_headless_smoke.cc"
+  )
+
+  target_include_directories(deps_headless_smoke PRIVATE
+    "${_vcpkg_inc}"
+    "${_vcpkg_inc}/glib-2.0"
+    "${_vcpkg_lib}/glib-2.0/include"
+  )
+
+  target_link_libraries(deps_headless_smoke PRIVATE
+    LibXml2::LibXml2
+    CURL::libcurl
+    SndFile::sndfile
+    PThreads4W::PThreads4W
+  )
+
+  foreach(_rel_lib IN ITEMS glib-2.0.lib intl.lib archive.lib)
+    if(EXISTS "${_vcpkg_lib}/${_rel_lib}")
+      target_link_libraries(deps_headless_smoke PRIVATE "${_vcpkg_lib}/${_rel_lib}")
+    endif()
+  endforeach()
+
+  set_target_properties(deps_headless_smoke PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
+  )
+  message(STATUS "Airdour win64: deps_headless_smoke enabled (vcpkg C stack)")
+endif()
