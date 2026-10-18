@@ -9,7 +9,9 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -54,15 +56,12 @@ public:
 	void* get_buffer (pframes_t nframes);
 
 private:
-	/* MIDI buffer filled once WinMME is attached */
 	uint8_t _placeholder[1];
 };
 
 /**
- * Native WASAPI shared-mode backend.
- *
- * Product path for Airdour on win64. Exclusive mode, DirectSound, and ASIO
- * are out of scope for this module.
+ * Native WASAPI shared-mode backend (AUDCLNT_SHAREMODE_SHARED).
+ * Exclusive / DirectSound / ASIO are out of scope.
  */
 class WasapiBackend : public AudioBackend, public PortEngineSharedImpl
 {
@@ -74,6 +73,8 @@ public:
 	bool        is_realtime () const;
 
 	bool use_separate_input_and_output_devices () const { return true; }
+	bool can_request_update_devices () { return true; }
+	bool update_devices ();
 
 	std::vector<DeviceStatus> enumerate_devices () const;
 	std::vector<DeviceStatus> enumerate_input_devices () const;
@@ -145,29 +146,29 @@ public:
 	void*              private_handle () const;
 	const std::string& my_name () const;
 
-	bool             port_is_physical (PortEngine::PortHandle ph) const { return PortEngineSharedImpl::port_is_physical (ph); }
-	void             get_physical_outputs (DataType type, std::vector<std::string>& results) { PortEngineSharedImpl::get_physical_outputs (type, results); }
-	void             get_physical_inputs (DataType type, std::vector<std::string>& results) { PortEngineSharedImpl::get_physical_inputs (type, results); }
-	ChanCount        n_physical_outputs () const { return PortEngineSharedImpl::n_physical_outputs (); }
-	ChanCount        n_physical_inputs () const { return PortEngineSharedImpl::n_physical_inputs (); }
-	uint32_t         port_name_size () const { return PortEngineSharedImpl::port_name_size (); }
-	int              set_port_name (PortEngine::PortHandle ph, const std::string& name) { return PortEngineSharedImpl::set_port_name (ph, name); }
-	std::string      get_port_name (PortEngine::PortHandle ph) const { return PortEngineSharedImpl::get_port_name (ph); }
-	PortFlags        get_port_flags (PortEngine::PortHandle ph) const { return PortEngineSharedImpl::get_port_flags (ph); }
+	bool                port_is_physical (PortEngine::PortHandle ph) const { return PortEngineSharedImpl::port_is_physical (ph); }
+	void                get_physical_outputs (DataType type, std::vector<std::string>& results) { PortEngineSharedImpl::get_physical_outputs (type, results); }
+	void                get_physical_inputs (DataType type, std::vector<std::string>& results) { PortEngineSharedImpl::get_physical_inputs (type, results); }
+	ChanCount           n_physical_outputs () const { return PortEngineSharedImpl::n_physical_outputs (); }
+	ChanCount           n_physical_inputs () const { return PortEngineSharedImpl::n_physical_inputs (); }
+	uint32_t            port_name_size () const { return PortEngineSharedImpl::port_name_size (); }
+	int                 set_port_name (PortEngine::PortHandle ph, const std::string& name) { return PortEngineSharedImpl::set_port_name (ph, name); }
+	std::string         get_port_name (PortEngine::PortHandle ph) const { return PortEngineSharedImpl::get_port_name (ph); }
+	PortFlags           get_port_flags (PortEngine::PortHandle ph) const { return PortEngineSharedImpl::get_port_flags (ph); }
 	PortEngine::PortPtr get_port_by_name (std::string const& name) const { return PortEngineSharedImpl::get_port_by_name (name); }
-	int              get_ports (const std::string& port_name_pattern, DataType type, PortFlags flags, std::vector<std::string>& results) const { return PortEngineSharedImpl::get_ports (port_name_pattern, type, flags, results); }
-	DataType         port_data_type (PortEngine::PortHandle ph) const { return PortEngineSharedImpl::port_data_type (ph); }
+	int                 get_ports (const std::string& port_name_pattern, DataType type, PortFlags flags, std::vector<std::string>& results) const { return PortEngineSharedImpl::get_ports (port_name_pattern, type, flags, results); }
+	DataType            port_data_type (PortEngine::PortHandle ph) const { return PortEngineSharedImpl::port_data_type (ph); }
 	PortEngine::PortPtr register_port (const std::string& shortname, ARDOUR::DataType type, ARDOUR::PortFlags flags);
-	void             unregister_port (PortHandle ph) { if (!_run) return; PortEngineSharedImpl::unregister_port (ph); }
-	int              connect (const std::string& src, const std::string& dst) { return PortEngineSharedImpl::connect (src, dst); }
-	int              disconnect (const std::string& src, const std::string& dst) { return PortEngineSharedImpl::disconnect (src, dst); }
-	int              connect (PortEngine::PortHandle ph, const std::string& other) { return PortEngineSharedImpl::connect (ph, other); }
-	int              disconnect (PortEngine::PortHandle ph, const std::string& other) { return PortEngineSharedImpl::disconnect (ph, other); }
-	int              disconnect_all (PortEngine::PortHandle ph) { return PortEngineSharedImpl::disconnect_all (ph); }
-	bool             connected (PortEngine::PortHandle ph, bool process_callback_safe) { return PortEngineSharedImpl::connected (ph, process_callback_safe); }
-	bool             connected_to (PortEngine::PortHandle ph, const std::string& other, bool process_callback_safe) { return PortEngineSharedImpl::connected_to (ph, other, process_callback_safe); }
-	bool             physically_connected (PortEngine::PortHandle ph, bool process_callback_safe) { return PortEngineSharedImpl::physically_connected (ph, process_callback_safe); }
-	int              get_connections (PortEngine::PortHandle ph, std::vector<std::string>& results, bool process_callback_safe) { return PortEngineSharedImpl::get_connections (ph, results, process_callback_safe); }
+	void                unregister_port (PortHandle ph) { if (!_run) return; PortEngineSharedImpl::unregister_port (ph); }
+	int                 connect (const std::string& src, const std::string& dst) { return PortEngineSharedImpl::connect (src, dst); }
+	int                 disconnect (const std::string& src, const std::string& dst) { return PortEngineSharedImpl::disconnect (src, dst); }
+	int                 connect (PortEngine::PortHandle ph, const std::string& other) { return PortEngineSharedImpl::connect (ph, other); }
+	int                 disconnect (PortEngine::PortHandle ph, const std::string& other) { return PortEngineSharedImpl::disconnect (ph, other); }
+	int                 disconnect_all (PortEngine::PortHandle ph) { return PortEngineSharedImpl::disconnect_all (ph); }
+	bool                connected (PortEngine::PortHandle ph, bool process_callback_safe) { return PortEngineSharedImpl::connected (ph, process_callback_safe); }
+	bool                connected_to (PortEngine::PortHandle ph, const std::string& other, bool process_callback_safe) { return PortEngineSharedImpl::connected_to (ph, other, process_callback_safe); }
+	bool                physically_connected (PortEngine::PortHandle ph, bool process_callback_safe) { return PortEngineSharedImpl::physically_connected (ph, process_callback_safe); }
+	int                 get_connections (PortEngine::PortHandle ph, std::vector<std::string>& results, bool process_callback_safe) { return PortEngineSharedImpl::get_connections (ph, results, process_callback_safe); }
 
 	int      midi_event_get (pframes_t& timestamp, size_t& size, uint8_t const** buf, void* port_buffer, uint32_t event_index);
 	int      midi_event_put (void* port_buffer, pframes_t timestamp, const uint8_t* buffer, size_t size);
@@ -187,7 +188,27 @@ public:
 	BackendPort* port_factory (std::string const& name, ARDOUR::DataType dt, ARDOUR::PortFlags flags);
 
 private:
-	static void* process_thread (void*);
+	struct ThreadData {
+		WasapiBackend*          backend;
+		std::function<void()>   f;
+		ThreadData (WasapiBackend* b, std::function<void()> fn)
+			: backend (b), f (fn) {}
+	};
+
+	static void* pthread_process (void*);
+	static void* main_process_thread (void*);
+
+	int  register_system_audio_ports ();
+	bool start_main_process_thread ();
+	bool stop_main_process_thread ();
+	bool run_one_cycle ();
+	bool run_freewheel_cycle ();
+	void process_port_connection_changes ();
+
+#ifdef _WIN32
+	static bool set_mmcss_pro_audio (void** task_handle);
+	static bool reset_mmcss (void* task_handle);
+#endif
 
 	std::string _instance_name;
 	WasapiIO    _io;
@@ -199,16 +220,22 @@ private:
 	uint32_t    _systemic_input_latency;
 	uint32_t    _systemic_output_latency;
 
-	bool  _run;
-	bool  _active;
-	bool  _freewheeling;
+	std::atomic<bool> _run;
+	std::atomic<bool> _active;
+	std::atomic<bool> _freewheeling;
+	bool              _freewheel;
+	bool              _measure_latency;
 
-	float               _dsp_load;
-	DSPLoadCalculator   _dsp_load_calc;
+	samplepos_t _processed_samples;
 
-	pthread_t                           _process_thread;
-	std::vector<pthread_t>              _backend_threads;
-	std::vector<std::function<void()> > _pending_threads;
+	float             _dsp_load;
+	DSPLoadCalculator _dsp_load_calc;
+
+	pthread_t              _main_thread;
+	std::vector<pthread_t> _threads;
+
+	std::vector<float> _interleaved_capture;
+	std::vector<float> _interleaved_playback;
 };
 
 } // namespace ARDOUR

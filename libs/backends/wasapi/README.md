@@ -1,35 +1,32 @@
 # WASAPI backend (Airdour)
 
-Native Windows audio backend for Airdour. Implements `ARDOUR::AudioBackend`.
+Native Windows audio backend implementing `ARDOUR::AudioBackend`.
 
-## Scope (v1)
+## Scope (v1) — implemented in-tree
 
 - **WASAPI shared mode only** (`AUDCLNT_SHAREMODE_SHARED`)
-- Optimize for cheap laptops / stock Windows drivers:
-  - buffer & period sizing from the shared engine quantum
-  - mix-format negotiation (`IAudioClient::GetMixFormat`)
-  - tight float convert/mix path (minimize copies)
-  - event-driven callback + MMCSS
-- **WinMME MIDI** (port from `libs/backends/portaudio/winmmemidi_*`)
+- Device enumeration (`IMMDeviceEnumerator`, friendly names + ids)
+- Mix-format negotiation (`GetMixFormat`); adopt device sample rate
+- Period snap to shared engine quantum (`GetDevicePeriod` / `IAudioClient3::GetSharedModeEnginePeriod`)
+- Event-driven cycle: `wait_for_period` → `read_capture` → engine process → `write_playback`
+- Float convert/mix for IEEE float32, PCM16, PCM24, PCM32
+- MMCSS “Pro Audio” on the main process thread (`PBD::MMCSS`)
+- Multimedia timer resolution (`PBD::MMTIMERS`)
+- System capture/playback ports registered into `PortEngineSharedImpl`
 
 ## Out of scope (v1)
 
-- WASAPI exclusive mode (optional later only if asked)
+- WASAPI exclusive mode
 - DirectSound
 - ASIO / specialized drivers
-- PortAudio (temporary bridge elsewhere until this backend runs)
+- WinMME MIDI (reserved option string; port from `libs/backends/portaudio/winmmemidi_*` next)
+- Capture when capture mix rate ≠ render mix rate (skipped with honest fallback)
 
-## First implementation order
+## Non-Windows / CI
 
-1. Device enumeration (`IMMDeviceEnumerator`)
-2. Shared-mode `IAudioClient` open with mix format
-3. Event callback thread → Ardour `process_callback`
-4. Period/buffer mapping exposed to the engine dialog
-5. Capture + render duplex; measure latency/CPU
-6. Attach WinMME MIDI
-7. Delete PortAudio from the Windows product path
+All COM paths are behind `#ifdef _WIN32`. On Linux the module can be parsed; `available()` returns false and `_start()` refuses to run.
 
 ## Build
 
-Included when `AIRDOUR_WINDOWS_ONLY` / `--dist-target=msvc|mingw` and `wasapi` is in `BACKENDS`.
-Requires Windows SDK (`mmdeviceapi.h`, `audioclient.h`). Links: `ole32`, `winmm`.
+Included when `AIRDOUR_WINDOWS_ONLY` / `--dist-target=msvc|mingw` (backends: `dummy` + `wasapi`).
+Links: `ole32`, `winmm`, `uuid`, `avrt`.
