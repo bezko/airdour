@@ -45,6 +45,9 @@ public:
 	/** Tear down Session + stop backend I/O (UI thread). */
 	void stop ();
 
+	/** Stop backend I/O only (no Session/Graph join). For timeout smoke. */
+	void stop_backend_only ();
+
 	/** Session transport roll / stop (keeps engine running). */
 	void transport_play ();
 	void transport_stop ();

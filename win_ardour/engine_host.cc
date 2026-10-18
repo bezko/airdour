@@ -27,6 +27,7 @@
 #include "ardour/route.h"
 #include "ardour/session.h"
 #include "ardour/session_event.h"
+#include "ardour/audiofilesource.h"
 #include "ardour/sndfilesource.h"
 #include "ardour/source_factory.h"
 #include "ardour/types.h"
@@ -245,17 +246,16 @@ EngineHost::ensure_session ()
 	}
 
 	/*
-	 * Dig (TUFNUTZ 2026-10-18):
-	 * - PeakMeter lives on Session Routes; AudioEngine alone has no peak API.
-	 * - Session::pre_engine_init sets _is_new = !dir_exists — never mkdir first.
-	 * - Existing-dir path throws "Failed to load state".
-	 * - New Session ctor still hangs on Dummy here (Butler/emit/auto-connect)
-	 *   even with a UI-thread EventLoop — needs fuller headless EventLoop pump
-	 *   like session_utils. Gated behind AIRDOUR_WIN_SHELL_SESSION=1.
+	 * PeakMeter lives on Session Routes. New Session needs:
+	 * - ShellEventLoop on the UI thread (no GTK)
+	 * - Path that does NOT exist yet (_is_new = !dir_exists)
+	 * - Panner DLLs discoverable (ARDOUR_DLL_PATH/panners or ARDOUR_PANNER_PATH)
+	 * - MSVC: never try_lock() process_lock while already held (Delivery/Route)
+	 * Opt out: AIRDOUR_WIN_SHELL_SESSION=0
 	 */
 	const char* try_sess = std::getenv ("AIRDOUR_WIN_SHELL_SESSION");
-	if (!try_sess || try_sess[0] == '\0' || try_sess[0] == '0') {
-		_snap.detail = L"engine PeakMeter needs Session — set AIRDOUR_WIN_SHELL_SESSION=1 to try (may hang)";
+	if (try_sess && try_sess[0] == '0') {
+		_snap.detail = L"Session PeakMeter disabled (AIRDOUR_WIN_SHELL_SESSION=0) — stub meters";
 		_snap.meters_real = false;
 		_snap.session_ok = false;
 		return false;
@@ -293,6 +293,12 @@ EngineHost::ensure_session ()
 		step ("Session ctor done");
 		/* Session ctor already called engine->set_session(this). */
 
+		/* Demo wav regions: opt-in. Default is empty tracks + PeakMeter (click
+		 * when rolling). Writing tones under a live Dummy process has hung /
+		 * AV'd on MSVC; set AIRDOUR_WIN_SHELL_DEMO_TONES=1 to try. */
+		const char* tone_flag = std::getenv ("AIRDOUR_WIN_SHELL_DEMO_TONES");
+		const bool want_tones = (tone_flag && tone_flag[0] == '1');
+
 		step ("new_audio_track x3");
 		AudioTrackList created = _impl->session->new_audio_track (
 			1, 2,
@@ -306,58 +312,76 @@ EngineHost::ensure_session ()
 			_impl->tracks.push_back (*it);
 		}
 
-		samplecnt_t sr = (samplecnt_t)_impl->engine->sample_rate ();
-		if (sr <= 0) {
-			sr = 48000;
-		}
-		const samplecnt_t n = sr * 4; /* 4s demo tone */
-
-		step ("write demo tones into playlists");
-		for (size_t t = 0; t < _impl->tracks.size (); ++t) {
-			std::shared_ptr<AudioTrack> track = _impl->tracks[t];
-			if (!track) {
-				continue;
+		if (want_tones) {
+			samplecnt_t sr = (samplecnt_t)_impl->engine->sample_rate ();
+			if (sr <= 0) {
+				sr = 48000;
 			}
+			const samplecnt_t n = sr * 4; /* 4s demo tone */
 
-			std::string wav = path_join (
-				_impl->session_dir,
-				string_compose ("tone_%1.wav", (int)t + 1));
+			step ("write demo tones into playlists");
+			for (size_t t = 0; t < _impl->tracks.size (); ++t) {
+				std::shared_ptr<AudioTrack> track = _impl->tracks[t];
+				if (!track) {
+					continue;
+				}
 
-			std::shared_ptr<Source> src = SourceFactory::createWritable (
-				DataType::AUDIO, *_impl->session, wav, sr);
-			std::shared_ptr<AudioSource> as = std::dynamic_pointer_cast<AudioSource> (src);
-			if (!as) {
-				continue;
+				std::string wav = path_join (
+					_impl->session_dir,
+					string_compose ("tone_%1.wav", (int)t + 1));
+
+				std::shared_ptr<Source> src = SourceFactory::createWritable (
+					DataType::AUDIO, *_impl->session, wav, sr);
+				std::shared_ptr<AudioSource> as = std::dynamic_pointer_cast<AudioSource> (src);
+				std::shared_ptr<AudioFileSource> afs = std::dynamic_pointer_cast<AudioFileSource> (src);
+				if (!as) {
+					continue;
+				}
+
+				std::vector<Sample> buf ((size_t)n);
+				float freq = 110.f * (float)(t + 1);
+				float amp = 0.22f + 0.05f * (float)t;
+				for (samplecnt_t i = 0; i < n; ++i) {
+					float ph = 6.2831853f * freq * ((float)i / (float)sr);
+					/* Soft envelope pulses every beat (~0.5s). */
+					float beat = std::fmod ((float)i / (float)sr * 2.f, 1.f);
+					float env = 0.55f + 0.45f * std::exp (-beat * 8.f);
+					buf[(size_t)i] = amp * env * std::sin (ph);
+				}
+				{
+					Source::WriterLock lm (as->mutex ());
+					as->mark_streaming_write_started (lm);
+					as->write (buf.data (), n);
+					as->mark_streaming_write_completed (lm, timecnt_t ((samplepos_t)n));
+				}
+				if (afs) {
+					afs->flush ();
+				}
+
+				PropertyList plist;
+				plist.add (Properties::start, timepos_t (0));
+				plist.add (Properties::length, timecnt_t ((samplepos_t)n));
+				std::shared_ptr<Region> region = RegionFactory::create (src, plist);
+				if (region && track->playlist ()) {
+					track->playlist ()->add_region (region, timepos_t (0));
+				}
+
+				if (track->gain_control ()) {
+					track->gain_control ()->set_value (_track_gain[t], Controllable::NoGroup);
+				}
 			}
-
-			std::vector<Sample> buf ((size_t)n);
-			float freq = 110.f * (float)(t + 1);
-			float amp = 0.22f + 0.05f * (float)t;
-			for (samplecnt_t i = 0; i < n; ++i) {
-				float ph = 6.2831853f * freq * ((float)i / (float)sr);
-				/* Soft envelope pulses every beat (~0.5s). */
-				float beat = std::fmod ((float)i / (float)sr * 2.f, 1.f);
-				float env = 0.55f + 0.45f * std::exp (-beat * 8.f);
-				buf[(size_t)i] = amp * env * std::sin (ph);
+			_snap.detail = L"Session + PeakMeter — demo tones on Audio 1–3";
+		} else {
+			for (size_t t = 0; t < _impl->tracks.size (); ++t) {
+				if (_impl->tracks[t] && _impl->tracks[t]->gain_control ()) {
+					_impl->tracks[t]->gain_control ()->set_value (_track_gain[t], Controllable::NoGroup);
+				}
 			}
-			as->write (buf.data (), n);
-
-			PropertyList plist;
-			plist.add (Properties::start, timepos_t (0));
-			plist.add (Properties::length, timecnt_t ((samplepos_t)n));
-			std::shared_ptr<Region> region = RegionFactory::create (src, plist);
-			if (region && track->playlist ()) {
-				track->playlist ()->add_region (region, timepos_t (0));
-			}
-
-			if (track->gain_control ()) {
-				track->gain_control ()->set_value (_track_gain[t], Controllable::NoGroup);
-			}
+			_snap.detail = L"Session + PeakMeter — empty Audio 1–3 (no demo tones)";
 		}
 
 		_snap.session_ok = true;
 		_snap.meters_real = true;
-		_snap.detail = L"Session + PeakMeter — demo tones on Audio 1–3";
 		step ("ready");
 		return true;
 	} catch (failed_constructor& e) {
@@ -517,6 +541,26 @@ EngineHost::transport_stop ()
 }
 
 void
+EngineHost::stop_backend_only ()
+{
+	if (!_impl || !_impl->engine) {
+		_started = false;
+		_snap.running = false;
+		return;
+	}
+	try {
+		std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
+		if (be) {
+			be->stop ();
+		}
+	} catch (...) {
+	}
+	_started = false;
+	_snap.running = false;
+	_snap.transport_rolling = false;
+}
+
+void
 EngineHost::stop ()
 {
 	if (!_impl) {
@@ -529,17 +573,8 @@ EngineHost::stop ()
 		_impl->session->request_stop (false, false, TRS_UI);
 	}
 	destroy_session ();
+	stop_backend_only ();
 
-	if (_impl->engine) {
-		std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
-		if (be) {
-			be->stop ();
-		}
-	}
-
-	_started = false;
-	_snap.running = false;
-	_snap.transport_rolling = false;
 	_snap.transport_sec = 0.f;
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.meter_peak[i] = 0.f;
@@ -584,13 +619,20 @@ EngineHost::read_meters ()
 		_snap.meters_real = false;
 		return;
 	}
-	_snap.meters_real = true;
-	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
-		float peak = 0.f;
-		if (i < (int)_impl->tracks.size () && _impl->tracks[i]) {
-			peak = peak_linear_from_meter (_impl->tracks[i]->peak_meter ());
+	try {
+		_snap.meters_real = true;
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			float peak = 0.f;
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]) {
+				std::shared_ptr<PeakMeter> pm = _impl->tracks[i]->peak_meter ();
+				if (pm) {
+					peak = peak_linear_from_meter (pm);
+				}
+			}
+			_snap.meter_peak[i] = peak;
 		}
-		_snap.meter_peak[i] = peak;
+	} catch (...) {
+		_snap.meters_real = false;
 	}
 }
 
@@ -601,33 +643,37 @@ EngineHost::refresh_snapshot ()
 	if (!_impl || !_impl->engine || !_started) {
 		return;
 	}
-	_snap.available = true;
-	_snap.running = _impl->engine->running ();
-	_snap.backend = utf8_to_wide (_impl->engine->current_backend_name ());
-	_snap.sample_rate = (uint32_t)_impl->engine->sample_rate ();
-	_snap.period_frames = (uint32_t)_impl->engine->samples_per_cycle ();
-	_snap.session_ok = (_impl->session != nullptr);
+	try {
+		_snap.available = true;
+		_snap.running = _impl->engine->running ();
+		_snap.backend = utf8_to_wide (_impl->engine->current_backend_name ());
+		_snap.sample_rate = (uint32_t)_impl->engine->sample_rate ();
+		_snap.period_frames = (uint32_t)_impl->engine->samples_per_cycle ();
+		_snap.session_ok = (_impl->session != nullptr);
 
-	if (_impl->session) {
-		_snap.transport_rolling = _impl->session->transport_rolling ();
-		samplecnt_t sr = _impl->session->sample_rate ();
-		if (sr > 0) {
-			_snap.transport_sec = (float)_impl->session->transport_sample () / (float)sr;
-		}
-		read_meters ();
-	} else {
-		/* Closest honest engine path without Session: AudioEngine sample clock. */
-		_snap.transport_rolling = _impl->transport_playing;
-		samplecnt_t sr = (samplecnt_t)_impl->engine->sample_rate ();
-		if (_impl->transport_playing && sr > 0) {
-			samplecnt_t now = _impl->engine->processed_samples ();
-			if (now < _impl->play_origin_samples) {
-				_impl->play_origin_samples = now;
+		if (_impl->session) {
+			_snap.transport_rolling = _impl->session->transport_rolling ();
+			samplecnt_t sr = _impl->session->sample_rate ();
+			if (sr > 0) {
+				_snap.transport_sec = (float)_impl->session->transport_sample () / (float)sr;
 			}
-			_snap.transport_sec = (float)(now - _impl->play_origin_samples) / (float)sr;
-		} else if (!_impl->transport_playing) {
-			_snap.transport_sec = 0.f;
+			read_meters ();
+		} else {
+			/* Closest honest engine path without Session: AudioEngine sample clock. */
+			_snap.transport_rolling = _impl->transport_playing;
+			samplecnt_t sr = (samplecnt_t)_impl->engine->sample_rate ();
+			if (_impl->transport_playing && sr > 0) {
+				samplecnt_t now = _impl->engine->processed_samples ();
+				if (now < _impl->play_origin_samples) {
+					_impl->play_origin_samples = now;
+				}
+				_snap.transport_sec = (float)(now - _impl->play_origin_samples) / (float)sr;
+			} else if (!_impl->transport_playing) {
+				_snap.transport_sec = 0.f;
+			}
 		}
+	} catch (...) {
+		/* RT/UI races must not take down the shell. */
 	}
 }
 

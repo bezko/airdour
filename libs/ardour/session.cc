@@ -7366,7 +7366,9 @@ Session::update_route_latency (bool playback, bool apply_to_delayline, bool* del
 {
 	/* apply_to_delayline can no be called concurrently with processing
 	 * caller must hold process lock when apply_to_delayline == true */
+	#ifndef PLATFORM_WINDOWS
 	assert (!apply_to_delayline || !AudioEngine::instance()->process_lock().trylock());
+	#endif
 
 	DEBUG_TRACE (DEBUG::LatencyCompensation , string_compose ("update_route_latency: %1 apply_to_delayline? %2)\n", (playback ? "PLAYBACK" : "CAPTURE"), (apply_to_delayline ? "yes" : "no")));
 

@@ -393,7 +393,9 @@ Route::process_output_buffers (BufferSet& bufs,
 			       bool gain_automation_ok, bool run_disk_reader)
 {
 	/* Caller must hold process lock */
+	#ifndef PLATFORM_WINDOWS
 	assert (!AudioEngine::instance()->process_lock().trylock());
+	#endif
 
 	PBD::RWLock::ReaderLock lm (_processor_lock, PBD::RWLock::TryLock);
 	if (!lm.locked()) {
@@ -1535,7 +1537,9 @@ Route::remove_processor (std::shared_ptr<Processor> processor, ProcessorStreams*
 		}
 
 		/* Caller must hold process lock */
+		#ifndef PLATFORM_WINDOWS
 		assert (!AudioEngine::instance()->process_lock().trylock());
+		#endif
 
 		PBD::RWLock::WriterLock lm (_processor_lock); // XXX deadlock after export
 
@@ -2173,7 +2177,9 @@ Route::apply_processor_order (const ProcessorList& new_order)
 	 * and the engine process_lock.
 	 * Due to r/w lock ambiguity we can only assert the latter
 	 */
+	#ifndef PLATFORM_WINDOWS
 	assert (!AudioEngine::instance()->process_lock().trylock());
+	#endif
 
 
 	/* "new_order" is an ordered list of processors to be positioned according to "placement".
@@ -3818,7 +3824,9 @@ void
 Route::enable_monitor_send ()
 {
 	/* Caller must hold process lock */
+	#ifndef PLATFORM_WINDOWS
 	assert (!AudioEngine::instance()->process_lock().trylock());
+	#endif
 
 	/* master never sends to monitor section via the normal mechanism */
 	assert (!is_master ());
@@ -4623,7 +4631,9 @@ Route::set_meter_point_unlocked ()
 {
 #ifndef NDEBUG
 	/* Caller must hold process and processor write lock */
+	#ifndef PLATFORM_WINDOWS
 	assert (!AudioEngine::instance()->process_lock().trylock());
+	#endif
 	PBD::RWLock::WriterLock lm (_processor_lock, PBD::RWLock::TryLock);
 	assert (!lm.locked ());
 #endif
@@ -6744,7 +6754,9 @@ Route::enable_surround_send ()
 	}
 
 	/* Caller must hold process lock */
+	#ifndef PLATFORM_WINDOWS
 	assert (!AudioEngine::instance()->process_lock().trylock());
+	#endif
 
 	/* make sure we have one */
 	if (!_surround_send) {
@@ -6765,7 +6777,9 @@ void
 Route::remove_surround_send ()
 {
 	/* Caller must hold process lock */
+	#ifndef PLATFORM_WINDOWS
 	assert (!AudioEngine::instance()->process_lock().trylock());
+	#endif
 
 	if (!_surround_send) {
 		return;

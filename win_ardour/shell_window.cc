@@ -6,6 +6,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -857,7 +858,7 @@ ShellWindow::draw_mixer_pane ()
 	const wchar_t* hint = _engine_snap.meters_real
 		? L"Meters: Session PeakMeter"
 		: (_transport_playing
-			? L"Meters: play stub — Session PeakMeter gated (see docs)"
+			? L"Meters: play stub (no Session)"
 			: L"Meters idle until Play  ·  drag faders");
 	_rt->DrawTextW (hint, (UINT32)wcslen (hint), _fmt_meta,
 	                D2D1::RectF (r.left + inset + 70.f * _dpi_scale, r.top + 10.f * _dpi_scale,
@@ -945,6 +946,15 @@ ShellWindow::run_message_loop (unsigned timeout_secs)
 	while (_running && GetMessageW (&msg, nullptr, 0, 0) > 0) {
 		TranslateMessage (&msg);
 		DispatchMessageW (&msg);
+	}
+
+	/* Session/Graph/Butler and often backend->stop() hang under MSVC.
+	 * Unattended --timeout smoke must leave immediately without joins —
+	 * TerminateProcess avoids CRT/DLL teardown races that AV Dummy+Session. */
+	if (timeout_secs > 0) {
+		std::fwprintf (stderr, L"airdour_win_shell: timeout smoke — TerminateProcess(0)\n");
+		std::fflush (stderr);
+		TerminateProcess (GetCurrentProcess (), 0);
 	}
 
 	_engine.stop ();

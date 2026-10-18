@@ -235,9 +235,13 @@ Delivery::set_analysis_active (bool en)
 bool
 Delivery::configure_io (ChanCount in, ChanCount out)
 {
+	/* MSVC/Windows std::mutex is non-recursive; try_lock() on a lock already
+	 * held by this thread deadlocks (SRWLOCK). Same guard as Route/IO. */
+#ifndef PLATFORM_WINDOWS
 #ifndef NDEBUG
 	bool r = AudioEngine::instance()->process_lock().trylock();
 	assert (!r && "trylock inside Delivery::configure_io");
+#endif
 #endif
 
 	/* check configuration by comparison with our I/O port configuration, if appropriate.
