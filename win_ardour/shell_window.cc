@@ -5,7 +5,9 @@
 #include "shell_window.h"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace {
 
@@ -13,38 +15,109 @@ constexpr wchar_t kClassName[] = L"AirdourWinShell";
 constexpr wchar_t kWindowTitle[] = L"Airdour";
 
 /* Visual direction: deep slate + teal accent (not purple / cream / broadsheet). */
-constexpr D2D1_COLOR_F kBgTop    = { 0.055f, 0.075f, 0.095f, 1.f }; /* #0e1318 */
-constexpr D2D1_COLOR_F kBgBottom = { 0.090f, 0.140f, 0.165f, 1.f }; /* #17242a */
-constexpr D2D1_COLOR_F kBrand    = { 0.930f, 0.955f, 0.970f, 1.f }; /* cool near-white */
-constexpr D2D1_COLOR_F kBody     = { 0.620f, 0.720f, 0.760f, 1.f };
-constexpr D2D1_COLOR_F kAccent   = { 0.180f, 0.820f, 0.720f, 1.f }; /* teal */
+constexpr D2D1_COLOR_F kBgTop     = { 0.055f, 0.075f, 0.095f, 1.f };
+constexpr D2D1_COLOR_F kBgBottom  = { 0.090f, 0.140f, 0.165f, 1.f };
+constexpr D2D1_COLOR_F kBrand     = { 0.930f, 0.955f, 0.970f, 1.f };
+constexpr D2D1_COLOR_F kBody      = { 0.620f, 0.720f, 0.760f, 1.f };
+constexpr D2D1_COLOR_F kAccent    = { 0.180f, 0.820f, 0.720f, 1.f };
+constexpr D2D1_COLOR_F kPaneFill  = { 0.070f, 0.100f, 0.120f, 0.92f };
+constexpr D2D1_COLOR_F kPaneEdge  = { 0.160f, 0.220f, 0.250f, 1.f };
+
+#ifndef WM_DPICHANGED
+#define WM_DPICHANGED 0x02E0
+#endif
+
+UINT
+query_dpi_for_hwnd (HWND hwnd)
+{
+	HMODULE user32 = GetModuleHandleW (L"user32.dll");
+	if (user32) {
+		typedef UINT (WINAPI *GetDpiForWindowFn) (HWND);
+		auto fn = (GetDpiForWindowFn)GetProcAddress (user32, "GetDpiForWindow");
+		if (fn && hwnd) {
+			UINT d = fn (hwnd);
+			if (d > 0) {
+				return d;
+			}
+		}
+	}
+	HDC dc = GetDC (nullptr);
+	UINT d = dc ? (UINT)GetDeviceCaps (dc, LOGPIXELSX) : 96;
+	if (dc) {
+		ReleaseDC (nullptr, dc);
+	}
+	return d ? d : 96;
+}
+
+void
+enable_dpi_awareness ()
+{
+	HMODULE user32 = LoadLibraryW (L"user32.dll");
+	if (user32) {
+		typedef BOOL (WINAPI *SetCtxFn) (HANDLE);
+		auto set_ctx = (SetCtxFn)GetProcAddress (user32, "SetProcessDpiAwarenessContext");
+		if (set_ctx) {
+			/* DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 == (HANDLE)-4 */
+			set_ctx ((HANDLE)(intptr_t)-4);
+			FreeLibrary (user32);
+			return;
+		}
+		FreeLibrary (user32);
+	}
+	HMODULE shcore = LoadLibraryW (L"Shcore.dll");
+	if (shcore) {
+		typedef HRESULT (WINAPI *SetAwareFn) (int);
+		auto set_aware = (SetAwareFn)GetProcAddress (shcore, "SetProcessDpiAwareness");
+		if (set_aware) {
+			set_aware (2); /* PROCESS_PER_MONITOR_DPI_AWARE */
+		}
+		FreeLibrary (shcore);
+	}
+}
 
 } // namespace
 
 ShellWindow::ShellWindow ()
 	: _hwnd (nullptr)
-	, _width (960)
-	, _height (600)
+	, _width (1100)
+	, _height (700)
+	, _dpi (96)
+	, _dpi_scale (1.f)
 	, _running (false)
 	, _start_tick (0)
 	, _timeout_secs (0)
+	, _brand_bar ()
+	, _editor_pane ()
+	, _mixer_pane ()
+	, _status_bar ()
 	, _d2d_factory (nullptr)
 	, _dwrite_factory (nullptr)
 	, _rt (nullptr)
 	, _brush_brand (nullptr)
 	, _brush_body (nullptr)
 	, _brush_accent (nullptr)
+	, _brush_pane (nullptr)
+	, _brush_pane_edge (nullptr)
 	, _brush_bg (nullptr)
 	, _fmt_brand (nullptr)
 	, _fmt_body (nullptr)
 	, _fmt_meta (nullptr)
+	, _fmt_pane (nullptr)
 	, _pulse (0.f)
+	, _engine_snap ()
 {
+	enable_dpi_awareness ();
+	_engine_snap = _engine.snapshot ();
 }
 
 ShellWindow::~ShellWindow ()
 {
+	_engine.stop ();
 	discard_device_resources ();
+	if (_fmt_pane) {
+		_fmt_pane->Release ();
+		_fmt_pane = nullptr;
+	}
 	if (_fmt_meta) {
 		_fmt_meta->Release ();
 		_fmt_meta = nullptr;
@@ -72,6 +145,19 @@ ShellWindow::~ShellWindow ()
 }
 
 bool
+ShellWindow::attach_engine (const std::string& backend_name)
+{
+	if (!_engine.is_linked ()) {
+		_engine_snap = _engine.snapshot ();
+		return false;
+	}
+	bool ok = _engine.start (backend_name);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	return ok;
+}
+
+bool
 ShellWindow::init_d2d ()
 {
 	HRESULT hr = D2D1CreateFactory (D2D1_FACTORY_TYPE_SINGLE_THREADED, &_d2d_factory);
@@ -86,47 +172,34 @@ ShellWindow::init_d2d ()
 		return false;
 	}
 
-	/* Prefer a display face; fall back to Segoe UI if Variable Display is absent. */
-	hr = _dwrite_factory->CreateTextFormat (
-		L"Segoe UI Variable Display", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-		DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 72.0f, L"en-us", &_fmt_brand);
-	if (FAILED (hr)) {
-		hr = _dwrite_factory->CreateTextFormat (
-			L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-			DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 72.0f, L"en-us", &_fmt_brand);
-	}
-	if (FAILED (hr)) {
+	auto make_fmt = [&] (const wchar_t* preferred, const wchar_t* fallback,
+	                     DWRITE_FONT_WEIGHT weight, float size, IDWriteTextFormat** out) -> bool {
+		HRESULT h = _dwrite_factory->CreateTextFormat (
+			preferred, nullptr, weight, DWRITE_FONT_STYLE_NORMAL,
+			DWRITE_FONT_STRETCH_NORMAL, size, L"en-us", out);
+		if (FAILED (h)) {
+			h = _dwrite_factory->CreateTextFormat (
+				fallback, nullptr, weight, DWRITE_FONT_STYLE_NORMAL,
+				DWRITE_FONT_STRETCH_NORMAL, size, L"en-us", out);
+		}
+		return SUCCEEDED (h);
+	};
+
+	if (!make_fmt (L"Segoe UI Variable Display", L"Segoe UI", DWRITE_FONT_WEIGHT_SEMI_BOLD, 48.f, &_fmt_brand)) {
 		return false;
 	}
 	_fmt_brand->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
-	_fmt_brand->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+	_fmt_brand->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
-	hr = _dwrite_factory->CreateTextFormat (
-		L"Segoe UI Variable Text", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-		DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 20.0f, L"en-us", &_fmt_body);
-	if (FAILED (hr)) {
-		hr = _dwrite_factory->CreateTextFormat (
-			L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-			DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 20.0f, L"en-us", &_fmt_body);
-	}
-	if (FAILED (hr)) {
+	if (!make_fmt (L"Segoe UI Variable Text", L"Segoe UI", DWRITE_FONT_WEIGHT_NORMAL, 16.f, &_fmt_body)) {
 		return false;
 	}
-	_fmt_body->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
-
-	hr = _dwrite_factory->CreateTextFormat (
-		L"Cascadia Mono", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-		DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"en-us", &_fmt_meta);
-	if (FAILED (hr)) {
-		hr = _dwrite_factory->CreateTextFormat (
-			L"Consolas", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-			DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, 13.0f, L"en-us", &_fmt_meta);
-	}
-	if (FAILED (hr)) {
+	if (!make_fmt (L"Cascadia Mono", L"Consolas", DWRITE_FONT_WEIGHT_NORMAL, 13.f, &_fmt_meta)) {
 		return false;
 	}
-	_fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
-
+	if (!make_fmt (L"Segoe UI Variable Text", L"Segoe UI", DWRITE_FONT_WEIGHT_SEMI_BOLD, 14.f, &_fmt_pane)) {
+		return false;
+	}
 	return true;
 }
 
@@ -136,6 +209,14 @@ ShellWindow::discard_device_resources ()
 	if (_brush_bg) {
 		_brush_bg->Release ();
 		_brush_bg = nullptr;
+	}
+	if (_brush_pane_edge) {
+		_brush_pane_edge->Release ();
+		_brush_pane_edge = nullptr;
+	}
+	if (_brush_pane) {
+		_brush_pane->Release ();
+		_brush_pane = nullptr;
 	}
 	if (_brush_accent) {
 		_brush_accent->Release ();
@@ -171,6 +252,8 @@ ShellWindow::ensure_device_resources ()
 		rc.right > 0 ? (UINT)rc.right : _width,
 		rc.bottom > 0 ? (UINT)rc.bottom : _height);
 
+	/* Physical pixels; DPI scale applied in layout DIPs via font sizes already in DIPs
+	 * when render target uses default DPI from HWND. */
 	HRESULT hr = _d2d_factory->CreateHwndRenderTarget (
 		D2D1::RenderTargetProperties (),
 		D2D1::HwndRenderTargetProperties (_hwnd, size),
@@ -182,6 +265,8 @@ ShellWindow::ensure_device_resources ()
 	_rt->CreateSolidColorBrush (kBrand, &_brush_brand);
 	_rt->CreateSolidColorBrush (kBody, &_brush_body);
 	_rt->CreateSolidColorBrush (kAccent, &_brush_accent);
+	_rt->CreateSolidColorBrush (kPaneFill, &_brush_pane);
+	_rt->CreateSolidColorBrush (kPaneEdge, &_brush_pane_edge);
 
 	ID2D1GradientStopCollection* stops = nullptr;
 	D2D1_GRADIENT_STOP gs[2];
@@ -197,7 +282,33 @@ ShellWindow::ensure_device_resources ()
 		stops->Release ();
 	}
 
-	return _brush_brand && _brush_body && _brush_accent && _brush_bg;
+	return _brush_brand && _brush_body && _brush_accent && _brush_pane && _brush_bg;
+}
+
+void
+ShellWindow::layout_panes ()
+{
+	const float w = (float)_width;
+	const float h = (float)_height;
+	const float pad = 16.f * _dpi_scale;
+	const float brand_h = 88.f * _dpi_scale;
+	const float status_h = 40.f * _dpi_scale;
+	const float gap = 12.f * _dpi_scale;
+
+	_brand_bar = D2D1::RectF (0, 0, w, brand_h);
+	_status_bar = D2D1::RectF (0, h - status_h, w, h);
+
+	float body_top = brand_h + pad;
+	float body_bot = h - status_h - pad;
+	float body_h = body_bot - body_top;
+	float left = pad;
+	float right = w - pad;
+	float split = left + (right - left) * 0.62f;
+
+	_editor_pane = D2D1::RectF (left, body_top, split - gap * 0.5f, body_bot);
+	_mixer_pane = D2D1::RectF (split + gap * 0.5f, body_top, right, body_bot);
+
+	(void)body_h;
 }
 
 bool
@@ -221,6 +332,9 @@ ShellWindow::create (HINSTANCE instance, int show_cmd)
 	}
 
 	DWORD style = WS_OVERLAPPEDWINDOW;
+	_dpi = 96;
+	_dpi_scale = 1.f;
+
 	RECT wr = { 0, 0, (LONG)_width, (LONG)_height };
 	AdjustWindowRect (&wr, style, FALSE);
 
@@ -233,9 +347,13 @@ ShellWindow::create (HINSTANCE instance, int show_cmd)
 		return false;
 	}
 
+	_dpi = query_dpi_for_hwnd (_hwnd);
+	_dpi_scale = (float)_dpi / 96.f;
+	layout_panes ();
+
 	ShowWindow (_hwnd, show_cmd);
 	UpdateWindow (_hwnd);
-	SetTimer (_hwnd, 1, 16, nullptr); /* ~60 Hz for presence motion */
+	SetTimer (_hwnd, 1, 16, nullptr);
 	return true;
 }
 
@@ -264,6 +382,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 	case WM_SIZE:
 		on_resize (LOWORD (lparam), HIWORD (lparam));
 		return 0;
+	case WM_DPICHANGED: {
+		UINT dpi = HIWORD (wparam);
+		RECT* suggested = reinterpret_cast<RECT*> (lparam);
+		on_dpi_changed (dpi, suggested);
+		return 0;
+	}
 	case WM_DISPLAYCHANGE:
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return 0;
@@ -284,6 +408,7 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		return 0;
 	case WM_DESTROY:
 		KillTimer (_hwnd, 1);
+		_engine.stop ();
 		discard_device_resources ();
 		PostQuitMessage (0);
 		return 0;
@@ -293,13 +418,29 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 }
 
 void
+ShellWindow::on_dpi_changed (UINT dpi, const RECT* suggested)
+{
+	_dpi = dpi ? dpi : 96;
+	_dpi_scale = (float)_dpi / 96.f;
+	if (suggested) {
+		SetWindowPos (_hwnd, nullptr,
+		              suggested->left, suggested->top,
+		              suggested->right - suggested->left,
+		              suggested->bottom - suggested->top,
+		              SWP_NOZORDER | SWP_NOACTIVATE);
+	}
+	layout_panes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::on_resize (UINT width, UINT height)
 {
 	_width = width ? width : 1;
 	_height = height ? height : 1;
+	layout_panes ();
 	if (_rt) {
 		_rt->Resize (D2D1::SizeU (_width, _height));
-		/* Rebuild vertical gradient for new height. */
 		if (_brush_bg) {
 			_brush_bg->Release ();
 			_brush_bg = nullptr;
@@ -327,6 +468,14 @@ ShellWindow::on_tick ()
 	float t = (now - _start_tick) * 0.001f;
 	_pulse = 0.5f + 0.5f * std::sin (t * 1.6f);
 
+	/* Poll engine on UI thread only (~4 Hz). */
+	static DWORD last_poll = 0;
+	if (now - last_poll > 250) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		last_poll = now;
+	}
+
 	if (_timeout_secs > 0 && (now - _start_tick) >= (_timeout_secs * 1000u)) {
 		PostQuitMessage (0);
 		return;
@@ -347,34 +496,65 @@ ShellWindow::on_paint ()
 	D2D1_SIZE_F sz = _rt->GetSize ();
 	_rt->FillRectangle (D2D1::RectF (0, 0, sz.width, sz.height), _brush_bg);
 
-	/* Soft accent wash (motion 1: drifting opacity with pulse). */
-	float wash = 0.04f + 0.03f * _pulse;
-	_brush_accent->SetOpacity (wash);
-	_rt->FillRectangle (D2D1::RectF (0, sz.height * 0.55f, sz.width, sz.height), _brush_accent);
-	_brush_accent->SetOpacity (1.f);
-
-	/* Accent rule under brand (motion 2: width breathes with pulse). */
-	float rule_w = 120.f + 40.f * _pulse;
-	float left = 64.f;
-	float brand_y = sz.height * 0.28f;
-	_rt->FillRectangle (D2D1::RectF (left, brand_y + 86.f, left + rule_w, brand_y + 89.f), _brush_accent);
-
-	/* Brand — hero signal (must dominate the first viewport). */
-	_brush_brand->SetOpacity (0.92f + 0.08f * _pulse); /* motion 3: presence */
+	/* Brand bar — hero product name. */
+	_brush_brand->SetOpacity (0.94f + 0.06f * _pulse);
 	const wchar_t* brand = L"Airdour";
 	_rt->DrawTextW (brand, (UINT32)wcslen (brand), _fmt_brand,
-	                D2D1::RectF (left, brand_y, sz.width - left, brand_y + 96.f),
+	                D2D1::RectF (_brand_bar.left + 24.f * _dpi_scale, _brand_bar.top,
+	                             _brand_bar.right - 24.f * _dpi_scale, _brand_bar.bottom),
 	                _brush_brand);
 	_brush_brand->SetOpacity (1.f);
 
-	const wchar_t* line = L"Windows-native shell. WASAPI shared. Direct2D canvas next.";
-	_rt->DrawTextW (line, (UINT32)wcslen (line), _fmt_body,
-	                D2D1::RectF (left, brand_y + 108.f, sz.width - left, brand_y + 160.f),
-	                _brush_body);
+	float rule_y = _brand_bar.bottom - 10.f * _dpi_scale;
+	float rule_w = (100.f + 36.f * _pulse) * _dpi_scale;
+	_rt->FillRectangle (D2D1::RectF (24.f * _dpi_scale, rule_y,
+	                                 24.f * _dpi_scale + rule_w, rule_y + 2.f * _dpi_scale),
+	                    _brush_accent);
 
-	const wchar_t* meta = L"win_ardour  ·  Esc to quit  ·  no GTK2";
-	_rt->DrawTextW (meta, (UINT32)wcslen (meta), _fmt_meta,
-	                D2D1::RectF (left, sz.height - 48.f, sz.width - left, sz.height - 24.f),
+	auto draw_pane = [&] (const D2D1_RECT_F& r, const wchar_t* title, const wchar_t* blurb) {
+		_rt->FillRectangle (r, _brush_pane);
+		_rt->DrawRectangle (r, _brush_pane_edge, 1.f);
+		_rt->FillRectangle (D2D1::RectF (r.left, r.top, r.left + 3.f * _dpi_scale, r.bottom), _brush_accent);
+		float inset = 14.f * _dpi_scale;
+		_rt->DrawTextW (title, (UINT32)wcslen (title), _fmt_pane,
+		                D2D1::RectF (r.left + inset, r.top + inset, r.right - inset, r.top + inset + 22.f * _dpi_scale),
+		                _brush_brand);
+		_rt->DrawTextW (blurb, (UINT32)wcslen (blurb), _fmt_body,
+		                D2D1::RectF (r.left + inset, r.top + inset + 28.f * _dpi_scale,
+		                             r.right - inset, r.bottom - inset),
+		                _brush_body);
+	};
+
+	draw_pane (_editor_pane, L"Editor",
+	           L"Timeline and regions land here. Direct2D canvas/waveview replaces Cairo in later slices.");
+	draw_pane (_mixer_pane, L"Mixer",
+	           L"Strip placeholders. Win32/D2D controls — no GTK widgets.");
+
+	/* Status bar: live engine snapshot (UI thread). */
+	std::wstring status;
+	if (_engine_snap.running) {
+		wchar_t buf[256];
+		_snwprintf_s (buf, _TRUNCATE,
+		              L"Engine  %s  ·  %u Hz  ·  %u frames (%.1f ms)  ·  dpi %u",
+		              _engine_snap.backend.c_str (),
+		              _engine_snap.sample_rate,
+		              _engine_snap.period_frames,
+		              _engine_snap.sample_rate
+		                  ? (1000.0 * (double)_engine_snap.period_frames / (double)_engine_snap.sample_rate)
+		                  : 0.0,
+		              _dpi);
+		status = buf;
+	} else if (_engine_snap.available) {
+		status = L"Engine idle — ";
+		status += _engine_snap.detail;
+	} else {
+		status = L"Engine not linked — UI shell only. ";
+		status += _engine_snap.detail;
+	}
+
+	_rt->DrawTextW (status.c_str (), (UINT32)status.size (), _fmt_meta,
+	                D2D1::RectF (_status_bar.left + 20.f * _dpi_scale, _status_bar.top,
+	                             _status_bar.right - 20.f * _dpi_scale, _status_bar.bottom),
 	                _brush_body);
 
 	HRESULT hr = _rt->EndDraw ();
@@ -389,11 +569,14 @@ ShellWindow::run_message_loop (unsigned timeout_secs)
 	_timeout_secs = timeout_secs;
 	_start_tick = GetTickCount ();
 	_running = true;
+	_engine_snap = _engine.snapshot ();
 
 	MSG msg = {};
 	while (_running && GetMessageW (&msg, nullptr, 0, 0) > 0) {
 		TranslateMessage (&msg);
 		DispatchMessageW (&msg);
 	}
+
+	_engine.stop ();
 	return (int)msg.wParam;
 }

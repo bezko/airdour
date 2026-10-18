@@ -1,8 +1,8 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Minimal Win32 + Direct2D + DirectWrite shell window.
- * No GTK, no Cairo — Windows-native GUI path for Airdour.
+ * Win32 + Direct2D + DirectWrite shell: DPI-aware host surface,
+ * editor/mixer placeholders, live engine status (optional link).
  */
 
 #pragma once
@@ -21,10 +21,13 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
+#include "engine_host.h"
+
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
+#pragma comment(lib, "shcore.lib")
 
 class ShellWindow
 {
@@ -33,6 +36,7 @@ public:
 	~ShellWindow ();
 
 	bool create (HINSTANCE instance, int show_cmd);
+	bool attach_engine (const std::string& backend_name);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -45,26 +49,41 @@ private:
 	void discard_device_resources ();
 	bool ensure_device_resources ();
 	void on_resize (UINT width, UINT height);
+	void on_dpi_changed (UINT dpi, const RECT* suggested);
 	void on_paint ();
 	void on_tick ();
+	void layout_panes ();
+	float dip (float px) const { return px * _dpi_scale; }
 
 	HWND _hwnd;
 	UINT _width;
 	UINT _height;
+	UINT _dpi;
+	float _dpi_scale;
 	bool _running;
 	DWORD _start_tick;
 	unsigned _timeout_secs;
 
-	ID2D1Factory*          _d2d_factory;
-	IDWriteFactory*        _dwrite_factory;
-	ID2D1HwndRenderTarget* _rt;
-	ID2D1SolidColorBrush*  _brush_brand;
-	ID2D1SolidColorBrush*  _brush_body;
-	ID2D1SolidColorBrush*  _brush_accent;
-	ID2D1LinearGradientBrush* _brush_bg;
-	IDWriteTextFormat*     _fmt_brand;
-	IDWriteTextFormat*     _fmt_body;
-	IDWriteTextFormat*     _fmt_meta;
+	D2D1_RECT_F _brand_bar;
+	D2D1_RECT_F _editor_pane;
+	D2D1_RECT_F _mixer_pane;
+	D2D1_RECT_F _status_bar;
 
-	float _pulse; /* 0..1 brand presence motion */
+	ID2D1Factory*             _d2d_factory;
+	IDWriteFactory*           _dwrite_factory;
+	ID2D1HwndRenderTarget*    _rt;
+	ID2D1SolidColorBrush*     _brush_brand;
+	ID2D1SolidColorBrush*     _brush_body;
+	ID2D1SolidColorBrush*     _brush_accent;
+	ID2D1SolidColorBrush*     _brush_pane;
+	ID2D1SolidColorBrush*     _brush_pane_edge;
+	ID2D1LinearGradientBrush* _brush_bg;
+	IDWriteTextFormat*        _fmt_brand;
+	IDWriteTextFormat*        _fmt_body;
+	IDWriteTextFormat*        _fmt_meta;
+	IDWriteTextFormat*        _fmt_pane;
+
+	float _pulse;
+	EngineHost _engine;
+	EngineSnapshot _engine_snap;
 };

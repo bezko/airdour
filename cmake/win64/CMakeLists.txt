@@ -204,10 +204,14 @@ if(AIRDOUR_BUILD_DEPS_GLIBMM_SMOKE)
 endif()
 
 # --- Minimal Win32 + Direct2D + DirectWrite GUI shell (no GTK2) ---
+option(AIRDOUR_WIN_SHELL_WITH_ENGINE "Link airdour_win_shell against waf-built libardour (laptop)" OFF)
+set(AIRDOUR_WAF_BUILD_DIR "${AIRDOUR_SRC_ROOT}/build" CACHE PATH "waf build dir with ardour.lib / backends")
+
 if(AIRDOUR_BUILD_WIN_SHELL)
   add_executable(airdour_win_shell
     "${AIRDOUR_SRC_ROOT}/win_ardour/main.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/shell_window.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/engine_host.cc"
   )
   target_include_directories(airdour_win_shell PRIVATE
     "${AIRDOUR_SRC_ROOT}/win_ardour"
@@ -217,6 +221,7 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     _UNICODE
     PLATFORM_WINDOWS=1
     AIRDOUR_WINDOWS_ONLY=1
+    _CRT_SECURE_NO_WARNINGS
   )
   target_link_libraries(airdour_win_shell PRIVATE
     d2d1
@@ -225,11 +230,79 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     gdi32
     ole32
     shell32
+    shcore
   )
+
+  set(_waf_ardour_lib "${AIRDOUR_WAF_BUILD_DIR}/libs/ardour/ardour.lib")
+  if(AIRDOUR_WIN_SHELL_WITH_ENGINE AND EXISTS "${_waf_ardour_lib}")
+    # waf MSVC product libs on TUFNUTZ are /MDd — match Debug CRT.
+    set_property(TARGET airdour_win_shell PROPERTY
+      MSVC_RUNTIME_LIBRARY "MultiThreadedDebugDLL")
+
+    set(_vcpkg_prefix "${AIRDOUR_SRC_ROOT}/tools/win-native/vcpkg_installed/x64-windows")
+    target_compile_definitions(airdour_win_shell PRIVATE
+      AIRDOUR_WIN_SHELL_WITH_ENGINE=1
+      COMPILER_MSVC=1
+      PLATFORM_WINDOWS=1
+      AIRDOUR_WINDOWS_ONLY=1
+      WAF_BUILD=1
+      LOCALEDIR=\"\"
+      PROGRAM_NAME=\"Airdour\"
+      PROGRAM_VERSION=\"9\"
+      LIBARDOUR=\"ardour\"
+      ARCH_X86=1
+      BOOST_SYSTEM_NO_DEPRECATED
+      BOOST_ERROR_CODE_HEADER_ONLY
+    )
+    target_include_directories(airdour_win_shell PRIVATE
+      "${AIRDOUR_SRC_ROOT}"
+      "${AIRDOUR_SRC_ROOT}/libs"
+      "${AIRDOUR_SRC_ROOT}/libs/ardour"
+      "${AIRDOUR_SRC_ROOT}/libs/pbd"
+      "${AIRDOUR_SRC_ROOT}/libs/temporal"
+      "${AIRDOUR_SRC_ROOT}/libs/midi++2"
+      "${AIRDOUR_SRC_ROOT}/libs/evoral"
+      "${AIRDOUR_SRC_ROOT}/libs/ctrl-interface/control_protocol"
+      "${AIRDOUR_SRC_ROOT}/libs/zita-resampler"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/pbd"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/ardour"
+      "${_vcpkg_prefix}/include"
+      "${_vcpkg_prefix}/include/glib-2.0"
+      "${_vcpkg_prefix}/lib/glib-2.0/include"
+      "${_vcpkg_prefix}/include/glibmm-2.4"
+      "${_vcpkg_prefix}/lib/glibmm-2.4/include"
+      "${_vcpkg_prefix}/include/sigc++-2.0"
+      "${_vcpkg_prefix}/lib/sigc++-2.0/include"
+      "${_vcpkg_prefix}/include/libxml2"
+    )
+    target_link_directories(airdour_win_shell PRIVATE
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/ardour"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/pbd"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/temporal"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/midi++2"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/evoral"
+      "${AIRDOUR_WAF_BUILD_DIR}/libs/ctrl-interface/control_protocol"
+      "${_vcpkg_prefix}/debug/lib"
+      "${_vcpkg_prefix}/lib"
+    )
+    target_link_libraries(airdour_win_shell PRIVATE
+      ardour
+      pbd
+      temporal
+      midipp
+      evoral
+      ardourcp
+    )
+    message(STATUS "Airdour win64: airdour_win_shell WITH engine (waf libs @ ${AIRDOUR_WAF_BUILD_DIR})")
+  elseif(AIRDOUR_WIN_SHELL_WITH_ENGINE)
+    message(WARNING "AIRDOUR_WIN_SHELL_WITH_ENGINE set but ${_waf_ardour_lib} missing — building UI-only")
+  else()
+    message(STATUS "Airdour win64: airdour_win_shell UI-only (enable AIRDOUR_WIN_SHELL_WITH_ENGINE for attach)")
+  endif()
+
   # Console subsystem so --timeout smoke logs are capturable; still creates a HWND.
   set_target_properties(airdour_win_shell PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
     OUTPUT_NAME "airdour_win_shell"
   )
-  message(STATUS "Airdour win64: airdour_win_shell (Win32+D2D+DirectWrite) enabled")
 endif()
