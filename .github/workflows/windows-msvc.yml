@@ -1,0 +1,100 @@
+# Airdour — Windows MSVC CI (win64 only)
+#
+# Product path: AIRDOUR_WINDOWS_ONLY / WASAPI shared.
+# This job compiles the WasapiIO smoke library (Windows SDK only) and
+# configures the cmake/win64 spine. Full headless/GUI link is staged later
+# once an MSVC dependency prefix (vcpkg) is wired — see tools/win-native/README.md.
+
+name: Windows MSVC CI
+
+on:
+  push:
+    branches:
+      - master
+      - main
+      - "cursor/**"
+  pull_request:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: windows-msvc-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  wasapi-smoke:
+    name: WASAPI I/O smoke (MSVC x64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Configure cmake/win64 (WASAPI smoke)
+        run: |
+          cmake -S cmake/win64 -B build-win64 `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON
+        shell: pwsh
+
+      - name: Build wasapi_io_smoke
+        run: cmake --build build-win64 --config Release --target wasapi_io_smoke -j $env:NUMBER_OF_PROCESSORS
+        shell: pwsh
+
+      - name: Write BUILD_STATUS
+        run: |
+          $lib = Get-ChildItem -Path build-win64 -Recurse -Filter "airdour_wasapi_io.lib" | Select-Object -First 1
+          .\tools\win-native\ci\Write-BuildStatus.ps1 `
+            -OutFile build-win64\BUILD_STATUS.txt `
+            -GitSha "${{ github.sha }}" `
+            -GitRef "${{ github.ref }}" `
+            -WasapiSmokePath $(if ($lib) { $lib.FullName } else { "" })
+          Get-Content build-win64\BUILD_STATUS.txt
+        shell: pwsh
+
+      - name: Upload CI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: airdour-win64-ci-${{ github.sha }}
+          path: |
+            build-win64/**/airdour_wasapi_io.lib
+            build-win64/BUILD_STATUS.txt
+            libs/backends/wasapi/**
+            cmake/win64/**
+            tools/win-native/**
+          if-no-files-found: error
+          retention-days: 14
+
+  # Placeholder job documenting the next CI stage (deps). Does not fail the workflow.
+  deps-notes:
+    name: Deps bootstrap notes
+    runs-on: windows-latest
+    needs: wasapi-smoke
+    steps:
+      - name: Document vcpkg expectations
+        shell: pwsh
+        run: |
+          Write-Host @"
+          Next CI stage (not enabled yet):
+            - lukka/run-vcpkg with manifest tools/win-native/vcpkg.json
+            - packages: glib, libxml2, libsndfile, curl, libarchive, libsigcpp, glibmm, pthreads4w, ...
+            - then waf --dist-target=msvc --windows-only OR grow cmake targets for libpbd→hardour
+
+          Blocked for full GUI:
+            - GTK2/Cairo/Pango MSVC stack (upstream Windows used MinGW)
+            - No ASIO/DirectSound in product path
+          "@

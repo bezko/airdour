@@ -1,0 +1,27 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "airdour-win64-deps",
+  "version-string": "0.1.0",
+  "description": "Staged MSVC dependency set for Airdour headless/core. GTK2 GUI stack is intentionally omitted (main full-app blocker on MSVC).",
+  "dependencies": [
+    "glib",
+    "libxml2",
+    "libsndfile",
+    "curl",
+    "libarchive",
+    "liblo",
+    "taglib",
+    "pthreads",
+    {
+      "name": "getopt-win32",
+      "platform": "windows"
+    }
+  ],
+  "features": {
+    "cxx-glib": {
+      "description": "C++ wrappers — enable once versions match Ardour waf checks",
+      "dependencies": ["glibmm", "libsigcpp"]
+    }
+  },
+  "supports": "windows & x64 & !uwp"
+}
