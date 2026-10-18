@@ -5,12 +5,11 @@
 ## What works
 
 - Brand window (**Airdour**), DPI-aware layout
-- **Transport** — Play / Stop (+ spacebar); drives engine start/stop; amber playhead on strip
-- Editor / Mixer panes (D2D only)
-- **Wave strip** — Direct2D peak/RMS demo + zoom/pan (not Cairo)
-- **Mixer** — Track 1 vertical fader (stub gain until Session routes)
-- Optional **engine attach** to waf-built libardour (Dummy or WASAPI shared)
-- Status bar: backend, rate, period, gain
+- **Transport** — Play / Stop (+ spacebar); engine start/stop; playhead locked to content
+- **Editor** — 3 stacked wave lanes (Audio 1–3), linked zoom/pan, labels
+- **Mixer** — 3 strips with faders + play-synced stub meters (no Session PeakMeter yet)
+- Demo peaks improved / quieter when stopped; denser near playhead
+- Optional **engine attach** (Dummy or WASAPI shared)
 - `--timeout N` for unattended smoke
 
 ## Build

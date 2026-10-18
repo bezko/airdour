@@ -1,8 +1,8 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Win32 + Direct2D + DirectWrite shell: DPI-aware host surface,
- * transport, editor wave strip, mixer fader, live engine status.
+ * Win32 + Direct2D + DirectWrite shell: transport, multi-track editor,
+ * mixer faders + meters, live engine status.
  */
 
 #pragma once
@@ -35,6 +35,8 @@
 class ShellWindow
 {
 public:
+	static constexpr int kTracks = 3;
+
 	ShellWindow ();
 	~ShellWindow ();
 
@@ -49,6 +51,13 @@ private:
 		None,
 		WavePan,
 		Fader
+	};
+
+	struct EditorLane {
+		WaveStrip   strip;
+		D2D1_RECT_F bounds;
+		wchar_t     label[24];
+		float       seed;
 	};
 
 	static LRESULT CALLBACK wnd_proc (HWND, UINT, WPARAM, LPARAM);
@@ -67,13 +76,16 @@ private:
 	void transport_play ();
 	void transport_stop ();
 	void transport_toggle ();
-	bool hit_wave (float x, float y) const;
+	void apply_shared_view (int source_lane);
+	void reset_shared_view ();
+	int  hit_editor_lane (float x, float y) const;
+	int  hit_mixer_fader (float x, float y) const;
 	void client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const;
 	bool on_mouse_wheel (WPARAM wparam, LPARAM lparam);
 	bool on_mouse_down (LPARAM lparam);
 	bool on_mouse_move (LPARAM lparam);
 	void on_mouse_up ();
-	float dip (float px) const { return px * _dpi_scale; }
+	float stub_meter_peak (int track, float dt) const;
 
 	HWND _hwnd;
 	UINT _width;
@@ -84,11 +96,11 @@ private:
 	DWORD _start_tick;
 	unsigned _timeout_secs;
 	DragMode _drag;
+	int _drag_index;
 	float _pan_last_x;
 
 	bool  _transport_playing;
 	float _playhead_sec;
-	float _playhead_norm;
 	DWORD _last_tick_ms;
 
 	D2D1_RECT_F _brand_bar;
@@ -96,7 +108,6 @@ private:
 	D2D1_RECT_F _editor_pane;
 	D2D1_RECT_F _mixer_pane;
 	D2D1_RECT_F _status_bar;
-	D2D1_RECT_F _wave_bounds;
 
 	ID2D1Factory*             _d2d_factory;
 	IDWriteFactory*           _dwrite_factory;
@@ -109,6 +120,7 @@ private:
 	ID2D1SolidColorBrush*     _brush_peak;
 	ID2D1SolidColorBrush*     _brush_rms;
 	ID2D1SolidColorBrush*     _brush_playhead;
+	ID2D1SolidColorBrush*     _brush_meter_hot;
 	ID2D1LinearGradientBrush* _brush_bg;
 	IDWriteTextFormat*        _fmt_brand;
 	IDWriteTextFormat*        _fmt_body;
@@ -116,10 +128,10 @@ private:
 	IDWriteTextFormat*        _fmt_pane;
 
 	float _pulse;
-	EngineHost   _engine;
+	EngineHost     _engine;
 	EngineSnapshot _engine_snap;
-	WaveStrip    _wave;
-	TransportBar _transport;
-	MixerStrip   _mixer;
+	TransportBar   _transport;
+	EditorLane     _lanes[kTracks];
+	MixerStrip     _mixers[kTracks];
 };
 

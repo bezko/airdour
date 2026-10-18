@@ -25,9 +25,10 @@ struct WaveStripParams {
 	bool     transport_playing;
 	uint32_t sample_rate;
 	uint32_t period_frames;
-	float    time_sec; /* UI clock */
-	float    gain;     /* 0..1 amplitude scale */
-	float    playhead; /* 0..1 across visible strip; <0 hide */
+	float    time_sec;     /* UI clock */
+	float    playhead_sec; /* transport time */
+	float    gain;         /* 0..1 amplitude scale */
+	float    track_seed;   /* per-lane timbre offset */
 };
 
 class WaveStrip
@@ -36,6 +37,8 @@ public:
 	static constexpr size_t kMaxColumns = 256;
 	static constexpr float  kZoomMin    = 0.25f;
 	static constexpr float  kZoomMax    = 16.f;
+	/** Screen fraction where playhead sits while following transport. */
+	static constexpr float  kFollowFrac = 0.28f;
 
 	WaveStrip ();
 
@@ -48,25 +51,29 @@ public:
 	           ID2D1SolidColorBrush* rms_brush,
 	           ID2D1SolidColorBrush* mid_brush,
 	           ID2D1SolidColorBrush* playhead_brush,
-	           float playhead_norm,
 	           float dpi_scale) const;
 
-	/** Zoom toward |norm_x| in [0,1] across the strip (wheel). */
 	void zoom_at (float factor, float norm_x);
-	/** Pan by delta in strip widths (negative = earlier). */
 	void pan_by (float delta_widths);
 	void reset_view ();
+
+	/** Copy shared timeline view from another strip (linked zoom/pan). */
+	void sync_view_from (const WaveStrip& other);
 
 	float  zoom () const { return _zoom; }
 	float  pan () const { return _pan; }
 	bool   interacting () const { return _user_view; }
+	/** Playhead X in [0,1] of strip, or <0 if off-screen. */
+	float  playhead_norm () const { return _playhead_norm; }
 	size_t column_count () const { return _peaks.size (); }
 
 private:
 	std::vector<float> _peaks;
 	std::vector<float> _rms;
-	float              _auto_scroll; /* clock-driven */
-	float              _pan;         /* user offset in "widths" of content */
-	float              _zoom;        /* 1 = default; >1 zoomed in */
-	bool               _user_view;   /* true after wheel/drag until reset */
+	float              _pan;
+	float              _zoom;
+	bool               _user_view;
+	float              _playhead_norm;
+	float              _content_playhead;
 };
+
