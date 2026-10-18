@@ -4,6 +4,7 @@
 
 #include "engine_host.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -73,12 +74,15 @@ public:
 
 EngineHost::EngineHost ()
 	: _started (false)
+	, _backend_name ("Dummy")
+	, _gain (0.85f)
 	, _impl (new Impl)
 {
 	_snap.available = true;
 	_snap.running = false;
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
+	_snap.gain = _gain;
 	_snap.backend = L"(idle)";
 	_snap.detail = L"engine linked — not started";
 }
@@ -96,8 +100,25 @@ EngineHost::is_linked ()
 	return true;
 }
 
+void
+EngineHost::prepare (const std::string& backend_name)
+{
+	if (!backend_name.empty ()) {
+		_backend_name = backend_name;
+	}
+	_snap.backend = utf8_to_wide (resolve_backend_name (_backend_name));
+	_snap.detail = L"prepared — press Play to start";
+}
+
 bool
 EngineHost::start (const std::string& backend_name)
+{
+	prepare (backend_name);
+	return start ();
+}
+
+bool
+EngineHost::start ()
 {
 	if (_started) {
 		return true;
@@ -107,6 +128,21 @@ EngineHost::start (const std::string& backend_name)
 		std::fprintf (stderr, "airdour_win_shell: engine: %s\n", msg);
 		std::fflush (stderr);
 	};
+
+	/* Restart path: engine already created, backend stopped. */
+	if (_impl->engine) {
+		step ("engine->start (restart)");
+		if (_impl->engine->start () != 0) {
+			_snap.detail = L"engine restart failed";
+			_snap.backend = utf8_to_wide (_impl->engine->current_backend_name ());
+			return false;
+		}
+		_started = true;
+		refresh_snapshot ();
+		_snap.detail = L"UI thread attach - audio on backend RT thread";
+		step ("running");
+		return true;
+	}
 
 	if (!_impl->ardour_inited) {
 		step ("ARDOUR::init");
@@ -128,7 +164,7 @@ EngineHost::start (const std::string& backend_name)
 		return false;
 	}
 
-	const std::string name = resolve_backend_name (backend_name);
+	const std::string name = resolve_backend_name (_backend_name);
 	step (("set_backend " + name).c_str ());
 	if (!_impl->engine->set_backend (name, "airdour", "")) {
 		_snap.detail = L"set_backend failed: " + utf8_to_wide (name);
@@ -155,6 +191,7 @@ EngineHost::stop ()
 {
 	if (!_impl || !_impl->engine) {
 		_started = false;
+		_snap.running = false;
 		return;
 	}
 
@@ -168,13 +205,27 @@ EngineHost::stop ()
 
 	_started = false;
 	_snap.running = false;
-	_snap.detail = L"engine stopped";
+	_snap.detail = L"engine stopped — press Play to restart";
+}
+
+void
+EngineHost::set_gain (float linear)
+{
+	_gain = std::max (0.f, std::min (1.f, linear));
+	_snap.gain = _gain;
+}
+
+float
+EngineHost::gain () const
+{
+	return _gain;
 }
 
 void
 EngineHost::refresh_snapshot ()
 {
 	if (!_impl || !_impl->engine || !_started) {
+		_snap.gain = _gain;
 		return;
 	}
 	_snap.available = true;
@@ -182,6 +233,7 @@ EngineHost::refresh_snapshot ()
 	_snap.backend = utf8_to_wide (_impl->engine->current_backend_name ());
 	_snap.sample_rate = (uint32_t)_impl->engine->sample_rate ();
 	_snap.period_frames = (uint32_t)_impl->engine->samples_per_cycle ();
+	_snap.gain = _gain;
 }
 
 void
@@ -200,11 +252,14 @@ EngineHost::snapshot () const
 
 EngineHost::EngineHost ()
 	: _started (false)
+	, _backend_name ("Dummy")
+	, _gain (0.85f)
 {
 	_snap.available = false;
 	_snap.running = false;
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
+	_snap.gain = _gain;
 	_snap.backend = L"(not linked)";
 	_snap.detail = L"build with AIRDOUR_WIN_SHELL_WITH_ENGINE + waf libs";
 }
@@ -217,8 +272,24 @@ EngineHost::is_linked ()
 	return false;
 }
 
+void
+EngineHost::prepare (const std::string& backend_name)
+{
+	if (!backend_name.empty ()) {
+		_backend_name = backend_name;
+	}
+	_snap.detail = L"engine support not compiled into this binary";
+}
+
 bool
-EngineHost::start (const std::string&)
+EngineHost::start (const std::string& backend_name)
+{
+	prepare (backend_name);
+	return start ();
+}
+
+bool
+EngineHost::start ()
 {
 	_snap.detail = L"engine support not compiled into this binary";
 	return false;
@@ -227,11 +298,27 @@ EngineHost::start (const std::string&)
 void
 EngineHost::stop ()
 {
+	_started = false;
+	_snap.running = false;
+}
+
+void
+EngineHost::set_gain (float linear)
+{
+	_gain = std::max (0.f, std::min (1.f, linear));
+	_snap.gain = _gain;
+}
+
+float
+EngineHost::gain () const
+{
+	return _gain;
 }
 
 void
 EngineHost::refresh_snapshot ()
 {
+	_snap.gain = _gain;
 }
 
 void
@@ -246,3 +333,4 @@ EngineHost::snapshot () const
 }
 
 #endif
+

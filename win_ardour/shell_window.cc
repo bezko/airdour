@@ -22,8 +22,9 @@ constexpr D2D1_COLOR_F kBody      = { 0.620f, 0.720f, 0.760f, 1.f };
 constexpr D2D1_COLOR_F kAccent    = { 0.180f, 0.820f, 0.720f, 1.f };
 constexpr D2D1_COLOR_F kPaneFill  = { 0.070f, 0.100f, 0.120f, 0.92f };
 constexpr D2D1_COLOR_F kPaneEdge  = { 0.160f, 0.220f, 0.250f, 1.f };
-constexpr D2D1_COLOR_F kPeak      = { 0.220f, 0.920f, 0.820f, 1.f }; /* teal peak tips */
-constexpr D2D1_COLOR_F kRms       = { 0.120f, 0.420f, 0.400f, 0.85f }; /* darker RMS body */
+constexpr D2D1_COLOR_F kPeak      = { 0.220f, 0.920f, 0.820f, 1.f };
+constexpr D2D1_COLOR_F kRms       = { 0.120f, 0.420f, 0.400f, 0.85f };
+constexpr D2D1_COLOR_F kPlayhead  = { 0.980f, 0.780f, 0.220f, 1.f }; /* amber playhead */
 
 #ifndef WM_DPICHANGED
 #define WM_DPICHANGED 0x02E0
@@ -59,7 +60,6 @@ enable_dpi_awareness ()
 		typedef BOOL (WINAPI *SetCtxFn) (HANDLE);
 		auto set_ctx = (SetCtxFn)GetProcAddress (user32, "SetProcessDpiAwarenessContext");
 		if (set_ctx) {
-			/* DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 == (HANDLE)-4 */
 			set_ctx ((HANDLE)(intptr_t)-4);
 			FreeLibrary (user32);
 			return;
@@ -71,7 +71,7 @@ enable_dpi_awareness ()
 		typedef HRESULT (WINAPI *SetAwareFn) (int);
 		auto set_aware = (SetAwareFn)GetProcAddress (shcore, "SetProcessDpiAwareness");
 		if (set_aware) {
-			set_aware (2); /* PROCESS_PER_MONITOR_DPI_AWARE */
+			set_aware (2);
 		}
 		FreeLibrary (shcore);
 	}
@@ -88,9 +88,14 @@ ShellWindow::ShellWindow ()
 	, _running (false)
 	, _start_tick (0)
 	, _timeout_secs (0)
-	, _panning (false)
+	, _drag (DragMode::None)
 	, _pan_last_x (0.f)
+	, _transport_playing (false)
+	, _playhead_sec (0.f)
+	, _playhead_norm (0.f)
+	, _last_tick_ms (0)
 	, _brand_bar ()
+	, _transport_bounds ()
 	, _editor_pane ()
 	, _mixer_pane ()
 	, _status_bar ()
@@ -105,6 +110,7 @@ ShellWindow::ShellWindow ()
 	, _brush_pane_edge (nullptr)
 	, _brush_peak (nullptr)
 	, _brush_rms (nullptr)
+	, _brush_playhead (nullptr)
 	, _brush_bg (nullptr)
 	, _fmt_brand (nullptr)
 	, _fmt_body (nullptr)
@@ -155,13 +161,62 @@ bool
 ShellWindow::attach_engine (const std::string& backend_name)
 {
 	if (!_engine.is_linked ()) {
+		_engine.prepare (backend_name);
 		_engine_snap = _engine.snapshot ();
 		return false;
 	}
+	/* Smoke / laptop path: start immediately; transport can stop/restart. */
 	bool ok = _engine.start (backend_name);
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
+	if (ok) {
+		_transport_playing = true;
+		_transport.set_playing (true);
+	}
 	return ok;
+}
+
+void
+ShellWindow::transport_play ()
+{
+	if (_engine.is_linked ()) {
+		if (!_engine.start ()) {
+			_engine_snap = _engine.snapshot ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return;
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	_transport_playing = true;
+	_transport.set_playing (true);
+	_last_tick_ms = GetTickCount ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::transport_stop ()
+{
+	_transport_playing = false;
+	_transport.set_playing (false);
+	_playhead_sec = 0.f;
+	_playhead_norm = 0.f;
+	if (_engine.is_linked () && _engine_snap.running) {
+		_engine.stop ();
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::transport_toggle ()
+{
+	if (_transport_playing) {
+		transport_stop ();
+	} else {
+		transport_play ();
+	}
 }
 
 bool
@@ -217,6 +272,10 @@ ShellWindow::discard_device_resources ()
 		_brush_bg->Release ();
 		_brush_bg = nullptr;
 	}
+	if (_brush_playhead) {
+		_brush_playhead->Release ();
+		_brush_playhead = nullptr;
+	}
 	if (_brush_rms) {
 		_brush_rms->Release ();
 		_brush_rms = nullptr;
@@ -267,8 +326,6 @@ ShellWindow::ensure_device_resources ()
 		rc.right > 0 ? (UINT)rc.right : _width,
 		rc.bottom > 0 ? (UINT)rc.bottom : _height);
 
-	/* Physical pixels; DPI scale applied in layout DIPs via font sizes already in DIPs
-	 * when render target uses default DPI from HWND. */
 	HRESULT hr = _d2d_factory->CreateHwndRenderTarget (
 		D2D1::RenderTargetProperties (),
 		D2D1::HwndRenderTargetProperties (_hwnd, size),
@@ -284,6 +341,7 @@ ShellWindow::ensure_device_resources ()
 	_rt->CreateSolidColorBrush (kPaneEdge, &_brush_pane_edge);
 	_rt->CreateSolidColorBrush (kPeak, &_brush_peak);
 	_rt->CreateSolidColorBrush (kRms, &_brush_rms);
+	_rt->CreateSolidColorBrush (kPlayhead, &_brush_playhead);
 
 	ID2D1GradientStopCollection* stops = nullptr;
 	D2D1_GRADIENT_STOP gs[2];
@@ -299,7 +357,8 @@ ShellWindow::ensure_device_resources ()
 		stops->Release ();
 	}
 
-	return _brush_brand && _brush_body && _brush_accent && _brush_pane && _brush_peak && _brush_rms && _brush_bg;
+	return _brush_brand && _brush_body && _brush_accent && _brush_pane
+	    && _brush_peak && _brush_rms && _brush_playhead && _brush_bg;
 }
 
 void
@@ -308,16 +367,18 @@ ShellWindow::layout_panes ()
 	const float w = (float)_width;
 	const float h = (float)_height;
 	const float pad = 16.f * _dpi_scale;
-	const float brand_h = 88.f * _dpi_scale;
+	const float brand_h = 72.f * _dpi_scale;
+	const float transport_h = 44.f * _dpi_scale;
 	const float status_h = 40.f * _dpi_scale;
 	const float gap = 12.f * _dpi_scale;
 
 	_brand_bar = D2D1::RectF (0, 0, w, brand_h);
+	_transport_bounds = D2D1::RectF (0, brand_h, w, brand_h + transport_h);
+	_transport.layout (_transport_bounds, _dpi_scale);
 	_status_bar = D2D1::RectF (0, h - status_h, w, h);
 
-	float body_top = brand_h + pad;
+	float body_top = brand_h + transport_h + pad;
 	float body_bot = h - status_h - pad;
-	float body_h = body_bot - body_top;
 	float left = pad;
 	float right = w - pad;
 	float split = left + (right - left) * 0.62f;
@@ -325,7 +386,6 @@ ShellWindow::layout_panes ()
 	_editor_pane = D2D1::RectF (left, body_top, split - gap * 0.5f, body_bot);
 	_mixer_pane = D2D1::RectF (split + gap * 0.5f, body_top, right, body_bot);
 
-	/* Wave strip fills most of the editor under the title row. */
 	float inset = 14.f * _dpi_scale;
 	float title_h = 48.f * _dpi_scale;
 	_wave_bounds = D2D1::RectF (
@@ -334,8 +394,7 @@ ShellWindow::layout_panes ()
 		_editor_pane.right - inset,
 		_editor_pane.bottom - inset);
 	_wave.resize_for_width (_wave_bounds.right - _wave_bounds.left);
-
-	(void)body_h;
+	_mixer.layout (_mixer_pane, _dpi_scale);
 }
 
 bool
@@ -431,6 +490,8 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 	case WM_KEYDOWN:
 		if (wparam == VK_ESCAPE) {
 			PostQuitMessage (0);
+		} else if (wparam == VK_SPACE) {
+			transport_toggle ();
 		} else if (wparam == VK_HOME || wparam == '0') {
 			_wave.reset_view ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
@@ -497,7 +558,6 @@ ShellWindow::on_mouse_wheel (WPARAM wparam, LPARAM lparam)
 	float w = _wave_bounds.right - _wave_bounds.left;
 	float norm_x = w > 1.f ? (x - _wave_bounds.left) / w : 0.5f;
 	int delta = GET_WHEEL_DELTA_WPARAM (wparam);
-	/* One notch ≈ 10% zoom; Ctrl slows it. */
 	float step = (GetKeyState (VK_CONTROL) & 0x8000) ? 1.05f : 1.12f;
 	float factor = (delta > 0) ? step : (1.f / step);
 	_wave.zoom_at (factor, norm_x);
@@ -510,41 +570,76 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 {
 	float x, y;
 	client_from_lparam (lparam, &x, &y);
-	if (!hit_wave (x, y)) {
-		return false;
+
+	TransportHit th = _transport.hit_test (x, y);
+	if (th == TransportHit::Play) {
+		transport_play ();
+		return true;
 	}
-	_panning = true;
-	_pan_last_x = x;
-	SetCapture (_hwnd);
-	SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
-	return true;
+	if (th == TransportHit::Stop) {
+		transport_stop ();
+		return true;
+	}
+
+	if (_mixer.hit_fader (x, y)) {
+		_drag = DragMode::Fader;
+		_mixer.drag_to (y);
+		_engine.set_gain (_mixer.gain ());
+		_engine_snap.gain = _mixer.gain ();
+		SetCapture (_hwnd);
+		SetCursor (LoadCursorW (nullptr, IDC_SIZENS));
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	if (hit_wave (x, y)) {
+		_drag = DragMode::WavePan;
+		_pan_last_x = x;
+		SetCapture (_hwnd);
+		SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
+		return true;
+	}
+	return false;
 }
 
 bool
 ShellWindow::on_mouse_move (LPARAM lparam)
 {
-	if (!_panning) {
+	if (_drag == DragMode::None) {
 		return false;
 	}
 	float x, y;
 	client_from_lparam (lparam, &x, &y);
-	float w = _wave_bounds.right - _wave_bounds.left;
-	if (w > 1.f) {
-		float delta_widths = (_pan_last_x - x) / w;
-		if (delta_widths != 0.f) {
-			_wave.pan_by (delta_widths);
+
+	if (_drag == DragMode::Fader) {
+		if (_mixer.drag_to (y)) {
+			_engine.set_gain (_mixer.gain ());
+			_engine_snap.gain = _mixer.gain ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		}
+		return true;
 	}
-	_pan_last_x = x;
-	return true;
+
+	if (_drag == DragMode::WavePan) {
+		float w = _wave_bounds.right - _wave_bounds.left;
+		if (w > 1.f) {
+			float delta_widths = (_pan_last_x - x) / w;
+			if (delta_widths != 0.f) {
+				_wave.pan_by (delta_widths);
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			}
+		}
+		_pan_last_x = x;
+		return true;
+	}
+	return false;
 }
 
 void
 ShellWindow::on_mouse_up ()
 {
-	if (_panning) {
-		_panning = false;
+	if (_drag != DragMode::None) {
+		_drag = DragMode::None;
 		if (GetCapture () == _hwnd) {
 			ReleaseCapture ();
 		}
@@ -599,10 +694,24 @@ void
 ShellWindow::on_tick ()
 {
 	DWORD now = GetTickCount ();
+	if (_last_tick_ms == 0) {
+		_last_tick_ms = now;
+	}
+	float dt = (now - _last_tick_ms) * 0.001f;
+	_last_tick_ms = now;
+
 	float t = (now - _start_tick) * 0.001f;
 	_pulse = 0.5f + 0.5f * std::sin (t * 1.6f);
 
-	/* Poll engine on UI thread only (~4 Hz). */
+	if (_transport_playing) {
+		_playhead_sec += dt;
+		/* Demo timeline wraps every 30s across the strip. */
+		_playhead_norm = std::fmod (_playhead_sec / 30.f, 1.f);
+		if (_playhead_norm < 0.f) {
+			_playhead_norm += 1.f;
+		}
+	}
+
 	static DWORD last_poll = 0;
 	if (now - last_poll > 250) {
 		_engine.poll ();
@@ -612,9 +721,12 @@ ShellWindow::on_tick ()
 
 	WaveStripParams wp;
 	wp.engine_running = _engine_snap.running;
+	wp.transport_playing = _transport_playing;
 	wp.sample_rate = _engine_snap.sample_rate;
 	wp.period_frames = _engine_snap.period_frames;
 	wp.time_sec = t;
+	wp.gain = _mixer.gain ();
+	wp.playhead = _playhead_norm;
 	_wave.update (wp);
 
 	if (_timeout_secs > 0 && (now - _start_tick) >= (_timeout_secs * 1000u)) {
@@ -639,26 +751,54 @@ ShellWindow::draw_editor_pane ()
 	                _brush_brand);
 
 	wchar_t caption[160];
-	if (_wave.interacting ()) {
+	if (_transport_playing) {
 		_snwprintf_s (caption, _TRUNCATE,
-		              L"Canvas  ·  zoom %.2fx  ·  wheel zoom / drag pan  ·  Home reset",
+		              L"Playhead  ·  %.1fs  ·  wheel zoom / drag pan",
+		              _playhead_sec);
+	} else if (_wave.interacting ()) {
+		_snwprintf_s (caption, _TRUNCATE,
+		              L"Canvas  ·  zoom %.2fx  ·  Home reset",
 		              _wave.zoom ());
 	} else if (_engine_snap.running) {
 		_snwprintf_s (caption, _TRUNCATE,
-		              L"Wave strip  ·  wheel zoom / drag pan  ·  live %s",
+		              L"Wave strip  ·  live %s",
 		              _engine_snap.backend.c_str ());
 	} else {
 		_snwprintf_s (caption, _TRUNCATE,
-		              L"Wave strip  ·  wheel zoom / drag pan  ·  Direct2D, not Cairo");
+		              L"Wave strip  ·  Direct2D, not Cairo");
 	}
 	_rt->DrawTextW (caption, (UINT32)wcslen (caption), _fmt_meta,
 	                D2D1::RectF (r.left + inset + 90.f * _dpi_scale, r.top + inset + 2.f * _dpi_scale,
 	                             r.right - inset, r.top + inset + 22.f * _dpi_scale),
 	                _brush_body);
 
-	/* Inner well behind the strip. */
 	_rt->FillRectangle (_wave_bounds, _brush_pane_edge);
-	_wave.draw (_rt, _wave_bounds, _brush_peak, _brush_rms, _brush_body, _dpi_scale);
+	_wave.draw (_rt, _wave_bounds, _brush_peak, _brush_rms, _brush_body,
+	            _brush_playhead, _playhead_norm, _dpi_scale);
+}
+
+void
+ShellWindow::draw_mixer_pane ()
+{
+	const D2D1_RECT_F& r = _mixer_pane;
+	_rt->FillRectangle (r, _brush_pane);
+	_rt->DrawRectangle (r, _brush_pane_edge, 1.f);
+	_rt->FillRectangle (D2D1::RectF (r.left, r.top, r.left + 3.f * _dpi_scale, r.bottom), _brush_accent);
+
+	float inset = 14.f * _dpi_scale;
+	const wchar_t* mt = L"Mixer";
+	_rt->DrawTextW (mt, (UINT32)wcslen (mt), _fmt_pane,
+	                D2D1::RectF (r.left + inset, r.top + inset, r.right - inset, r.top + inset + 22.f * _dpi_scale),
+	                _brush_brand);
+
+	const wchar_t* hint = L"Drag fader  ·  stub gain (no Session yet)";
+	_rt->DrawTextW (hint, (UINT32)wcslen (hint), _fmt_meta,
+	                D2D1::RectF (r.left + inset + 70.f * _dpi_scale, r.top + inset + 2.f * _dpi_scale,
+	                             r.right - inset, r.top + inset + 22.f * _dpi_scale),
+	                _brush_body);
+
+	_mixer.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane_edge,
+	             _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
 }
 
 void
@@ -683,55 +823,41 @@ ShellWindow::on_paint ()
 	                _brush_brand);
 	_brush_brand->SetOpacity (1.f);
 
-	float rule_y = _brand_bar.bottom - 10.f * _dpi_scale;
+	float rule_y = _brand_bar.bottom - 8.f * _dpi_scale;
 	float rule_w = (100.f + 36.f * _pulse) * _dpi_scale;
 	_rt->FillRectangle (D2D1::RectF (24.f * _dpi_scale, rule_y,
 	                                 24.f * _dpi_scale + rule_w, rule_y + 2.f * _dpi_scale),
 	                    _brush_accent);
 
+	_transport.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
+	                 _brush_pane_edge, _fmt_pane, _playhead_sec, _dpi_scale);
+
 	draw_editor_pane ();
+	draw_mixer_pane ();
 
-	/* Mixer placeholder pane. */
-	{
-		const D2D1_RECT_F& r = _mixer_pane;
-		_rt->FillRectangle (r, _brush_pane);
-		_rt->DrawRectangle (r, _brush_pane_edge, 1.f);
-		_rt->FillRectangle (D2D1::RectF (r.left, r.top, r.left + 3.f * _dpi_scale, r.bottom), _brush_accent);
-		float inset = 14.f * _dpi_scale;
-		const wchar_t* mt = L"Mixer";
-		const wchar_t* mb = L"Strip placeholders. Win32/D2D controls - no GTK widgets.";
-		_rt->DrawTextW (mt, (UINT32)wcslen (mt), _fmt_pane,
-		                D2D1::RectF (r.left + inset, r.top + inset, r.right - inset, r.top + inset + 22.f * _dpi_scale),
-		                _brush_brand);
-		_rt->DrawTextW (mb, (UINT32)wcslen (mb), _fmt_body,
-		                D2D1::RectF (r.left + inset, r.top + inset + 28.f * _dpi_scale,
-		                             r.right - inset, r.bottom - inset),
-		                _brush_body);
-	}
-
-	/* Status bar: live engine snapshot (UI thread). */
-	std::wstring status;
+	/* Status: stack wchar buffer — no heap on paint hot path. */
+	wchar_t status[320];
 	if (_engine_snap.running) {
-		wchar_t buf[256];
-		_snwprintf_s (buf, _TRUNCATE,
-		              L"Engine  %s  ·  %u Hz  ·  %u frames (%.1f ms)  ·  dpi %u",
+		_snwprintf_s (status, _TRUNCATE,
+		              L"Engine  %s  ·  %u Hz  ·  %u frames  ·  gain %.0f%%  ·  dpi %u",
 		              _engine_snap.backend.c_str (),
 		              _engine_snap.sample_rate,
 		              _engine_snap.period_frames,
-		              _engine_snap.sample_rate
-		                  ? (1000.0 * (double)_engine_snap.period_frames / (double)_engine_snap.sample_rate)
-		                  : 0.0,
+		              _mixer.gain () * 100.f,
 		              _dpi);
-		status = buf;
 	} else if (_engine_snap.available) {
-		status = L"Engine idle — ";
-		status += _engine_snap.detail;
+		_snwprintf_s (status, _TRUNCATE,
+		              L"Engine idle  ·  gain %.0f%%  ·  %s",
+		              _mixer.gain () * 100.f,
+		              _engine_snap.detail.c_str ());
 	} else {
-		status = L"Engine not linked — UI shell only. ";
-		status += _engine_snap.detail;
+		_snwprintf_s (status, _TRUNCATE,
+		              L"UI shell  ·  gain %.0f%%  ·  %s",
+		              _mixer.gain () * 100.f,
+		              _engine_snap.detail.c_str ());
 	}
 
-	_rt->DrawTextW (status.c_str (), (UINT32)status.size (), _fmt_meta,
+	_rt->DrawTextW (status, (UINT32)wcslen (status), _fmt_meta,
 	                D2D1::RectF (_status_bar.left + 20.f * _dpi_scale, _status_bar.top,
 	                             _status_bar.right - 20.f * _dpi_scale, _status_bar.bottom),
 	                _brush_body);
@@ -747,6 +873,7 @@ ShellWindow::run_message_loop (unsigned timeout_secs)
 {
 	_timeout_secs = timeout_secs;
 	_start_tick = GetTickCount ();
+	_last_tick_ms = _start_tick;
 	_running = true;
 	_engine_snap = _engine.snapshot ();
 

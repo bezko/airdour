@@ -22,9 +22,12 @@
 
 struct WaveStripParams {
 	bool     engine_running;
+	bool     transport_playing;
 	uint32_t sample_rate;
 	uint32_t period_frames;
 	float    time_sec; /* UI clock */
+	float    gain;     /* 0..1 amplitude scale */
+	float    playhead; /* 0..1 across visible strip; <0 hide */
 };
 
 class WaveStrip
@@ -44,6 +47,8 @@ public:
 	           ID2D1SolidColorBrush* peak_brush,
 	           ID2D1SolidColorBrush* rms_brush,
 	           ID2D1SolidColorBrush* mid_brush,
+	           ID2D1SolidColorBrush* playhead_brush,
+	           float playhead_norm,
 	           float dpi_scale) const;
 
 	/** Zoom toward |norm_x| in [0,1] across the strip (wheel). */

@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Win32 + Direct2D + DirectWrite shell: DPI-aware host surface,
- * editor/mixer panes, wave strip zoom/pan, live engine status.
+ * transport, editor wave strip, mixer fader, live engine status.
  */
 
 #pragma once
@@ -22,6 +22,8 @@
 #include <dwrite.h>
 
 #include "engine_host.h"
+#include "mixer_strip.h"
+#include "transport_bar.h"
 #include "wave_strip.h"
 
 #pragma comment(lib, "d2d1.lib")
@@ -43,6 +45,12 @@ public:
 	HWND hwnd () const { return _hwnd; }
 
 private:
+	enum class DragMode {
+		None,
+		WavePan,
+		Fader
+	};
+
 	static LRESULT CALLBACK wnd_proc (HWND, UINT, WPARAM, LPARAM);
 	LRESULT handle_message (UINT msg, WPARAM wparam, LPARAM lparam);
 
@@ -55,6 +63,10 @@ private:
 	void on_tick ();
 	void layout_panes ();
 	void draw_editor_pane ();
+	void draw_mixer_pane ();
+	void transport_play ();
+	void transport_stop ();
+	void transport_toggle ();
 	bool hit_wave (float x, float y) const;
 	void client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const;
 	bool on_mouse_wheel (WPARAM wparam, LPARAM lparam);
@@ -71,10 +83,16 @@ private:
 	bool _running;
 	DWORD _start_tick;
 	unsigned _timeout_secs;
-	bool _panning;
+	DragMode _drag;
 	float _pan_last_x;
 
+	bool  _transport_playing;
+	float _playhead_sec;
+	float _playhead_norm;
+	DWORD _last_tick_ms;
+
 	D2D1_RECT_F _brand_bar;
+	D2D1_RECT_F _transport_bounds;
 	D2D1_RECT_F _editor_pane;
 	D2D1_RECT_F _mixer_pane;
 	D2D1_RECT_F _status_bar;
@@ -90,6 +108,7 @@ private:
 	ID2D1SolidColorBrush*     _brush_pane_edge;
 	ID2D1SolidColorBrush*     _brush_peak;
 	ID2D1SolidColorBrush*     _brush_rms;
+	ID2D1SolidColorBrush*     _brush_playhead;
 	ID2D1LinearGradientBrush* _brush_bg;
 	IDWriteTextFormat*        _fmt_brand;
 	IDWriteTextFormat*        _fmt_body;
@@ -97,7 +116,10 @@ private:
 	IDWriteTextFormat*        _fmt_pane;
 
 	float _pulse;
-	EngineHost _engine;
+	EngineHost   _engine;
 	EngineSnapshot _engine_snap;
-	WaveStrip _wave;
+	WaveStrip    _wave;
+	TransportBar _transport;
+	MixerStrip   _mixer;
 };
+

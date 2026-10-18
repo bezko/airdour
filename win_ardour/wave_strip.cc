@@ -78,6 +78,7 @@ WaveStrip::update (const WaveStripParams& params)
 	float origin = _user_view ? _pan : (_auto_scroll + _pan);
 	/* Visible content span shrinks as zoom increases. */
 	float span = 1.f / std::max (0.001f, _zoom);
+	float amp = std::max (0.f, std::min (1.f, params.gain));
 
 	for (size_t i = 0; i < n; ++i) {
 		float x = (float)i / (float)n;
@@ -89,20 +90,20 @@ WaveStrip::update (const WaveStripParams& params)
 		float s3 = 0.25f * std::sin (phase * 5.3f + content_x);
 		float noise = 0.08f * std::sin (phase * 17.f + content_x * 3.f);
 		float sample = s1 + s2 + s3 + noise;
-		float peak = std::min (1.f, std::fabs (sample) * 0.85f);
+		float peak = std::min (1.f, std::fabs (sample) * 0.85f * amp);
 
-		if (params.engine_running) {
+		if (params.engine_running || params.transport_playing) {
 			float beat = std::fmod (content_x * 2.f + x * 4.f, 1.f);
 			if (beat < 0.f) {
 				beat += 1.f;
 			}
 			if (beat < 0.06f) {
-				peak = std::min (1.f, peak + 0.55f * (1.f - beat / 0.06f));
+				peak = std::min (1.f, peak + 0.55f * amp * (1.f - beat / 0.06f));
 			}
 		}
 
 		float rms = peak * (0.55f + 0.2f * std::sin (phase * 0.5f));
-		rms = std::min (peak, std::max (0.02f, rms));
+		rms = std::min (peak, std::max (0.02f * amp, rms));
 
 		_peaks[i] = _peaks[i] * 0.55f + peak * 0.45f;
 		_rms[i] = _rms[i] * 0.6f + rms * 0.4f;
@@ -115,6 +116,8 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
                  ID2D1SolidColorBrush* peak_brush,
                  ID2D1SolidColorBrush* rms_brush,
                  ID2D1SolidColorBrush* mid_brush,
+                 ID2D1SolidColorBrush* playhead_brush,
+                 float playhead_norm,
                  float dpi_scale) const
 {
 	if (!rt || _peaks.empty ()) {
@@ -151,5 +154,13 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 		rt->FillRectangle (D2D1::RectF (x0, mid_y - rms_h, x1, mid_y + rms_h), rms_brush);
 		rt->FillRectangle (D2D1::RectF (x0, mid_y - peak_h, x1, mid_y - peak_h + 2.f * dpi_scale), peak_brush);
 		rt->FillRectangle (D2D1::RectF (x0, mid_y + peak_h - 2.f * dpi_scale, x1, mid_y + peak_h), peak_brush);
+	}
+
+	if (playhead_brush && playhead_norm >= 0.f) {
+		float pn = std::max (0.f, std::min (1.f, playhead_norm));
+		float px = bounds.left + pn * w;
+		float thick = std::max (1.5f, 2.f * dpi_scale);
+		rt->FillRectangle (D2D1::RectF (px - thick * 0.5f, bounds.top, px + thick * 0.5f, bounds.bottom),
+		                   playhead_brush);
 	}
 }

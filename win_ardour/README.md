@@ -5,11 +5,12 @@
 ## What works
 
 - Brand window (**Airdour**), DPI-aware layout
+- **Transport** — Play / Stop (+ spacebar); drives engine start/stop; amber playhead on strip
 - Editor / Mixer panes (D2D only)
-- **Wave strip** in Editor — Direct2D peak/RMS demo (not Cairo)
-- **Canvas zoom/pan** — mouse wheel zoom (cursor-anchored), drag to pan, Home/`0` reset
+- **Wave strip** — Direct2D peak/RMS demo + zoom/pan (not Cairo)
+- **Mixer** — Track 1 vertical fader (stub gain until Session routes)
 - Optional **engine attach** to waf-built libardour (Dummy or WASAPI shared)
-- Status bar: backend name, sample rate, period
+- Status bar: backend, rate, period, gain
 - `--timeout N` for unattended smoke
 
 ## Build
