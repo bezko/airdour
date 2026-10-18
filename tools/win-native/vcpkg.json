@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
   "name": "airdour-win64-deps",
-  "version-string": "0.4.0",
+  "version-string": "0.5.0",
   "description": "MSVC headless/core deps for Airdour. Includes overlay glibmm-2.4 + sigc++-2.0 (not stock vcpkg glibmm 2.68+/sigc++3). GTK2 GUI intentionally omitted.",
   "dependencies": [
     "glib",
@@ -23,6 +23,7 @@
       "name": "aubio",
       "default-features": false
     },
+    "lilv",
     "pthreads",
     "boost-uuid",
     "boost-tokenizer",
@@ -30,6 +31,9 @@
     "boost-smart-ptr",
     "boost-multiprecision",
     "boost-type-traits",
+    "boost-ptr-container",
+    "boost-format",
+    "boost-optional",
     {
       "name": "getopt-win32",
       "platform": "windows"

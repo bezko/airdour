@@ -80,7 +80,7 @@ Manifest for the next deps stage: `tools/win-native/vcpkg.json` (core only — n
 1. [x] CI compiles WasapiIO with MSVC (smoke)
 2. [x] Laptop: vcpkg headless C deps + `deps_headless_smoke` target wired
 3. [x] Overlay `glibmm-2.4` + `sigc++-2.0` installed; waf past glibmm; `deps_glibmm_smoke`
-4. [ ] waf past vamp-sdk + rubberband → MSVC link `libpbd`
+4. [x] waf Windows-only configure green; MSVC link `libpbd` (`build\libs\pbd\pbd.dll`)
 5. [ ] MSVC link `libardour` → `hardour` (dummy + WASAPI)
 6. [ ] Dummy backend processes a session headless
 7. [ ] Load `wasapi_audiobackend`; open shared-mode Default device

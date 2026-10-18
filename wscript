@@ -435,6 +435,11 @@ _WINDOWS_ONLY_EXCLUDE = set([
         'libs/widgets',
         'libs/waveview',
         'gtk2_ardour',
+        # Cairo UI LV2 plugins — need cairo; headless graph skips them
+        'libs/plugins/a-comp.lv2',
+        'libs/plugins/a-exp.lv2',
+        'libs/plugins/a-delay.lv2',
+        'libs/plugins/a-eq.lv2',
 ])
 
 def windows_only_children():
@@ -603,11 +608,13 @@ int main() { return 0; }''',
         cxx_flags.append('--stdlib=libc++')
         linker_flags.append('--stdlib=libc++')
 
-    if conf.options.cxx17 or platform == "darwin":
+    # MSVC + modern PBD (std::optional etc.) needs /std:c++17; darwin already did.
+    need_cxx17 = conf.options.cxx17 or platform == "darwin" or Options.options.dist_target == 'msvc'
+    if need_cxx17:
         conf.check_cxx(cxxflags=flags_dict['cxx17'])
         cxx_flags += flags_dict['cxx17']
 
-    if conf.options.cxx17 or platform == "darwin":
+    if need_cxx17:
         if platform == "darwin":
             # Mavericks and later changed the syntax to be used when including Carbon headers,
             # from requiring a full path to requiring just the header name.
@@ -1711,12 +1718,22 @@ def build(bld):
         bld.recurse(i)
 
     if bld.env['build_target'] == 'msvc': #For using .def generator
-        gendef_targets = ['libydk-pixbuf', 'libydk', 'libytk', 'libztkmm', 'libydkmm', 'libytkmm', 'libaaf']
+        # GTK/ytk targets omitted when AIRDOUR_WINDOWS_ONLY excludes the tk tree.
+        gendef_targets = ['libaaf']
+        if not bld.is_defined('AIRDOUR_WINDOWS_ONLY'):
+            gendef_targets = [
+                'libydk-pixbuf', 'libydk', 'libytk', 'libztkmm',
+                'libydkmm', 'libytkmm', 'libaaf',
+            ]
         if not Options.options.use_lld:
             gendef_targets += ['libardourvampplugins', 'libardourvamppyin']
 
         for name in gendef_targets:
-            tgen = bld.get_tgen_by_name(name) # Waf 'features' can be a list or a space separated string depending on the target
+            try:
+                tgen = bld.get_tgen_by_name(name)
+            except Exception:
+                continue
+            # Waf 'features' can be a list or a space separated string depending on the target
             if isinstance(tgen.features, list):
                 tgen.features.append('gendef')
             else:
