@@ -212,6 +212,7 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     "${AIRDOUR_SRC_ROOT}/win_ardour/main.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/shell_window.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/engine_host.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/wave_strip.cc"
   )
   target_include_directories(airdour_win_shell PRIVATE
     "${AIRDOUR_SRC_ROOT}/win_ardour"

@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Win32 + Direct2D + DirectWrite shell: DPI-aware host surface,
- * editor/mixer placeholders, live engine status (optional link).
+ * editor/mixer panes, wave strip v0, live engine status.
  */
 
 #pragma once
@@ -22,6 +22,7 @@
 #include <dwrite.h>
 
 #include "engine_host.h"
+#include "wave_strip.h"
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
@@ -53,6 +54,7 @@ private:
 	void on_paint ();
 	void on_tick ();
 	void layout_panes ();
+	void draw_editor_pane ();
 	float dip (float px) const { return px * _dpi_scale; }
 
 	HWND _hwnd;
@@ -68,6 +70,7 @@ private:
 	D2D1_RECT_F _editor_pane;
 	D2D1_RECT_F _mixer_pane;
 	D2D1_RECT_F _status_bar;
+	D2D1_RECT_F _wave_bounds;
 
 	ID2D1Factory*             _d2d_factory;
 	IDWriteFactory*           _dwrite_factory;
@@ -77,6 +80,8 @@ private:
 	ID2D1SolidColorBrush*     _brush_accent;
 	ID2D1SolidColorBrush*     _brush_pane;
 	ID2D1SolidColorBrush*     _brush_pane_edge;
+	ID2D1SolidColorBrush*     _brush_peak;
+	ID2D1SolidColorBrush*     _brush_rms;
 	ID2D1LinearGradientBrush* _brush_bg;
 	IDWriteTextFormat*        _fmt_brand;
 	IDWriteTextFormat*        _fmt_body;
@@ -86,4 +91,5 @@ private:
 	float _pulse;
 	EngineHost _engine;
 	EngineSnapshot _engine_snap;
+	WaveStrip _wave;
 };

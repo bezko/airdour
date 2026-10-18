@@ -5,7 +5,8 @@
 ## What works
 
 - Brand window (**Airdour**), DPI-aware layout
-- Editor / Mixer placeholder panes (D2D only)
+- Editor / Mixer panes (D2D only)
+- **Wave strip v0** in Editor — Direct2D peak/RMS demo (not Cairo)
 - Optional **engine attach** to waf-built libardour (Dummy or WASAPI shared)
 - Status bar: backend name, sample rate, period
 - `--timeout N` for unattended smoke

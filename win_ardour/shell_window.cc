@@ -22,6 +22,8 @@ constexpr D2D1_COLOR_F kBody      = { 0.620f, 0.720f, 0.760f, 1.f };
 constexpr D2D1_COLOR_F kAccent    = { 0.180f, 0.820f, 0.720f, 1.f };
 constexpr D2D1_COLOR_F kPaneFill  = { 0.070f, 0.100f, 0.120f, 0.92f };
 constexpr D2D1_COLOR_F kPaneEdge  = { 0.160f, 0.220f, 0.250f, 1.f };
+constexpr D2D1_COLOR_F kPeak      = { 0.220f, 0.920f, 0.820f, 1.f }; /* teal peak tips */
+constexpr D2D1_COLOR_F kRms       = { 0.120f, 0.420f, 0.400f, 0.85f }; /* darker RMS body */
 
 #ifndef WM_DPICHANGED
 #define WM_DPICHANGED 0x02E0
@@ -90,6 +92,7 @@ ShellWindow::ShellWindow ()
 	, _editor_pane ()
 	, _mixer_pane ()
 	, _status_bar ()
+	, _wave_bounds ()
 	, _d2d_factory (nullptr)
 	, _dwrite_factory (nullptr)
 	, _rt (nullptr)
@@ -98,6 +101,8 @@ ShellWindow::ShellWindow ()
 	, _brush_accent (nullptr)
 	, _brush_pane (nullptr)
 	, _brush_pane_edge (nullptr)
+	, _brush_peak (nullptr)
+	, _brush_rms (nullptr)
 	, _brush_bg (nullptr)
 	, _fmt_brand (nullptr)
 	, _fmt_body (nullptr)
@@ -210,6 +215,14 @@ ShellWindow::discard_device_resources ()
 		_brush_bg->Release ();
 		_brush_bg = nullptr;
 	}
+	if (_brush_rms) {
+		_brush_rms->Release ();
+		_brush_rms = nullptr;
+	}
+	if (_brush_peak) {
+		_brush_peak->Release ();
+		_brush_peak = nullptr;
+	}
 	if (_brush_pane_edge) {
 		_brush_pane_edge->Release ();
 		_brush_pane_edge = nullptr;
@@ -267,6 +280,8 @@ ShellWindow::ensure_device_resources ()
 	_rt->CreateSolidColorBrush (kAccent, &_brush_accent);
 	_rt->CreateSolidColorBrush (kPaneFill, &_brush_pane);
 	_rt->CreateSolidColorBrush (kPaneEdge, &_brush_pane_edge);
+	_rt->CreateSolidColorBrush (kPeak, &_brush_peak);
+	_rt->CreateSolidColorBrush (kRms, &_brush_rms);
 
 	ID2D1GradientStopCollection* stops = nullptr;
 	D2D1_GRADIENT_STOP gs[2];
@@ -282,7 +297,7 @@ ShellWindow::ensure_device_resources ()
 		stops->Release ();
 	}
 
-	return _brush_brand && _brush_body && _brush_accent && _brush_pane && _brush_bg;
+	return _brush_brand && _brush_body && _brush_accent && _brush_pane && _brush_peak && _brush_rms && _brush_bg;
 }
 
 void
@@ -307,6 +322,16 @@ ShellWindow::layout_panes ()
 
 	_editor_pane = D2D1::RectF (left, body_top, split - gap * 0.5f, body_bot);
 	_mixer_pane = D2D1::RectF (split + gap * 0.5f, body_top, right, body_bot);
+
+	/* Wave strip fills most of the editor under the title row. */
+	float inset = 14.f * _dpi_scale;
+	float title_h = 48.f * _dpi_scale;
+	_wave_bounds = D2D1::RectF (
+		_editor_pane.left + inset,
+		_editor_pane.top + title_h,
+		_editor_pane.right - inset,
+		_editor_pane.bottom - inset);
+	_wave.resize_for_width (_wave_bounds.right - _wave_bounds.left);
 
 	(void)body_h;
 }
@@ -476,11 +501,49 @@ ShellWindow::on_tick ()
 		last_poll = now;
 	}
 
+	WaveStripParams wp;
+	wp.engine_running = _engine_snap.running;
+	wp.sample_rate = _engine_snap.sample_rate;
+	wp.period_frames = _engine_snap.period_frames;
+	wp.time_sec = t;
+	_wave.update (wp);
+
 	if (_timeout_secs > 0 && (now - _start_tick) >= (_timeout_secs * 1000u)) {
 		PostQuitMessage (0);
 		return;
 	}
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::draw_editor_pane ()
+{
+	const D2D1_RECT_F& r = _editor_pane;
+	_rt->FillRectangle (r, _brush_pane);
+	_rt->DrawRectangle (r, _brush_pane_edge, 1.f);
+	_rt->FillRectangle (D2D1::RectF (r.left, r.top, r.left + 3.f * _dpi_scale, r.bottom), _brush_accent);
+
+	float inset = 14.f * _dpi_scale;
+	const wchar_t* title = L"Editor";
+	_rt->DrawTextW (title, (UINT32)wcslen (title), _fmt_pane,
+	                D2D1::RectF (r.left + inset, r.top + inset, r.right - inset, r.top + inset + 22.f * _dpi_scale),
+	                _brush_brand);
+
+	wchar_t caption[128];
+	if (_engine_snap.running) {
+		_snwprintf_s (caption, _TRUNCATE, L"Wave strip v0 (demo peaks/RMS)  ·  live %s",
+		              _engine_snap.backend.c_str ());
+	} else {
+		_snwprintf_s (caption, _TRUNCATE, L"Wave strip v0 (demo peaks/RMS)  ·  Direct2D, not Cairo");
+	}
+	_rt->DrawTextW (caption, (UINT32)wcslen (caption), _fmt_meta,
+	                D2D1::RectF (r.left + inset + 90.f * _dpi_scale, r.top + inset + 2.f * _dpi_scale,
+	                             r.right - inset, r.top + inset + 22.f * _dpi_scale),
+	                _brush_body);
+
+	/* Inner well behind the strip. */
+	_rt->FillRectangle (_wave_bounds, _brush_pane_edge);
+	_wave.draw (_rt, _wave_bounds, _brush_peak, _brush_rms, _brush_body, _dpi_scale);
 }
 
 void
@@ -511,24 +574,25 @@ ShellWindow::on_paint ()
 	                                 24.f * _dpi_scale + rule_w, rule_y + 2.f * _dpi_scale),
 	                    _brush_accent);
 
-	auto draw_pane = [&] (const D2D1_RECT_F& r, const wchar_t* title, const wchar_t* blurb) {
+	draw_editor_pane ();
+
+	/* Mixer placeholder pane. */
+	{
+		const D2D1_RECT_F& r = _mixer_pane;
 		_rt->FillRectangle (r, _brush_pane);
 		_rt->DrawRectangle (r, _brush_pane_edge, 1.f);
 		_rt->FillRectangle (D2D1::RectF (r.left, r.top, r.left + 3.f * _dpi_scale, r.bottom), _brush_accent);
 		float inset = 14.f * _dpi_scale;
-		_rt->DrawTextW (title, (UINT32)wcslen (title), _fmt_pane,
+		const wchar_t* mt = L"Mixer";
+		const wchar_t* mb = L"Strip placeholders. Win32/D2D controls - no GTK widgets.";
+		_rt->DrawTextW (mt, (UINT32)wcslen (mt), _fmt_pane,
 		                D2D1::RectF (r.left + inset, r.top + inset, r.right - inset, r.top + inset + 22.f * _dpi_scale),
 		                _brush_brand);
-		_rt->DrawTextW (blurb, (UINT32)wcslen (blurb), _fmt_body,
+		_rt->DrawTextW (mb, (UINT32)wcslen (mb), _fmt_body,
 		                D2D1::RectF (r.left + inset, r.top + inset + 28.f * _dpi_scale,
 		                             r.right - inset, r.bottom - inset),
 		                _brush_body);
-	};
-
-	draw_pane (_editor_pane, L"Editor",
-	           L"Timeline and regions land here. Direct2D canvas/waveview replaces Cairo in later slices.");
-	draw_pane (_mixer_pane, L"Mixer",
-	           L"Strip placeholders. Win32/D2D controls — no GTK widgets.");
+	}
 
 	/* Status bar: live engine snapshot (UI thread). */
 	std::wstring status;
