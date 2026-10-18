@@ -62,15 +62,15 @@ build-win64-gui-engine\artifacts\Debug\airdour_win_shell.exe --timeout 3 --backe
 
 Engine builds also **copy** `ptformat.dll` / `ardour.dll` / … next to the exe on POST_BUILD (still need vcpkg + VsDevCmd CRT on PATH).
 
-## Session / PeakMeter
+## Session / PeakMeter / Editor waves
 
-Default: create a minimal unnamed Session with **3 empty audio tracks** so mixer PeakMeters attach (levels move when rolling with click / content). Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** (avoids intermittent Debug AVs) then `ExitProcess(0)` to skip join hangs.
+Default: create a minimal unnamed Session with **3 empty audio tracks** so mixer PeakMeters attach (levels move when rolling with click / content). Editor lanes read playlist peaks via `AudioRegion::read_peaks` — **empty tracks stay empty**; no synthetic fill. Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** (avoids intermittent Debug AVs) then `ExitProcess(0)` to skip join hangs.
 
 | Flag / env | Effect |
 |------------|--------|
-| (default) | Session + PeakMeter on **Dummy and WASAPI** |
-| `AIRDOUR_WIN_SHELL_SESSION=0` | Skip Session; stub meters only |
-| `AIRDOUR_WIN_SHELL_DEMO_TONES=1` | Opt-in sine wav regions (can hang/AV under Dummy on MSVC) |
+| (default) | Session + PeakMeter on **Dummy and WASAPI**; empty Editor lanes |
+| `AIRDOUR_WIN_SHELL_SESSION=0` | Skip Session; stub meters; empty lanes |
+| `AIRDOUR_WIN_SHELL_DEMO_TONES=1` | Opt-in sine wav regions → real Editor waveforms (can hang/AV under Dummy on MSVC) |
 | `ARDOUR_PANNER_PATH` | Extra search path if panners are not under `%ARDOUR_DLL_PATH%\panners` |
 
 **MSVC notes:**

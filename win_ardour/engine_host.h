@@ -18,11 +18,13 @@ struct EngineSnapshot {
 	bool         session_ok;
 	bool         transport_rolling;
 	bool         meters_real; /* PeakMeter (not stub) */
+	bool         waves_from_session; /* Editor peaks from playlist (may still be empty) */
 	std::wstring backend;
 	uint32_t     sample_rate;
 	uint32_t     period_frames;
 	float        gain; /* track 0 stub/session gain */
 	float        meter_peak[kMeters]; /* linear 0..1 */
+	bool         track_has_regions[kMeters];
 	float        transport_sec;
 	std::wstring detail;
 };
@@ -60,6 +62,18 @@ public:
 
 	EngineSnapshot snapshot () const;
 
+	/**
+	 * Fill peak/RMS columns for one track from Session playlist regions.
+	 * Returns true if the track has at least one audio region (even if outside view).
+	 * When false or on failure, peaks/rms are zeroed (empty lane).
+	 */
+	bool fill_track_waveform (int track,
+	                          float view_start_sec,
+	                          float view_span_sec,
+	                          float* peaks,
+	                          float* rms,
+	                          size_t n_columns);
+
 	static bool is_linked ();
 
 private:
@@ -67,6 +81,7 @@ private:
 	bool ensure_session ();
 	void destroy_session ();
 	void read_meters ();
+	void refresh_region_flags ();
 
 	bool        _started;
 	std::string _backend_name;
@@ -79,4 +94,3 @@ private:
 	Impl* _impl;
 #endif
 };
-

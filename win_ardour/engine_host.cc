@@ -17,6 +17,7 @@
 #include "ardour/audio_backend.h"
 #include "ardour/audio_track.h"
 #include "ardour/audioengine.h"
+#include "ardour/audioregion.h"
 #include "ardour/audiosource.h"
 #include "ardour/meter.h"
 #include "ardour/playlist.h"
@@ -191,12 +192,14 @@ EngineHost::EngineHost ()
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_track_gain[i] = (i == 0) ? 0.85f : (0.85f - 0.12f * (float)i);
 		_snap.meter_peak[i] = 0.f;
+		_snap.track_has_regions[i] = false;
 	}
 	_snap.available = true;
 	_snap.running = false;
 	_snap.session_ok = false;
 	_snap.transport_rolling = false;
 	_snap.meters_real = false;
+	_snap.waves_from_session = false;
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -382,6 +385,8 @@ EngineHost::ensure_session ()
 
 		_snap.session_ok = true;
 		_snap.meters_real = true;
+		_snap.waves_from_session = true;
+		refresh_region_flags ();
 		step ("ready");
 		return true;
 	} catch (SessionException& e) {
@@ -431,7 +436,11 @@ EngineHost::destroy_session ()
 	_impl->session = nullptr;
 	_snap.session_ok = false;
 	_snap.meters_real = false;
+	_snap.waves_from_session = false;
 	_snap.transport_rolling = false;
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_has_regions[i] = false;
+	}
 }
 
 bool
@@ -646,6 +655,167 @@ EngineHost::read_meters ()
 }
 
 void
+EngineHost::refresh_region_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_has_regions[i] = false;
+	}
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	try {
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i >= (int)_impl->tracks.size () || !_impl->tracks[i]) {
+				continue;
+			}
+			std::shared_ptr<Playlist> pl = _impl->tracks[i]->playlist ();
+			if (!pl) {
+				continue;
+			}
+			std::shared_ptr<RegionList> regions = pl->region_list ();
+			_snap.track_has_regions[i] = (regions && !regions->empty ());
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::fill_track_waveform (int track,
+                                 float view_start_sec,
+                                 float view_span_sec,
+                                 float* peaks,
+                                 float* rms,
+                                 size_t n_columns)
+{
+	if (peaks && n_columns > 0) {
+		std::memset (peaks, 0, sizeof (float) * n_columns);
+	}
+	if (rms && n_columns > 0) {
+		std::memset (rms, 0, sizeof (float) * n_columns);
+	}
+	if (track < 0 || track >= EngineSnapshot::kMeters || !peaks || n_columns == 0) {
+		return false;
+	}
+	if (!_impl || !_impl->session || !_snap.session_ok) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+
+	try {
+		std::shared_ptr<Playlist> pl = _impl->tracks[track]->playlist ();
+		if (!pl) {
+			_snap.track_has_regions[track] = false;
+			return false;
+		}
+
+		std::shared_ptr<RegionList> all = pl->region_list ();
+		const bool has_any = (all && !all->empty ());
+		_snap.track_has_regions[track] = has_any;
+		if (!has_any) {
+			return false;
+		}
+
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0 || view_span_sec <= 0.f) {
+			return has_any;
+		}
+
+		samplepos_t view_start = (samplepos_t)std::llround ((double)view_start_sec * (double)sr);
+		samplecnt_t view_span = (samplecnt_t)std::llround ((double)view_span_sec * (double)sr);
+		if (view_span < (samplecnt_t)n_columns) {
+			view_span = (samplecnt_t)n_columns;
+		}
+		samplepos_t view_end = view_start + view_span;
+
+		std::shared_ptr<RegionList> touched = pl->regions_touched (
+			timepos_t (view_start), timepos_t (view_end));
+		if (!touched || touched->empty ()) {
+			return has_any;
+		}
+
+		std::vector<PeakData> buf (n_columns);
+		const double samples_per_col = (double)view_span / (double)n_columns;
+
+		for (RegionList::const_iterator it = touched->begin (); it != touched->end (); ++it) {
+			std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (*it);
+			if (!ar) {
+				continue;
+			}
+
+			samplepos_t rpos = ar->position_sample ();
+			samplecnt_t rlen = ar->length_samples ();
+			samplepos_t rsrc = ar->start_sample ();
+			samplepos_t rend = rpos + rlen;
+
+			samplepos_t ov0 = std::max (view_start, rpos);
+			samplepos_t ov1 = std::min (view_end, rend);
+			if (ov0 >= ov1) {
+				continue;
+			}
+
+			samplecnt_t ov_len = ov1 - ov0;
+			size_t c0 = (size_t)((ov0 - view_start) / samples_per_col);
+			size_t c1 = (size_t)((ov1 - view_start + (samplecnt_t)samples_per_col - 1) / samples_per_col);
+			if (c0 >= n_columns) {
+				continue;
+			}
+			c1 = std::min (c1, n_columns);
+			if (c1 <= c0) {
+				c1 = c0 + 1;
+			}
+			size_t ncols = c1 - c0;
+
+			samplepos_t src_off = rsrc + (ov0 - rpos);
+			double spp = (double)ov_len / (double)ncols;
+			if (spp < 1.0) {
+				spp = 1.0;
+			}
+
+			if (buf.size () < ncols) {
+				buf.resize (ncols);
+			}
+			std::memset (buf.data (), 0, sizeof (PeakData) * ncols);
+			samplecnt_t got = ar->read_peaks (buf.data (), (samplecnt_t)ncols, src_off, ov_len, 0, spp);
+			if (got == 0) {
+				continue;
+			}
+
+			for (size_t i = 0; i < ncols; ++i) {
+				float lo = buf[i].min;
+				float hi = buf[i].max;
+				float peak = std::max (std::fabs (lo), std::fabs (hi));
+				peak = std::max (0.f, std::min (1.f, peak));
+				size_t col = c0 + i;
+				if (col >= n_columns) {
+					break;
+				}
+				if (peak > peaks[col]) {
+					peaks[col] = peak;
+				}
+				float approx_rms = peak * 0.55f;
+				if (rms && approx_rms > rms[col]) {
+					rms[col] = approx_rms;
+				}
+			}
+		}
+		return has_any;
+	} catch (...) {
+		if (peaks && n_columns > 0) {
+			std::memset (peaks, 0, sizeof (float) * n_columns);
+		}
+		if (rms && n_columns > 0) {
+			std::memset (rms, 0, sizeof (float) * n_columns);
+		}
+		return false;
+	}
+}
+
+void
 EngineHost::refresh_snapshot ()
 {
 	_snap.gain = _gain;
@@ -667,7 +837,13 @@ EngineHost::refresh_snapshot ()
 				_snap.transport_sec = (float)_impl->session->transport_sample () / (float)sr;
 			}
 			read_meters ();
+			_snap.waves_from_session = true;
+			refresh_region_flags ();
 		} else {
+			_snap.waves_from_session = false;
+			for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+				_snap.track_has_regions[i] = false;
+			}
 			/* Closest honest engine path without Session: AudioEngine sample clock. */
 			_snap.transport_rolling = _impl->transport_playing;
 			samplecnt_t sr = (samplecnt_t)_impl->engine->sample_rate ();
@@ -708,12 +884,14 @@ EngineHost::EngineHost ()
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_track_gain[i] = 0.85f;
 		_snap.meter_peak[i] = 0.f;
+		_snap.track_has_regions[i] = false;
 	}
 	_snap.available = false;
 	_snap.running = false;
 	_snap.session_ok = false;
 	_snap.transport_rolling = false;
 	_snap.meters_real = false;
+	_snap.waves_from_session = false;
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -826,6 +1004,31 @@ EngineHost::destroy_session ()
 void
 EngineHost::read_meters ()
 {
+}
+
+void
+EngineHost::refresh_region_flags ()
+{
+}
+
+bool
+EngineHost::fill_track_waveform (int track,
+                                 float view_start_sec,
+                                 float view_span_sec,
+                                 float* peaks,
+                                 float* rms,
+                                 size_t n_columns)
+{
+	(void)track;
+	(void)view_start_sec;
+	(void)view_span_sec;
+	if (peaks && n_columns > 0) {
+		std::memset (peaks, 0, sizeof (float) * n_columns);
+	}
+	if (rms && n_columns > 0) {
+		std::memset (rms, 0, sizeof (float) * n_columns);
+	}
+	return false;
 }
 
 #endif

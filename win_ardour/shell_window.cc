@@ -127,7 +127,6 @@ ShellWindow::ShellWindow ()
 	static const float gains[kTracks] = { 0.85f, 0.72f, 0.60f };
 	for (int i = 0; i < kTracks; ++i) {
 		wcsncpy_s (_lanes[i].label, labels[i], _TRUNCATE);
-		_lanes[i].seed = (float)i;
 		_lanes[i].bounds = D2D1::RectF ();
 		_mixers[i].set_label (labels[i]);
 		_mixers[i].set_gain (gains[i]);
@@ -775,10 +774,30 @@ ShellWindow::on_tick ()
 	wp.time_sec = t;
 	wp.playhead_sec = _playhead_sec;
 
+	float wave_peaks[WaveStrip::kMaxColumns];
+	float wave_rms[WaveStrip::kMaxColumns];
+
 	for (int i = 0; i < kTracks; ++i) {
 		wp.gain = _mixers[i].gain ();
-		wp.track_seed = _lanes[i].seed;
-		_lanes[i].strip.update (wp);
+		_lanes[i].strip.update_view (wp);
+
+		bool has_regions = false;
+		size_t n = _lanes[i].strip.column_count ();
+		if (n > WaveStrip::kMaxColumns) {
+			n = WaveStrip::kMaxColumns;
+		}
+		if (_engine_snap.waves_from_session && n > 0) {
+			has_regions = _engine.fill_track_waveform (
+				i,
+				_lanes[i].strip.view_start_sec (),
+				_lanes[i].strip.view_span_sec (),
+				wave_peaks,
+				wave_rms,
+				n);
+			_lanes[i].strip.set_waveform (wave_peaks, wave_rms, n, has_regions);
+		} else {
+			_lanes[i].strip.set_waveform (nullptr, nullptr, 0, false);
+		}
 
 		float peak = 0.f;
 		if (_engine_snap.meters_real && i < EngineSnapshot::kMeters) {
@@ -812,17 +831,29 @@ ShellWindow::draw_editor_pane ()
 	                _brush_brand);
 
 	wchar_t caption[160];
-	if (_transport_playing) {
-		_snwprintf_s (caption, _TRUNCATE,
-		              L"%d tracks  ·  playhead %.1fs  ·  linked zoom/pan",
-		              kTracks, _playhead_sec);
+	int with_audio = 0;
+	for (int i = 0; i < kTracks; ++i) {
+		if (_lanes[i].strip.has_regions ()) {
+			++with_audio;
+		}
+	}
+	if (_engine_snap.waves_from_session) {
+		if (with_audio > 0) {
+			_snwprintf_s (caption, _TRUNCATE,
+			              L"%d tracks  ·  %d with audio  ·  playhead %.1fs",
+			              kTracks, with_audio, _playhead_sec);
+		} else {
+			_snwprintf_s (caption, _TRUNCATE,
+			              L"%d tracks  ·  empty lanes  ·  playhead %.1fs",
+			              kTracks, _playhead_sec);
+		}
 	} else if (_lanes[0].strip.interacting ()) {
 		_snwprintf_s (caption, _TRUNCATE,
 		              L"%d tracks  ·  zoom %.2fx  ·  Home follows transport",
 		              kTracks, _lanes[0].strip.zoom ());
 	} else {
 		_snwprintf_s (caption, _TRUNCATE,
-		              L"%d tracks  ·  demo peaks (no Session buffers yet)",
+		              L"%d tracks  ·  empty lanes (no Session)",
 		              kTracks);
 	}
 	_rt->DrawTextW (caption, (UINT32)wcslen (caption), _fmt_meta,

@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Wave strip — Direct2D peak/RMS + canvas zoom/pan (not Cairo WaveView).
- * Synthetic demo peaks until session audio buffers are wired.
+ * Peaks come from Session playlist readouts (or stay empty). No synthetic fill.
  */
 
 #pragma once
@@ -28,7 +28,6 @@ struct WaveStripParams {
 	float    time_sec;     /* UI clock */
 	float    playhead_sec; /* transport time */
 	float    gain;         /* 0..1 amplitude scale */
-	float    track_seed;   /* per-lane timbre offset */
 };
 
 class WaveStrip
@@ -37,13 +36,20 @@ public:
 	static constexpr size_t kMaxColumns = 256;
 	static constexpr float  kZoomMin    = 0.25f;
 	static constexpr float  kZoomMax    = 16.f;
+	/** Default visible window at zoom=1 (seconds). */
+	static constexpr float  kDefaultSpanSec = 8.f;
 	/** Screen fraction where playhead sits while following transport. */
 	static constexpr float  kFollowFrac = 0.28f;
 
 	WaveStrip ();
 
 	void resize_for_width (float width_px);
-	void update (const WaveStripParams& params);
+
+	/** Update view window + playhead from transport; peaks stay until set_waveform. */
+	void update_view (const WaveStripParams& params);
+
+	/** Copy Session peak/RMS columns, or clear to empty lane if peaks is null. */
+	void set_waveform (const float* peaks, const float* rms, size_t n, bool has_regions);
 
 	void draw (ID2D1RenderTarget* rt,
 	           const D2D1_RECT_F& bounds,
@@ -62,7 +68,10 @@ public:
 
 	float  zoom () const { return _zoom; }
 	float  pan () const { return _pan; }
+	float  view_start_sec () const { return _view_start_sec; }
+	float  view_span_sec () const { return _view_span_sec; }
 	bool   interacting () const { return _user_view; }
+	bool   has_regions () const { return _has_regions; }
 	/** Playhead X in [0,1] of strip, or <0 if off-screen. */
 	float  playhead_norm () const { return _playhead_norm; }
 	size_t column_count () const { return _peaks.size (); }
@@ -70,10 +79,11 @@ public:
 private:
 	std::vector<float> _peaks;
 	std::vector<float> _rms;
-	float              _pan;
+	float              _pan; /* view start seconds when user-panned */
 	float              _zoom;
 	bool               _user_view;
+	bool               _has_regions;
 	float              _playhead_norm;
-	float              _content_playhead;
+	float              _view_start_sec;
+	float              _view_span_sec;
 };
-

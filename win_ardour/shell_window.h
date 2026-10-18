@@ -59,7 +59,6 @@ private:
 		WaveStrip   strip;
 		D2D1_RECT_F bounds;
 		wchar_t     label[24];
-		float       seed;
 	};
 
 	static LRESULT CALLBACK wnd_proc (HWND, UINT, WPARAM, LPARAM);

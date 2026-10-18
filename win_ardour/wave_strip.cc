@@ -11,8 +11,10 @@ WaveStrip::WaveStrip ()
 	: _pan (0.f)
 	, _zoom (1.f)
 	, _user_view (false)
+	, _has_regions (false)
 	, _playhead_norm (kFollowFrac)
-	, _content_playhead (0.f)
+	, _view_start_sec (0.f)
+	, _view_span_sec (kDefaultSpanSec)
 {
 	_peaks.assign (128, 0.f);
 	_rms.assign (128, 0.f);
@@ -38,15 +40,22 @@ WaveStrip::zoom_at (float factor, float norm_x)
 	if (_zoom == old_zoom) {
 		return;
 	}
-	float content_at_cursor = _pan + norm_x / old_zoom;
-	_pan = content_at_cursor - norm_x / _zoom;
+	float old_span = kDefaultSpanSec / old_zoom;
+	float content_at_cursor = _view_start_sec + norm_x * old_span;
+	float new_span = kDefaultSpanSec / _zoom;
+	_pan = content_at_cursor - norm_x * new_span;
+	_view_start_sec = _pan;
+	_view_span_sec = new_span;
 	_user_view = true;
 }
 
 void
 WaveStrip::pan_by (float delta_widths)
 {
-	_pan += delta_widths / std::max (0.001f, _zoom);
+	float span = kDefaultSpanSec / std::max (0.001f, _zoom);
+	_pan += delta_widths * span;
+	_view_start_sec = _pan;
+	_view_span_sec = span;
 	_user_view = true;
 }
 
@@ -56,6 +65,7 @@ WaveStrip::reset_view ()
 	_zoom = 1.f;
 	_pan = 0.f;
 	_user_view = false;
+	_view_span_sec = kDefaultSpanSec;
 }
 
 void
@@ -64,80 +74,54 @@ WaveStrip::sync_view_from (const WaveStrip& other)
 	_zoom = other._zoom;
 	_pan = other._pan;
 	_user_view = other._user_view;
+	_view_start_sec = other._view_start_sec;
+	_view_span_sec = other._view_span_sec;
 }
 
 void
-WaveStrip::update (const WaveStripParams& params)
+WaveStrip::update_view (const WaveStripParams& params)
 {
-	const size_t n = _peaks.size ();
-	if (n == 0) {
-		return;
-	}
+	_view_span_sec = kDefaultSpanSec / std::max (0.001f, _zoom);
 
-	float scroll_hz = 0.45f;
-	if (params.engine_running && params.sample_rate > 0 && params.period_frames > 0) {
-		float period_sec = (float)params.period_frames / (float)params.sample_rate;
-		scroll_hz = std::max (0.25f, std::min (2.5f, 0.1f / std::max (0.001f, period_sec)));
-	}
-
-	_content_playhead = params.playhead_sec * scroll_hz;
-	float span = 1.f / std::max (0.001f, _zoom);
-
-	float origin;
 	if (_user_view) {
-		origin = _pan;
+		_view_start_sec = _pan;
 	} else {
-		/* Keep playhead parked at kFollowFrac while transport runs (or frozen). */
-		origin = _content_playhead - kFollowFrac * span;
-		_pan = origin;
+		_view_start_sec = params.playhead_sec - kFollowFrac * _view_span_sec;
+		_pan = _view_start_sec;
 	}
 
-	_playhead_norm = (_content_playhead - origin) / span;
+	_playhead_norm = (params.playhead_sec - _view_start_sec) / std::max (0.001f, _view_span_sec);
 	if (_playhead_norm < -0.05f || _playhead_norm > 1.05f) {
-		_playhead_norm = -1.f; /* off-screen */
+		_playhead_norm = -1.f;
 	} else {
 		_playhead_norm = std::max (0.f, std::min (1.f, _playhead_norm));
 	}
+}
 
-	float amp = std::max (0.f, std::min (1.f, params.gain));
-	float seed = params.track_seed;
-	float seed_phase = seed * 1.7f + 0.3f;
-	float harm = 2.3f + seed * 0.9f;
+void
+WaveStrip::set_waveform (const float* peaks, const float* rms, size_t n, bool has_regions)
+{
+	_has_regions = has_regions;
+	if (_peaks.empty ()) {
+		return;
+	}
+	if (!peaks || n == 0) {
+		std::fill (_peaks.begin (), _peaks.end (), 0.f);
+		std::fill (_rms.begin (), _rms.end (), 0.f);
+		return;
+	}
 
-	for (size_t i = 0; i < n; ++i) {
-		float x = (float)i / (float)n;
-		float content_x = origin + x * span;
-		float phase = content_x * 6.2831853f * (2.4f + seed * 0.35f) + seed_phase;
-
-		/* Multi-harmonic synthetic — denser near the playhead content. */
-		float dist = content_x - _content_playhead;
-		float near_ph = std::exp (-dist * dist * 14.f);
-
-		float s1 = std::sin (phase);
-		float s2 = 0.42f * std::sin (phase * harm + 0.4f);
-		float s3 = 0.22f * std::sin (phase * (harm + 2.1f) + content_x);
-		float noise = 0.07f * std::sin (phase * 19.f + seed * 5.f);
-		float sample = (s1 + s2 + s3 + noise) * (0.55f + 0.45f * near_ph);
-		float peak = std::min (1.f, std::fabs (sample) * 0.9f * amp);
-
-		if (params.transport_playing || params.engine_running) {
-			/* Transient blips synced to playhead time (not screen x). */
-			float beat = std::fmod (_content_playhead * 2.f + seed * 0.37f, 1.f);
-			if (beat < 0.f) {
-				beat += 1.f;
-			}
-			if (beat < 0.05f && near_ph > 0.2f) {
-				peak = std::min (1.f, peak + 0.65f * amp * (1.f - beat / 0.05f));
-			}
-		} else {
-			peak *= 0.35f; /* quieter when stopped */
-		}
-
-		float rms = peak * (0.52f + 0.22f * std::sin (phase * 0.45f + seed));
-		rms = std::min (peak, std::max (0.015f * amp, rms));
-
-		_peaks[i] = _peaks[i] * 0.5f + peak * 0.5f;
-		_rms[i] = _rms[i] * 0.55f + rms * 0.45f;
+	const size_t count = std::min (n, _peaks.size ());
+	float amp = 1.f;
+	for (size_t i = 0; i < count; ++i) {
+		float p = std::max (0.f, std::min (1.f, peaks[i] * amp));
+		float r = rms ? std::max (0.f, std::min (p, rms[i] * amp)) : p * 0.55f;
+		_peaks[i] = p;
+		_rms[i] = r;
+	}
+	for (size_t i = count; i < _peaks.size (); ++i) {
+		_peaks[i] = 0.f;
+		_rms[i] = 0.f;
 	}
 }
 
@@ -171,6 +155,17 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 	              mid_brush, 1.f * dpi_scale);
 	mid_brush->SetOpacity (1.f);
 
+	if (!_has_regions) {
+		/* Empty lane: midline + playhead only. */
+		if (playhead_brush && _playhead_norm >= 0.f) {
+			float px = bounds.left + _playhead_norm * w;
+			float thick = std::max (1.5f, 2.f * dpi_scale);
+			rt->FillRectangle (D2D1::RectF (px - thick * 0.5f, bounds.top, px + thick * 0.5f, bounds.bottom),
+			                   playhead_brush);
+		}
+		return;
+	}
+
 	for (size_t i = 0; i < n; ++i) {
 		float x0 = bounds.left + (float)i * col_w + gap * 0.5f;
 		float x1 = bounds.left + (float)(i + 1) * col_w - gap * 0.5f;
@@ -193,4 +188,3 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 		                   playhead_brush);
 	}
 }
-
