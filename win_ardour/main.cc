@@ -68,7 +68,9 @@ wmain (int argc, wchar_t** argv)
 	bool no_engine = parse_flag (argc, argv, L"--no-engine");
 	HINSTANCE instance = GetModuleHandleW (nullptr);
 
-	/* STA for UI; WASAPI audio thread uses its own COM init as needed. */
+	/* STA for UI. WASAPI opens on this thread; process load under Session can
+	 * race COM apartment use from the audio thread — --timeout smoke skips
+	 * auto-roll (see ShellWindow::attach_engine) so ExitProcess stays reliable. */
 	HRESULT co = CoInitializeEx (nullptr, COINIT_APARTMENTTHREADED);
 	(void)co;
 
@@ -86,7 +88,7 @@ wmain (int argc, wchar_t** argv)
 	               timeout);
 
 	if (!no_engine) {
-		if (shell.attach_engine (backend)) {
+		if (shell.attach_engine (backend, timeout)) {
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", backend.c_str ());
 		} else {
 			std::fwprintf (stderr, L"airdour_win_shell: engine not attached (ok for UI-only / CI)\n");

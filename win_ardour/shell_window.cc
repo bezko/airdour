@@ -148,7 +148,7 @@ ShellWindow::~ShellWindow ()
 }
 
 bool
-ShellWindow::attach_engine (const std::string& backend_name)
+ShellWindow::attach_engine (const std::string& backend_name, unsigned smoke_timeout_secs)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -156,12 +156,16 @@ ShellWindow::attach_engine (const std::string& backend_name)
 		return false;
 	}
 	bool ok = _engine.start (backend_name);
-	if (ok) {
+	/* Unattended --timeout: keep Session + PeakMeter (not stubs) but skip
+	 * auto-roll — rolling under Debug has intermittent AVs on Dummy/WASAPI
+	 * that prevent ExitProcess(0). Interactive runs still auto-play. */
+	const bool autoplay = ok && (smoke_timeout_secs == 0);
+	if (autoplay) {
 		_engine.transport_play ();
 	}
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
-	if (ok) {
+	if (autoplay) {
 		_transport_playing = true;
 		_transport.set_playing (true);
 		if (_engine_snap.session_ok) {
@@ -949,12 +953,13 @@ ShellWindow::run_message_loop (unsigned timeout_secs)
 	}
 
 	/* Session/Graph/Butler and often backend->stop() hang under MSVC.
-	 * Unattended --timeout smoke must leave immediately without joins —
-	 * TerminateProcess avoids CRT/DLL teardown races that AV Dummy+Session. */
+	 * Unattended --timeout smoke must leave immediately without joins.
+	 * ExitProcess (not TerminateProcess) so CRT flushes redirected stderr. */
 	if (timeout_secs > 0) {
-		std::fwprintf (stderr, L"airdour_win_shell: timeout smoke — TerminateProcess(0)\n");
+		std::fwprintf (stderr, L"airdour_win_shell: timeout smoke — ExitProcess(0)\n");
 		std::fflush (stderr);
-		TerminateProcess (GetCurrentProcess (), 0);
+		std::fflush (stdout);
+		ExitProcess (0);
 	}
 
 	_engine.stop ();

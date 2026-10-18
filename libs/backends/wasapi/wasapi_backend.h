@@ -11,6 +11,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <string>
@@ -45,6 +46,29 @@ private:
 	Sample _buffer[8192];
 };
 
+/** Event stored in a WASAPI MIDI port buffer (same shape as PortAudio/ALSA). */
+class WasapiMidiEvent
+{
+public:
+	WasapiMidiEvent (const pframes_t timestamp, const uint8_t* data, size_t size);
+	WasapiMidiEvent (const WasapiMidiEvent& other);
+
+	size_t           size () const { return _size; }
+	pframes_t        timestamp () const { return _timestamp; }
+	const uint8_t*   data () const { return _data; }
+
+	bool operator< (const WasapiMidiEvent& other) const {
+		return _timestamp < other._timestamp;
+	}
+
+private:
+	size_t    _size;
+	pframes_t _timestamp;
+	uint8_t   _data[256];
+};
+
+typedef std::vector<WasapiMidiEvent> WasapiMidiBuffer;
+
 class WasapiMidiPort : public BackendPort
 {
 public:
@@ -54,9 +78,11 @@ public:
 	DataType type () const { return DataType::MIDI; }
 
 	void* get_buffer (pframes_t nframes);
+	const WasapiMidiBuffer* const_buffer () const { return &_buffer[_bufperiod]; }
 
 private:
-	uint8_t _placeholder[1];
+	WasapiMidiBuffer _buffer[2];
+	int              _bufperiod;
 };
 
 /**

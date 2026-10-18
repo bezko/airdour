@@ -384,18 +384,27 @@ EngineHost::ensure_session ()
 		_snap.meters_real = true;
 		step ("ready");
 		return true;
+	} catch (SessionException& e) {
+		std::fprintf (stderr, "airdour_win_shell: session SessionException: %s\n", e.what ());
+		std::fflush (stderr);
+		destroy_session ();
+		_snap.detail = L"Session create failed — stub meters";
+		return false;
 	} catch (failed_constructor& e) {
 		std::fprintf (stderr, "airdour_win_shell: session failed_constructor: %s\n", e.what ());
+		std::fflush (stderr);
 		destroy_session ();
 		_snap.detail = L"Session create failed — stub meters";
 		return false;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: session exception: %s\n", e.what ());
+		std::fflush (stderr);
 		destroy_session ();
 		_snap.detail = L"Session exception — stub meters";
 		return false;
 	} catch (...) {
 		std::fprintf (stderr, "airdour_win_shell: session unknown failure\n");
+		std::fflush (stderr);
 		destroy_session ();
 		_snap.detail = L"Session unknown failure — stub meters";
 		return false;

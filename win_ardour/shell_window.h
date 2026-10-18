@@ -41,7 +41,9 @@ public:
 	~ShellWindow ();
 
 	bool create (HINSTANCE instance, int show_cmd);
-	bool attach_engine (const std::string& backend_name);
+	/** When smoke_timeout_secs > 0, create Session/PeakMeter but do not auto-roll
+	 *  (avoids intermittent AVs under Dummy/WASAPI during unattended --timeout). */
+	bool attach_engine (const std::string& backend_name, unsigned smoke_timeout_secs = 0);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }

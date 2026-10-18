@@ -1673,6 +1673,9 @@ Session::add_master_bus (ChanCount const& count)
 	BOOST_MARK_ROUTE(r);
 
 	{
+		/* hold process lock while adding ports so concurrent process
+		 * callbacks see a consistent port set
+		 */
 		PBD::Mutex::Lock lm (AudioEngine::instance()->process_lock ());
 		r->input()->ensure_io (count, false);
 		r->output()->ensure_io (count, false);

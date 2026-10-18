@@ -7,7 +7,7 @@
 - Brand window (**Airdour**), DPI-aware layout
 - **Transport** — Play / Stop (+ spacebar); engine start/stop; playhead locked to content
 - **Editor** — 3 stacked wave lanes (Audio 1–3), linked zoom/pan, labels
-- **Mixer** — 3 strips with faders + **Session PeakMeter** (Dummy by default; stub if Session fails)
+- **Mixer** — 3 strips with faders + **Session PeakMeter** (Dummy and WASAPI; stub only if Session fails / opted out)
 - Playhead follows Session transport when attached, else engine `processed_samples`
 - Optional **engine attach** (Dummy or WASAPI shared)
 - `--timeout N` for unattended smoke
@@ -53,11 +53,11 @@ build-win64-gui-engine\artifacts\Debug\airdour_win_shell.exe --timeout 3 --backe
 
 ## Session / PeakMeter
 
-Default: create a minimal unnamed Session with **3 empty audio tracks** so mixer PeakMeters are live (levels move when rolling with click / content). `--timeout` exits via `TerminateProcess(0)` to skip join hangs.
+Default: create a minimal unnamed Session with **3 empty audio tracks** so mixer PeakMeters attach (levels move when rolling with click / content). Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** (avoids intermittent Debug AVs) then `ExitProcess(0)` to skip join hangs.
 
 | Flag / env | Effect |
 |------------|--------|
-| (default) | Session + PeakMeter (Dummy). WASAPI Session create may fall back to stubs |
+| (default) | Session + PeakMeter on **Dummy and WASAPI** |
 | `AIRDOUR_WIN_SHELL_SESSION=0` | Skip Session; stub meters only |
 | `AIRDOUR_WIN_SHELL_DEMO_TONES=1` | Opt-in sine wav regions (can hang/AV under Dummy on MSVC) |
 | `ARDOUR_PANNER_PATH` | Extra search path if panners are not under `%ARDOUR_DLL_PATH%\panners` |
@@ -65,6 +65,7 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** so mixer
 **MSVC notes:**
 - `process_lock().trylock()` while already held deadlocks (SRWLOCK). `Delivery::configure_io` and related asserts are `#ifndef PLATFORM_WINDOWS`.
 - Panner DLLs must be discoverable or `reset_panners` fatals.
+- WASAPI Session create requires non-zero MIDI `raw_buffer_size` (ThreadBuffers / VSTBuffer).
 
 ## Threading
 

@@ -7,8 +7,10 @@
  * (at your option) any later version.
  */
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 #include <glib.h>
 #include <glibmm/main.h>
@@ -58,9 +60,30 @@ WasapiAudioPort::get_buffer (pframes_t /*nframes*/)
 	return _buffer;
 }
 
+WasapiMidiEvent::WasapiMidiEvent (const pframes_t timestamp, const uint8_t* data, size_t size)
+	: _size (size > sizeof (_data) ? sizeof (_data) : size)
+	, _timestamp (timestamp)
+{
+	if (_size && data) {
+		memcpy (_data, data, _size);
+	}
+}
+
+WasapiMidiEvent::WasapiMidiEvent (const WasapiMidiEvent& other)
+	: _size (other._size)
+	, _timestamp (other._timestamp)
+{
+	if (_size) {
+		memcpy (_data, other._data, _size);
+	}
+}
+
 WasapiMidiPort::WasapiMidiPort (WasapiBackend& b, const std::string& name, PortFlags flags)
 	: BackendPort (b, name, flags)
+	, _bufperiod (0)
 {
+	_buffer[0].reserve (256);
+	_buffer[1].reserve (256);
 }
 
 WasapiMidiPort::~WasapiMidiPort () {}
@@ -68,7 +91,23 @@ WasapiMidiPort::~WasapiMidiPort () {}
 void*
 WasapiMidiPort::get_buffer (pframes_t /*nframes*/)
 {
-	return _placeholder;
+	if (is_input ()) {
+		_buffer[_bufperiod].clear ();
+		const std::set<BackendPortPtr>& connections = get_connections ();
+		for (std::set<BackendPortPtr>::const_iterator i = connections.begin ();
+		     i != connections.end (); ++i) {
+			std::shared_ptr<WasapiMidiPort> src = std::dynamic_pointer_cast<WasapiMidiPort> (*i);
+			if (!src) {
+				continue;
+			}
+			const WasapiMidiBuffer* sb = src->const_buffer ();
+			for (WasapiMidiBuffer::const_iterator it = sb->begin (); it != sb->end (); ++it) {
+				_buffer[_bufperiod].push_back (*it);
+			}
+		}
+		std::stable_sort (_buffer[_bufperiod].begin (), _buffer[_bufperiod].end ());
+	}
+	return &_buffer[_bufperiod];
 }
 
 /* —— MMCSS —— */
@@ -728,10 +767,19 @@ WasapiBackend::dsp_load () const
 size_t
 WasapiBackend::raw_buffer_size (DataType t)
 {
-	if (t == DataType::AUDIO) {
+	/* MIDI size must be non-zero: ThreadBuffers always allocates ≥1 MIDI
+	 * buffer via this value. Capacity 0 + WINDOWS_VST_SUPPORT makes
+	 * BufferSet::VSTBuffer throw failed_constructor during Session
+	 * PortCountChanged → ensure_buffers (Master ensure_io). Match Dummy/PA/ALSA. */
+	static const size_t max_midi_buffer_size = 8192;
+	switch (t) {
+	case DataType::AUDIO:
 		return sizeof (Sample) * _buffer_size;
+	case DataType::MIDI:
+		return max_midi_buffer_size;
+	default:
+		return 0;
 	}
-	return 0;
 }
 
 samplepos_t
@@ -858,26 +906,49 @@ WasapiBackend::register_port (const std::string& shortname, ARDOUR::DataType typ
 }
 
 int
-WasapiBackend::midi_event_get (pframes_t&, size_t&, uint8_t const**, void*, uint32_t)
+WasapiBackend::midi_event_get (pframes_t& timestamp, size_t& size, uint8_t const** buf, void* port_buffer, uint32_t event_index)
 {
-	return -1;
-}
-
-int
-WasapiBackend::midi_event_put (void*, pframes_t, const uint8_t*, size_t)
-{
-	return -1;
-}
-
-uint32_t
-WasapiBackend::get_midi_event_count (void*)
-{
+	if (!port_buffer) {
+		return -1;
+	}
+	WasapiMidiBuffer& src = *static_cast<WasapiMidiBuffer*> (port_buffer);
+	if (event_index >= src.size ()) {
+		return -1;
+	}
+	WasapiMidiEvent const& ev = src[event_index];
+	timestamp = ev.timestamp ();
+	size = ev.size ();
+	*buf = ev.data ();
 	return 0;
 }
 
-void
-WasapiBackend::midi_clear (void*)
+int
+WasapiBackend::midi_event_put (void* port_buffer, pframes_t timestamp, const uint8_t* buffer, size_t size)
 {
+	if (!port_buffer || !buffer || size == 0) {
+		return -1;
+	}
+	WasapiMidiBuffer& dst = *static_cast<WasapiMidiBuffer*> (port_buffer);
+	dst.push_back (WasapiMidiEvent (timestamp, buffer, size));
+	return 0;
+}
+
+uint32_t
+WasapiBackend::get_midi_event_count (void* port_buffer)
+{
+	if (!port_buffer) {
+		return 0;
+	}
+	return (uint32_t)static_cast<WasapiMidiBuffer*> (port_buffer)->size ();
+}
+
+void
+WasapiBackend::midi_clear (void* port_buffer)
+{
+	if (!port_buffer) {
+		return;
+	}
+	static_cast<WasapiMidiBuffer*> (port_buffer)->clear ();
 }
 
 bool
