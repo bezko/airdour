@@ -340,6 +340,8 @@ if any(arg in ('dist', 'distcheck') for arg in sys.argv[1:]):
 top = '.'
 out = 'build'
 
+# Full multiplatform children list (upstream). Windows-only builds filter this
+# via windows_only_children() once AIRDOUR_WINDOWS_ONLY is defined.
 children = [
         # patched 3rd party libs
         'libs/clearlooks-newer',
@@ -411,6 +413,16 @@ children = [
         'libs/ardouralsautil',
         'libs/auscan',
 ]
+
+# Paths dropped from the default Windows-only product graph (Airdour).
+_WINDOWS_ONLY_EXCLUDE = set([
+        'libs/vfork',
+        'libs/ardouralsautil',
+        'libs/auscan',
+])
+
+def windows_only_children():
+        return [c for c in children if c not in _WINDOWS_ONLY_EXCLUDE]
 
 i18n_children = [
         'gtk2_ardour',
@@ -842,7 +854,11 @@ def options(opt):
     opt.add_option('--arch', type='string', action='store', dest='arch',
                     help='Architecture-specific compiler FLAGS')
     opt.add_option('--with-backends', type='string', action='store', default='', dest='with_backends',
-                    help='Specify which backend modules are to be included(jack,alsa,portaudio,coreaudio,pulseaudio)')
+                    help='Specify which backend modules are to be included(jack,alsa,portaudio,coreaudio,pulseaudio,wasapi,dummy)')
+    opt.add_option('--windows-only', action='store_true', default=False, dest='windows_only',
+                    help='Airdour: force Windows-only product graph (WASAPI shared + dummy; drop Linux/mac helpers)')
+    opt.add_option('--with-portaudio-bridge', action='store_true', default=False, dest='with_portaudio_bridge',
+                    help='Airdour: keep PortAudio backend as temporary bridge alongside WASAPI')
     opt.add_option('--backtrace', action='store_true', default=False, dest='backtrace',
                     help='Compile with -rdynamic -- allow obtaining backtraces from within Ardour')
     opt.add_option('--no-carbon', action='store_true', default=False, dest='nocarbon',
@@ -1416,20 +1432,34 @@ int main () { __int128 x = 0; return 0; }
 
     backends = opts.with_backends.split(',')
 
+    # Airdour: treat mingw/msvc dist targets as Windows-only unless explicitly disabled.
+    windows_only = opts.windows_only or Options.options.dist_target in ('mingw', 'msvc')
+    if windows_only:
+        conf.define('AIRDOUR_WINDOWS_ONLY', 1)
+        conf.env['AIRDOUR_WINDOWS_ONLY'] = True
+        conf.env.append_value('CFLAGS', '-DAIRDOUR_WINDOWS_ONLY=1')
+        conf.env.append_value('CXXFLAGS', '-DAIRDOUR_WINDOWS_ONLY=1')
+
     if backends == ['']:
         backends = ['dummy']
-        autowaf.check_pkg(conf, 'jack', uselib_store='JACK', atleast_version='1.9.10', mandatory=False)
-        if conf.is_defined('HAVE_JACK'):
-            backends += ['jack']
-        if conf.is_defined('HAVE_PULSEAUDIO'):
-            backends += ['pulseaudio']
+        if windows_only:
+            # Product audio path: native WASAPI shared mode.
+            backends += ['wasapi']
+            if opts.with_portaudio_bridge:
+                backends += ['portaudio']
+        else:
+            autowaf.check_pkg(conf, 'jack', uselib_store='JACK', atleast_version='1.9.10', mandatory=False)
+            if conf.is_defined('HAVE_JACK'):
+                backends += ['jack']
+            if conf.is_defined('HAVE_PULSEAUDIO'):
+                backends += ['pulseaudio']
 
-        if re.search ("linux", sys.platform) is not None and Options.options.dist_target != 'mingw':
-            backends += ['alsa']
-        if sys.platform == 'darwin':
-            backends += ['coreaudio']
-        if Options.options.dist_target == 'mingw' or Options.options.dist_target == 'msvc':
-            backends += ['portaudio']
+            if re.search ("linux", sys.platform) is not None and Options.options.dist_target != 'mingw':
+                backends += ['alsa']
+            if sys.platform == 'darwin':
+                backends += ['coreaudio']
+            if Options.options.dist_target == 'mingw' or Options.options.dist_target == 'msvc':
+                backends += ['portaudio']
 
     if 'dummy' not in backends:
         backends += ['dummy']
@@ -1439,6 +1469,7 @@ int main () { __int128 x = 0; return 0; }
     conf.env['BUILD_ALSABACKEND'] = any('alsa' in b for b in backends)
     conf.env['BUILD_DUMMYBACKEND'] = any('dummy' in b for b in backends)
     conf.env['BUILD_PABACKEND'] = any('portaudio' in b for b in backends)
+    conf.env['BUILD_WASAPIBACKEND'] = any('wasapi' in b for b in backends)
     conf.env['BUILD_CORECRAPPITA'] = any('coreaudio' in b for b in backends)
     conf.env['BUILD_PULSEAUDIO'] = any('pulseaudio' in b for b in backends)
 
@@ -1447,6 +1478,7 @@ int main () { __int128 x = 0; return 0; }
             or conf.env['BUILD_ALSABACKEND']
             or conf.env['BUILD_DUMMYBACKEND']
             or conf.env['BUILD_PABACKEND']
+            or conf.env['BUILD_WASAPIBACKEND']
             or conf.env['BUILD_CORECRAPPITA']
             or conf.env['BUILD_PULSEAUDIO']):
         conf.fatal("Must configure and build at least one backend")
@@ -1497,7 +1529,8 @@ int main () { __int128 x = 0; return 0; }
     if not (Options.options.dist_target == 'mingw' or Options.options.dist_target == 'msvc'):
         conf.env.append_value('LIB', 'm')
 
-    for i in children:
+    config_children = windows_only_children() if conf.env.get('AIRDOUR_WINDOWS_ONLY') else children
+    for i in config_children:
         conf.recurse(i)
 
     # Fix utterly braindead FLAC include path to not smash assert.h
@@ -1542,6 +1575,8 @@ const char* const ardour_config_info = "\\n\\
     write_config_text('Aubio',                 conf.is_defined('HAVE_AUBIO'))
     write_config_text('AudioUnits',            conf.is_defined('AUDIOUNIT_SUPPORT'))
     write_config_text('Build target',          conf.env['build_target'])
+    write_config_text('Airdour Windows-only',  conf.is_defined('AIRDOUR_WINDOWS_ONLY'))
+    write_config_text('WASAPI backend',        conf.env.get('BUILD_WASAPIBACKEND'))
     write_config_text('Canvas Test UI',        conf.is_defined('CANVASTESTUI'))
     write_config_text('Beatbox test app',      conf.is_defined('BEATBOX'))
     write_config_text('CoreAudio',             conf.is_defined('HAVE_COREAUDIO'))
@@ -1653,7 +1688,8 @@ def build(bld):
         obj.chmod        = Utils.O755
         obj.install_path = bld.env['LIBDIR']
 
-    for i in children:
+    build_children = windows_only_children() if bld.env.get('AIRDOUR_WINDOWS_ONLY') else children
+    for i in build_children:
         bld.recurse(i)
 
     if bld.env['build_target'] == 'msvc': #For using .def generator
