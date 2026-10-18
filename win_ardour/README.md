@@ -62,15 +62,17 @@ build-win64-gui-engine\artifacts\Debug\airdour_win_shell.exe --timeout 3 --backe
 
 Engine builds also **copy** `ptformat.dll` / `ardour.dll` / … next to the exe on POST_BUILD (still need vcpkg + VsDevCmd CRT on PATH).
 
-## Session / PeakMeter / Editor waves
+## Session / PeakMeter / Editor waves / Record / Import
 
-Default: create a minimal unnamed Session with **3 empty audio tracks** so mixer PeakMeters attach (levels move when rolling with click / content). Editor lanes read playlist peaks via `AudioRegion::read_peaks` — **empty tracks stay empty**; no synthetic fill. Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** (avoids intermittent Debug AVs) then `ExitProcess(0)` to skip join hangs.
+Default: create a minimal unnamed Session with **3 empty audio tracks** so mixer PeakMeters attach. Editor lanes read playlist peaks via `AudioRegion::read_peaks` — **empty tracks stay empty**. Mixer **R · arm** arms a track; transport **Rec** toggles session record-enable (auto-arms track 0 if none armed); **Play** captures; **Stop** finalizes the take so Editor peaks appear. **Import** opens a WAV file dialog (or `--smoke-import` writes a test WAV under the session). Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** then `ExitProcess(0)`.
 
 | Flag / env | Effect |
 |------------|--------|
-| (default) | Session + PeakMeter on **Dummy and WASAPI**; empty Editor lanes |
+| (default) | Session + PeakMeter; empty Editor lanes; arm/rec/import UI live |
+| `--smoke-import` | Write+import test WAV onto track 0 (waveforms without `DEMO_TONES`) |
+| `--smoke-record` | Arm track 0, record ~1.2s, stop — region peaks (Dummy + WASAPI) |
 | `AIRDOUR_WIN_SHELL_SESSION=0` | Skip Session; stub meters; empty lanes |
-| `AIRDOUR_WIN_SHELL_DEMO_TONES=1` | Opt-in sine wav regions → real Editor waveforms (can hang/AV under Dummy on MSVC) |
+| `AIRDOUR_WIN_SHELL_DEMO_TONES=1` | Opt-in sine regions at Session create (prefer Import / `--smoke-import`) |
 | `ARDOUR_PANNER_PATH` | Extra search path if panners are not under `%ARDOUR_DLL_PATH%\panners` |
 
 **MSVC notes:**

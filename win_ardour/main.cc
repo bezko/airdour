@@ -5,10 +5,13 @@
  *
  * Usage:
  *   airdour_win_shell.exe [--timeout N] [--backend Dummy|WASAPI] [--no-engine]
+ *                         [--smoke-import] [--smoke-record]
  *
- * --timeout N     Auto-quit after N seconds (unattended smoke).
- * --backend NAME  Attach AudioEngine (when built WITH_ENGINE). Default: Dummy.
- * --no-engine     Skip engine attach even if linked.
+ * --timeout N      Auto-quit after N seconds (unattended smoke).
+ * --backend NAME   Attach AudioEngine (when built WITH_ENGINE). Default: Dummy.
+ * --no-engine      Skip engine attach even if linked.
+ * --smoke-import   Write+import a test WAV onto track 0 (waveforms without DEMO_TONES).
+ * --smoke-record   Arm track 0, enable session record, capture ~1s, stop (shows take peaks).
  */
 
 #include "shell_window.h"
@@ -66,6 +69,8 @@ wmain (int argc, wchar_t** argv)
 	unsigned timeout = parse_timeout (argc, argv);
 	std::string backend = parse_backend (argc, argv);
 	bool no_engine = parse_flag (argc, argv, L"--no-engine");
+	bool smoke_import = parse_flag (argc, argv, L"--smoke-import");
+	bool smoke_record = parse_flag (argc, argv, L"--smoke-record");
 	HINSTANCE instance = GetModuleHandleW (nullptr);
 
 	/* STA for UI. WASAPI opens on this thread; process load under Session can
@@ -88,7 +93,7 @@ wmain (int argc, wchar_t** argv)
 	               timeout);
 
 	if (!no_engine) {
-		if (shell.attach_engine (backend, timeout)) {
+		if (shell.attach_engine (backend, timeout, smoke_import, smoke_record)) {
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", backend.c_str ());
 		} else {
 			std::fwprintf (stderr, L"airdour_win_shell: engine not attached (ok for UI-only / CI)\n");

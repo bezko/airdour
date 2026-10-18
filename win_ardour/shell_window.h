@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Win32 + Direct2D + DirectWrite shell: transport, multi-track editor,
- * mixer faders + meters, live engine status.
+ * mixer faders + meters, record arm, WAV import, live engine status.
  */
 
 #pragma once
@@ -31,6 +31,7 @@
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "shcore.lib")
+#pragma comment(lib, "comdlg32.lib")
 
 class ShellWindow
 {
@@ -41,9 +42,16 @@ public:
 	~ShellWindow ();
 
 	bool create (HINSTANCE instance, int show_cmd);
-	/** When smoke_timeout_secs > 0, create Session/PeakMeter but do not auto-roll
-	 *  (avoids intermittent AVs under Dummy/WASAPI during unattended --timeout). */
-	bool attach_engine (const std::string& backend_name, unsigned smoke_timeout_secs = 0);
+	/**
+	 * When smoke_timeout_secs > 0, create Session/PeakMeter but do not auto-roll
+	 * (avoids intermittent AVs under Dummy/WASAPI during unattended --timeout).
+	 * smoke_import / smoke_record exercise import + short take without changing
+	 * the plain --timeout exit-0 contract when those flags are off.
+	 */
+	bool attach_engine (const std::string& backend_name,
+	                    unsigned smoke_timeout_secs = 0,
+	                    bool smoke_import = false,
+	                    bool smoke_record = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -53,6 +61,15 @@ private:
 		None,
 		WavePan,
 		Fader
+	};
+
+	enum class SmokeRecordPhase {
+		Off,
+		NeedArm,
+		ArmWait,
+		Rolling,
+		FinalizeWait,
+		Done
 	};
 
 	struct EditorLane {
@@ -77,16 +94,21 @@ private:
 	void transport_play ();
 	void transport_stop ();
 	void transport_toggle ();
+	void transport_toggle_record ();
+	void prompt_import_audio ();
+	void sync_mixer_arm_from_engine ();
 	void apply_shared_view (int source_lane);
 	void reset_shared_view ();
 	int  hit_editor_lane (float x, float y) const;
 	int  hit_mixer_fader (float x, float y) const;
+	int  hit_mixer_arm (float x, float y) const;
 	void client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const;
 	bool on_mouse_wheel (WPARAM wparam, LPARAM lparam);
 	bool on_mouse_down (LPARAM lparam);
 	bool on_mouse_move (LPARAM lparam);
 	void on_mouse_up ();
 	float stub_meter_peak (int track, float dt) const;
+	void tick_smoke_record (DWORD now);
 
 	HWND _hwnd;
 	UINT _width;
@@ -103,6 +125,9 @@ private:
 	bool  _transport_playing;
 	float _playhead_sec;
 	DWORD _last_tick_ms;
+
+	SmokeRecordPhase _smoke_record;
+	DWORD            _smoke_record_start_ms;
 
 	D2D1_RECT_F _brand_bar;
 	D2D1_RECT_F _transport_bounds;
@@ -135,4 +160,3 @@ private:
 	EditorLane     _lanes[kTracks];
 	MixerStrip     _mixers[kTracks];
 };
-

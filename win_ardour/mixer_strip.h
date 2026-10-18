@@ -1,8 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Direct2D mixer track strip: fader + level meter (not GTK).
- * Gain/meter are UI stubs until Session routes exist.
+ * Direct2D mixer track strip: arm + fader + level meter (not GTK).
  */
 
 #pragma once
@@ -31,11 +30,15 @@ public:
 	void  set_gain (float g);
 	float gain () const { return _gain; }
 
+	void set_armed (bool armed) { _armed = armed; }
+	bool armed () const { return _armed; }
+
 	void        set_meter_peak (float peak);
 	void        meter_tick (float dt);
 	LevelMeter& meter () { return _meter; }
 
 	bool hit_fader (float x, float y) const;
+	bool hit_arm (float x, float y) const;
 	bool drag_to (float y);
 
 	void draw (ID2D1RenderTarget* rt,
@@ -55,7 +58,8 @@ private:
 	wchar_t     _label[32];
 	D2D1_RECT_F _strip;
 	D2D1_RECT_F _track;
+	D2D1_RECT_F _arm_btn;
 	LevelMeter  _meter;
 	float       _gain;
+	bool        _armed;
 };
-

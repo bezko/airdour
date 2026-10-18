@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Direct2D transport: Play / Stop hit targets (not GTK).
+ * Direct2D transport: Play / Stop / Rec / Import (not GTK).
  */
 
 #pragma once
@@ -20,7 +20,9 @@
 enum class TransportHit {
 	None,
 	Play,
-	Stop
+	Stop,
+	Rec,
+	Import
 };
 
 class TransportBar
@@ -32,6 +34,12 @@ public:
 
 	void set_playing (bool playing) { _playing = playing; }
 	bool playing () const { return _playing; }
+
+	void set_recording (bool recording) { _recording = recording; }
+	bool recording () const { return _recording; }
+
+	void set_record_armed (bool armed) { _record_armed = armed; }
+	bool record_armed () const { return _record_armed; }
 
 	TransportHit hit_test (float x, float y) const;
 
@@ -51,6 +59,9 @@ private:
 	D2D1_RECT_F _bounds;
 	D2D1_RECT_F _play_btn;
 	D2D1_RECT_F _stop_btn;
+	D2D1_RECT_F _rec_btn;
+	D2D1_RECT_F _import_btn;
 	bool        _playing;
+	bool        _recording;
+	bool        _record_armed;
 };
-

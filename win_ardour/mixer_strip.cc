@@ -9,10 +9,22 @@
 #include <cstdio>
 #include <cstring>
 
+namespace {
+
+bool
+contains (const D2D1_RECT_F& r, float x, float y)
+{
+	return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+
+} // namespace
+
 MixerStrip::MixerStrip ()
 	: _strip ()
 	, _track ()
+	, _arm_btn ()
 	, _gain (0.85f)
+	, _armed (false)
 {
 	wcsncpy_s (_label, L"Track", _TRUNCATE);
 }
@@ -31,7 +43,14 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 	_strip = strip_bounds;
 
 	float pad = 8.f * dpi_scale;
-	float top = _strip.top + 32.f * dpi_scale;
+	float arm_h = 22.f * dpi_scale;
+	_arm_btn = D2D1::RectF (
+		_strip.left + pad,
+		_strip.top + 28.f * dpi_scale,
+		_strip.right - pad,
+		_strip.top + 28.f * dpi_scale + arm_h);
+
+	float top = _arm_btn.bottom + 8.f * dpi_scale;
 	float bot = _strip.bottom - 36.f * dpi_scale;
 	float inner_w = _strip.right - _strip.left - pad * 2.f;
 	float fader_w = inner_w * 0.42f;
@@ -69,6 +88,12 @@ MixerStrip::hit_fader (float x, float y) const
 	float pad = 14.f;
 	return x >= _track.left - pad && x <= _track.right + pad
 	    && y >= _track.top - pad && y <= _track.bottom + pad;
+}
+
+bool
+MixerStrip::hit_arm (float x, float y) const
+{
+	return contains (_arm_btn, x, y);
 }
 
 bool
@@ -117,6 +142,16 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 	               brand);
 	fmt_title->SetTextAlignment (ta);
 
+	rt->FillRectangle (_arm_btn, _armed ? accent : edge);
+	DWRITE_TEXT_ALIGNMENT ta_arm = fmt_meta->GetTextAlignment ();
+	DWRITE_PARAGRAPH_ALIGNMENT pa_arm = fmt_meta->GetParagraphAlignment ();
+	fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
+	fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+	const wchar_t* arm_label = _armed ? L"R · armed" : L"R · arm";
+	rt->DrawTextW (arm_label, (UINT32)wcslen (arm_label), fmt_meta, _arm_btn, brand);
+	fmt_meta->SetTextAlignment (ta_arm);
+	fmt_meta->SetParagraphAlignment (pa_arm);
+
 	rt->FillRectangle (_track, edge);
 
 	float h = _track.bottom - _track.top;
@@ -150,4 +185,3 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 	               body);
 	fmt_meta->SetTextAlignment (ta2);
 }
-

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -133,6 +134,93 @@ path_join (const std::string& a, const std::string& b)
 	return a + sep + b;
 }
 
+std::wstring
+utf8_path_to_wide (const std::string& s)
+{
+	if (s.empty ()) {
+		return std::wstring ();
+	}
+	int n = MultiByteToWideChar (CP_UTF8, 0, s.c_str (), (int)s.size (), nullptr, 0);
+	if (n <= 0) {
+		return std::wstring ();
+	}
+	std::wstring out ((size_t)n, L'\0');
+	MultiByteToWideChar (CP_UTF8, 0, s.c_str (), (int)s.size (), &out[0], n);
+	return out;
+}
+
+/** Minimal mono 16-bit PCM WAV (no libsndfile) for import smoke. */
+bool
+write_pcm16_wav (const std::string& path_utf8, int sample_rate, int n_samples, float freq_hz, float amp)
+{
+	std::wstring wpath = utf8_path_to_wide (path_utf8);
+	if (wpath.empty ()) {
+		return false;
+	}
+	FILE* f = _wfopen (wpath.c_str (), L"wb");
+	if (!f) {
+		return false;
+	}
+
+	const int channels = 1;
+	const int bits = 16;
+	const int byte_rate = sample_rate * channels * (bits / 8);
+	const int block_align = channels * (bits / 8);
+	const uint32_t data_bytes = (uint32_t)n_samples * (uint32_t)block_align;
+	const uint32_t riff_size = 36u + data_bytes;
+
+	auto wr = [&] (const void* p, size_t n) {
+		return fwrite (p, 1, n, f) == n;
+	};
+	auto wr32 = [&] (uint32_t v) {
+		unsigned char b[4] = {
+			(unsigned char)(v & 0xff),
+			(unsigned char)((v >> 8) & 0xff),
+			(unsigned char)((v >> 16) & 0xff),
+			(unsigned char)((v >> 24) & 0xff)
+		};
+		return wr (b, 4);
+	};
+	auto wr16 = [&] (uint16_t v) {
+		unsigned char b[2] = {
+			(unsigned char)(v & 0xff),
+			(unsigned char)((v >> 8) & 0xff)
+		};
+		return wr (b, 2);
+	};
+
+	bool ok = wr ("RIFF", 4) && wr32 (riff_size) && wr ("WAVE", 4)
+	       && wr ("fmt ", 4) && wr32 (16) && wr16 (1) && wr16 ((uint16_t)channels)
+	       && wr32 ((uint32_t)sample_rate) && wr32 ((uint32_t)byte_rate)
+	       && wr16 ((uint16_t)block_align) && wr16 ((uint16_t)bits)
+	       && wr ("data", 4) && wr32 (data_bytes);
+
+	if (ok) {
+		for (int i = 0; i < n_samples; ++i) {
+			float ph = 6.2831853f * freq_hz * ((float)i / (float)sample_rate);
+			float beat = std::fmod ((float)i / (float)sample_rate * 2.f, 1.f);
+			float env = 0.55f + 0.45f * std::exp (-beat * 8.f);
+			float s = amp * env * std::sin (ph);
+			if (s > 1.f) {
+				s = 1.f;
+			} else if (s < -1.f) {
+				s = -1.f;
+			}
+			int16_t sample = (int16_t)std::lrintf (s * 32767.f);
+			unsigned char b[2] = {
+				(unsigned char)(sample & 0xff),
+				(unsigned char)((sample >> 8) & 0xff)
+			};
+			if (!wr (b, 2)) {
+				ok = false;
+				break;
+			}
+		}
+	}
+	fclose (f);
+	return ok;
+}
+
 } // namespace
 
 /** Minimal EventLoop so Session signals/butler don't block waiting for GTK. */
@@ -193,6 +281,7 @@ EngineHost::EngineHost ()
 		_track_gain[i] = (i == 0) ? 0.85f : (0.85f - 0.12f * (float)i);
 		_snap.meter_peak[i] = 0.f;
 		_snap.track_has_regions[i] = false;
+		_snap.track_armed[i] = false;
 	}
 	_snap.available = true;
 	_snap.running = false;
@@ -200,6 +289,8 @@ EngineHost::EngineHost ()
 	_snap.transport_rolling = false;
 	_snap.meters_real = false;
 	_snap.waves_from_session = false;
+	_snap.session_record_armed = false;
+	_snap.session_recording = false;
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -438,8 +529,11 @@ EngineHost::destroy_session ()
 	_snap.meters_real = false;
 	_snap.waves_from_session = false;
 	_snap.transport_rolling = false;
+	_snap.session_record_armed = false;
+	_snap.session_recording = false;
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_has_regions[i] = false;
+		_snap.track_armed[i] = false;
 	}
 }
 
@@ -543,8 +637,19 @@ EngineHost::transport_stop ()
 {
 	_impl->transport_playing = false;
 	if (_impl->session) {
-		_impl->session->request_stop (false, false, TRS_UI);
-		_impl->session->request_locate (0, true, MustStop, TRS_UI);
+		/* Stop transport first so DiskWriter can finalize the take, then clear
+		 * session record-enable. Disabling record before stop drops the capture.
+		 * Skip immediate locate — FSM may still be DeclickToStop (bad transition). */
+		try {
+			_impl->session->request_stop (false, false, TRS_UI);
+		} catch (...) {
+		}
+		try {
+			_impl->session->disable_record (false, true);
+		} catch (...) {
+		}
+		refresh_region_flags ();
+		refresh_record_flags ();
 		_snap.detail = L"transport stopped — Session kept warm";
 	} else {
 		_snap.detail = L"transport stopped — engine kept warm";
@@ -816,6 +921,188 @@ EngineHost::fill_track_waveform (int track,
 }
 
 void
+EngineHost::refresh_record_flags ()
+{
+	_snap.session_record_armed = false;
+	_snap.session_recording = false;
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_armed[i] = false;
+	}
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	try {
+		_snap.session_record_armed = _impl->session->get_record_enabled ();
+		_snap.session_recording = _impl->session->actively_recording ();
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]
+			    && _impl->tracks[i]->rec_enable_control ()) {
+				_snap.track_armed[i] =
+					_impl->tracks[i]->rec_enable_control ()->get_value () >= 0.5;
+			}
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::set_track_armed (int track, bool armed)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
+	    || !_impl->tracks[track]->rec_enable_control ()) {
+		return false;
+	}
+	try {
+		_impl->tracks[track]->rec_enable_control ()->set_value (
+			armed ? 1.0 : 0.0, Controllable::NoGroup);
+		refresh_record_flags ();
+		_snap.detail = armed ? L"track armed for record" : L"track disarmed";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_track_armed (int track)
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	return set_track_armed (track, !_snap.track_armed[track]);
+}
+
+bool
+EngineHost::set_session_record (bool enable)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		if (enable) {
+			bool any_armed = false;
+			for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+				if (_snap.track_armed[i]) {
+					any_armed = true;
+					break;
+				}
+			}
+			if (!any_armed) {
+				set_track_armed (0, true);
+			}
+			_impl->session->maybe_enable_record (false);
+			_snap.detail = L"session record armed — Play to capture";
+		} else {
+			_impl->session->disable_record (false, true);
+			refresh_region_flags ();
+			_snap.detail = L"session record off";
+		}
+		refresh_record_flags ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_session_record ()
+{
+	return set_session_record (!_snap.session_record_armed);
+}
+
+bool
+EngineHost::import_audio_file (int track, const std::string& path)
+{
+	if (!_impl || !_impl->session || path.empty ()) {
+		return false;
+	}
+	if (track < 0 || track >= EngineSnapshot::kMeters
+	    || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+
+	try {
+		std::shared_ptr<Source> src = SourceFactory::createExternal (
+			DataType::AUDIO,
+			*_impl->session,
+			path,
+			0,
+			Source::Flag (Source::Removable | Source::RemovableIfEmpty),
+			true,
+			false);
+		std::shared_ptr<AudioSource> as = std::dynamic_pointer_cast<AudioSource> (src);
+		if (!as) {
+			_snap.detail = L"import failed — not an audio source";
+			return false;
+		}
+
+		samplecnt_t n = as->length ().samples ();
+		if (n <= 0) {
+			_snap.detail = L"import failed — empty file";
+			return false;
+		}
+
+		PropertyList plist;
+		plist.add (Properties::start, timepos_t (0));
+		plist.add (Properties::length, timecnt_t ((samplepos_t)n));
+		std::shared_ptr<Region> region = RegionFactory::create (src, plist);
+		if (!region || !_impl->tracks[track]->playlist ()) {
+			_snap.detail = L"import failed — region create";
+			return false;
+		}
+		_impl->tracks[track]->playlist ()->add_region (region, timepos_t (0));
+		refresh_region_flags ();
+		_snap.detail = L"imported audio onto track — Editor peaks from Session";
+		std::fprintf (stderr, "airdour_win_shell: imported \"%s\" (%lld samples) onto track %d\n",
+		              path.c_str (), (long long)n, track);
+		std::fflush (stderr);
+		return true;
+	} catch (failed_constructor& e) {
+		std::fprintf (stderr, "airdour_win_shell: import failed_constructor: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"import failed_constructor";
+		return false;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: import exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"import exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"import unknown failure";
+		return false;
+	}
+}
+
+bool
+EngineHost::import_test_tone (int track, float freq_hz, float seconds)
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		return false;
+	}
+	samplecnt_t sr = (samplecnt_t)_impl->engine->sample_rate ();
+	if (sr <= 0) {
+		sr = 48000;
+	}
+	if (seconds < 0.25f) {
+		seconds = 0.25f;
+	}
+	const int n = (int)std::llround ((double)sr * (double)seconds);
+	std::string wav = path_join (
+		_impl->session_dir,
+		string_compose ("import_tone_%1.wav", track + 1));
+	if (!write_pcm16_wav (wav, (int)sr, n, freq_hz, 0.28f)) {
+		_snap.detail = L"test WAV write failed";
+		return false;
+	}
+	std::fprintf (stderr, "airdour_win_shell: wrote test WAV %s\n", wav.c_str ());
+	std::fflush (stderr);
+	return import_audio_file (track, wav);
+}
+
+void
 EngineHost::refresh_snapshot ()
 {
 	_snap.gain = _gain;
@@ -839,10 +1126,14 @@ EngineHost::refresh_snapshot ()
 			read_meters ();
 			_snap.waves_from_session = true;
 			refresh_region_flags ();
+			refresh_record_flags ();
 		} else {
 			_snap.waves_from_session = false;
+			_snap.session_record_armed = false;
+			_snap.session_recording = false;
 			for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 				_snap.track_has_regions[i] = false;
+				_snap.track_armed[i] = false;
 			}
 			/* Closest honest engine path without Session: AudioEngine sample clock. */
 			_snap.transport_rolling = _impl->transport_playing;
@@ -885,6 +1176,7 @@ EngineHost::EngineHost ()
 		_track_gain[i] = 0.85f;
 		_snap.meter_peak[i] = 0.f;
 		_snap.track_has_regions[i] = false;
+		_snap.track_armed[i] = false;
 	}
 	_snap.available = false;
 	_snap.running = false;
@@ -892,6 +1184,8 @@ EngineHost::EngineHost ()
 	_snap.transport_rolling = false;
 	_snap.meters_real = false;
 	_snap.waves_from_session = false;
+	_snap.session_record_armed = false;
+	_snap.session_recording = false;
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -1009,6 +1303,56 @@ EngineHost::read_meters ()
 void
 EngineHost::refresh_region_flags ()
 {
+}
+
+void
+EngineHost::refresh_record_flags ()
+{
+}
+
+bool
+EngineHost::set_track_armed (int track, bool armed)
+{
+	(void)track;
+	(void)armed;
+	return false;
+}
+
+bool
+EngineHost::toggle_track_armed (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::set_session_record (bool enable)
+{
+	(void)enable;
+	return false;
+}
+
+bool
+EngineHost::toggle_session_record ()
+{
+	return false;
+}
+
+bool
+EngineHost::import_audio_file (int track, const std::string& path)
+{
+	(void)track;
+	(void)path;
+	return false;
+}
+
+bool
+EngineHost::import_test_tone (int track, float freq_hz, float seconds)
+{
+	(void)track;
+	(void)freq_hz;
+	(void)seconds;
+	return false;
 }
 
 bool

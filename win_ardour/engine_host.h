@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * UI-thread engine + minimal Session attach for win_ardour.
- * Peak meters and transport time come from Session when available.
+ * Peak meters, transport, record arm, and WAV import for Editor waves.
  */
 
 #pragma once
@@ -19,12 +19,15 @@ struct EngineSnapshot {
 	bool         transport_rolling;
 	bool         meters_real; /* PeakMeter (not stub) */
 	bool         waves_from_session; /* Editor peaks from playlist (may still be empty) */
+	bool         session_record_armed; /* Session record enable (may not be rolling yet) */
+	bool         session_recording; /* actively capturing */
 	std::wstring backend;
 	uint32_t     sample_rate;
 	uint32_t     period_frames;
 	float        gain; /* track 0 stub/session gain */
 	float        meter_peak[kMeters]; /* linear 0..1 */
 	bool         track_has_regions[kMeters];
+	bool         track_armed[kMeters];
 	float        transport_sec;
 	std::wstring detail;
 };
@@ -60,6 +63,26 @@ public:
 	void  set_track_gain (int track, float linear);
 	float gain () const;
 
+	/** Arm / disarm a track for recording (Session rec-enable control). */
+	bool set_track_armed (int track, bool armed);
+	bool toggle_track_armed (int track);
+
+	/** Session-level record enable (maybe_enable_record / disable_record). */
+	bool set_session_record (bool enable);
+	bool toggle_session_record ();
+
+	/**
+	 * Import a WAV (or other libsndfile) path onto a track playlist at time 0.
+	 * Builds peakfile so Editor waveforms appear without DEMO_TONES.
+	 */
+	bool import_audio_file (int track, const std::string& path);
+
+	/**
+	 * Write a short PCM WAV under the session dir and import it (safe path for
+	 * smoke / no file dialog). Returns false if Session is missing.
+	 */
+	bool import_test_tone (int track, float freq_hz = 220.f, float seconds = 2.f);
+
 	EngineSnapshot snapshot () const;
 
 	/**
@@ -82,6 +105,7 @@ private:
 	void destroy_session ();
 	void read_meters ();
 	void refresh_region_flags ();
+	void refresh_record_flags ();
 
 	bool        _started;
 	std::string _backend_name;

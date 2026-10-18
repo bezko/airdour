@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <commdlg.h>
 
 namespace {
 
@@ -95,6 +96,8 @@ ShellWindow::ShellWindow ()
 	, _transport_playing (false)
 	, _playhead_sec (0.f)
 	, _last_tick_ms (0)
+	, _smoke_record (SmokeRecordPhase::Off)
+	, _smoke_record_start_ms (0)
 	, _brand_bar ()
 	, _transport_bounds ()
 	, _editor_pane ()
@@ -147,7 +150,10 @@ ShellWindow::~ShellWindow ()
 }
 
 bool
-ShellWindow::attach_engine (const std::string& backend_name, unsigned smoke_timeout_secs)
+ShellWindow::attach_engine (const std::string& backend_name,
+                            unsigned smoke_timeout_secs,
+                            bool smoke_import,
+                            bool smoke_record)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -157,13 +163,28 @@ ShellWindow::attach_engine (const std::string& backend_name, unsigned smoke_time
 	bool ok = _engine.start (backend_name);
 	/* Unattended --timeout: keep Session + PeakMeter (not stubs) but skip
 	 * auto-roll — rolling under Debug has intermittent AVs on Dummy/WASAPI
-	 * that prevent ExitProcess(0). Interactive runs still auto-play. */
-	const bool autoplay = ok && (smoke_timeout_secs == 0);
+	 * that prevent ExitProcess(0). Interactive runs still auto-play.
+	 * --smoke-record drives its own short roll; --smoke-import needs no roll. */
+	const bool autoplay = ok && (smoke_timeout_secs == 0) && !smoke_record;
+	if (ok && smoke_import && _engine.snapshot ().session_ok) {
+		if (_engine.import_test_tone (0, 220.f, 2.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-import ok (track 0)\n");
+		} else {
+			std::fprintf (stderr, "airdour_win_shell: smoke-import failed\n");
+		}
+		std::fflush (stderr);
+	}
+	if (ok && smoke_record && _engine.snapshot ().session_ok) {
+		_smoke_record = SmokeRecordPhase::NeedArm;
+		std::fprintf (stderr, "airdour_win_shell: smoke-record scheduled (arm → ~1.2s take)\n");
+		std::fflush (stderr);
+	}
 	if (autoplay) {
 		_engine.transport_play ();
 	}
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
+	sync_mixer_arm_from_engine ();
 	if (autoplay) {
 		_transport_playing = true;
 		_transport.set_playing (true);
@@ -172,6 +193,138 @@ ShellWindow::attach_engine (const std::string& backend_name, unsigned smoke_time
 		}
 	}
 	return ok;
+}
+
+void
+ShellWindow::sync_mixer_arm_from_engine ()
+{
+	for (int i = 0; i < kTracks; ++i) {
+		bool armed = (i < EngineSnapshot::kMeters) && _engine_snap.track_armed[i];
+		_mixers[i].set_armed (armed);
+	}
+	_transport.set_record_armed (_engine_snap.session_record_armed);
+	_transport.set_recording (_engine_snap.session_recording);
+}
+
+void
+ShellWindow::transport_toggle_record ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	_engine.toggle_session_record ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_arm_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::prompt_import_audio ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+
+	wchar_t path[MAX_PATH] = {};
+	OPENFILENAMEW ofn = {};
+	ofn.lStructSize = sizeof (ofn);
+	ofn.hwndOwner = _hwnd;
+	ofn.lpstrFilter = L"WAV audio (*.wav)\0*.wav\0All files (*.*)\0*.*\0";
+	ofn.lpstrFile = path;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+	ofn.lpstrTitle = L"Airdour — import audio";
+	if (!GetOpenFileNameW (&ofn)) {
+		return;
+	}
+
+	char utf8[MAX_PATH * 4];
+	WideCharToMultiByte (CP_UTF8, 0, path, -1, utf8, sizeof (utf8), nullptr, nullptr);
+	if (_engine.import_audio_file (0, utf8)) {
+		std::fprintf (stderr, "airdour_win_shell: import dialog ok\n");
+	} else {
+		std::fprintf (stderr, "airdour_win_shell: import dialog failed\n");
+	}
+	std::fflush (stderr);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::tick_smoke_record (DWORD now)
+{
+	if (_smoke_record == SmokeRecordPhase::Off || _smoke_record == SmokeRecordPhase::Done) {
+		return;
+	}
+	if (!_engine_snap.session_ok) {
+		return;
+	}
+
+	if (_smoke_record == SmokeRecordPhase::NeedArm) {
+		_engine.set_track_armed (0, true);
+		_smoke_record_start_ms = now;
+		_smoke_record = SmokeRecordPhase::ArmWait;
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_arm_from_engine ();
+		std::fprintf (stderr, "airdour_win_shell: smoke-record track0 arm queued\n");
+		std::fflush (stderr);
+		return;
+	}
+
+	if (_smoke_record == SmokeRecordPhase::ArmWait
+	    && (now - _smoke_record_start_ms) >= 250u) {
+		_engine.set_session_record (true);
+		_engine.transport_play ();
+		_transport_playing = true;
+		_transport.set_playing (true);
+		_smoke_record_start_ms = now;
+		_smoke_record = SmokeRecordPhase::Rolling;
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_arm_from_engine ();
+		std::fprintf (stderr, "airdour_win_shell: smoke-record rolling (armed=%d session_rec=%d)\n",
+		              _engine_snap.track_armed[0] ? 1 : 0,
+		              _engine_snap.session_record_armed ? 1 : 0);
+		std::fflush (stderr);
+		return;
+	}
+
+	if (_smoke_record == SmokeRecordPhase::Rolling
+	    && (now - _smoke_record_start_ms) >= 1200u) {
+		transport_stop ();
+		_smoke_record_start_ms = now;
+		_smoke_record = SmokeRecordPhase::FinalizeWait;
+		std::fprintf (stderr, "airdour_win_shell: smoke-record transport stopped — waiting finalize\n");
+		std::fflush (stderr);
+		return;
+	}
+
+	if (_smoke_record == SmokeRecordPhase::FinalizeWait
+	    && (now - _smoke_record_start_ms) >= 400u) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_arm_from_engine ();
+		_smoke_record = SmokeRecordPhase::Done;
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-record done — track0 regions=%d\n",
+		              _engine_snap.track_has_regions[0] ? 1 : 0);
+		std::fflush (stderr);
+		/* Leave early so ExitProcess is less likely to race Butler after a take. */
+		PostQuitMessage (0);
+	}
 }
 
 void
@@ -186,6 +339,7 @@ ShellWindow::transport_play ()
 		_engine.transport_play ();
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
+		sync_mixer_arm_from_engine ();
 	}
 	_transport_playing = true;
 	_transport.set_playing (true);
@@ -203,6 +357,7 @@ ShellWindow::transport_stop ()
 		_engine.transport_stop ();
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
+		sync_mixer_arm_from_engine ();
 	}
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
@@ -567,6 +722,17 @@ ShellWindow::hit_editor_lane (float x, float y) const
 }
 
 int
+ShellWindow::hit_mixer_arm (float x, float y) const
+{
+	for (int i = 0; i < kTracks; ++i) {
+		if (_mixers[i].hit_arm (x, y)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int
 ShellWindow::hit_mixer_fader (float x, float y) const
 {
 	for (int i = 0; i < kTracks; ++i) {
@@ -616,6 +782,30 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::Stop) {
 		transport_stop ();
+		return true;
+	}
+	if (th == TransportHit::Rec) {
+		transport_toggle_record ();
+		return true;
+	}
+	if (th == TransportHit::Import) {
+		prompt_import_audio ();
+		return true;
+	}
+
+	int arm = hit_mixer_arm (x, y);
+	if (arm >= 0) {
+		if (_engine.is_linked ()) {
+			if (!_engine.start ()) {
+				_engine_snap = _engine.snapshot ();
+			} else {
+				_engine.toggle_track_armed (arm);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_arm_from_engine ();
+			}
+		}
+		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
 
@@ -756,8 +946,11 @@ ShellWindow::on_tick ()
 	if (now - last_poll > poll_ms) {
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
+		sync_mixer_arm_from_engine ();
 		last_poll = now;
 	}
+
+	tick_smoke_record (now);
 
 	if (_engine_snap.running && (_transport_playing || _engine_snap.transport_rolling)) {
 		/* Prefer engine clock (Session transport_sample or processed_samples). */
