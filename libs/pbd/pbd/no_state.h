@@ -20,9 +20,9 @@
 
 #include <exception>
 
-#include "pbd/libpbd_visibility.h"
-
-class LIBPBD_API no_state : public std::exception {
+// Header-only exception: do not mark LIBPBD_API (MSVC dllimport would
+// require out-of-line ctor/dtor in pbd.dll; see unknown_type.h).
+class no_state : public std::exception {
   public:
 	virtual const char *what() const throw() { return "no state for XML"; }
 };

@@ -1362,9 +1362,11 @@ int main () { __int128 x = 0; return 0; }
         conf.env.append_value('CFLAGS', "-DCOMPILER_INT128_SUPPORT")
 
 
-    # always use localized gtk2
-    conf.define('YTK', 1)
-    conf.define('HAVE_SUIL', 1)
+    # Bundled YTK/SUIL are for the GTK UI stack. MSVC / --windows-only headless
+    # excludes libs/tk/suil — do not claim HAVE_SUIL or libardour will include suil.h.
+    if Options.options.dist_target != 'msvc' and not Options.options.windows_only:
+        conf.define('YTK', 1)
+        conf.define('HAVE_SUIL', 1)
 
     # Tell everyone that this is a waf build
 

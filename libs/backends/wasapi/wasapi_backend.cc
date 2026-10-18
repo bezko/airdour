@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include <glib.h>
 #include <glibmm/main.h>
 
 #include "ardour/port_manager.h"
@@ -117,7 +118,7 @@ WasapiBackend::WasapiBackend (AudioEngine& e, AudioBackendInfo& info)
 	, _measure_latency (false)
 	, _processed_samples (0)
 	, _dsp_load (0.f)
-	, _main_thread (0)
+	, _main_thread_running (false)
 {
 }
 
@@ -491,7 +492,7 @@ WasapiBackend::_start (bool for_latency_measurement)
 	/* Wait briefly for the thread to become active. */
 	int timeout = 5000;
 	while (!_active && --timeout > 0) {
-		Glib::usleep (1000);
+		g_usleep (1000);
 	}
 	if (!_active) {
 		error << _("WASAPI: process thread failed to start") << endmsg;
@@ -513,16 +514,17 @@ WasapiBackend::start_main_process_thread ()
 			return false;
 		}
 	}
+	_main_thread_running = true;
 	return true;
 }
 
 bool
 WasapiBackend::stop_main_process_thread ()
 {
-	if (_main_thread) {
+	if (_main_thread_running) {
 		void* status = 0;
 		pthread_join (_main_thread, &status);
-		_main_thread = 0;
+		_main_thread_running = false;
 	}
 	return true;
 }
@@ -660,7 +662,7 @@ WasapiBackend::run_freewheel_cycle ()
 		return false;
 	}
 	_processed_samples += nframes;
-	Glib::usleep ((gulong)(1e6 * (double)nframes / (double)_samplerate));
+	g_usleep ((gulong)(1e6 * (double)nframes / (double)_samplerate));
 	return true;
 }
 
@@ -802,7 +804,7 @@ WasapiBackend::join_process_threads ()
 bool
 WasapiBackend::in_process_thread ()
 {
-	if (_main_thread && pthread_equal (_main_thread, pthread_self ())) {
+	if (_main_thread_running && pthread_equal (_main_thread, pthread_self ())) {
 		return true;
 	}
 	for (size_t i = 0; i < _threads.size (); ++i) {
@@ -905,13 +907,38 @@ WasapiBackend::monitoring_input (PortHandle)
 void
 WasapiBackend::set_latency_range (PortHandle port, bool for_playback, LatencyRange r)
 {
-	PortEngineSharedImpl::set_latency_range (port, for_playback, r);
+	BackendPortPtr p = std::dynamic_pointer_cast<BackendPort> (port);
+	if (!valid_port (p)) {
+		return;
+	}
+	p->set_latency_range (r, for_playback);
 }
 
 LatencyRange
 WasapiBackend::get_latency_range (PortHandle port, bool for_playback)
 {
-	return PortEngineSharedImpl::get_latency_range (port, for_playback);
+	LatencyRange r;
+	BackendPortPtr p = std::dynamic_pointer_cast<BackendPort> (port);
+	if (!valid_port (p)) {
+		r.min = 0;
+		r.max = 0;
+		return r;
+	}
+
+	r = p->latency_range (for_playback);
+	if (p->is_physical () && p->is_terminal ()) {
+		/* Shared-mode device latency is at least one period until
+		 * WasapiIO exposes measured capture/playback latencies. */
+		if (p->is_input () && for_playback) {
+			r.min += _buffer_size;
+			r.max += _buffer_size;
+		}
+		if (p->is_output () && !for_playback) {
+			r.min += _buffer_size;
+			r.max += _buffer_size;
+		}
+	}
+	return r;
 }
 
 void*

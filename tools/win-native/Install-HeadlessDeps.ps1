@@ -68,11 +68,13 @@ if ((Test-Path $pkgconf) -and -not (Test-Path $pkgconfig)) {
   Write-Host "Created pkg-config.exe alias -> pkgconf.exe"
 }
 
+$pcDir = Join-Path $installed "lib\pkgconfig"
+New-Item -ItemType Directory -Force -Path $pcDir | Out-Null
+
 # Stock aubio vcpkg port installs CMake config only (no aubio.pc); waf needs pkg-config.
 $aubioLib = Join-Path $installed "lib\aubio.lib"
-$aubioPc = Join-Path $installed "lib\pkgconfig\aubio.pc"
+$aubioPc = Join-Path $pcDir "aubio.pc"
 if ((Test-Path $aubioLib) -and -not (Test-Path $aubioPc)) {
-  New-Item -ItemType Directory -Force -Path (Split-Path $aubioPc) | Out-Null
   @"
 prefix=`${pcfiledir}/../..
 exec_prefix=`${prefix}
@@ -86,6 +88,61 @@ Libs: "-L`${libdir}" -laubio
 Cflags: "-I`${includedir}"
 "@ | Set-Content -Path $aubioPc -Encoding ASCII
   Write-Host "Wrote $aubioPc (vcpkg aubio has no pkg-config module)"
+}
+
+# vamp-sdk .pc says -lvamp-sdk but MSVC artifacts are VampPluginSDK.lib / VampHostSDK.lib.
+$vampSdkPc = Join-Path $pcDir "vamp-sdk.pc"
+$vampHostPc = Join-Path $pcDir "vamp-hostsdk.pc"
+$vampPluginLib = Join-Path $installed "lib\VampPluginSDK.lib"
+$vampHostLib = Join-Path $installed "lib\VampHostSDK.lib"
+if (Test-Path $vampPluginLib) {
+  @"
+prefix=`${pcfiledir}/../..
+exec_prefix=`${prefix}
+libdir=`${exec_prefix}/lib
+includedir=`${prefix}/include
+
+Name: vamp-sdk
+Version: 2.10
+Description: Development library for Vamp audio analysis plugins
+Libs: "-L`${libdir}" -lVampPluginSDK
+Cflags: "-I`${includedir}"
+"@ | Set-Content -Path $vampSdkPc -Encoding ASCII
+  Write-Host "Patched $vampSdkPc -> -lVampPluginSDK"
+}
+if (Test-Path $vampHostLib) {
+  @"
+prefix=`${pcfiledir}/../..
+exec_prefix=`${prefix}
+libdir=`${exec_prefix}/lib
+includedir=`${prefix}/include
+
+Name: vamp-hostsdk
+Version: 2.10
+Description: Development library for Vamp audio analysis plugin hosts
+Libs: "-L`${libdir}" -lVampHostSDK
+Cflags: "-I`${includedir}"
+"@ | Set-Content -Path $vampHostPc -Encoding ASCII
+  Write-Host "Patched $vampHostPc -> -lVampHostSDK (no -ldl on Windows)"
+}
+
+# liblo.pc says -llo but the MSVC import lib is liblo.lib (would look for lo.lib).
+$libloLib = Join-Path $installed "lib\liblo.lib"
+$libloPc = Join-Path $pcDir "liblo.pc"
+if (Test-Path $libloLib) {
+  @"
+prefix=`${pcfiledir}/../..
+exec_prefix=`${prefix}
+libdir=`${prefix}/lib
+includedir=`${prefix}/include
+
+Name: liblo
+Version: 0.36
+Description: A lightweight OSC server/client library
+Libs: "-L`${libdir}" -lliblo
+Cflags: "-I`${includedir}"
+"@ | Set-Content -Path $libloPc -Encoding ASCII
+  Write-Host "Patched $libloPc -> -lliblo"
 }
 
 Write-Host "Installed prefix: $installed"

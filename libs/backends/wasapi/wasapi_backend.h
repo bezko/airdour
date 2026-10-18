@@ -232,6 +232,7 @@ private:
 	DSPLoadCalculator _dsp_load_calc;
 
 	pthread_t              _main_thread;
+	bool                   _main_thread_running;
 	std::vector<pthread_t> _threads;
 
 	std::vector<float> _interleaved_capture;
