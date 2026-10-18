@@ -24,6 +24,13 @@ if (-not $ManifestDir) {
 $env:VCPKG_ROOT = $VcpkgRoot
 Remove-Item Env:VCPKG_DEFAULT_BINARY_CACHE -ErrorAction SilentlyContinue
 
+# Overlay ports (glibmm-2.4 / sigc++-2.0) — also declared in vcpkg-configuration.json.
+$overlay = Join-Path $ManifestDir "overlays"
+if (Test-Path $overlay) {
+  $env:VCPKG_OVERLAY_PORTS = $overlay
+  Write-Host "VCPKG_OVERLAY_PORTS=$overlay"
+}
+
 $git = @(
   "C:\Program Files\Git\cmd\git.exe",
   "git"
@@ -61,8 +68,28 @@ if ((Test-Path $pkgconf) -and -not (Test-Path $pkgconfig)) {
   Write-Host "Created pkg-config.exe alias -> pkgconf.exe"
 }
 
+# Stock aubio vcpkg port installs CMake config only (no aubio.pc); waf needs pkg-config.
+$aubioLib = Join-Path $installed "lib\aubio.lib"
+$aubioPc = Join-Path $installed "lib\pkgconfig\aubio.pc"
+if ((Test-Path $aubioLib) -and -not (Test-Path $aubioPc)) {
+  New-Item -ItemType Directory -Force -Path (Split-Path $aubioPc) | Out-Null
+  @"
+prefix=`${pcfiledir}/../..
+exec_prefix=`${prefix}
+libdir=`${exec_prefix}/lib
+includedir=`${prefix}/include
+
+Name: aubio
+Description: a library for audio labelling
+Version: 0.5.0
+Libs: "-L`${libdir}" -laubio
+Cflags: "-I`${includedir}"
+"@ | Set-Content -Path $aubioPc -Encoding ASCII
+  Write-Host "Wrote $aubioPc (vcpkg aubio has no pkg-config module)"
+}
+
 Write-Host "Installed prefix: $installed"
 Write-Host "CMake toolchain: $(Join-Path $VcpkgRoot 'scripts\buildsystems\vcpkg.cmake')"
 Write-Host "Pass -DVCPKG_MANIFEST_DIR=$ManifestDir when configuring cmake/win64."
 Write-Host "waf tip: --boost-include=$installed\include and PKG_CONFIG_PATH=$installed\lib\pkgconfig"
-Write-Host "waf blocker: glibmm-2.4 / sigc++-2.0 still need overlays (see overlays/README.md)."
+Write-Host "Overlays: libsigcpp2 + glibmm24 provide sigc++-2.0 / glibmm-2.4 (see overlays/README.md)."

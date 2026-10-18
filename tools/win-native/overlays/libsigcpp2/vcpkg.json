@@ -1,0 +1,14 @@
+{
+  "name": "libsigcpp2",
+  "version": "2.10.8",
+  "description": "libsigc++ 2.x (pkg-config: sigc++-2.0) for Ardour/glibmm-2.4. Distinct from stock vcpkg libsigcpp 3.x.",
+  "homepage": "https://libsigcplusplus.github.io/libsigcplusplus/",
+  "license": "LGPL-2.1-or-later",
+  "supports": "!uwp & !xbox",
+  "dependencies": [
+    {
+      "name": "vcpkg-tool-meson",
+      "host": true
+    }
+  ]
+}

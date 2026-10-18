@@ -40,7 +40,7 @@ cmake --build build-win64-deps --config Release --target deps_headless_smoke
 
 ### Blocker before `libpbd`
 
-Stock vcpkg `glibmm` / `libsigcpp` are **2.68+/3.x**. Ardour needs **glibmm-2.4 + sigc++-2.0**. Overlay plan: `tools/win-native/overlays/README.md`. Do not enable feature `cxx-glib-modern-incompatible` for product builds.
+Stock vcpkg `glibmm` / `libsigcpp` are **2.68+/3.x**. Ardour needs **glibmm-2.4 + sigc++-2.0** — provided by overlay ports `glibmm24` + `libsigcpp2` (`tools/win-native/overlays/`). Do not enable feature `cxx-glib-modern-incompatible` for product builds.
 
 ## Full product (not green in CI yet)
 
@@ -79,11 +79,12 @@ Manifest for the next deps stage: `tools/win-native/vcpkg.json` (core only — n
 
 1. [x] CI compiles WasapiIO with MSVC (smoke)
 2. [x] Laptop: vcpkg headless C deps + `deps_headless_smoke` target wired
-3. [ ] Overlay `glibmm-2.4` + `sigc++-2.0` → MSVC link `libpbd`
-4. [ ] MSVC link `libardour` → `hardour` (dummy + WASAPI)
-5. [ ] Dummy backend processes a session headless
-6. [ ] Load `wasapi_audiobackend`; open shared-mode Default device
-7. [ ] Tune period/CPU on a cheap laptop
+3. [x] Overlay `glibmm-2.4` + `sigc++-2.0` installed; waf past glibmm; `deps_glibmm_smoke`
+4. [ ] waf past vamp-sdk + rubberband → MSVC link `libpbd`
+5. [ ] MSVC link `libardour` → `hardour` (dummy + WASAPI)
+6. [ ] Dummy backend processes a session headless
+7. [ ] Load `wasapi_audiobackend`; open shared-mode Default device
+8. [ ] Tune period/CPU on a cheap laptop
 8. [ ] Port WinMME MIDI; GUI / installer release (not GTK2-on-MSVC)
 
 ## Success for this phase

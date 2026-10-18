@@ -3,7 +3,8 @@
 # Stages:
 #   1) wasapi_io_smoke     — WasapiIO + Windows SDK only (CI green path)
 #   2) deps_headless_smoke — vcpkg C stack (glib/xml/sndfile/curl/archive/pthread)
-#   3) INTERFACE notes for full wasapi_backend / libpbd (needs glibmm-2.4 overlay)
+#   3) deps_glibmm_smoke   — overlay glibmm-2.4 + sigc++-2.0 link probe
+#   4) INTERFACE notes for full wasapi_backend / libpbd
 #
 # Audio product path: WASAPI shared (libs/backends/wasapi).
 # Exclusive / DirectSound / ASIO: out of scope.
@@ -17,11 +18,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(AIRDOUR_BUILD_WASAPI_IO_SMOKE "Build WasapiIO smoke static lib (Windows SDK only)" ON)
 option(AIRDOUR_BUILD_DEPS_HEADLESS_SMOKE "Build headless vcpkg C-deps probe executable" OFF)
+option(AIRDOUR_BUILD_DEPS_GLIBMM_SMOKE "Build overlay glibmm-2.4 + sigc++-2.0 probe executable" OFF)
 
 if(NOT WIN32)
   message(WARNING "cmake/win64 is intended for MSVC/Win64; smoke lib disabled off-Windows.")
   set(AIRDOUR_BUILD_WASAPI_IO_SMOKE OFF)
   set(AIRDOUR_BUILD_DEPS_HEADLESS_SMOKE OFF)
+  set(AIRDOUR_BUILD_DEPS_GLIBMM_SMOKE OFF)
 endif()
 
 add_compile_definitions(
@@ -46,7 +49,7 @@ set(AIRDOUR_SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 
 # --- Slice order (full product) ---
 # 1. pbd  2. temporal / midipp / evoral  3. ardour  4. dummy + wasapi  5. headless
-# Blocked for pbd: glibmm-2.4 + sigc++-2.0 overlay (stock vcpkg is 2.68+/3.x).
+# glibmm-2.4 + sigc++-2.0: overlay ports in tools/win-native/overlays.
 
 set(WASAPI_IO_SOURCES
   "${AIRDOUR_SRC_ROOT}/libs/backends/wasapi/wasapi_io.cc"
@@ -59,7 +62,7 @@ set(WASAPI_BACKEND_SOURCES
 add_custom_target(airdour_slice_notes
   COMMAND ${CMAKE_COMMAND} -E echo "Build order: pbd -> temporal/midi/evoral -> ardour -> dummy+wasapi -> hardour"
   COMMAND ${CMAKE_COMMAND} -E echo "CI smoke: wasapi_io_smoke (Windows SDK only)"
-  COMMAND ${CMAKE_COMMAND} -E echo "Next: deps_headless_smoke (vcpkg C stack); libpbd needs glibmm-2.4 overlay"
+  COMMAND ${CMAKE_COMMAND} -E echo "Next: deps_glibmm_smoke then waf libpbd (vamp-sdk + rubberband)"
 )
 
 if(AIRDOUR_BUILD_WASAPI_IO_SMOKE)
@@ -147,4 +150,53 @@ if(AIRDOUR_BUILD_DEPS_HEADLESS_SMOKE)
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
   )
   message(STATUS "Airdour win64: deps_headless_smoke enabled (vcpkg C stack)")
+endif()
+
+# --- Overlay glibmm-2.4 + sigc++-2.0 probe ---
+if(AIRDOUR_BUILD_DEPS_GLIBMM_SMOKE)
+  if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
+    set(_gmm_lib "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib")
+    set(_gmm_inc "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include")
+  else()
+    set(_gmm_lib "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/lib")
+    set(_gmm_inc "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/include")
+  endif()
+
+  # Manifest install may live under tools/win-native when installed via Install-HeadlessDeps.ps1.
+  if(NOT EXISTS "${_gmm_lib}/glibmm-2.4.lib")
+    set(_manifest_gmm "${AIRDOUR_SRC_ROOT}/tools/win-native/vcpkg_installed/x64-windows")
+    if(EXISTS "${_manifest_gmm}/lib/glibmm-2.4.lib")
+      set(_gmm_lib "${_manifest_gmm}/lib")
+      set(_gmm_inc "${_manifest_gmm}/include")
+    endif()
+  endif()
+
+  if(NOT EXISTS "${_gmm_lib}/glibmm-2.4.lib")
+    message(FATAL_ERROR "glibmm-2.4.lib not found under ${_gmm_lib}; run tools/win-native/Install-HeadlessDeps.ps1")
+  endif()
+
+  add_executable(deps_glibmm_smoke
+    "${CMAKE_CURRENT_SOURCE_DIR}/deps_glibmm_smoke.cc"
+  )
+
+  target_include_directories(deps_glibmm_smoke PRIVATE
+    "${_gmm_inc}"
+    "${_gmm_inc}/glibmm-2.4"
+    "${_gmm_lib}/glibmm-2.4/include"
+    "${_gmm_inc}/sigc++-2.0"
+    "${_gmm_lib}/sigc++-2.0/include"
+    "${_gmm_inc}/glib-2.0"
+    "${_gmm_lib}/glib-2.0/include"
+  )
+
+  foreach(_rel_lib IN ITEMS glibmm-2.4.lib sigc-2.0.lib gobject-2.0.lib gio-2.0.lib glib-2.0.lib intl.lib)
+    if(EXISTS "${_gmm_lib}/${_rel_lib}")
+      target_link_libraries(deps_glibmm_smoke PRIVATE "${_gmm_lib}/${_rel_lib}")
+    endif()
+  endforeach()
+
+  set_target_properties(deps_glibmm_smoke PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
+  )
+  message(STATUS "Airdour win64: deps_glibmm_smoke enabled (overlay glibmm-2.4)")
 endif()

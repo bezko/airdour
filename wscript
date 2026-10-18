@@ -415,10 +415,26 @@ children = [
 ]
 
 # Paths dropped from the default Windows-only product graph (Airdour).
+# GTK2/ytk stack is intentionally out of scope for MSVC (dead end); headless first.
 _WINDOWS_ONLY_EXCLUDE = set([
         'libs/vfork',
         'libs/ardouralsautil',
         'libs/auscan',
+        # GTK2 / bundled ytk — GUI path is GTK3/gvsbuild or Direct2D later
+        'libs/clearlooks-newer',
+        'libs/tk/ztk',
+        'libs/tk/ydk-pixbuf',
+        'libs/tk/ydk',
+        'libs/tk/ytk',
+        'libs/tk/ztkmm',
+        'libs/tk/ydkmm',
+        'libs/tk/ytkmm',
+        'libs/tk/suil',
+        'libs/gtkmm2ext',
+        'libs/canvas',
+        'libs/widgets',
+        'libs/waveview',
+        'gtk2_ardour',
 ])
 
 def windows_only_children():
@@ -1530,7 +1546,8 @@ int main () { __int128 x = 0; return 0; }
     if not (Options.options.dist_target == 'mingw' or Options.options.dist_target == 'msvc'):
         conf.env.append_value('LIB', 'm')
 
-    config_children = windows_only_children() if conf.env.get('AIRDOUR_WINDOWS_ONLY') else children
+    # waf ConfigSet: env.get is not dict.get (returns [] for key "get") — use is_defined.
+    config_children = windows_only_children() if conf.is_defined('AIRDOUR_WINDOWS_ONLY') else children
     for i in config_children:
         conf.recurse(i)
 
@@ -1577,7 +1594,7 @@ const char* const ardour_config_info = "\\n\\
     write_config_text('AudioUnits',            conf.is_defined('AUDIOUNIT_SUPPORT'))
     write_config_text('Build target',          conf.env['build_target'])
     write_config_text('Airdour Windows-only',  conf.is_defined('AIRDOUR_WINDOWS_ONLY'))
-    write_config_text('WASAPI backend',        conf.env.get('BUILD_WASAPIBACKEND'))
+    write_config_text('WASAPI backend',        conf.env['BUILD_WASAPIBACKEND'])
     write_config_text('Canvas Test UI',        conf.is_defined('CANVASTESTUI'))
     write_config_text('Beatbox test app',      conf.is_defined('BEATBOX'))
     write_config_text('CoreAudio',             conf.is_defined('HAVE_COREAUDIO'))
@@ -1689,7 +1706,7 @@ def build(bld):
         obj.chmod        = Utils.O755
         obj.install_path = bld.env['LIBDIR']
 
-    build_children = windows_only_children() if bld.env.get('AIRDOUR_WINDOWS_ONLY') else children
+    build_children = windows_only_children() if bld.is_defined('AIRDOUR_WINDOWS_ONLY') else children
     for i in build_children:
         bld.recurse(i)
 
