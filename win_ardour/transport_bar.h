@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Direct2D transport: Play / Stop / Rec / Loop / Punch / Mark / Split / Fade /
- * Stretch / Pitch± / Reverse / Snap / Count / Click / Tempo± / Shuttle / Import / Save / Open / Export.
+ * Stretch / Pitch± / Reverse / Norm / Snap / Count / Click / Tempo± / Shuttle / Import / Save / Open / Export.
  * Clock shows MM:SS + BBT + timecode + BPM.
  */
 
@@ -37,6 +37,7 @@ enum class TransportHit {
 	PitchUp,
 	PitchDown,
 	Reverse,
+	Normalize,
 	Snap,
 	CountIn,
 	Click,
@@ -153,6 +154,7 @@ private:
 	D2D1_RECT_F _pitch_up_btn;
 	D2D1_RECT_F _pitch_dn_btn;
 	D2D1_RECT_F _reverse_btn;
+	D2D1_RECT_F _normalize_btn;
 	D2D1_RECT_F _snap_btn;
 	D2D1_RECT_F _count_btn;
 	D2D1_RECT_F _click_btn;

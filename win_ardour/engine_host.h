@@ -428,6 +428,13 @@ public:
 	 */
 	bool reverse_selected ();
 
+	/**
+	 * Normalize selected AudioRegion to target_dbfs (default −1 dBFS).
+	 * Uses AudioRegion::maximum_amplitude + normalize (scale_amplitude).
+	 * Peaks refresh via scale applied in read_peaks.
+	 */
+	bool normalize_selected (float target_dbfs = -1.f);
+
 	/** Snap-to-grid: TempoMap beat/bar (fallback fixed 120 BPM). */
 	void set_snap_enabled (bool on);
 	bool snap_enabled () const;
@@ -489,6 +496,12 @@ public:
 	 * For --smoke-reverse.
 	 */
 	bool smoke_reverse ();
+
+	/**
+	 * Import tone → select → normalize −1 dBFS; verify scale_amplitude.
+	 * For --smoke-normalize.
+	 */
+	bool smoke_normalize ();
 
 	/**
 	 * Enable beat snap; verify 1.1s → ~1.0s; density bar; off → identity.

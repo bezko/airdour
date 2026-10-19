@@ -67,6 +67,7 @@
 #include "ardour/audiofilesource.h"
 #include "ardour/sndfilesource.h"
 #include "ardour/source_factory.h"
+#include "ardour/dB.h"
 #include "ardour/pitch.h"
 #include "ardour/reverse.h"
 #include "ardour/stretch.h"
@@ -4865,6 +4866,64 @@ EngineHost::reverse_selected ()
 	}
 }
 
+bool
+EngineHost::normalize_selected (float target_dbfs)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (!ar) {
+		_snap.detail = L"normalize — select an audio region";
+		return false;
+	}
+	if (!std::isfinite (target_dbfs) || target_dbfs > 0.f) {
+		target_dbfs = -1.f;
+	}
+	if (target_dbfs < -112.f) {
+		target_dbfs = -112.f;
+	}
+	try {
+		double max_amp = ar->maximum_amplitude (nullptr);
+		if (max_amp < 0.0) {
+			_snap.detail = L"normalize cancelled";
+			return false;
+		}
+		if (max_amp < (double)GAIN_COEFF_SMALL) {
+			_snap.detail = L"normalize — silence / no peak";
+			return false;
+		}
+
+		float scale_before = ar->scale_amplitude ();
+		_impl->session->begin_reversible_command ("normalize");
+		ar->clear_changes ();
+		ar->normalize ((float)max_amp, target_dbfs);
+		_impl->session->add_command (new StatefulDiffCommand (ar));
+		_impl->session->commit_reversible_command ();
+
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+
+		float scale_after = ar->scale_amplitude ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: normalize ok (peak=%.4f → %.1f dBFS scale %.4f→%.4f)\n",
+		              max_amp, target_dbfs, scale_before, scale_after);
+		std::fflush (stderr);
+		_snap.detail = L"normalize — peaks refresh";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: normalize exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"normalize exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"normalize failed";
+		return false;
+	}
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -5482,6 +5541,93 @@ EngineHost::smoke_reverse ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-reverse exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_normalize ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-normalize failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-normalize FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 0.8f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-normalize FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-normalize FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::shared_ptr<Region> region = _impl->selected_region.lock ();
+		std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+		if (!ar) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-normalize FAILED (no AudioRegion)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float scale0 = ar->scale_amplitude ();
+		double peak0 = ar->maximum_amplitude (nullptr);
+		if (peak0 < (double)GAIN_COEFF_SMALL) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-normalize FAILED (peak=%.6f)\n",
+			              peak0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		const float target_db = -1.f;
+		if (!normalize_selected (target_db)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-normalize FAILED (normalize)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		ar = std::dynamic_pointer_cast<AudioRegion> (_impl->selected_region.lock ());
+		if (!ar) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-normalize FAILED (selection lost)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float scale1 = ar->scale_amplitude ();
+		float expect = dB_to_coefficient (target_db) / (float)peak0;
+		/* AudioRegion::normalize nudges unity target by FLT_EPSILON; −1 dBFS is fine. */
+		if (std::fabs (scale1 - expect) > 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-normalize FAILED (scale %.4f→%.4f expect≈%.4f)\n",
+			              scale0, scale1, expect);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-normalize ok (−1 dBFS peak=%.3f scale %.3f→%.3f)\n",
+		              peak0, scale0, scale1);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-normalize ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-normalize exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -10271,6 +10417,13 @@ EngineHost::reverse_selected ()
 	return false;
 }
 
+bool
+EngineHost::normalize_selected (float target_dbfs)
+{
+	(void)target_dbfs;
+	return false;
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -10354,6 +10507,12 @@ EngineHost::smoke_pitch ()
 
 bool
 EngineHost::smoke_reverse ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_normalize ()
 {
 	return false;
 }

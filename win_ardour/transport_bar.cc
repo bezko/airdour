@@ -101,6 +101,7 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_pitch_up_btn, x, narrow + 4.f * dpi_scale);
 	place (_pitch_dn_btn, x, narrow + 4.f * dpi_scale);
 	place (_reverse_btn, x, btn_w);
+	place (_normalize_btn, x, btn_w);
 	place (_snap_btn, x, btn_w);
 	place (_count_btn, x, btn_w);
 	place (_click_btn, x, btn_w);
@@ -182,6 +183,9 @@ TransportBar::hit_test (float x, float y) const
 	}
 	if (contains (_reverse_btn, x, y)) {
 		return TransportHit::Reverse;
+	}
+	if (contains (_normalize_btn, x, y)) {
+		return TransportHit::Normalize;
 	}
 	if (contains (_snap_btn, x, y)) {
 		return TransportHit::Snap;
@@ -297,6 +301,7 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_pitch_up_btn, L"♯1", false);
 	draw_btn (_pitch_dn_btn, L"♭1", false);
 	draw_btn (_reverse_btn, L"Rev", false);
+	draw_btn (_normalize_btn, L"Norm", false);
 	draw_btn (_snap_btn, L"Snap", _snap_enabled);
 	draw_btn (_count_btn, L"Count", _count_in_enabled);
 	draw_btn (_click_btn, L"Click", _click_enabled);
