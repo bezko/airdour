@@ -32,7 +32,9 @@
 #include "ardour/debug.h"
 
 #include "audio_utils.h"
+#include "debug.h"
 #include "wasapi_backend.h"
+#include "winmmemidi_output_device.h"
 
 using namespace ARDOUR;
 using namespace PBD;
@@ -41,8 +43,27 @@ using namespace PBD;
 #define BACKEND_NAME "WASAPI"
 #endif
 
+static const char* const winmme_driver_name = X_("WinMME");
+static const char* const none_midi_driver_name = X_("None");
+
 static std::string s_instance_name;
 static std::shared_ptr<WasapiBackend> _instance;
+
+static uint32_t
+elf_hash (std::string const& s)
+{
+	const uint8_t* b = (const uint8_t*)s.c_str ();
+	uint32_t       h = 0;
+	for (size_t i = 0; i < s.length (); ++i) {
+		h             = (h << 4) + b[i];
+		uint32_t high = h & 0xF0000000;
+		if (high) {
+			h ^= high >> 24;
+			h &= ~high;
+		}
+	}
+	return h;
+}
 
 /* —— ports —— */
 
@@ -81,6 +102,7 @@ WasapiMidiEvent::WasapiMidiEvent (const WasapiMidiEvent& other)
 WasapiMidiPort::WasapiMidiPort (WasapiBackend& b, const std::string& name, PortFlags flags)
 	: BackendPort (b, name, flags)
 	, _bufperiod (0)
+	, _n_periods (1)
 {
 	_buffer[0].reserve (256);
 	_buffer[1].reserve (256);
@@ -150,6 +172,8 @@ WasapiBackend::WasapiBackend (AudioEngine& e, AudioBackendInfo& info)
 	, _buffer_size (512)
 	, _systemic_input_latency (0)
 	, _systemic_output_latency (0)
+	, _midi_driver_option (winmme_driver_name)
+	, _midiio (0)
 	, _run (false)
 	, _active (false)
 	, _freewheeling (false)
@@ -159,11 +183,16 @@ WasapiBackend::WasapiBackend (AudioEngine& e, AudioBackendInfo& info)
 	, _dsp_load (0.f)
 	, _main_thread_running (false)
 {
+#ifdef _WIN32
+	_midiio = new WinMMEMidiIO ();
+#endif
 }
 
 WasapiBackend::~WasapiBackend ()
 {
 	stop ();
+	delete _midiio;
+	_midiio = 0;
 }
 
 std::string
@@ -400,39 +429,75 @@ std::vector<std::string>
 WasapiBackend::enumerate_midi_options () const
 {
 	std::vector<std::string> opts;
-	opts.push_back ("None");
-	opts.push_back ("WinMME"); /* reserved — MIDI ported in a follow-up */
+	opts.push_back (none_midi_driver_name);
+	opts.push_back (winmme_driver_name);
 	return opts;
 }
 
 int
-WasapiBackend::set_midi_option (const std::string&)
+WasapiBackend::set_midi_option (const std::string& opt)
 {
+	if (opt != none_midi_driver_name && opt != winmme_driver_name) {
+		return -1;
+	}
+	_midi_driver_option = opt;
 	return 0;
 }
 
 std::string
 WasapiBackend::midi_option () const
 {
-	return "None";
+	return _midi_driver_option;
+}
+
+MidiDeviceInfo*
+WasapiBackend::midi_device_info (const std::string& device_name) const
+{
+	if (!_midiio || _midi_driver_option != winmme_driver_name) {
+		return 0;
+	}
+	std::vector<MidiDeviceInfo*> dev_info = _midiio->get_device_info ();
+	for (std::vector<MidiDeviceInfo*>::const_iterator i = dev_info.begin ();
+	     i != dev_info.end (); ++i) {
+		if ((*i)->device_name == device_name) {
+			return *i;
+		}
+	}
+	return 0;
 }
 
 std::vector<AudioBackend::DeviceStatus>
 WasapiBackend::enumerate_midi_devices () const
 {
-	return std::vector<DeviceStatus> ();
+	std::vector<DeviceStatus> devices;
+	if (!_midiio || _midi_driver_option != winmme_driver_name) {
+		return devices;
+	}
+	const_cast<WinMMEMidiIO*> (_midiio)->update_device_info ();
+	std::vector<MidiDeviceInfo*> info = _midiio->get_device_info ();
+	for (std::vector<MidiDeviceInfo*>::const_iterator i = info.begin ();
+	     i != info.end (); ++i) {
+		devices.push_back (DeviceStatus ((*i)->device_name, true));
+	}
+	return devices;
 }
 
 int
-WasapiBackend::set_midi_device_enabled (std::string const, bool)
+WasapiBackend::set_midi_device_enabled (std::string const device, bool enable)
 {
+	MidiDeviceInfo* nfo = midi_device_info (device);
+	if (!nfo) {
+		return -1;
+	}
+	nfo->enable = enable;
 	return 0;
 }
 
 bool
-WasapiBackend::midi_device_enabled (std::string const) const
+WasapiBackend::midi_device_enabled (std::string const device) const
 {
-	return false;
+	MidiDeviceInfo* nfo = midi_device_info (device);
+	return nfo ? nfo->enable : false;
 }
 
 int
@@ -471,6 +536,145 @@ WasapiBackend::register_system_audio_ports ()
 }
 
 int
+WasapiBackend::register_system_midi_ports (std::string const& device)
+{
+	if (!_midiio || _midi_driver_option != winmme_driver_name) {
+		DEBUG_MIDI ("No WinMME MIDI backend selected\n");
+		return 0;
+	}
+
+	LatencyRange lr;
+	const std::vector<WinMMEMidiInputDevice*> inputs = _midiio->get_inputs ();
+
+	for (std::vector<WinMMEMidiInputDevice*>::const_iterator i = inputs.begin ();
+	     i != inputs.end (); ++i) {
+		if (!device.empty () && device != (*i)->name ()) {
+			continue;
+		}
+		MidiDeviceInfo* info = _midiio->get_device_info ((*i)->name ());
+		if (!info || !info->enable) {
+			continue;
+		}
+
+		char tmp[64];
+		for (int x = 0; x < 10; ++x) {
+			snprintf (tmp, sizeof (tmp), "system:midi_capture_%x%d", elf_hash ((*i)->name ()), x);
+			if (!find_port (tmp)) {
+				break;
+			}
+		}
+
+		PortPtr p = add_port (std::string (tmp), DataType::MIDI,
+		                      static_cast<PortFlags> (IsOutput | IsPhysical | IsTerminal));
+		if (!p) {
+			return -1;
+		}
+
+		lr.min = lr.max = (_measure_latency ? 0 : info->systemic_input_latency);
+		set_latency_range (p, false, lr);
+
+		BackendPortPtr ap = std::dynamic_pointer_cast<BackendPort> (p);
+		ap->set_hw_port_name ((*i)->name ());
+
+		std::shared_ptr<WasapiMidiPort> midi_port = std::dynamic_pointer_cast<WasapiMidiPort> (p);
+		midi_clear (midi_port->get_buffer (0));
+		_system_midi_in.push_back (midi_port);
+		DEBUG_MIDI (string_compose ("Registered MIDI input port: %1 (%2)\n", tmp, (*i)->name ()));
+	}
+
+	const std::vector<WinMMEMidiOutputDevice*> outputs = _midiio->get_outputs ();
+
+	for (std::vector<WinMMEMidiOutputDevice*>::const_iterator i = outputs.begin ();
+	     i != outputs.end (); ++i) {
+		if (!device.empty () && device != (*i)->name ()) {
+			continue;
+		}
+		MidiDeviceInfo* info = _midiio->get_device_info ((*i)->name ());
+		if (!info || !info->enable) {
+			continue;
+		}
+
+		char tmp[64];
+		for (int x = 0; x < 10; ++x) {
+			snprintf (tmp, sizeof (tmp), "system:midi_playback_%x%d", elf_hash ((*i)->name ()), x);
+			if (!find_port (tmp)) {
+				break;
+			}
+		}
+		PortPtr p = add_port (std::string (tmp), DataType::MIDI,
+		                      static_cast<PortFlags> (IsInput | IsPhysical | IsTerminal));
+		if (!p) {
+			return -1;
+		}
+
+		lr.min = lr.max = (_measure_latency ? 0 : info->systemic_output_latency);
+		set_latency_range (p, false, lr);
+
+		BackendPortPtr ap = std::dynamic_pointer_cast<BackendPort> (p);
+		ap->set_hw_port_name ((*i)->name ());
+
+		std::shared_ptr<WasapiMidiPort> midi_port = std::dynamic_pointer_cast<WasapiMidiPort> (p);
+		midi_port->set_n_periods (2);
+		midi_clear (midi_port->get_buffer (0));
+		_system_midi_out.push_back (midi_port);
+		DEBUG_MIDI (string_compose ("Registered MIDI output port: %1 (%2)\n", tmp, (*i)->name ()));
+	}
+
+	return 0;
+}
+
+void
+WasapiBackend::process_incoming_midi ()
+{
+	if (!_midiio || _midi_driver_option != winmme_driver_name) {
+		return;
+	}
+	uint32_t i = 0;
+	for (std::vector<BackendPortPtr>::const_iterator it = _system_midi_in.begin ();
+	     it != _system_midi_in.end (); ++it, ++i) {
+		WasapiMidiBuffer* mbuf = static_cast<WasapiMidiBuffer*> ((*it)->get_buffer (0));
+		mbuf->clear ();
+		uint64_t timestamp;
+		uint8_t  data[MaxWinMidiEventSize];
+		size_t   size = sizeof (data);
+		while (_midiio->dequeue_input_event (
+		           i,
+		           _cycle_timer.get_start (),
+		           _cycle_timer.get_next_start (),
+		           timestamp,
+		           data,
+		           size)) {
+			pframes_t sample_offset = _cycle_timer.samples_since_cycle_start (timestamp);
+			midi_event_put (mbuf, sample_offset, data, size);
+			size = sizeof (data);
+		}
+	}
+}
+
+void
+WasapiBackend::process_outgoing_midi ()
+{
+	if (!_midiio || _midi_driver_option != winmme_driver_name) {
+		return;
+	}
+	for (std::vector<BackendPortPtr>::iterator it = _system_midi_out.begin ();
+	     it != _system_midi_out.end (); ++it) {
+		std::dynamic_pointer_cast<WasapiMidiPort> (*it)->next_period ();
+	}
+	uint32_t i = 0;
+	for (std::vector<BackendPortPtr>::const_iterator it = _system_midi_out.begin ();
+	     it != _system_midi_out.end (); ++it, ++i) {
+		const WasapiMidiBuffer* src =
+			std::dynamic_pointer_cast<const WasapiMidiPort> (*it)->const_buffer ();
+		for (WasapiMidiBuffer::const_iterator mit = src->begin (); mit != src->end (); ++mit) {
+			uint64_t timestamp =
+			    _cycle_timer.timestamp_from_sample_offset (mit->timestamp ());
+			_midiio->enqueue_output_event (i, timestamp, mit->data (), mit->size ());
+		}
+	}
+}
+
+int
 WasapiBackend::_start (bool for_latency_measurement)
 {
 #ifndef _WIN32
@@ -496,16 +700,33 @@ WasapiBackend::_start (bool for_latency_measurement)
 	_interleaved_playback.assign (_buffer_size * std::max (1u, _io.playback_channels ()), 0.f);
 
 	clear_ports ();
+	_system_midi_in.clear ();
+	_system_midi_out.clear ();
 
 	if (register_system_audio_ports ()) {
 		_io.close ();
 		return PortRegistrationError;
 	}
 
+	if (_midiio && _midi_driver_option == winmme_driver_name) {
+		_midiio->start ();
+		if (register_system_midi_ports ()) {
+			_midiio->stop ();
+			_io.close ();
+			return PortRegistrationError;
+		}
+	}
+
+	_cycle_timer.set_samplerate (_samplerate);
+	_cycle_timer.set_samples_per_cycle (_buffer_size);
+
 	engine.sample_rate_change (_samplerate);
 	engine.buffer_size_change (_buffer_size);
 
 	if (engine.reestablish_ports ()) {
+		if (_midiio) {
+			_midiio->stop ();
+		}
 		_io.close ();
 		return PortReconnectError;
 	}
@@ -524,6 +745,9 @@ WasapiBackend::_start (bool for_latency_measurement)
 
 	if (!start_main_process_thread ()) {
 		_run = false;
+		if (_midiio) {
+			_midiio->stop ();
+		}
 		_io.close ();
 		return ProcessThreadStartError;
 	}
@@ -623,7 +847,9 @@ WasapiBackend::main_process_thread (void* arg)
 bool
 WasapiBackend::run_one_cycle ()
 {
-	_dsp_load_calc.set_start_timestamp_us (PBD::get_microseconds ());
+	const int64_t cycle_us = PBD::get_microseconds ();
+	_cycle_timer.reset_start (cycle_us);
+	_dsp_load_calc.set_start_timestamp_us (cycle_us);
 
 	int w = _io.wait_for_period ();
 	if (w < 0) {
@@ -644,6 +870,8 @@ WasapiBackend::run_one_cycle ()
 	const uint32_t n_in = _io.capture_channels ();
 	const uint32_t n_out = _io.playback_channels ();
 
+	process_incoming_midi ();
+
 	uint32_t i = 0;
 	for (std::vector<BackendPortPtr>::const_iterator it = _system_inputs.begin ();
 	     it != _system_inputs.end (); ++it, ++i) {
@@ -663,6 +891,8 @@ WasapiBackend::run_one_cycle ()
 	if (engine.process_callback (nframes)) {
 		return false;
 	}
+
+	process_outgoing_midi ();
 
 	if (play) {
 		memset (play, 0, _interleaved_playback.size () * sizeof (float));
@@ -740,6 +970,11 @@ WasapiBackend::stop ()
 	_run = false;
 	stop_main_process_thread ();
 	join_process_threads ();
+	if (_midiio) {
+		_midiio->stop ();
+	}
+	_system_midi_in.clear ();
+	_system_midi_out.clear ();
 	_io.close ();
 	clear_ports ();
 	_active = false;

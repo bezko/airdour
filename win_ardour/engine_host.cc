@@ -36,7 +36,11 @@
 #include "ardour/region.h"
 #include "ardour/region_factory.h"
 #include "ardour/route.h"
+#include "ardour/audio_backend.h"
+#include "ardour/chan_count.h"
 #include "ardour/location.h"
+#include "ardour/midi_track.h"
+#include "ardour/plugin.h"
 #include "ardour/session.h"
 #include "ardour/session_event.h"
 #include "ardour/audiofilesource.h"
@@ -271,8 +275,10 @@ public:
 	samplecnt_t     play_origin_samples;
 	std::string     session_dir;
 	std::vector<std::shared_ptr<AudioTrack> > tracks;
+	std::shared_ptr<MidiTrack> midi_track;
 	int             selected_track;
 	std::weak_ptr<Region> selected_region;
+	float           midi_activity;
 
 	Impl ()
 		: engine (nullptr)
@@ -282,6 +288,7 @@ public:
 		, transport_playing (false)
 		, play_origin_samples (0)
 		, selected_track (-1)
+		, midi_activity (0.f)
 	{
 	}
 };
@@ -323,6 +330,15 @@ EngineHost::EngineHost ()
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
 	}
+	_snap.midi_ok = false;
+	_snap.midi_track_ok = false;
+	_snap.midi_activity = 0.f;
+	_snap.midi_device_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMaxMidiDevices; ++i) {
+		_snap.midi_devices[i].name[0] = L'\0';
+		_snap.midi_devices[i].input = false;
+	}
+	_snap.midi_option.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -550,6 +566,8 @@ EngineHost::destroy_session ()
 		return;
 	}
 	_impl->tracks.clear ();
+	_impl->midi_track.reset ();
+	_impl->midi_activity = 0.f;
 	_impl->selected_track = -1;
 	_impl->selected_region.reset ();
 	if (_impl->session) {
@@ -1164,6 +1182,8 @@ EngineHost::start ()
 		_snap.backend = utf8_to_wide (name);
 		return false;
 	}
+
+	configure_backend_midi ();
 
 	step ("engine->start");
 	if (_impl->engine->start () != 0) {
@@ -2370,6 +2390,217 @@ EngineHost::smoke_loop_markers ()
 	}
 }
 
+bool
+EngineHost::configure_backend_midi ()
+{
+	if (!_impl || !_impl->engine) {
+		return false;
+	}
+	std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
+	if (!be) {
+		return false;
+	}
+	try {
+		std::vector<std::string> opts = be->enumerate_midi_options ();
+		std::string chosen;
+		/* Prefer real WinMME; Dummy uses loopback/silence ports. Never PortAudio. */
+		for (size_t i = 0; i < opts.size (); ++i) {
+			if (opts[i] == "WinMME") {
+				chosen = opts[i];
+				break;
+			}
+		}
+		if (chosen.empty ()) {
+			for (size_t i = 0; i < opts.size (); ++i) {
+				if (opts[i].find ("Loopback") != std::string::npos) {
+					chosen = opts[i];
+					break;
+				}
+			}
+		}
+		if (chosen.empty () && !opts.empty ()) {
+			/* Prefer any option that is not "None" / "No MIDI". */
+			for (size_t i = 0; i < opts.size (); ++i) {
+				if (opts[i].find ("No MIDI") == std::string::npos
+				    && opts[i] != "None") {
+					chosen = opts[i];
+					break;
+				}
+			}
+		}
+		if (chosen.empty () && !opts.empty ()) {
+			chosen = opts[0];
+		}
+		if (!chosen.empty ()) {
+			be->set_midi_option (chosen);
+			_snap.midi_option = utf8_to_wide (chosen);
+			std::fprintf (stderr, "airdour_win_shell: MIDI option → %s\n", chosen.c_str ());
+			std::fflush (stderr);
+			return true;
+		}
+	} catch (...) {
+	}
+	return false;
+}
+
+void
+EngineHost::refresh_midi_snap ()
+{
+	_snap.midi_ok = false;
+	_snap.midi_track_ok = (_impl && _impl->midi_track);
+	_snap.midi_activity = _impl ? _impl->midi_activity : 0.f;
+	_snap.midi_device_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMaxMidiDevices; ++i) {
+		_snap.midi_devices[i].name[0] = L'\0';
+		_snap.midi_devices[i].input = false;
+	}
+	if (!_impl || !_impl->engine) {
+		return;
+	}
+	try {
+		std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
+		if (!be) {
+			return;
+		}
+		_snap.midi_option = utf8_to_wide (be->midi_option ());
+		std::vector<AudioBackend::DeviceStatus> devs = be->enumerate_midi_devices ();
+		int n = 0;
+		for (size_t i = 0; i < devs.size () && n < EngineSnapshot::kMaxMidiDevices; ++i) {
+			std::wstring w = utf8_to_wide (devs[i].name);
+			wcsncpy_s (_snap.midi_devices[n].name, w.c_str (), _TRUNCATE);
+			/* Heuristic: names containing "out" / "synth" → output. */
+			std::string lower = devs[i].name;
+			for (size_t c = 0; c < lower.size (); ++c) {
+				if (lower[c] >= 'A' && lower[c] <= 'Z') {
+					lower[c] = (char)(lower[c] - 'A' + 'a');
+				}
+			}
+			_snap.midi_devices[n].input =
+			    (lower.find ("out") == std::string::npos
+			     && lower.find ("synth") == std::string::npos
+			     && lower.find ("playback") == std::string::npos);
+			++n;
+		}
+		_snap.midi_device_count = n;
+
+		/* Physical MIDI ports from backend. */
+		std::vector<std::string> phys_in;
+		std::vector<std::string> phys_out;
+		be->get_physical_inputs (DataType::MIDI, phys_in);
+		be->get_physical_outputs (DataType::MIDI, phys_out);
+		_snap.midi_ok = (_snap.midi_option.find (L"None") == std::wstring::npos
+		                 && _snap.midi_option.find (L"No MIDI") == std::wstring::npos)
+		                || !phys_in.empty () || !phys_out.empty () || n > 0;
+
+		/* Activity: if MIDI track PeakMeter has energy, bump; else decay. */
+		if (_impl->midi_track) {
+			std::shared_ptr<PeakMeter> pm = _impl->midi_track->peak_meter ();
+			float peak = peak_linear_from_meter (pm);
+			if (peak > _impl->midi_activity) {
+				_impl->midi_activity = peak;
+			} else {
+				_impl->midi_activity *= 0.92f;
+				if (_impl->midi_activity < 0.01f) {
+					_impl->midi_activity = 0.f;
+				}
+			}
+			_snap.midi_activity = _impl->midi_activity;
+		}
+		_snap.midi_track_ok = (bool)_impl->midi_track;
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::ensure_midi_track ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (_impl->midi_track) {
+		refresh_midi_snap ();
+		return true;
+	}
+	try {
+		ChanCount midi_io (DataType::MIDI, 1);
+		std::list<std::shared_ptr<MidiTrack> > created = _impl->session->new_midi_track (
+			midi_io,
+			midi_io,
+			true /*strict_io*/,
+			std::shared_ptr<PluginInfo> (),
+			(Plugin::PresetRecord*)0,
+			std::shared_ptr<RouteGroup> (),
+			1,
+			"MIDI",
+			PresentationInfo::max_order,
+			Normal,
+			true /*input_auto_connect*/,
+			false);
+		if (created.empty () || !created.front ()) {
+			_snap.detail = L"MIDI track create failed";
+			return false;
+		}
+		_impl->midi_track = created.front ();
+		refresh_midi_snap ();
+		_snap.detail = L"MIDI track ready";
+		std::fprintf (stderr, "airdour_win_shell: created MIDI track \"%s\"\n",
+		              _impl->midi_track->name ().c_str ());
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: MIDI track exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"MIDI track exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"MIDI track unknown failure";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi option=%ls devices=%d midi_ok=%d\n",
+		              _snap.midi_option.c_str (),
+		              _snap.midi_device_count,
+		              _snap.midi_ok ? 1 : 0);
+		for (int i = 0; i < _snap.midi_device_count; ++i) {
+			std::fprintf (stderr, "airdour_win_shell:   midi[%d] %ls (%s)\n",
+			              i, _snap.midi_devices[i].name,
+			              _snap.midi_devices[i].input ? "in?" : "out?");
+		}
+		std::fflush (stderr);
+
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* Dummy/WinMME path is ok even with 0 hardware devices (enumerate worked). */
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi ok (track=1 option=%ls devices=%d)\n",
+		              _snap.midi_option.c_str (), _snap.midi_device_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 void
 EngineHost::refresh_snapshot ()
 {
@@ -2398,6 +2629,7 @@ EngineHost::refresh_snapshot ()
 			refresh_history_flags ();
 			refresh_selection_snap ();
 			refresh_locations_snap ();
+			refresh_midi_snap ();
 		} else {
 			_snap.waves_from_session = false;
 			_snap.session_record_armed = false;
@@ -2481,6 +2713,15 @@ EngineHost::EngineHost ()
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
 	}
+	_snap.midi_ok = false;
+	_snap.midi_track_ok = false;
+	_snap.midi_activity = 0.f;
+	_snap.midi_device_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMaxMidiDevices; ++i) {
+		_snap.midi_devices[i].name[0] = L'\0';
+		_snap.midi_devices[i].input = false;
+	}
+	_snap.midi_option.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -2790,6 +3031,29 @@ EngineHost::locate_to (float time_sec, bool snap_to_marker, float slop_sec)
 
 bool
 EngineHost::smoke_loop_markers ()
+{
+	return false;
+}
+
+bool
+EngineHost::ensure_midi_track ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_midi_snap ()
+{
+}
+
+bool
+EngineHost::smoke_midi ()
+{
+	return false;
+}
+
+bool
+EngineHost::configure_backend_midi ()
 {
 	return false;
 }

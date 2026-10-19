@@ -13,13 +13,14 @@ Native Windows audio backend implementing `ARDOUR::AudioBackend`.
 - MMCSS “Pro Audio” on the main process thread (`PBD::MMCSS`)
 - Multimedia timer resolution (`PBD::MMTIMERS`)
 - System capture/playback ports registered into `PortEngineSharedImpl`
+- **WinMME MIDI** (`winmmemidi_*` in this tree; not PortAudio) — option `WinMME`
 
 ## Out of scope (v1)
 
 - WASAPI exclusive mode
 - DirectSound
 - ASIO / specialized drivers
-- WinMME MIDI (reserved option string; port from `libs/backends/portaudio/winmmemidi_*` next)
+- PortAudio MIDI bridge
 - Capture when capture mix rate ≠ render mix rate (skipped with honest fallback)
 
 ## Non-Windows / CI

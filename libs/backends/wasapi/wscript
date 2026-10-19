@@ -17,6 +17,10 @@ def build(bld):
     obj.source = [
         'wasapi_backend.cc',
         'wasapi_io.cc',
+        'winmmemidi_io.cc',
+        'winmmemidi_input_device.cc',
+        'winmmemidi_output_device.cc',
+        'midi_util.cc',
     ]
     obj.includes = ['.']
     obj.name = 'wasapi_audiobackend'

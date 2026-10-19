@@ -24,7 +24,9 @@
 #include "ardour/port_engine_shared.h"
 #include "ardour/types.h"
 
+#include "cycle_timer.h"
 #include "wasapi_io.h"
+#include "winmmemidi_io.h"
 
 namespace ARDOUR {
 
@@ -79,10 +81,22 @@ public:
 
 	void* get_buffer (pframes_t nframes);
 	const WasapiMidiBuffer* const_buffer () const { return &_buffer[_bufperiod]; }
+	void next_period () {
+		if (_n_periods > 1) {
+			get_buffer (0);
+			_bufperiod = (_bufperiod + 1) % _n_periods;
+		}
+	}
+	void set_n_periods (int n) {
+		if (n > 0 && n < 3) {
+			_n_periods = n;
+		}
+	}
 
 private:
 	WasapiMidiBuffer _buffer[2];
 	int              _bufperiod;
+	int              _n_periods;
 };
 
 /**
@@ -225,6 +239,10 @@ private:
 	static void* main_process_thread (void*);
 
 	int  register_system_audio_ports ();
+	int  register_system_midi_ports (std::string const& device = std::string ());
+	void process_incoming_midi ();
+	void process_outgoing_midi ();
+	MidiDeviceInfo* midi_device_info (const std::string& device_name) const;
 	bool start_main_process_thread ();
 	bool stop_main_process_thread ();
 	bool run_one_cycle ();
@@ -245,6 +263,13 @@ private:
 	uint32_t    _buffer_size;
 	uint32_t    _systemic_input_latency;
 	uint32_t    _systemic_output_latency;
+
+	std::string    _midi_driver_option;
+	WinMMEMidiIO*  _midiio;
+	CycleTimer     _cycle_timer;
+
+	std::vector<BackendPortPtr> _system_midi_in;
+	std::vector<BackendPortPtr> _system_midi_out;
 
 	std::atomic<bool> _run;
 	std::atomic<bool> _active;

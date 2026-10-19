@@ -2,22 +2,29 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * UI-thread engine + minimal Session attach for win_ardour.
- * Peak meters, transport, record, import, undo, loop, markers.
+ * Peak meters, transport, record, import, undo, loop, markers, MIDI.
  */
 
 #pragma once
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 struct EngineMarkerSnap {
 	float        sec;
 	wchar_t      name[24];
 };
 
+struct EngineMidiDeviceSnap {
+	wchar_t name[64];
+	bool    input; /* true = capture / in; false = playback / out (best-effort) */
+};
+
 struct EngineSnapshot {
 	static constexpr int kMeters = 3;
 	static constexpr int kMaxMarkers = 8;
+	static constexpr int kMaxMidiDevices = 16;
 
 	bool         available; /* compiled with AIRDOUR_WIN_SHELL_WITH_ENGINE */
 	bool         running;
@@ -41,6 +48,12 @@ struct EngineSnapshot {
 	float        loop_end_sec;
 	int          marker_count;
 	EngineMarkerSnap markers[kMaxMarkers];
+	bool         midi_ok; /* backend MIDI option active / ports present */
+	bool         midi_track_ok; /* Session has at least one MidiTrack */
+	float        midi_activity; /* 0..1 decaying activity indicator */
+	int          midi_device_count;
+	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices];
+	std::wstring midi_option; /* e.g. WinMME / Dummy loopback */
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
 	std::wstring export_path; /* last exported WAV (UTF-16 display) */
@@ -170,6 +183,18 @@ public:
 	 */
 	bool smoke_loop_markers ();
 
+	/** Ensure a Session MidiTrack exists (creates one if needed). */
+	bool ensure_midi_track ();
+
+	/** Refresh MIDI device list + option into snapshot (safe without hardware). */
+	void refresh_midi_snap ();
+
+	/**
+	 * Enumerate MIDI devices, ensure MidiTrack, verify midi_ok/midi_track_ok.
+	 * Hardware I/O not required. Loopback on Dummy when available.
+	 */
+	bool smoke_midi ();
+
 	std::string session_dir () const;
 	std::string last_export_path () const;
 
@@ -202,6 +227,7 @@ private:
 	void collect_tracks ();
 	void update_session_path_snap ();
 	bool compute_export_range (int64_t* start_sample, int64_t* end_sample) const;
+	bool configure_backend_midi ();
 
 	bool        _started;
 	std::string _backend_name;

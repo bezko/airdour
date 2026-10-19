@@ -56,6 +56,7 @@ public:
 	                    bool smoke_export = false,
 	                    bool smoke_undo = false,
 	                    bool smoke_loop = false,
+	                    bool smoke_midi = false,
 	                    const std::string& open_session_path = std::string ());
 	int  run_message_loop (unsigned timeout_secs);
 
@@ -118,6 +119,7 @@ private:
 	void apply_region_selection_to_lanes ();
 	void apply_loop_to_lanes ();
 	void draw_editor_ruler ();
+	void draw_midi_lane ();
 	bool hit_editor_ruler (float x, float y) const;
 	int  hit_editor_lane (float x, float y) const;
 	int  hit_mixer_fader (float x, float y) const;
@@ -155,6 +157,7 @@ private:
 	D2D1_RECT_F _transport_bounds;
 	D2D1_RECT_F _editor_pane;
 	D2D1_RECT_F _editor_ruler;
+	D2D1_RECT_F _midi_lane;
 	D2D1_RECT_F _mixer_pane;
 	D2D1_RECT_F _status_bar;
 
@@ -172,6 +175,7 @@ private:
 	ID2D1SolidColorBrush*     _brush_selection;
 	ID2D1SolidColorBrush*     _brush_loop;
 	ID2D1SolidColorBrush*     _brush_marker;
+	ID2D1SolidColorBrush*     _brush_midi;
 	ID2D1SolidColorBrush*     _brush_meter_hot;
 	ID2D1LinearGradientBrush* _brush_bg;
 	IDWriteTextFormat*        _fmt_brand;

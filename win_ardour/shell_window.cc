@@ -29,6 +29,7 @@ constexpr D2D1_COLOR_F kPlayhead   = { 0.980f, 0.780f, 0.220f, 1.f };
 constexpr D2D1_COLOR_F kSelection  = { 0.350f, 0.780f, 0.920f, 1.f };
 constexpr D2D1_COLOR_F kLoop       = { 0.920f, 0.620f, 0.220f, 1.f };
 constexpr D2D1_COLOR_F kMarker     = { 0.780f, 0.860f, 0.420f, 1.f };
+constexpr D2D1_COLOR_F kMidi       = { 0.720f, 0.480f, 0.920f, 1.f };
 constexpr D2D1_COLOR_F kMeterHot   = { 0.95f, 0.35f, 0.22f, 1.f };
 
 #ifndef WM_DPICHANGED
@@ -107,6 +108,7 @@ ShellWindow::ShellWindow ()
 	, _transport_bounds ()
 	, _editor_pane ()
 	, _editor_ruler ()
+	, _midi_lane ()
 	, _mixer_pane ()
 	, _status_bar ()
 	, _d2d_factory (nullptr)
@@ -123,6 +125,7 @@ ShellWindow::ShellWindow ()
 	, _brush_selection (nullptr)
 	, _brush_loop (nullptr)
 	, _brush_marker (nullptr)
+	, _brush_midi (nullptr)
 	, _brush_meter_hot (nullptr)
 	, _brush_bg (nullptr)
 	, _fmt_brand (nullptr)
@@ -167,6 +170,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_export,
                             bool smoke_undo,
                             bool smoke_loop,
+                            bool smoke_midi,
                             const std::string& open_session_path)
 {
 	if (!_engine.is_linked ()) {
@@ -240,6 +244,18 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			std::fprintf (stderr, "airdour_win_shell: smoke-loop FAILED\n");
 		}
 		std::fflush (stderr);
+	}
+
+	if (ok && smoke_midi && _engine.snapshot ().session_ok) {
+		if (_engine.smoke_midi ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi ok\n");
+		} else {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi FAILED\n");
+		}
+		std::fflush (stderr);
+	} else if (ok && _engine.snapshot ().session_ok) {
+		/* Always scaffold a MIDI track so the Editor lane is live. */
+		_engine.ensure_midi_track ();
 	}
 
 	if (ok && smoke_record && _engine.snapshot ().session_ok) {
@@ -757,6 +773,7 @@ ShellWindow::discard_device_resources ()
 {
 	if (_brush_bg) { _brush_bg->Release (); _brush_bg = nullptr; }
 	if (_brush_meter_hot) { _brush_meter_hot->Release (); _brush_meter_hot = nullptr; }
+	if (_brush_midi) { _brush_midi->Release (); _brush_midi = nullptr; }
 	if (_brush_marker) { _brush_marker->Release (); _brush_marker = nullptr; }
 	if (_brush_loop) { _brush_loop->Release (); _brush_loop = nullptr; }
 	if (_brush_selection) { _brush_selection->Release (); _brush_selection = nullptr; }
@@ -806,6 +823,7 @@ ShellWindow::ensure_device_resources ()
 	_rt->CreateSolidColorBrush (kSelection, &_brush_selection);
 	_rt->CreateSolidColorBrush (kLoop, &_brush_loop);
 	_rt->CreateSolidColorBrush (kMarker, &_brush_marker);
+	_rt->CreateSolidColorBrush (kMidi, &_brush_midi);
 	_rt->CreateSolidColorBrush (kMeterHot, &_brush_meter_hot);
 
 	ID2D1GradientStopCollection* stops = nullptr;
@@ -822,7 +840,7 @@ ShellWindow::ensure_device_resources ()
 
 	return _brush_brand && _brush_body && _brush_accent && _brush_pane
 	    && _brush_peak && _brush_rms && _brush_playhead && _brush_selection
-	    && _brush_loop && _brush_marker && _brush_meter_hot && _brush_bg;
+	    && _brush_loop && _brush_marker && _brush_midi && _brush_meter_hot && _brush_bg;
 }
 
 void
@@ -859,8 +877,9 @@ ShellWindow::layout_panes ()
 	float wave_right = _editor_pane.right - inset;
 	_editor_ruler = D2D1::RectF (wave_left, _editor_pane.top + title_h,
 	                             wave_right, _editor_pane.top + title_h + ruler_h);
+	float midi_h = 48.f * _dpi_scale;
 	float lanes_top = _editor_ruler.bottom + 4.f * _dpi_scale;
-	float lanes_bot = _editor_pane.bottom - inset;
+	float lanes_bot = _editor_pane.bottom - inset - midi_h - lane_gap;
 	float lane_h = (lanes_bot - lanes_top - lane_gap * (kTracks - 1)) / (float)kTracks;
 
 	for (int i = 0; i < kTracks; ++i) {
@@ -868,6 +887,8 @@ ShellWindow::layout_panes ()
 		_lanes[i].bounds = D2D1::RectF (wave_left, y0, wave_right, y0 + lane_h);
 		_lanes[i].strip.resize_for_width (wave_right - wave_left);
 	}
+	_midi_lane = D2D1::RectF (wave_left, lanes_bot + lane_gap, wave_right,
+	                          lanes_bot + lane_gap + midi_h);
 
 	float mix_inset = 10.f * _dpi_scale;
 	float mix_top = _mixer_pane.top + 36.f * _dpi_scale;
@@ -1585,6 +1606,70 @@ ShellWindow::draw_editor_pane ()
 			_brush_marker->SetOpacity (1.f);
 		}
 	}
+
+	draw_midi_lane ();
+}
+
+void
+ShellWindow::draw_midi_lane ()
+{
+	const D2D1_RECT_F& r = _midi_lane;
+	if (r.right <= r.left) {
+		return;
+	}
+	float inset = 12.f * _dpi_scale;
+	D2D1_RECT_F label_rc = D2D1::RectF (
+		_editor_pane.left + inset, r.top, r.left - 4.f * _dpi_scale, r.bottom);
+	_rt->DrawTextW (L"MIDI 1", 6, _fmt_meta, label_rc, _brush_midi);
+
+	_rt->FillRectangle (r, _brush_pane_edge);
+	_rt->DrawRectangle (r, _brush_midi, 1.f);
+
+	/* Piano-roll stub: 12 key rows + activity bars. */
+	const int keys = 12;
+	float h = r.bottom - r.top;
+	float w = r.right - r.left;
+	float row_h = h / (float)keys;
+	for (int k = 0; k < keys; ++k) {
+		float y0 = r.top + (float)k * row_h;
+		bool black = (k == 1 || k == 3 || k == 5 || k == 8 || k == 10);
+		_brush_body->SetOpacity (black ? 0.18f : 0.08f);
+		_rt->FillRectangle (D2D1::RectF (r.left, y0, r.right, y0 + row_h - 0.5f), _brush_body);
+		_brush_body->SetOpacity (1.f);
+	}
+
+	float act = _engine_snap.midi_activity;
+	if (act > 0.02f && _brush_midi) {
+		/* Fake note blips proportional to activity (no hardware required). */
+		int blips = 1 + (int)(act * 6.f);
+		for (int b = 0; b < blips; ++b) {
+			float nx = 0.12f + 0.12f * (float)b + 0.05f * _pulse;
+			float ky = (float)((b * 3 + 2) % keys);
+			float x0 = r.left + nx * w;
+			float x1 = x0 + (0.06f + 0.04f * act) * w;
+			float y0 = r.top + ky * row_h + 1.f;
+			float y1 = y0 + row_h - 2.f;
+			_brush_midi->SetOpacity (0.35f + 0.55f * act);
+			_rt->FillRectangle (D2D1::RectF (x0, y0, x1, y1), _brush_midi);
+			_brush_midi->SetOpacity (1.f);
+		}
+	}
+
+	wchar_t midicap[120];
+	if (_engine_snap.midi_track_ok) {
+		_snwprintf_s (midicap, _TRUNCATE,
+		              L"%ls  ·  %d device%s  ·  act %.0f%%",
+		              _engine_snap.midi_option.empty () ? L"MIDI" : _engine_snap.midi_option.c_str (),
+		              _engine_snap.midi_device_count,
+		              _engine_snap.midi_device_count == 1 ? L"" : L"s",
+		              _engine_snap.midi_activity * 100.f);
+	} else {
+		_snwprintf_s (midicap, _TRUNCATE, L"no MIDI track");
+	}
+	_rt->DrawTextW (midicap, (UINT32)wcslen (midicap), _fmt_meta,
+	                D2D1::RectF (r.left + 6.f * _dpi_scale, r.top,
+	                             r.right - 4.f * _dpi_scale, r.bottom),
+	                _brush_brand);
 }
 
 void
