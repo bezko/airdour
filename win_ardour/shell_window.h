@@ -119,7 +119,8 @@ public:
 	                    bool smoke_midi_transpose = false,
 	                    bool smoke_midi_velocity = false,
 	                    bool smoke_midi_length = false,
-	                    bool smoke_midi_clipboard = false);
+	                    bool smoke_midi_clipboard = false,
+	                    bool smoke_midi_humanize = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -231,6 +232,7 @@ private:
 	void do_copy_midi_notes ();
 	void do_cut_midi_notes ();
 	void do_paste_midi_notes ();
+	void do_humanize_midi_notes (float strength = 1.f);
 	void do_toggle_loop ();
 	void do_toggle_punch ();
 	void do_toggle_count_in ();

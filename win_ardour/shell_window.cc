@@ -244,7 +244,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_transpose,
                             bool smoke_midi_velocity,
                             bool smoke_midi_length,
-                            bool smoke_midi_clipboard)
+                            bool smoke_midi_clipboard,
+                            bool smoke_midi_humanize)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -377,6 +378,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_clipboard) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi_humanize && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_humanize ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_humanize) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-humanize FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -2660,6 +2670,19 @@ ShellWindow::do_paste_midi_notes ()
 }
 
 void
+ShellWindow::do_humanize_midi_notes (float strength)
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.humanize_midi_notes (strength, 0)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_cycle_snap_density ()
 {
 	if (!_engine.is_linked ()) {
@@ -3196,7 +3219,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Q' || wparam == 'q')) {
 			/* Q = quantize selected (or all) MIDI notes to snap grid. */
 			do_quantize_midi_notes ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'H' || wparam == 'h')) {
+			/* H = humanize; Shift+H = 2× strength. */
+			do_humanize_midi_notes ((GetKeyState (VK_SHIFT) & 0x8000) ? 2.f : 1.f);
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+
 		           && (wparam == VK_OEM_PERIOD || wparam == VK_OEM_COMMA)) {
 			/* . / , = MIDI transpose +1 / −1; Shift = ±12 (octave). */
 			int st = (wparam == VK_OEM_PERIOD) ? 1 : -1;
@@ -3892,6 +3919,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			unit *= 4.f;
 		}
 		do_nudge_midi_length (th == TransportHit::MidiLenUp ? unit : -unit);
+		return true;
+	}
+	if (th == TransportHit::MidiHumanize) {
+		do_humanize_midi_notes ((GetKeyState (VK_SHIFT) & 0x8000) ? 2.f : 1.f);
 		return true;
 	}
 	if (th == TransportHit::CountIn) {
@@ -5694,6 +5725,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"↑ / ↓  Shift", L"MIDI velocity ±1 · ±8 (V+/V−)" },
 		{ L"Alt+←/→  Shift", L"MIDI note length ± (L+/L−; snap unit)" },
 		{ L"Ctrl+C / X / V", L"MIDI note copy · cut · paste (at playhead)" },
+		{ L"H / Shift+H", L"MIDI humanize · 2× strength (Hum)" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },

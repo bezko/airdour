@@ -41,6 +41,7 @@ TransportBar::TransportBar ()
 	, _midi_vel_dn_btn ()
 	, _midi_len_up_btn ()
 	, _midi_len_dn_btn ()
+	, _midi_humanize_btn ()
 	, _count_btn ()
 	, _click_btn ()
 	, _tempo_dn_btn ()
@@ -127,6 +128,7 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_midi_vel_dn_btn, x, narrow + 4.f * dpi_scale);
 	place (_midi_len_up_btn, x, narrow + 4.f * dpi_scale);
 	place (_midi_len_dn_btn, x, narrow + 4.f * dpi_scale);
+	place (_midi_humanize_btn, x, btn_w);
 	place (_count_btn, x, btn_w);
 	place (_click_btn, x, btn_w);
 	place (_tempo_dn_btn, x, narrow);
@@ -246,6 +248,9 @@ TransportBar::hit_test (float x, float y) const
 	}
 	if (contains (_midi_len_dn_btn, x, y)) {
 		return TransportHit::MidiLenDown;
+	}
+	if (contains (_midi_humanize_btn, x, y)) {
+		return TransportHit::MidiHumanize;
 	}
 	if (contains (_count_btn, x, y)) {
 		return TransportHit::CountIn;
@@ -379,6 +384,7 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_midi_vel_dn_btn, L"V−", false);
 	draw_btn (_midi_len_up_btn, L"L+", false);
 	draw_btn (_midi_len_dn_btn, L"L−", false);
+	draw_btn (_midi_humanize_btn, L"Hum", false);
 	draw_btn (_count_btn, L"Count", _count_in_enabled);
 	draw_btn (_click_btn, L"Click", _click_enabled);
 	draw_btn (_tempo_dn_btn, L"−", false);

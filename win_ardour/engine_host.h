@@ -1036,6 +1036,14 @@ public:
 	bool paste_midi_notes (float at_sec = -1.f);
 	bool has_midi_clipboard () const;
 
+	/**
+	 * Humanize selected notes (or all if none selected): bounded random
+	 * timing (±20ms @ strength 1) and velocity (±8 @ strength 1) jitter.
+	 * strength clamped to 0.1..2. seed 0 → nondeterministic; else fixed.
+	 * Rebuilds the MIDI region (Windows-safe).
+	 */
+	bool humanize_midi_notes (float strength = 1.f, uint32_t seed = 0);
+
 	/** Best-effort connect MidiTrack output to first physical MIDI playback port. */
 	bool connect_midi_output ();
 
@@ -1079,6 +1087,12 @@ public:
 	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.
 	 */
 	bool smoke_midi_clipboard ();
+
+	/**
+	 * Add notes, humanize with fixed seed, verify bounded jitter.
+	 * For --smoke-midi-humanize.
+	 */
+	bool smoke_midi_humanize ();
 
 	std::string session_dir () const;
 	std::string last_export_path () const;
