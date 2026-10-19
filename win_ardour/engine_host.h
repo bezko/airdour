@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * UI-thread engine + minimal Session attach for win_ardour.
- * Peak meters, transport, record arm, WAV import, save/load.
+ * Peak meters, transport, record arm, WAV import, save/load, undo, region select.
  */
 
 #pragma once
@@ -23,6 +23,12 @@ struct EngineSnapshot {
 	bool         session_recording; /* actively capturing */
 	bool         session_saved; /* last save_state succeeded */
 	bool         export_ok; /* last export produced a file */
+	uint32_t     undo_depth;
+	uint32_t     redo_depth;
+	bool         has_selection; /* Editor region selection */
+	int          selection_track; /* 0..kMeters-1, or -1 */
+	float        selection_start_sec;
+	float        selection_end_sec;
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
 	std::wstring export_path; /* last exported WAV (UTF-16 display) */
@@ -111,6 +117,26 @@ public:
 	/** Convenience: export after ensuring content; for --smoke-export. */
 	bool smoke_export_wav (std::string* out_path = nullptr);
 
+	/** Session history undo/redo (Ctrl+Z / Ctrl+Y). */
+	bool undo (uint32_t n = 1);
+	bool redo (uint32_t n = 1);
+
+	/**
+	 * Hit-test playlist at time_sec on track; select topmost region if any.
+	 * Updates snapshot selection fields for Editor highlight.
+	 */
+	bool select_region_at (int track, float time_sec);
+	void clear_region_selection ();
+
+	/** Remove selected region via reversible command; peaks refresh on next poll. */
+	bool delete_selected_region ();
+
+	/**
+	 * Import a test tone, undo it (regions gone), redo (regions back), undo again.
+	 * For --smoke-undo. Returns false if history/import path fails.
+	 */
+	bool smoke_undo ();
+
 	std::string session_dir () const;
 	std::string last_export_path () const;
 
@@ -137,6 +163,8 @@ private:
 	void read_meters ();
 	void refresh_region_flags ();
 	void refresh_record_flags ();
+	void refresh_history_flags ();
+	void refresh_selection_snap ();
 	void collect_tracks ();
 	void update_session_path_snap ();
 	bool compute_export_range (int64_t* start_sample, int64_t* end_sample) const;

@@ -6,7 +6,7 @@
  * Usage:
  *   airdour_win_shell.exe [--timeout N] [--backend Dummy|WASAPI] [--no-engine]
  *                         [--smoke-import] [--smoke-record] [--smoke-save-load]
- *                         [--smoke-export] [--session DIR]
+ *                         [--smoke-export] [--smoke-undo] [--session DIR]
  */
 
 #include "shell_window.h"
@@ -85,6 +85,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_record = parse_flag (argc, argv, L"--smoke-record");
 	bool smoke_save_load = parse_flag (argc, argv, L"--smoke-save-load");
 	bool smoke_export = parse_flag (argc, argv, L"--smoke-export");
+	bool smoke_undo = parse_flag (argc, argv, L"--smoke-undo");
 	std::string session_path = parse_session_path (argc, argv);
 	HINSTANCE instance = GetModuleHandleW (nullptr);
 
@@ -106,7 +107,8 @@ wmain (int argc, wchar_t** argv)
 
 	if (!no_engine) {
 		if (shell.attach_engine (backend, timeout, smoke_import, smoke_record,
-		                         smoke_save_load, smoke_export, session_path)) {
+		                         smoke_save_load, smoke_export, smoke_undo,
+		                         session_path)) {
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", backend.c_str ());
 		} else {
 			std::fwprintf (stderr, L"airdour_win_shell: engine not attached (ok for UI-only / CI)\n");

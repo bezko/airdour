@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Win32 + Direct2D + DirectWrite shell: transport, multi-track editor,
- * mixer faders + meters, record arm, WAV import, live engine status.
+ * mixer faders + meters, record arm, WAV import, undo, region select.
  */
 
 #pragma once
@@ -45,7 +45,7 @@ public:
 	/**
 	 * When smoke_timeout_secs > 0, create Session/PeakMeter but do not auto-roll
 	 * (avoids intermittent AVs under Dummy/WASAPI during unattended --timeout).
-	 * smoke_import / smoke_record exercise import + short take without changing
+	 * smoke_import / smoke_record / smoke_undo exercise paths without changing
 	 * the plain --timeout exit-0 contract when those flags are off.
 	 */
 	bool attach_engine (const std::string& backend_name,
@@ -54,6 +54,7 @@ public:
 	                    bool smoke_record = false,
 	                    bool smoke_save_load = false,
 	                    bool smoke_export = false,
+	                    bool smoke_undo = false,
 	                    const std::string& open_session_path = std::string ());
 	int  run_message_loop (unsigned timeout_secs);
 
@@ -62,6 +63,7 @@ public:
 private:
 	enum class DragMode {
 		None,
+		WavePending, /* click may become select or pan */
 		WavePan,
 		Fader
 	};
@@ -102,9 +104,13 @@ private:
 	void do_save_session ();
 	void prompt_open_session ();
 	void prompt_export_wav ();
+	void do_undo ();
+	void do_redo ();
+	void do_delete_selection ();
 	void sync_mixer_arm_from_engine ();
 	void apply_shared_view (int source_lane);
 	void reset_shared_view ();
+	void apply_region_selection_to_lanes ();
 	int  hit_editor_lane (float x, float y) const;
 	int  hit_mixer_fader (float x, float y) const;
 	int  hit_mixer_arm (float x, float y) const;
@@ -127,6 +133,8 @@ private:
 	DragMode _drag;
 	int _drag_index;
 	float _pan_last_x;
+	float _pan_down_x;
+	float _pan_down_y;
 
 	bool  _transport_playing;
 	float _playhead_sec;
@@ -152,6 +160,7 @@ private:
 	ID2D1SolidColorBrush*     _brush_peak;
 	ID2D1SolidColorBrush*     _brush_rms;
 	ID2D1SolidColorBrush*     _brush_playhead;
+	ID2D1SolidColorBrush*     _brush_selection;
 	ID2D1SolidColorBrush*     _brush_meter_hot;
 	ID2D1LinearGradientBrush* _brush_bg;
 	IDWriteTextFormat*        _fmt_brand;

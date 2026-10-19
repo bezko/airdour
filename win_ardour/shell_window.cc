@@ -26,6 +26,7 @@ constexpr D2D1_COLOR_F kPaneEdge   = { 0.160f, 0.220f, 0.250f, 1.f };
 constexpr D2D1_COLOR_F kPeak       = { 0.220f, 0.920f, 0.820f, 1.f };
 constexpr D2D1_COLOR_F kRms        = { 0.120f, 0.420f, 0.400f, 0.85f };
 constexpr D2D1_COLOR_F kPlayhead   = { 0.980f, 0.780f, 0.220f, 1.f };
+constexpr D2D1_COLOR_F kSelection  = { 0.350f, 0.780f, 0.920f, 1.f };
 constexpr D2D1_COLOR_F kMeterHot   = { 0.95f, 0.35f, 0.22f, 1.f };
 
 #ifndef WM_DPICHANGED
@@ -93,6 +94,8 @@ ShellWindow::ShellWindow ()
 	, _drag (DragMode::None)
 	, _drag_index (-1)
 	, _pan_last_x (0.f)
+	, _pan_down_x (0.f)
+	, _pan_down_y (0.f)
 	, _transport_playing (false)
 	, _playhead_sec (0.f)
 	, _last_tick_ms (0)
@@ -114,6 +117,7 @@ ShellWindow::ShellWindow ()
 	, _brush_peak (nullptr)
 	, _brush_rms (nullptr)
 	, _brush_playhead (nullptr)
+	, _brush_selection (nullptr)
 	, _brush_meter_hot (nullptr)
 	, _brush_bg (nullptr)
 	, _fmt_brand (nullptr)
@@ -156,6 +160,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_record,
                             bool smoke_save_load,
                             bool smoke_export,
+                            bool smoke_undo,
                             const std::string& open_session_path)
 {
 	if (!_engine.is_linked ()) {
@@ -209,6 +214,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			std::fprintf (stderr, "airdour_win_shell: smoke-export ok → %s\n", exported.c_str ());
 		} else {
 			std::fprintf (stderr, "airdour_win_shell: smoke-export FAILED\n");
+		}
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_undo && _engine.snapshot ().session_ok) {
+		if (_engine.smoke_undo ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-undo ok\n");
+		} else {
+			std::fprintf (stderr, "airdour_win_shell: smoke-undo FAILED\n");
 		}
 		std::fflush (stderr);
 	}
@@ -546,6 +560,61 @@ ShellWindow::reset_shared_view ()
 	}
 }
 
+void
+ShellWindow::apply_region_selection_to_lanes ()
+{
+	for (int i = 0; i < kTracks; ++i) {
+		bool active = _engine_snap.has_selection && _engine_snap.selection_track == i;
+		_lanes[i].strip.set_selection (
+			active,
+			_engine_snap.selection_start_sec,
+			_engine_snap.selection_end_sec);
+	}
+}
+
+void
+ShellWindow::do_undo ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.undo (1);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	apply_region_selection_to_lanes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_redo ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.redo (1);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	apply_region_selection_to_lanes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_delete_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.delete_selected_region ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	apply_region_selection_to_lanes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 float
 ShellWindow::stub_meter_peak (int track, float dt) const
 {
@@ -614,6 +683,7 @@ ShellWindow::discard_device_resources ()
 {
 	if (_brush_bg) { _brush_bg->Release (); _brush_bg = nullptr; }
 	if (_brush_meter_hot) { _brush_meter_hot->Release (); _brush_meter_hot = nullptr; }
+	if (_brush_selection) { _brush_selection->Release (); _brush_selection = nullptr; }
 	if (_brush_playhead) { _brush_playhead->Release (); _brush_playhead = nullptr; }
 	if (_brush_rms) { _brush_rms->Release (); _brush_rms = nullptr; }
 	if (_brush_peak) { _brush_peak->Release (); _brush_peak = nullptr; }
@@ -657,6 +727,7 @@ ShellWindow::ensure_device_resources ()
 	_rt->CreateSolidColorBrush (kPeak, &_brush_peak);
 	_rt->CreateSolidColorBrush (kRms, &_brush_rms);
 	_rt->CreateSolidColorBrush (kPlayhead, &_brush_playhead);
+	_rt->CreateSolidColorBrush (kSelection, &_brush_selection);
 	_rt->CreateSolidColorBrush (kMeterHot, &_brush_meter_hot);
 
 	ID2D1GradientStopCollection* stops = nullptr;
@@ -672,7 +743,8 @@ ShellWindow::ensure_device_resources ()
 	}
 
 	return _brush_brand && _brush_body && _brush_accent && _brush_pane
-	    && _brush_peak && _brush_rms && _brush_playhead && _brush_meter_hot && _brush_bg;
+	    && _brush_peak && _brush_rms && _brush_playhead && _brush_selection
+	    && _brush_meter_hot && _brush_bg;
 }
 
 void
@@ -819,9 +891,15 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			PostQuitMessage (0);
 		} else if (wparam == VK_SPACE) {
 			transport_toggle ();
+		} else if (wparam == VK_DELETE || wparam == VK_BACK) {
+			do_delete_selection ();
 		} else if (wparam == VK_HOME || wparam == '0') {
 			reset_shared_view ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Z' || wparam == 'z')) {
+			do_undo ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Y' || wparam == 'y')) {
+			do_redo ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
 			do_save_session ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'O' || wparam == 'o')) {
@@ -997,11 +1075,13 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	int lane = hit_editor_lane (x, y);
 	if (lane >= 0) {
-		_drag = DragMode::WavePan;
+		/* Click selects a region; drag past threshold pans the timeline. */
+		_drag = DragMode::WavePending;
 		_drag_index = lane;
 		_pan_last_x = x;
+		_pan_down_x = x;
+		_pan_down_y = y;
 		SetCapture (_hwnd);
-		SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
 		return true;
 	}
 	return false;
@@ -1027,6 +1107,18 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 		return true;
 	}
 
+	if (_drag == DragMode::WavePending && _drag_index >= 0 && _drag_index < kTracks) {
+		float dx = x - _pan_down_x;
+		float dy = y - _pan_down_y;
+		float thresh = 4.f * _dpi_scale;
+		if ((dx * dx + dy * dy) >= (thresh * thresh)) {
+			_drag = DragMode::WavePan;
+			SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
+		} else {
+			return true;
+		}
+	}
+
 	if (_drag == DragMode::WavePan && _drag_index >= 0 && _drag_index < kTracks) {
 		const D2D1_RECT_F& r = _lanes[_drag_index].bounds;
 		float w = r.right - r.left;
@@ -1047,6 +1139,19 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 void
 ShellWindow::on_mouse_up ()
 {
+	if (_drag == DragMode::WavePending && _drag_index >= 0 && _drag_index < kTracks) {
+		int lane = _drag_index;
+		float time_sec = _lanes[lane].strip.time_at_x (_lanes[lane].bounds, _pan_down_x);
+		if (_engine.is_linked () && _engine_snap.session_ok) {
+			if (!_engine.select_region_at (lane, time_sec)) {
+				_engine.clear_region_selection ();
+			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			apply_region_selection_to_lanes ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+	}
 	if (_drag != DragMode::None) {
 		_drag = DragMode::None;
 		_drag_index = -1;
@@ -1118,6 +1223,7 @@ ShellWindow::on_tick ()
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 		sync_mixer_arm_from_engine ();
+		apply_region_selection_to_lanes ();
 		last_poll = now;
 	}
 
@@ -1202,10 +1308,15 @@ ShellWindow::draw_editor_pane ()
 		}
 	}
 	if (_engine_snap.waves_from_session) {
-		if (with_audio > 0) {
+		if (_engine_snap.has_selection) {
 			_snwprintf_s (caption, _TRUNCATE,
-			              L"%d tracks  ·  %d with audio  ·  playhead %.1fs",
-			              kTracks, with_audio, _playhead_sec);
+			              L"%d tracks  ·  sel T%d [%.1f–%.1f]s  ·  Del · Ctrl+Z/Y",
+			              kTracks, _engine_snap.selection_track + 1,
+			              _engine_snap.selection_start_sec, _engine_snap.selection_end_sec);
+		} else if (with_audio > 0) {
+			_snwprintf_s (caption, _TRUNCATE,
+			              L"%d tracks  ·  %d with audio  ·  click region · undo %u",
+			              kTracks, with_audio, (unsigned)_engine_snap.undo_depth);
 		} else {
 			_snwprintf_s (caption, _TRUNCATE,
 			              L"%d tracks  ·  empty lanes  ·  playhead %.1fs",
@@ -1236,7 +1347,7 @@ ShellWindow::draw_editor_pane ()
 
 		_rt->FillRectangle (lb, _brush_pane_edge);
 		_lanes[i].strip.draw (_rt, lb, _brush_peak, _brush_rms, _brush_body,
-		                      _brush_playhead, _dpi_scale);
+		                      _brush_playhead, _brush_selection, _dpi_scale);
 	}
 }
 

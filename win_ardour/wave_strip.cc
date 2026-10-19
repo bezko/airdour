@@ -15,6 +15,9 @@ WaveStrip::WaveStrip ()
 	, _playhead_norm (kFollowFrac)
 	, _view_start_sec (0.f)
 	, _view_span_sec (kDefaultSpanSec)
+	, _sel_active (false)
+	, _sel_start_sec (0.f)
+	, _sel_end_sec (0.f)
 {
 	_peaks.assign (128, 0.f);
 	_rms.assign (128, 0.f);
@@ -79,6 +82,28 @@ WaveStrip::sync_view_from (const WaveStrip& other)
 }
 
 void
+WaveStrip::set_selection (bool active, float start_sec, float end_sec)
+{
+	_sel_active = active;
+	if (end_sec < start_sec) {
+		float t = start_sec;
+		start_sec = end_sec;
+		end_sec = t;
+	}
+	_sel_start_sec = start_sec;
+	_sel_end_sec = end_sec;
+}
+
+float
+WaveStrip::time_at_x (const D2D1_RECT_F& bounds, float x) const
+{
+	float w = bounds.right - bounds.left;
+	float norm = (w > 1.f) ? (x - bounds.left) / w : 0.f;
+	norm = std::max (0.f, std::min (1.f, norm));
+	return _view_start_sec + norm * std::max (0.001f, _view_span_sec);
+}
+
+void
 WaveStrip::update_view (const WaveStripParams& params)
 {
 	_view_span_sec = kDefaultSpanSec / std::max (0.001f, _zoom);
@@ -132,6 +157,7 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
                  ID2D1SolidColorBrush* rms_brush,
                  ID2D1SolidColorBrush* mid_brush,
                  ID2D1SolidColorBrush* playhead_brush,
+                 ID2D1SolidColorBrush* selection_brush,
                  float dpi_scale) const
 {
 	if (!rt || _peaks.empty ()) {
@@ -148,12 +174,38 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 	const float mid_y = bounds.top + h * 0.5f;
 	const float col_w = w / (float)n;
 	const float gap = std::max (0.5f, 1.f * dpi_scale);
+	const float span = std::max (0.001f, _view_span_sec);
 
 	mid_brush->SetOpacity (0.3f);
 	rt->DrawLine (D2D1::Point2F (bounds.left, mid_y),
 	              D2D1::Point2F (bounds.right, mid_y),
 	              mid_brush, 1.f * dpi_scale);
 	mid_brush->SetOpacity (1.f);
+
+	if (_sel_active && selection_brush && _sel_end_sec > _sel_start_sec) {
+		float n0 = (_sel_start_sec - _view_start_sec) / span;
+		float n1 = (_sel_end_sec - _view_start_sec) / span;
+		n0 = std::max (0.f, std::min (1.f, n0));
+		n1 = std::max (0.f, std::min (1.f, n1));
+		if (n1 > n0) {
+			selection_brush->SetOpacity (0.28f);
+			rt->FillRectangle (
+				D2D1::RectF (bounds.left + n0 * w, bounds.top,
+				             bounds.left + n1 * w, bounds.bottom),
+				selection_brush);
+			selection_brush->SetOpacity (0.85f);
+			float edge = std::max (1.f, 1.5f * dpi_scale);
+			rt->FillRectangle (
+				D2D1::RectF (bounds.left + n0 * w, bounds.top,
+				             bounds.left + n0 * w + edge, bounds.bottom),
+				selection_brush);
+			rt->FillRectangle (
+				D2D1::RectF (bounds.left + n1 * w - edge, bounds.top,
+				             bounds.left + n1 * w, bounds.bottom),
+				selection_brush);
+			selection_brush->SetOpacity (1.f);
+		}
+	}
 
 	if (!_has_regions) {
 		/* Empty lane: midline + playhead only. */

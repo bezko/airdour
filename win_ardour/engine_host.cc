@@ -269,6 +269,8 @@ public:
 	samplecnt_t     play_origin_samples;
 	std::string     session_dir;
 	std::vector<std::shared_ptr<AudioTrack> > tracks;
+	int             selected_track;
+	std::weak_ptr<Region> selected_region;
 
 	Impl ()
 		: engine (nullptr)
@@ -277,6 +279,7 @@ public:
 		, ardour_inited (false)
 		, transport_playing (false)
 		, play_origin_samples (0)
+		, selected_track (-1)
 	{
 	}
 };
@@ -303,6 +306,12 @@ EngineHost::EngineHost ()
 	_snap.session_recording = false;
 	_snap.session_saved = false;
 	_snap.export_ok = false;
+	_snap.undo_depth = 0;
+	_snap.redo_depth = 0;
+	_snap.has_selection = false;
+	_snap.selection_track = -1;
+	_snap.selection_start_sec = 0.f;
+	_snap.selection_end_sec = 0.f;
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -530,6 +539,8 @@ EngineHost::destroy_session ()
 		return;
 	}
 	_impl->tracks.clear ();
+	_impl->selected_track = -1;
+	_impl->selected_region.reset ();
 	if (_impl->session) {
 		try {
 			_impl->session->request_stop (false, false, TRS_UI);
@@ -554,6 +565,12 @@ EngineHost::destroy_session ()
 	_snap.session_record_armed = false;
 	_snap.session_recording = false;
 	_snap.session_saved = false;
+	_snap.undo_depth = 0;
+	_snap.redo_depth = 0;
+	_snap.has_selection = false;
+	_snap.selection_track = -1;
+	_snap.selection_start_sec = 0.f;
+	_snap.selection_end_sec = 0.f;
 	_snap.session_path.clear ();
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_has_regions[i] = false;
@@ -1592,12 +1609,23 @@ EngineHost::import_audio_file (int track, const std::string& path)
 		plist.add (Properties::start, timepos_t (0));
 		plist.add (Properties::length, timecnt_t ((samplepos_t)n));
 		std::shared_ptr<Region> region = RegionFactory::create (src, plist);
-		if (!region || !_impl->tracks[track]->playlist ()) {
+		std::shared_ptr<Playlist> pl = _impl->tracks[track]->playlist ();
+		if (!region || !pl) {
 			_snap.detail = L"import failed — region create";
 			return false;
 		}
-		_impl->tracks[track]->playlist ()->add_region (region, timepos_t (0));
+		/* Wrap in Session history so Ctrl+Z / --smoke-undo can reverse import. */
+		_impl->session->begin_reversible_command ("import audio");
+		pl->clear_changes ();
+		pl->clear_owned_changes ();
+		pl->add_region (region, timepos_t (0));
+		pl->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+		_impl->selected_track = track;
+		_impl->selected_region = region;
 		refresh_region_flags ();
+		refresh_history_flags ();
+		refresh_selection_snap ();
 		_snap.detail = L"imported audio onto track — Editor peaks from Session";
 		std::fprintf (stderr, "airdour_win_shell: imported \"%s\" (%lld samples) onto track %d\n",
 		              path.c_str (), (long long)n, track);
@@ -1646,6 +1674,316 @@ EngineHost::import_test_tone (int track, float freq_hz, float seconds)
 }
 
 void
+EngineHost::refresh_history_flags ()
+{
+	_snap.undo_depth = 0;
+	_snap.redo_depth = 0;
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	try {
+		_snap.undo_depth = _impl->session->undo_depth ();
+		_snap.redo_depth = _impl->session->redo_depth ();
+	} catch (...) {
+	}
+}
+
+void
+EngineHost::refresh_selection_snap ()
+{
+	_snap.has_selection = false;
+	_snap.selection_track = -1;
+	_snap.selection_start_sec = 0.f;
+	_snap.selection_end_sec = 0.f;
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region || _impl->selected_track < 0) {
+		_impl->selected_region.reset ();
+		_impl->selected_track = -1;
+		return;
+	}
+	/* Drop selection if region left its playlist (undo/delete). */
+	if (!region->playlist ()) {
+		_impl->selected_region.reset ();
+		_impl->selected_track = -1;
+		return;
+	}
+	samplecnt_t sr = _impl->session->sample_rate ();
+	if (sr <= 0 && _impl->engine) {
+		sr = (samplecnt_t)_impl->engine->sample_rate ();
+	}
+	if (sr <= 0) {
+		return;
+	}
+	samplepos_t start = region->position_sample ();
+	samplecnt_t len = region->length_samples ();
+	_snap.has_selection = true;
+	_snap.selection_track = _impl->selected_track;
+	_snap.selection_start_sec = (float)start / (float)sr;
+	_snap.selection_end_sec = (float)(start + len) / (float)sr;
+}
+
+bool
+EngineHost::undo (uint32_t n)
+{
+	if (!_impl || !_impl->session || n == 0) {
+		return false;
+	}
+	try {
+		if (_impl->session->undo_depth () == 0) {
+			_snap.detail = L"nothing to undo";
+			refresh_history_flags ();
+			return false;
+		}
+		_impl->session->undo (n);
+		refresh_region_flags ();
+		refresh_history_flags ();
+		refresh_selection_snap ();
+		_snap.detail = L"undo";
+		std::fprintf (stderr, "airdour_win_shell: undo (%u) — undo_depth=%u redo_depth=%u\n",
+		              (unsigned)n, (unsigned)_snap.undo_depth, (unsigned)_snap.redo_depth);
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: undo exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"undo exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"undo unknown failure";
+		return false;
+	}
+}
+
+bool
+EngineHost::redo (uint32_t n)
+{
+	if (!_impl || !_impl->session || n == 0) {
+		return false;
+	}
+	try {
+		if (_impl->session->redo_depth () == 0) {
+			_snap.detail = L"nothing to redo";
+			refresh_history_flags ();
+			return false;
+		}
+		_impl->session->redo (n);
+		refresh_region_flags ();
+		refresh_history_flags ();
+		refresh_selection_snap ();
+		_snap.detail = L"redo";
+		std::fprintf (stderr, "airdour_win_shell: redo (%u) — undo_depth=%u redo_depth=%u\n",
+		              (unsigned)n, (unsigned)_snap.undo_depth, (unsigned)_snap.redo_depth);
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: redo exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"redo exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"redo unknown failure";
+		return false;
+	}
+}
+
+bool
+EngineHost::select_region_at (int track, float time_sec)
+{
+	clear_region_selection ();
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (track < 0 || track >= EngineSnapshot::kMeters
+	    || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	try {
+		std::shared_ptr<Playlist> pl = _impl->tracks[track]->playlist ();
+		if (!pl) {
+			return false;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		if (time_sec < 0.f) {
+			time_sec = 0.f;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		std::shared_ptr<RegionList> hits = pl->regions_at (timepos_t (sample));
+		if (!hits || hits->empty ()) {
+			_snap.detail = L"no region at click";
+			refresh_selection_snap ();
+			return false;
+		}
+		/* Prefer topmost (last in list / highest layer). */
+		std::shared_ptr<Region> best = hits->back ();
+		for (RegionList::const_iterator it = hits->begin (); it != hits->end (); ++it) {
+			if (*it && best && (*it)->layer () >= best->layer ()) {
+				best = *it;
+			}
+		}
+		if (!best) {
+			return false;
+		}
+		_impl->selected_track = track;
+		_impl->selected_region = best;
+		refresh_selection_snap ();
+		_snap.detail = L"region selected — Delete to remove";
+		std::fprintf (stderr,
+		              "airdour_win_shell: selected region track=%d [%.2f..%.2f]s\n",
+		              track, _snap.selection_start_sec, _snap.selection_end_sec);
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		clear_region_selection ();
+		return false;
+	}
+}
+
+void
+EngineHost::clear_region_selection ()
+{
+	if (_impl) {
+		_impl->selected_track = -1;
+		_impl->selected_region.reset ();
+	}
+	_snap.has_selection = false;
+	_snap.selection_track = -1;
+	_snap.selection_start_sec = 0.f;
+	_snap.selection_end_sec = 0.f;
+}
+
+bool
+EngineHost::delete_selected_region ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	int track = _impl->selected_track;
+	if (!region || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"no region selected";
+		return false;
+	}
+	try {
+		std::shared_ptr<Playlist> pl = region->playlist ();
+		if (!pl) {
+			pl = _impl->tracks[track]->playlist ();
+		}
+		if (!pl) {
+			_snap.detail = L"delete failed — no playlist";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("remove region");
+		pl->clear_changes ();
+		pl->clear_owned_changes ();
+		pl->remove_region (region);
+		pl->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+		clear_region_selection ();
+		refresh_region_flags ();
+		refresh_history_flags ();
+		_snap.detail = L"region deleted — Ctrl+Z to undo";
+		std::fprintf (stderr, "airdour_win_shell: deleted region on track %d\n", track);
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: delete exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"delete exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"delete unknown failure";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_undo ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-undo failed — no Session";
+		return false;
+	}
+	try {
+		/* Start from empty track 0 when possible. */
+		if (_snap.track_has_regions[0]) {
+			std::shared_ptr<Playlist> pl = _impl->tracks[0] ? _impl->tracks[0]->playlist () : std::shared_ptr<Playlist> ();
+			if (pl) {
+				std::shared_ptr<RegionList> all = pl->region_list ();
+				if (all && !all->empty ()) {
+					_impl->session->begin_reversible_command ("smoke clear");
+					pl->clear_changes ();
+					pl->clear_owned_changes ();
+					RegionList copy = *all;
+					for (RegionList::iterator it = copy.begin (); it != copy.end (); ++it) {
+						if (*it) {
+							pl->remove_region (*it);
+						}
+					}
+					pl->rdiff_and_add_command (_impl->session);
+					_impl->session->commit_reversible_command ();
+				}
+			}
+			refresh_region_flags ();
+		}
+
+		if (!import_test_tone (0, 440.f, 1.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-undo FAILED (import)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_snap.track_has_regions[0] || _snap.undo_depth == 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-undo FAILED (regions=%d undo_depth=%u)\n",
+			              _snap.track_has_regions[0] ? 1 : 0, (unsigned)_snap.undo_depth);
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!undo (1) || _snap.track_has_regions[0]) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-undo FAILED (undo left regions=%d)\n",
+			              _snap.track_has_regions[0] ? 1 : 0);
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!redo (1) || !_snap.track_has_regions[0]) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-undo FAILED (redo regions=%d)\n",
+			              _snap.track_has_regions[0] ? 1 : 0);
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* Leave session empty after verifying redo. */
+		undo (1);
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-undo ok (import↔undo↔redo; undo_depth=%u)\n",
+		              (unsigned)_snap.undo_depth);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-undo ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-undo exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"smoke-undo exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"smoke-undo unknown failure";
+		return false;
+	}
+}
+
+void
 EngineHost::refresh_snapshot ()
 {
 	_snap.gain = _gain;
@@ -1670,10 +2008,16 @@ EngineHost::refresh_snapshot ()
 			_snap.waves_from_session = true;
 			refresh_region_flags ();
 			refresh_record_flags ();
+			refresh_history_flags ();
+			refresh_selection_snap ();
 		} else {
 			_snap.waves_from_session = false;
 			_snap.session_record_armed = false;
 			_snap.session_recording = false;
+			_snap.undo_depth = 0;
+			_snap.redo_depth = 0;
+			_snap.has_selection = false;
+			_snap.selection_track = -1;
 			for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 				_snap.track_has_regions[i] = false;
 				_snap.track_armed[i] = false;
@@ -1731,6 +2075,12 @@ EngineHost::EngineHost ()
 	_snap.session_recording = false;
 	_snap.session_saved = false;
 	_snap.export_ok = false;
+	_snap.undo_depth = 0;
+	_snap.redo_depth = 0;
+	_snap.has_selection = false;
+	_snap.selection_track = -1;
+	_snap.selection_start_sec = 0.f;
+	_snap.selection_end_sec = 0.f;
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -1937,6 +2287,55 @@ EngineHost::smoke_export_wav (std::string* out_path)
 {
 	(void)out_path;
 	return false;
+}
+
+bool
+EngineHost::undo (uint32_t n)
+{
+	(void)n;
+	return false;
+}
+
+bool
+EngineHost::redo (uint32_t n)
+{
+	(void)n;
+	return false;
+}
+
+bool
+EngineHost::select_region_at (int track, float time_sec)
+{
+	(void)track;
+	(void)time_sec;
+	return false;
+}
+
+void
+EngineHost::clear_region_selection ()
+{
+}
+
+bool
+EngineHost::delete_selected_region ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_undo ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_history_flags ()
+{
+}
+
+void
+EngineHost::refresh_selection_snap ()
+{
 }
 
 std::string

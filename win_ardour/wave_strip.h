@@ -57,6 +57,7 @@ public:
 	           ID2D1SolidColorBrush* rms_brush,
 	           ID2D1SolidColorBrush* mid_brush,
 	           ID2D1SolidColorBrush* playhead_brush,
+	           ID2D1SolidColorBrush* selection_brush,
 	           float dpi_scale) const;
 
 	void zoom_at (float factor, float norm_x);
@@ -65,6 +66,12 @@ public:
 
 	/** Copy shared timeline view from another strip (linked zoom/pan). */
 	void sync_view_from (const WaveStrip& other);
+
+	/** Absolute-time selection highlight (seconds); inactive clears. */
+	void set_selection (bool active, float start_sec, float end_sec);
+
+	/** Map client X within strip bounds to absolute time (seconds). */
+	float time_at_x (const D2D1_RECT_F& bounds, float x) const;
 
 	float  zoom () const { return _zoom; }
 	float  pan () const { return _pan; }
@@ -86,4 +93,7 @@ private:
 	float              _playhead_norm;
 	float              _view_start_sec;
 	float              _view_span_sec;
+	bool               _sel_active;
+	float              _sel_start_sec;
+	float              _sel_end_sec;
 };
