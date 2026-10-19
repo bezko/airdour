@@ -222,7 +222,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_prefs,
                             bool smoke_recent,
                             bool smoke_recovery,
-                            bool smoke_stretch)
+                            bool smoke_stretch,
+                            bool smoke_pitch)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -423,6 +424,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_stretch) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-stretch FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_pitch && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_pitch ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_pitch) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-pitch FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2137,6 +2151,23 @@ ShellWindow::do_stretch_selection (float time_ratio)
 }
 
 void
+ShellWindow::do_pitch_shift_selection (float semitones)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.pitch_shift_selected (semitones)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::do_toggle_snap ()
 {
 	if (!_engine.is_linked ()) {
@@ -2621,6 +2652,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'T' || wparam == 't')) {
 			/* T = stretch 1.5×; Shift+T = compress 0.75× (pitch unchanged). */
 			do_stretch_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? 0.75f : 1.5f);
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'R' || wparam == 'r')) {
+			/* R = pitch +1 st; Shift+R = −1 st (duration held). */
+			do_pitch_shift_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? -1.f : 1.f);
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'G' || wparam == 'g')) {
 			if (GetKeyState (VK_SHIFT) & 0x8000) {
 				do_cycle_snap_density ();
@@ -3069,6 +3103,14 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::Stretch) {
 		do_stretch_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? 0.75f : 1.5f);
+		return true;
+	}
+	if (th == TransportHit::PitchUp) {
+		do_pitch_shift_selection (1.f);
+		return true;
+	}
+	if (th == TransportHit::PitchDown) {
+		do_pitch_shift_selection (-1.f);
 		return true;
 	}
 	if (th == TransportHit::Snap) {
@@ -4520,6 +4562,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },
+		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },

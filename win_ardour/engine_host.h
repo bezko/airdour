@@ -416,6 +416,12 @@ public:
 	 */
 	bool stretch_selected (float time_ratio = 1.5f);
 
+	/**
+	 * Pitch-shift selected AudioRegion by semitones (duration held).
+	 * Session Pitch / RubberBand; pitch_fraction = 2^(st/12). Default ±1.
+	 */
+	bool pitch_shift_selected (float semitones = 1.f);
+
 	/** Snap-to-grid: TempoMap beat/bar (fallback fixed 120 BPM). */
 	void set_snap_enabled (bool on);
 	bool snap_enabled () const;
@@ -465,6 +471,12 @@ public:
 	 * For --smoke-stretch.
 	 */
 	bool smoke_stretch ();
+
+	/**
+	 * Import tone → select → pitch +1 semitone; verify duration held.
+	 * For --smoke-pitch.
+	 */
+	bool smoke_pitch ();
 
 	/**
 	 * Enable beat snap; verify 1.1s → ~1.0s; density bar; off → identity.

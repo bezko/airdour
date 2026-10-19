@@ -67,6 +67,7 @@
 #include "ardour/audiofilesource.h"
 #include "ardour/sndfilesource.h"
 #include "ardour/source_factory.h"
+#include "ardour/pitch.h"
 #include "ardour/stretch.h"
 #include "ardour/timefx_request.h"
 #include "ardour/types.h"
@@ -4684,6 +4685,111 @@ EngineHost::stretch_selected (float time_ratio)
 	}
 }
 
+bool
+EngineHost::pitch_shift_selected (float semitones)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (!ar) {
+		_snap.detail = L"pitch — select an audio region";
+		return false;
+	}
+	if (!std::isfinite (semitones) || std::fabs (semitones) < 0.001f) {
+		_snap.detail = L"pitch — no-op";
+		return true;
+	}
+	/* Clamp to a musically sane range (±2 octaves). */
+	if (semitones > 24.f) {
+		semitones = 24.f;
+	}
+	if (semitones < -24.f) {
+		semitones = -24.f;
+	}
+	try {
+		std::shared_ptr<Playlist> pl = ar->playlist ();
+		if (!pl) {
+			_snap.detail = L"pitch — no playlist";
+			return false;
+		}
+
+		samplecnt_t old_len = ar->length_samples ();
+		float pitch_frac = (float)std::pow (2.0, (double)semitones / 12.0);
+
+#ifdef HAVE_RUBBERBAND
+		TimeFXRequest req;
+		req.algorithm = TimeFXRequest::Rubberband;
+		req.time_fraction = Temporal::ratio_t (1, 1); /* duration held */
+		req.pitch_fraction = pitch_frac;
+		req.opts = 0;
+		req.cancel = false;
+		req.done = false;
+
+		ShellProgress progress;
+		ARDOUR::Pitch fx (*_impl->session, req);
+		if (fx.run (ar, &progress) != 0 || fx.results.empty ()) {
+			std::fprintf (stderr, "airdour_win_shell: Pitch (RB) failed\n");
+			std::fflush (stderr);
+			_snap.detail = L"pitch failed";
+			return false;
+		}
+
+		std::shared_ptr<Region> neu = fx.results.front ();
+		timepos_t pos = ar->position ();
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		float pos_sec = (float)ar->position_sample () / (float)sr;
+		int track = _impl->selected_track;
+
+		_impl->session->begin_reversible_command ("pitch shift");
+		pl->clear_changes ();
+		pl->clear_owned_changes ();
+		pl->replace_region (ar, neu, pos);
+		pl->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		if (track < 0 || !select_region_at (track, pos_sec + 0.01f)) {
+			_impl->selected_region = neu;
+			refresh_selection_snap ();
+		}
+		refresh_region_flags ();
+		refresh_history_flags ();
+
+		samplecnt_t new_len = 0;
+		if (std::shared_ptr<Region> sel = _impl->selected_region.lock ()) {
+			new_len = sel->length_samples ();
+		} else {
+			new_len = neu->length_samples ();
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: pitch ok (%+.1fst ratio=%.4f samples %lld→%lld)\n",
+		              semitones, pitch_frac, (long long)old_len, (long long)new_len);
+		std::fflush (stderr);
+		_snap.detail = L"pitch shift (RubberBand) — duration held";
+		return true;
+#else
+		(void)pitch_frac;
+		(void)old_len;
+		_snap.detail = L"pitch unavailable (no RubberBand)";
+		std::fprintf (stderr, "airdour_win_shell: pitch failed — no HAVE_RUBBERBAND\n");
+		std::fflush (stderr);
+		return false;
+#endif
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: pitch exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"pitch exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"pitch failed";
+		return false;
+	}
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -5162,6 +5268,75 @@ EngineHost::smoke_stretch ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-stretch exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_pitch ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-pitch failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pitch FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 0.8f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pitch FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pitch FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float len0 = _snap.selection_end_sec - _snap.selection_start_sec;
+		if (len0 < 0.5f || len0 > 1.2f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pitch FAILED (len0=%.3f)\n",
+			              len0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!pitch_shift_selected (1.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pitch FAILED (pitch +1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float len1 = _snap.selection_end_sec - _snap.selection_start_sec;
+		/* Duration held: allow small RubberBand length jitter. */
+		if (std::fabs (len1 - len0) > 0.08f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-pitch FAILED (len drifted %.3f→%.3f)\n",
+			              len0, len1);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-pitch ok (+1st len %.3f→%.3f held)\n",
+		              len0, len1);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-pitch ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-pitch exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -9938,6 +10113,13 @@ EngineHost::stretch_selected (float time_ratio)
 	return false;
 }
 
+bool
+EngineHost::pitch_shift_selected (float semitones)
+{
+	(void)semitones;
+	return false;
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -10009,6 +10191,12 @@ EngineHost::smoke_edit ()
 
 bool
 EngineHost::smoke_stretch ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_pitch ()
 {
 	return false;
 }
