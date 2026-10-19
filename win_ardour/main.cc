@@ -15,7 +15,7 @@
  *                         [--smoke-rename] [--smoke-group] [--smoke-monitor]
  *                         [--smoke-locate] [--smoke-zoom] [--smoke-history]
  *                         [--smoke-prefs]
- *                         [--period N] [--session DIR]
+ *                         [--no-splash] [--period N] [--session DIR]
  */
 
 #include "shell_window.h"
@@ -134,10 +134,15 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_history = parse_flag (argc, argv, L"--smoke-history");
 	bool smoke_prefs = parse_flag (argc, argv, L"--smoke-prefs");
 	bool smoke_perf = parse_flag (argc, argv, L"--smoke-perf");
+	bool no_splash = parse_flag (argc, argv, L"--no-splash");
 	std::string session_path = parse_session_path (argc, argv);
 	/* --smoke-perf uses --timeout as the sample window (default 5s). */
 	if (smoke_perf && timeout == 0) {
 		timeout = 5;
+	}
+	/* Unattended / smoke: skip splash so --timeout exit-0 stays snappy. */
+	if (timeout > 0 || smoke_perf) {
+		no_splash = true;
 	}
 	HINSTANCE instance = GetModuleHandleW (nullptr);
 
@@ -153,9 +158,13 @@ wmain (int argc, wchar_t** argv)
 		return 1;
 	}
 
+	if (!no_splash) {
+		shell.show_splash ();
+	}
+
 	std::fwprintf (stderr,
-	               L"airdour_win_shell: window up (timeout=%u). Brand=Airdour. DPI host + panes.\n",
-	               timeout);
+	               L"airdour_win_shell: window up (timeout=%u). Brand=Airdour. DPI host + panes%s.\n",
+	               timeout, no_splash ? L" (--no-splash)" : L"");
 
 	if (!no_engine) {
 		if (shell.attach_engine (backend, timeout, smoke_import, smoke_record,

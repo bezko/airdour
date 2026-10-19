@@ -50,6 +50,7 @@ TransportBar::TransportBar ()
 	, _fit_regions_btn ()
 	, _help_btn ()
 	, _prefs_btn ()
+	, _about_btn ()
 	, _playing (false)
 	, _recording (false)
 	, _record_armed (false)
@@ -113,6 +114,7 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_fit_regions_btn, x, narrow + 4.f * dpi_scale);
 	place (_help_btn, x, narrow);
 	place (_prefs_btn, x, btn_w * 1.1f);
+	place (_about_btn, x, btn_w * 1.15f);
 	place (_import_btn, x, btn_w * 1.15f);
 	place (_save_btn, x, btn_w);
 	place (_open_btn, x, btn_w);
@@ -216,6 +218,9 @@ TransportBar::hit_test (float x, float y) const
 	if (contains (_prefs_btn, x, y)) {
 		return TransportHit::Prefs;
 	}
+	if (contains (_about_btn, x, y)) {
+		return TransportHit::About;
+	}
 	if (contains (_import_btn, x, y)) {
 		return TransportHit::Import;
 	}
@@ -311,6 +316,7 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_fit_regions_btn, L"All", false);
 	draw_btn (_help_btn, L"?", false);
 	draw_btn (_prefs_btn, L"Prefs", false);
+	draw_btn (_about_btn, L"About", false);
 	draw_btn (_import_btn, L"Import", false);
 	draw_btn (_save_btn, L"Save", false);
 	draw_btn (_open_btn, L"Open", false);

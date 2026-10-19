@@ -21,6 +21,7 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
+#include "about_panel.h"
 #include "automation_lane.h"
 #include "engine_host.h"
 #include "history_panel.h"
@@ -50,6 +51,10 @@ public:
 	~ShellWindow ();
 
 	bool create (HINSTANCE instance, int show_cmd);
+	/** Show brief branded splash (ignored if already dismissed / --no-splash). */
+	void show_splash ();
+	void dismiss_splash ();
+	bool splash_visible () const { return _about.splash_visible (); }
 	/**
 	 * When smoke_timeout_secs > 0, create Session/PeakMeter but do not auto-roll
 	 * (avoids intermittent AVs under Dummy/WASAPI during unattended --timeout).
@@ -153,6 +158,7 @@ private:
 	void draw_help_overlay ();
 	void toggle_help ();
 	void toggle_prefs ();
+	void toggle_about ();
 	void sync_prefs_from_engine ();
 	void apply_prefs_hit (PrefsHit hit);
 	void transport_play ();
@@ -272,6 +278,7 @@ private:
 	bool             _smoke_failed; /* any --smoke-* reported FAILED */
 	bool             _help_visible;
 	bool             _prefs_visible;
+	DWORD            _splash_shown_ms; /* 0 = no auto-dismiss timer */
 
 	D2D1_RECT_F _brand_bar;
 	D2D1_RECT_F _transport_bounds;
@@ -315,5 +322,6 @@ private:
 	MonitorStrip   _monitor;
 	HistoryPanel   _history;
 	PrefsPanel     _prefs;
+	AboutPanel     _about;
 	float          _auto_last_write_sec;
 };

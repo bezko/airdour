@@ -113,6 +113,7 @@ ShellWindow::ShellWindow ()
 	, _smoke_failed (false)
 	, _help_visible (false)
 	, _prefs_visible (false)
+	, _splash_shown_ms (0)
 	, _brand_bar ()
 	, _transport_bounds ()
 	, _editor_pane ()
@@ -2271,10 +2272,18 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		on_tick ();
 		return 0;
 	case WM_KEYDOWN:
+		if (_about.splash_visible ()) {
+			/* Any key dismisses splash (smokes use --no-splash / --timeout). */
+			dismiss_splash ();
+			return 0;
+		}
 		if (wparam == VK_ESCAPE) {
 			if (_prefs_visible) {
 				_prefs_visible = false;
 				_prefs.set_visible (false);
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			} else if (_about.about_visible ()) {
+				_about.set_about_visible (false);
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			} else if (_help_visible) {
 				_help_visible = false;
@@ -2285,6 +2294,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && wparam == VK_OEM_COMMA) {
 			/* Ctrl+, — Preferences. */
 			toggle_prefs ();
+		} else if (wparam == VK_F3) {
+			/* F3 — About Airdour. */
+			toggle_about ();
 		} else if (wparam == VK_F1
 		           || ((wparam == VK_OEM_2 || wparam == VK_DIVIDE)
 		               && (GetKeyState (VK_SHIFT) & 0x8000))) {
@@ -2716,9 +2728,22 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	float x, y;
 	client_from_lparam (lparam, &x, &y);
 
+	if (_about.splash_visible ()) {
+		dismiss_splash ();
+		return true;
+	}
+
 	if (_prefs_visible) {
 		PrefsHit ph = _prefs.hit_test (x, y);
 		apply_prefs_hit (ph);
+		return true;
+	}
+
+	if (_about.about_visible ()) {
+		if (_about.hit_dismiss_about (x, y)) {
+			_about.set_about_visible (false);
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
 		return true;
 	}
 
@@ -2736,6 +2761,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::Prefs) {
 		toggle_prefs ();
+		return true;
+	}
+	if (th == TransportHit::About) {
+		toggle_about ();
 		return true;
 	}
 	if (th == TransportHit::Play) {
@@ -3577,6 +3606,12 @@ ShellWindow::on_tick ()
 	float t = (now - _start_tick) * 0.001f;
 	_pulse = 0.5f + 0.5f * std::sin (t * 1.6f);
 
+	/* Brief splash auto-dismiss (~1.6s); click/Esc/any key also clears. */
+	if (_about.splash_visible () && _splash_shown_ms != 0
+	    && (now - _splash_shown_ms) >= 1600u) {
+		dismiss_splash ();
+	}
+
 	/* Poll engine often enough for meters while playing. */
 	static DWORD last_poll = 0;
 	static DWORD last_wave = 0;
@@ -4042,11 +4077,60 @@ ShellWindow::draw_midi_lane ()
 }
 
 void
-ShellWindow::toggle_help ()
+ShellWindow::show_splash ()
 {
+	_about.set_splash_visible (true);
+	_about.set_about_visible (false);
+	_prefs_visible = false;
+	_prefs.set_visible (false);
+	_help_visible = false;
+	_splash_shown_ms = GetTickCount ();
+	if (_splash_shown_ms == 0) {
+		_splash_shown_ms = 1; /* reserve 0 = inactive */
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::dismiss_splash ()
+{
+	if (!_about.splash_visible () && _splash_shown_ms == 0) {
+		return;
+	}
+	_about.set_splash_visible (false);
+	_splash_shown_ms = 0;
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::toggle_about ()
+{
+	dismiss_splash ();
 	if (_prefs_visible) {
 		_prefs_visible = false;
 		_prefs.set_visible (false);
+	}
+	if (_help_visible) {
+		_help_visible = false;
+	}
+	bool on = !_about.about_visible ();
+	_about.set_about_visible (on);
+	if (on) {
+		_about.layout ((float)_width, (float)_height, _dpi_scale);
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::toggle_help ()
+{
+	dismiss_splash ();
+	if (_prefs_visible) {
+		_prefs_visible = false;
+		_prefs.set_visible (false);
+	}
+	if (_about.about_visible ()) {
+		_about.set_about_visible (false);
 	}
 	_help_visible = !_help_visible;
 	InvalidateRect (_hwnd, nullptr, FALSE);
@@ -4067,8 +4151,12 @@ ShellWindow::sync_prefs_from_engine ()
 void
 ShellWindow::toggle_prefs ()
 {
+	dismiss_splash ();
 	if (_help_visible) {
 		_help_visible = false;
+	}
+	if (_about.about_visible ()) {
+		_about.set_about_visible (false);
 	}
 	_prefs_visible = !_prefs_visible;
 	_prefs.set_visible (_prefs_visible);
@@ -4165,6 +4253,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Space", L"Play / Stop" },
 		{ L"Esc", L"Close help · quit app" },
 		{ L"F1  /  ?", L"Toggle this help" },
+		{ L"F3", L"About Airdour" },
 		{ L"Ctrl+,", L"Preferences" },
 		{ L"Ctrl+Z / Y", L"Undo / Redo" },
 		{ L"Ctrl+S / O / E", L"Save / Open / Export" },
@@ -4291,10 +4380,19 @@ ShellWindow::on_paint ()
 	if (_help_visible) {
 		draw_help_overlay ();
 	}
+	if (_about.about_visible ()) {
+		_about.layout ((float)_width, (float)_height, _dpi_scale);
+		_about.draw_about (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
+		                   _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
+	}
 	if (_prefs_visible) {
 		_prefs.layout ((float)_width, (float)_height, _dpi_scale);
 		_prefs.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
 		             _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
+	}
+	if (_about.splash_visible ()) {
+		_about.draw_splash (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
+		                    _fmt_brand, _fmt_meta, _dpi_scale, _pulse);
 	}
 
 	wchar_t status[384];
