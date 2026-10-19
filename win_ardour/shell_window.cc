@@ -155,6 +155,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_import,
                             bool smoke_record,
                             bool smoke_save_load,
+                            bool smoke_export,
                             const std::string& open_session_path)
 {
 	if (!_engine.is_linked ()) {
@@ -198,6 +199,16 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			std::fprintf (stderr, "airdour_win_shell: smoke-save-load FAILED (saved=%d regions0=%d)\n",
 			              _engine.snapshot ().session_saved ? 1 : 0,
 			              _engine.snapshot ().track_has_regions[0] ? 1 : 0);
+		}
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_export && _engine.snapshot ().session_ok) {
+		std::string exported;
+		if (_engine.smoke_export_wav (&exported)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-export ok → %s\n", exported.c_str ());
+		} else {
+			std::fprintf (stderr, "airdour_win_shell: smoke-export FAILED\n");
 		}
 		std::fflush (stderr);
 	}
@@ -249,6 +260,45 @@ ShellWindow::transport_toggle_record ()
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_mixer_arm_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::prompt_export_wav ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+
+	wchar_t path[MAX_PATH] = L"airdour_export.wav";
+	OPENFILENAMEW ofn = {};
+	ofn.lStructSize = sizeof (ofn);
+	ofn.hwndOwner = _hwnd;
+	ofn.lpstrFilter = L"WAV audio (*.wav)\0*.wav\0All files (*.*)\0*.*\0";
+	ofn.lpstrFile = path;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+	ofn.lpstrTitle = L"Airdour — export WAV";
+	ofn.lpstrDefExt = L"wav";
+	if (!GetSaveFileNameW (&ofn)) {
+		return;
+	}
+
+	char utf8[MAX_PATH * 4];
+	WideCharToMultiByte (CP_UTF8, 0, path, -1, utf8, sizeof (utf8), nullptr, nullptr);
+	if (_engine.export_session_wav (utf8)) {
+		std::fprintf (stderr, "airdour_win_shell: export dialog ok\n");
+	} else {
+		std::fprintf (stderr, "airdour_win_shell: export dialog failed\n");
+	}
+	std::fflush (stderr);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
@@ -776,6 +826,8 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_save_session ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'O' || wparam == 'o')) {
 			prompt_open_session ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')) {
+			prompt_export_wav ();
 		}
 		return 0;
 	case WM_MOUSEWHEEL:
@@ -905,6 +957,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::Open) {
 		prompt_open_session ();
+		return true;
+	}
+	if (th == TransportHit::Export) {
+		prompt_export_wav ();
 		return true;
 	}
 

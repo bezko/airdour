@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Direct2D transport: Play / Stop / Rec / Import / Save / Open (not GTK).
+ * Direct2D transport: Play / Stop / Rec / Import / Save / Open / Export.
  */
 
 #pragma once
@@ -24,7 +24,8 @@ enum class TransportHit {
 	Rec,
 	Import,
 	Save,
-	Open
+	Open,
+	Export
 };
 
 class TransportBar
@@ -65,6 +66,7 @@ private:
 	D2D1_RECT_F _import_btn;
 	D2D1_RECT_F _save_btn;
 	D2D1_RECT_F _open_btn;
+	D2D1_RECT_F _export_btn;
 	bool        _playing;
 	bool        _recording;
 	bool        _record_armed;

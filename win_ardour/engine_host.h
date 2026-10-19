@@ -22,8 +22,10 @@ struct EngineSnapshot {
 	bool         session_record_armed; /* Session record enable (may not be rolling yet) */
 	bool         session_recording; /* actively capturing */
 	bool         session_saved; /* last save_state succeeded */
+	bool         export_ok; /* last export produced a file */
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
+	std::wstring export_path; /* last exported WAV (UTF-16 display) */
 	uint32_t     sample_rate;
 	uint32_t     period_frames;
 	float        gain; /* track 0 stub/session gain */
@@ -97,7 +99,20 @@ public:
 	/** Save then reopen the current session path (smoke / Ctrl+S round-trip). */
 	bool reload_session ();
 
+	/**
+	 * Bounce session (master bus) to a WAV file for [start,end] samples.
+	 * If outfile empty, writes under session export/ as airdour_export.wav.
+	 * If end<=start, uses playlist extent or a short fallback window.
+	 */
+	bool export_session_wav (const std::string& outfile = std::string (),
+	                         int64_t start_sample = 0,
+	                         int64_t end_sample = 0);
+
+	/** Convenience: export after ensuring content; for --smoke-export. */
+	bool smoke_export_wav (std::string* out_path = nullptr);
+
 	std::string session_dir () const;
+	std::string last_export_path () const;
 
 	EngineSnapshot snapshot () const;
 
@@ -124,9 +139,11 @@ private:
 	void refresh_record_flags ();
 	void collect_tracks ();
 	void update_session_path_snap ();
+	bool compute_export_range (int64_t* start_sample, int64_t* end_sample) const;
 
 	bool        _started;
 	std::string _backend_name;
+	std::string _last_export_path;
 	float       _gain;
 	float       _track_gain[EngineSnapshot::kMeters];
 	EngineSnapshot _snap;

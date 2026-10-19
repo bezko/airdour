@@ -20,8 +20,17 @@
 #include "ardour/audioengine.h"
 #include "ardour/audioregion.h"
 #include "ardour/audiosource.h"
+#include "ardour/export_channel.h"
+#include "ardour/export_channel_configuration.h"
+#include "ardour/export_filename.h"
+#include "ardour/export_format_specification.h"
+#include "ardour/export_handler.h"
+#include "ardour/export_status.h"
+#include "ardour/export_timespan.h"
+#include "ardour/io.h"
 #include "ardour/meter.h"
 #include "ardour/playlist.h"
+#include "ardour/session_directory.h"
 #include "ardour/presentation_info.h"
 #include "ardour/rc_configuration.h"
 #include "ardour/region.h"
@@ -39,6 +48,7 @@
 #include "pbd/event_loop.h"
 #include "pbd/failed_constructor.h"
 #include "pbd/rwlock.h"
+#include "pbd/xml++.h"
 #include "temporal/types.h"
 
 #ifdef interface
@@ -292,13 +302,16 @@ EngineHost::EngineHost ()
 	_snap.session_record_armed = false;
 	_snap.session_recording = false;
 	_snap.session_saved = false;
+	_snap.export_ok = false;
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
 	_snap.transport_sec = 0.f;
 	_snap.backend = L"(idle)";
 	_snap.session_path.clear ();
+	_snap.export_path.clear ();
 	_snap.detail = L"engine linked — not started";
+	_last_export_path.clear ();
 }
 
 EngineHost::~EngineHost ()
@@ -764,6 +777,307 @@ EngineHost::reload_session ()
 		return false;
 	}
 	return open_session (path, snap);
+}
+
+bool
+EngineHost::compute_export_range (int64_t* start_sample, int64_t* end_sample) const
+{
+	if (!start_sample || !end_sample || !_impl || !_impl->session) {
+		return false;
+	}
+	*start_sample = 0;
+	*end_sample = 0;
+
+	try {
+		samplepos_t s = _impl->session->current_start_sample ();
+		samplepos_t e = _impl->session->current_end_sample ();
+		if (e > s) {
+			*start_sample = (int64_t)s;
+			*end_sample = (int64_t)e;
+			return true;
+		}
+	} catch (...) {
+	}
+
+	samplepos_t max_end = 0;
+	try {
+		for (size_t t = 0; t < _impl->tracks.size (); ++t) {
+			if (!_impl->tracks[t] || !_impl->tracks[t]->playlist ()) {
+				continue;
+			}
+			std::shared_ptr<RegionList> regions = _impl->tracks[t]->playlist ()->region_list ();
+			if (!regions) {
+				continue;
+			}
+			for (RegionList::const_iterator it = regions->begin (); it != regions->end (); ++it) {
+				if (!*it) {
+					continue;
+				}
+				samplepos_t re = (*it)->end_position ().samples ();
+				if (re > max_end) {
+					max_end = re;
+				}
+			}
+		}
+	} catch (...) {
+	}
+
+	if (max_end > 0) {
+		*start_sample = 0;
+		*end_sample = (int64_t)max_end;
+		return true;
+	}
+
+	samplecnt_t sr = _impl->session->sample_rate ();
+	if (sr <= 0 && _impl->engine) {
+		sr = (samplecnt_t)_impl->engine->sample_rate ();
+	}
+	if (sr <= 0) {
+		sr = 48000;
+	}
+	*start_sample = 0;
+	*end_sample = (int64_t)sr * 2; /* 2s silence fallback */
+	return true;
+}
+
+bool
+EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample, int64_t end_sample)
+{
+	_snap.export_ok = false;
+	_snap.export_path.clear ();
+	_last_export_path.clear ();
+
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"export failed — no Session";
+		return false;
+	}
+
+	try {
+		_impl->session->request_stop (false, false, TRS_UI);
+	} catch (...) {
+	}
+
+	if (end_sample <= start_sample) {
+		if (!compute_export_range (&start_sample, &end_sample) || end_sample <= start_sample) {
+			_snap.detail = L"export failed — empty range";
+			return false;
+		}
+	}
+
+	std::shared_ptr<Route> master = _impl->session->master_out ();
+	if (!master || !master->output ()) {
+		_snap.detail = L"export failed — no master out";
+		return false;
+	}
+
+	samplecnt_t sr = _impl->session->sample_rate ();
+	if (sr <= 0) {
+		sr = 48000;
+	}
+
+	std::string out = outfile;
+	std::string folder;
+	std::string basename = "airdour_export";
+	if (out.empty ()) {
+		folder = _impl->session->session_directory ().export_path ();
+		out = path_join (folder, basename + ".wav");
+	} else {
+		/* Split path into folder + basename without .wav */
+		size_t slash = out.find_last_of ("\\/");
+		folder = (slash == std::string::npos) ? "." : out.substr (0, slash);
+		basename = (slash == std::string::npos) ? out : out.substr (slash + 1);
+		if (basename.size () > 4) {
+			std::string ext = basename.substr (basename.size () - 4);
+			if (ext == ".wav" || ext == ".WAV") {
+				basename = basename.substr (0, basename.size () - 4);
+			}
+		}
+		out = path_join (folder, basename + ".wav");
+	}
+
+	{
+		std::wstring wfolder = utf8_path_to_wide (folder);
+		if (!wfolder.empty ()) {
+			CreateDirectoryW (wfolder.c_str (), nullptr);
+		}
+	}
+
+	std::fprintf (stderr, "airdour_win_shell: export range %lld..%lld → %s\n",
+	              (long long)start_sample, (long long)end_sample, out.c_str ());
+	std::fflush (stderr);
+
+	try {
+		std::shared_ptr<ExportHandler> handler = _impl->session->get_export_handler ();
+		std::shared_ptr<ExportStatus> status = _impl->session->get_export_status ();
+		if (!handler || !status) {
+			_snap.detail = L"export failed — no handler";
+			return false;
+		}
+
+		ExportTimespanPtr tsp = handler->add_timespan ();
+		std::shared_ptr<ExportChannelConfiguration> ccp = handler->add_channel_config ();
+		std::shared_ptr<ExportFilename> fnp = handler->add_filename ();
+
+		char rate_buf[32];
+		std::snprintf (rate_buf, sizeof (rate_buf), "%lld", (long long)sr);
+		std::string xml =
+			std::string (
+			    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+			    "<ExportFormatSpecification name=\"AIRDOUR-WAV\" id=\"b1280899-0459-4aef-9dc9-7e2277fa6d24\">"
+			    "  <Encoding id=\"F_WAV\" type=\"T_Sndfile\" extension=\"wav\" name=\"WAV\" has-sample-format=\"true\" channel-limit=\"256\"/>"
+			    "  <SampleRate rate=\"")
+			+ rate_buf +
+			"\"/>"
+			"  <SRCQuality quality=\"SRC_SincBest\"/>"
+			"  <EncodingOptions>"
+			"    <Option name=\"sample-format\" value=\"SF_16\"/>"
+			"    <Option name=\"dithering\" value=\"D_None\"/>"
+			"    <Option name=\"tag-metadata\" value=\"true\"/>"
+			"    <Option name=\"tag-support\" value=\"false\"/>"
+			"    <Option name=\"broadcast-info\" value=\"false\"/>"
+			"  </EncodingOptions>"
+			"  <Processing>"
+			"    <Normalize enabled=\"false\" target=\"0\"/>"
+			"    <Silence>"
+			"      <Start><Trim enabled=\"false\"/><Add enabled=\"false\">"
+			"        <Duration format=\"Timecode\" hours=\"0\" minutes=\"0\" seconds=\"0\" frames=\"0\"/>"
+			"      </Add></Start>"
+			"      <End><Trim enabled=\"false\"/><Add enabled=\"false\">"
+			"        <Duration format=\"Timecode\" hours=\"0\" minutes=\"0\" seconds=\"0\" frames=\"0\"/>"
+			"      </Add></End>"
+			"    </Silence>"
+			"  </Processing>"
+			"</ExportFormatSpecification>";
+
+		XMLTree tree;
+		if (!tree.read_buffer (xml.c_str ()) || !tree.root ()) {
+			_snap.detail = L"export failed — format XML";
+			return false;
+		}
+		std::shared_ptr<ExportFormatSpecification> fmp = handler->add_format (*tree.root ());
+
+		tsp->set_range ((samplepos_t)start_sample, (samplepos_t)end_sample);
+		tsp->set_range_id ("session");
+		tsp->set_name (basename);
+		tsp->set_realtime (false);
+
+		IO* master_out = master->output ().get ();
+		for (uint32_t n = 0; n < master_out->n_ports ().n_audio (); ++n) {
+			PortExportChannel* channel = new PortExportChannel ();
+			channel->add_port (master_out->audio (n));
+			ExportChannelPtr chan_ptr (channel);
+			ccp->register_channel (chan_ptr);
+		}
+		if (ccp->get_n_chans () == 0) {
+			_snap.detail = L"export failed — no master channels";
+			return false;
+		}
+
+		fnp->set_folder (folder);
+		fnp->set_timespan (tsp);
+		fnp->include_label = false;
+
+		fmp->set_soundcloud_upload (false);
+		handler->add_export_config (tsp, ccp, fmp, fnp, BroadcastInfoPtr ());
+
+		if (0 != handler->do_export ()) {
+			_snap.detail = L"export failed — do_export";
+			return false;
+		}
+
+		while (status->running ()) {
+			/* Keep UI responsive during interactive export; smoke is short. */
+			MSG msg;
+			while (PeekMessageW (&msg, nullptr, 0, 0, PM_REMOVE)) {
+				TranslateMessage (&msg);
+				DispatchMessageW (&msg);
+			}
+			ARDOUR::GUIIdle ();
+			Sleep (10);
+		}
+		status->finish (TRS_UI);
+
+		if (status->aborted ()) {
+			_snap.detail = L"export aborted";
+			return false;
+		}
+
+		std::wstring wout = utf8_path_to_wide (out);
+		DWORD attrs = GetFileAttributesW (wout.c_str ());
+		if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+			/* Handler may have written a slightly different name — check get_path. */
+			std::string alt = fnp->get_path (fmp);
+			if (!alt.empty ()) {
+				out = alt;
+				wout = utf8_path_to_wide (out);
+				attrs = GetFileAttributesW (wout.c_str ());
+			}
+		}
+		if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+			_snap.detail = L"export finished but file missing";
+			std::fprintf (stderr, "airdour_win_shell: export file missing: %s\n", out.c_str ());
+			std::fflush (stderr);
+			return false;
+		}
+
+		HANDLE hf = CreateFileW (wout.c_str (), GENERIC_READ, FILE_SHARE_READ, nullptr,
+		                         OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+		LARGE_INTEGER sz = {};
+		if (hf != INVALID_HANDLE_VALUE) {
+			GetFileSizeEx (hf, &sz);
+			CloseHandle (hf);
+		}
+		if (sz.QuadPart < 44) {
+			_snap.detail = L"export file too small";
+			return false;
+		}
+
+		_last_export_path = out;
+		_snap.export_path = utf8_to_wide (out);
+		_snap.export_ok = true;
+		_snap.detail = L"export ok — WAV written";
+		std::fprintf (stderr, "airdour_win_shell: export ok (%lld bytes) %s\n",
+		              (long long)sz.QuadPart, out.c_str ());
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: export exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"export exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"export unknown failure";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_export_wav (std::string* out_path)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_region_flags ();
+	if (!_snap.track_has_regions[0]) {
+		if (!import_test_tone (0, 440.f, 1.5f)) {
+			return false;
+		}
+	}
+	std::string folder = _impl->session->session_directory ().export_path ();
+	std::string path = path_join (folder, "airdour_smoke_export.wav");
+	if (!export_session_wav (path)) {
+		return false;
+	}
+	if (out_path) {
+		*out_path = _last_export_path;
+	}
+	return true;
+}
+
+std::string
+EngineHost::last_export_path () const
+{
+	return _last_export_path;
 }
 
 bool
@@ -1416,13 +1730,16 @@ EngineHost::EngineHost ()
 	_snap.session_record_armed = false;
 	_snap.session_recording = false;
 	_snap.session_saved = false;
+	_snap.export_ok = false;
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
 	_snap.transport_sec = 0.f;
 	_snap.backend = L"(not linked)";
 	_snap.session_path.clear ();
+	_snap.export_path.clear ();
 	_snap.detail = L"build with AIRDOUR_WIN_SHELL_WITH_ENGINE + waf libs";
+	_last_export_path.clear ();
 }
 
 EngineHost::~EngineHost () = default;
@@ -1606,6 +1923,28 @@ EngineHost::reload_session ()
 	return false;
 }
 
+bool
+EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample, int64_t end_sample)
+{
+	(void)outfile;
+	(void)start_sample;
+	(void)end_sample;
+	return false;
+}
+
+bool
+EngineHost::smoke_export_wav (std::string* out_path)
+{
+	(void)out_path;
+	return false;
+}
+
+std::string
+EngineHost::last_export_path () const
+{
+	return std::string ();
+}
+
 std::string
 EngineHost::session_dir () const
 {
@@ -1620,6 +1959,14 @@ EngineHost::collect_tracks ()
 void
 EngineHost::update_session_path_snap ()
 {
+}
+
+bool
+EngineHost::compute_export_range (int64_t* start_sample, int64_t* end_sample) const
+{
+	(void)start_sample;
+	(void)end_sample;
+	return false;
 }
 
 bool

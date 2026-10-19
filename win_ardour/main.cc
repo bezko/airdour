@@ -6,15 +6,7 @@
  * Usage:
  *   airdour_win_shell.exe [--timeout N] [--backend Dummy|WASAPI] [--no-engine]
  *                         [--smoke-import] [--smoke-record] [--smoke-save-load]
- *                         [--session DIR]
- *
- * --timeout N       Auto-quit after N seconds (unattended smoke).
- * --backend NAME    Attach AudioEngine (when built WITH_ENGINE). Default: Dummy.
- * --no-engine       Skip engine attach even if linked.
- * --smoke-import    Write+import a test WAV onto track 0.
- * --smoke-record    Arm track 0, capture ~1s, stop (region peaks).
- * --smoke-save-load Import (if needed), save_state, reopen — peaks must return.
- * --session DIR     Open existing session folder after engine start.
+ *                         [--smoke-export] [--session DIR]
  */
 
 #include "shell_window.h"
@@ -92,12 +84,10 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_import = parse_flag (argc, argv, L"--smoke-import");
 	bool smoke_record = parse_flag (argc, argv, L"--smoke-record");
 	bool smoke_save_load = parse_flag (argc, argv, L"--smoke-save-load");
+	bool smoke_export = parse_flag (argc, argv, L"--smoke-export");
 	std::string session_path = parse_session_path (argc, argv);
 	HINSTANCE instance = GetModuleHandleW (nullptr);
 
-	/* STA for UI. WASAPI opens on this thread; process load under Session can
-	 * race COM apartment use from the audio thread — --timeout smoke skips
-	 * auto-roll (see ShellWindow::attach_engine) so ExitProcess stays reliable. */
 	HRESULT co = CoInitializeEx (nullptr, COINIT_APARTMENTTHREADED);
 	(void)co;
 
@@ -116,7 +106,7 @@ wmain (int argc, wchar_t** argv)
 
 	if (!no_engine) {
 		if (shell.attach_engine (backend, timeout, smoke_import, smoke_record,
-		                         smoke_save_load, session_path)) {
+		                         smoke_save_load, smoke_export, session_path)) {
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", backend.c_str ());
 		} else {
 			std::fwprintf (stderr, L"airdour_win_shell: engine not attached (ok for UI-only / CI)\n");

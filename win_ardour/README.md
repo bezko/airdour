@@ -62,16 +62,17 @@ build-win64-gui-engine\artifacts\Debug\airdour_win_shell.exe --timeout 3 --backe
 
 Engine builds also **copy** `ptformat.dll` / `ardour.dll` / … next to the exe on POST_BUILD (still need vcpkg + VsDevCmd CRT on PATH).
 
-## Session / PeakMeter / Editor waves / Record / Import / Save
+## Session / PeakMeter / Editor / Record / Import / Save / Export
 
-Default: create a minimal unnamed Session with **3 empty audio tracks** so mixer PeakMeters attach. Editor lanes read playlist peaks via `AudioRegion::read_peaks` — **empty tracks stay empty**. Mixer **R · arm** arms a track; transport **Rec** / **Import** / **Save** / **Open** (Ctrl+S / Ctrl+O). **Play** captures when rec-armed; **Stop** finalizes takes. Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** then `ExitProcess(0)`.
+Default: create a minimal unnamed Session with **3 empty audio tracks** so mixer PeakMeters attach. Editor lanes read playlist peaks via `AudioRegion::read_peaks` — **empty tracks stay empty**. Mixer **R · arm**; transport **Rec** / **Import** / **Save** / **Open** / **Export** (Ctrl+S / Ctrl+O / Ctrl+E). **Export** bounces the master bus to a 16-bit WAV (ExportHandler, no GTK). Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** then `ExitProcess(0)`.
 
 | Flag / env | Effect |
 |------------|--------|
-| (default) | Session + PeakMeter; empty Editor lanes; arm/rec/import/save UI live |
+| (default) | Session + PeakMeter; arm/rec/import/save/export UI live |
 | `--smoke-import` | Write+import test WAV onto track 0 |
 | `--smoke-record` | Arm track 0, record ~1.2s, stop — region peaks |
-| `--smoke-save-load` | Import → `save_state` → reopen same folder — peaks must return |
+| `--smoke-save-load` | Import → `save_state` → reopen — peaks must return |
+| `--smoke-export` | Import if needed → write `export/airdour_smoke_export.wav` |
 | `--session DIR` | Open existing session folder after engine start |
 | `AIRDOUR_WIN_SHELL_SESSION=0` | Skip Session; stub meters; empty lanes |
 | `AIRDOUR_WIN_SHELL_DEMO_TONES=1` | Opt-in sine regions at Session create (prefer Import) |

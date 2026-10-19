@@ -53,6 +53,7 @@ public:
 	                    bool smoke_import = false,
 	                    bool smoke_record = false,
 	                    bool smoke_save_load = false,
+	                    bool smoke_export = false,
 	                    const std::string& open_session_path = std::string ());
 	int  run_message_loop (unsigned timeout_secs);
 
@@ -100,6 +101,7 @@ private:
 	void prompt_import_audio ();
 	void do_save_session ();
 	void prompt_open_session ();
+	void prompt_export_wav ();
 	void sync_mixer_arm_from_engine ();
 	void apply_shared_view (int source_lane);
 	void reset_shared_view ();
