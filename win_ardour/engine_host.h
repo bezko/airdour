@@ -181,6 +181,7 @@ struct EngineSnapshot {
 	bool         midi_muted;
 	bool         midi_soloed;
 	bool         snap_enabled; /* Editor snap-to-grid */
+	bool         midi_step_enabled; /* Step-record: keys/click place at playhead */
 	int          snap_density; /* 0=bar 1=beat 2=1/2 3=1/4 */
 	int          grid_line_count; /* visible grid lines for Editor draw */
 	static constexpr int kMaxGridLines = 96;
@@ -1044,6 +1045,19 @@ public:
 	 */
 	bool humanize_midi_notes (float strength = 1.f, uint32_t seed = 0);
 
+	/** Step-record mode: computer keys / API place notes at playhead. */
+	void set_midi_step_enabled (bool on);
+	bool midi_step_enabled () const;
+	bool toggle_midi_step_enabled ();
+	/**
+	 * Place a note at the transport playhead (length = snap grid unit) and
+	 * advance playhead by one grid step. Works whether or not step UI is on
+	 * (smoke / scripting). WinMME hardware note-on is not polled here.
+	 */
+	bool step_input_midi_note (uint8_t pitch, uint8_t velocity = 100);
+	/** Advance (or retreat) playhead by one snap grid step without a note. */
+	bool step_advance (int steps = 1);
+
 	/** Best-effort connect MidiTrack output to first physical MIDI playback port. */
 	bool connect_midi_output ();
 
@@ -1093,6 +1107,12 @@ public:
 	 * For --smoke-midi-humanize.
 	 */
 	bool smoke_midi_humanize ();
+
+	/**
+	 * Enable step, place two notes via step_input, verify positions + advance.
+	 * For --smoke-midi-step.
+	 */
+	bool smoke_midi_step ();
 
 	std::string session_dir () const;
 	std::string last_export_path () const;

@@ -120,7 +120,8 @@ public:
 	                    bool smoke_midi_velocity = false,
 	                    bool smoke_midi_length = false,
 	                    bool smoke_midi_clipboard = false,
-	                    bool smoke_midi_humanize = false);
+	                    bool smoke_midi_humanize = false,
+	                    bool smoke_midi_step = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -233,6 +234,10 @@ private:
 	void do_cut_midi_notes ();
 	void do_paste_midi_notes ();
 	void do_humanize_midi_notes (float strength = 1.f);
+	void do_toggle_midi_step ();
+	void do_step_input_pitch (uint8_t pitch);
+	/** Map computer key → MIDI pitch when step-record is on; −1 if not a piano key. */
+	int  step_piano_pitch_for_key (WPARAM wparam) const;
 	void do_toggle_loop ();
 	void do_toggle_punch ();
 	void do_toggle_count_in ();

@@ -624,6 +624,7 @@ EngineHost::EngineHost ()
 	_snap.midi_muted = false;
 	_snap.midi_soloed = false;
 	_snap.snap_enabled = false;
+	_snap.midi_step_enabled = false;
 	_snap.snap_density = 1; /* beat */
 	_snap.grid_line_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
@@ -15376,6 +15377,262 @@ EngineHost::smoke_midi_humanize ()
 	}
 }
 
+void
+EngineHost::set_midi_step_enabled (bool on)
+{
+	_snap.midi_step_enabled = on;
+	_snap.detail = on ? L"MIDI step-record on" : L"MIDI step-record off";
+}
+
+bool
+EngineHost::midi_step_enabled () const
+{
+	return _snap.midi_step_enabled;
+}
+
+bool
+EngineHost::toggle_midi_step_enabled ()
+{
+	set_midi_step_enabled (!_snap.midi_step_enabled);
+	return _snap.midi_step_enabled;
+}
+
+bool
+EngineHost::step_advance (int steps)
+{
+	if (steps == 0) {
+		return true;
+	}
+	float unit = snap_unit_sec ();
+	if (unit < 0.05f) {
+		unit = 0.05f;
+	}
+	float t = _snap.transport_sec + unit * (float)steps;
+	if (t < 0.f) {
+		t = 0.f;
+	}
+	/* Force grid snap for the destination even if Snap UI is off. */
+	const bool snap_was = _snap.snap_enabled;
+	set_snap_enabled (true);
+	bool ok = locate_to (t, false, 0.f);
+	set_snap_enabled (snap_was);
+	return ok;
+}
+
+bool
+EngineHost::step_input_midi_note (uint8_t pitch, uint8_t velocity)
+{
+	if (pitch > 127) {
+		pitch = 127;
+	}
+	if (velocity < 1) {
+		velocity = 1;
+	}
+	if (velocity > 127) {
+		velocity = 127;
+	}
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"step: no Session";
+		return false;
+	}
+	float unit = snap_unit_sec ();
+	if (unit < 0.05f) {
+		unit = 0.05f;
+	}
+	float start = _snap.transport_sec;
+	if (start < 0.f) {
+		start = 0.f;
+	}
+	/* Snap placement origin when Snap UI is on. */
+	if (_snap.snap_enabled) {
+		start = snap_time (start);
+	}
+	float len = unit * 0.9f;
+	if (len < 0.05f) {
+		len = 0.05f;
+	}
+	if (!ensure_midi_region (32.f)) {
+		_snap.detail = L"step: no MIDI region";
+		return false;
+	}
+	if (!add_midi_note (pitch, start, len, velocity)) {
+		_snap.detail = L"step: add note failed";
+		return false;
+	}
+	refresh_midi_notes_snap ();
+	/* Advance one grid step from the note start (not from pre-snap transport). */
+	float next = start + unit;
+	const bool snap_was = _snap.snap_enabled;
+	set_snap_enabled (true);
+	locate_to (next, false, 0.f);
+	set_snap_enabled (snap_was);
+	std::fprintf (stderr,
+	              "airdour_win_shell: step note p=%u t=%.3f len=%.3f → %.3f\n",
+	              (unsigned)pitch, start, len, _snap.transport_sec);
+	std::fflush (stderr);
+	_snap.detail = L"MIDI step note";
+	return true;
+}
+
+bool
+EngineHost::smoke_midi_step ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-step failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-step FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-step FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for step smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-step FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		const bool snap_was = _snap.snap_enabled;
+		const int dens_was = _snap.snap_density;
+		set_snap_density (1); /* beat = 0.5s @ 120 */
+		set_snap_enabled (false);
+		set_midi_step_enabled (true);
+		if (!midi_step_enabled ()) {
+			set_snap_enabled (snap_was);
+			set_snap_density (dens_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-step FAILED (enable)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!locate_to (0.f, false, 0.f)) {
+			set_midi_step_enabled (false);
+			set_snap_enabled (snap_was);
+			set_snap_density (dens_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-step FAILED (locate 0)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		float unit = snap_unit_sec ();
+		if (!step_input_midi_note (60, 100)) {
+			set_midi_step_enabled (false);
+			set_snap_enabled (snap_was);
+			set_snap_density (dens_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-step FAILED (note 60)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (std::fabs (_snap.transport_sec - unit) > 0.08f) {
+			set_midi_step_enabled (false);
+			set_snap_enabled (snap_was);
+			set_snap_density (dens_was);
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-step FAILED (advance1 t=%.3f want=%.3f)\n",
+			              _snap.transport_sec, unit);
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!step_input_midi_note (64, 100)) {
+			set_midi_step_enabled (false);
+			set_snap_enabled (snap_was);
+			set_snap_density (dens_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-step FAILED (note 64)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		bool got60 = false, got64 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 60
+			    && _snap.midi_notes[i].start_sec >= -0.05f
+			    && _snap.midi_notes[i].start_sec <= 0.08f) {
+				got60 = true;
+			}
+			if (_snap.midi_notes[i].pitch == 64
+			    && _snap.midi_notes[i].start_sec >= unit - 0.08f
+			    && _snap.midi_notes[i].start_sec <= unit + 0.08f) {
+				got64 = true;
+			}
+		}
+		if (!got60 || !got64 || _snap.midi_note_count < 2) {
+			set_midi_step_enabled (false);
+			set_snap_enabled (snap_was);
+			set_snap_density (dens_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-step FAILED (verify notes)\n");
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				std::fprintf (stderr, "  note p=%u t=%.3f\n",
+				              (unsigned)_snap.midi_notes[i].pitch,
+				              _snap.midi_notes[i].start_sec);
+			}
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!step_advance (1)) {
+			set_midi_step_enabled (false);
+			set_snap_enabled (snap_was);
+			set_snap_density (dens_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-step FAILED (rest advance)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		float want3 = unit * 3.f;
+		if (std::fabs (_snap.transport_sec - want3) > 0.12f) {
+			set_midi_step_enabled (false);
+			set_snap_enabled (snap_was);
+			set_snap_density (dens_was);
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-step FAILED (rest t=%.3f want=%.3f)\n",
+			              _snap.transport_sec, want3);
+			std::fflush (stderr);
+			return false;
+		}
+
+		set_midi_step_enabled (false);
+		set_snap_enabled (snap_was);
+		set_snap_density (dens_was);
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-step ok (notes=%d unit=%.3f)\n",
+		              _snap.midi_note_count, unit);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-step ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-step exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 
 void
 EngineHost::refresh_snapshot ()
@@ -15569,6 +15826,7 @@ EngineHost::EngineHost ()
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
 	_snap.snap_enabled = false;
+	_snap.midi_step_enabled = false;
 	_snap.snap_density = 1;
 	_snap.grid_line_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
@@ -17756,6 +18014,45 @@ EngineHost::humanize_midi_notes (float strength, uint32_t seed)
 
 bool
 EngineHost::smoke_midi_humanize ()
+{
+	return false;
+}
+
+void
+EngineHost::set_midi_step_enabled (bool on)
+{
+	_snap.midi_step_enabled = on;
+}
+
+bool
+EngineHost::midi_step_enabled () const
+{
+	return false;
+}
+
+bool
+EngineHost::toggle_midi_step_enabled ()
+{
+	return false;
+}
+
+bool
+EngineHost::step_advance (int steps)
+{
+	(void)steps;
+	return false;
+}
+
+bool
+EngineHost::step_input_midi_note (uint8_t pitch, uint8_t velocity)
+{
+	(void)pitch;
+	(void)velocity;
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_step ()
 {
 	return false;
 }
