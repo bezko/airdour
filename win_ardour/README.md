@@ -120,13 +120,15 @@ Backend realtime thread: audio only. Do not call D2D from the process callback.
 
 ## Portable zip (no source tree)
 
-From a tree that already built the Engine shell + waf libs + ACE LV2:
+Default packaged artifact is **MSVC Release** (`build-rel` + `build-win64-gui-engine-rel`):
 
 ```bat
-powershell -File tools\win-native\ci\Package-WinShell-Portable.ps1 -RepoRoot %CD% -OutDir dist -Version local -Mode Engine
+powershell -File tools\win-native\ci\Package-WinShell-Portable.ps1 -RepoRoot %CD% -OutDir dist -Version local -Mode Engine -Config Release
 ```
 
-Unzip `dist\airdour-*-win64-shell.zip` anywhere and run `run-airdour.bat`. See `tools/win-native/ci/` and the release-pipeline docs for GHA UiOnly vs Engine.
+`-Config Auto` (default) picks Release when those trees exist. Pass `-Config Debug` for `*-shell-debug.zip`.
+
+Unzip `dist\airdour-*-win64-shell.zip` anywhere and run `run-airdour.bat`. See `tools/win-native/ci/` and the release-pipeline docs for GHA UiOnly vs Engine Release.
 
 ## Constraints
 

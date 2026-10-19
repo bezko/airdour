@@ -45,6 +45,7 @@ tags
 waf3-*
 .lock-waf*
 /build/
+/build-rel/
 /.cache
 /doc/html/
 /doc/latex/

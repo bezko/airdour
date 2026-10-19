@@ -7,8 +7,9 @@
 # Publishes:
 #   1) airdour-*-win64-ci.zip — WASAPI I/O smoke lib + sources + BUILD_STATUS
 #   2) airdour-*-win64-shell-ui.zip — portable D2D shell (UiOnly; GHA-honest)
-# Full Engine portable zip (Dummy/WASAPI + ACE LV2) is produced on a laptop
-# agent via tools/win-native/ci/Package-WinShell-Portable.ps1 (Mode=Engine).
+# Full Engine portable zip (Dummy/WASAPI + ACE LV2, MSVC Release /MD default)
+# is produced on a laptop agent via Package-WinShell-Portable.ps1
+# (Mode=Engine -Config Release).
 
 name: Windows MSVC Release
 
@@ -128,11 +129,11 @@ jobs:
             - `airdour-*-win64-ci.zip` — WASAPI I/O smoke lib + sources + BUILD_STATUS
             - `airdour-*-win64-shell-ui.zip` — portable **UiOnly** `airdour_win_shell` (unzip + `run-airdour.bat --no-engine`)
 
-            ### Engine portable zip (laptop)
-            Full Dummy/WASAPI + ACE LV2 package is produced on a Windows build agent with the waf MSVC tree:
+            ### Engine portable zip (laptop — MSVC Release default)
+            Full Dummy/WASAPI + ACE LV2 package (`airdour-*-win64-shell.zip`) from `build-rel` + Release shell:
 
             ```bat
-            powershell -File tools\win-native\ci\Package-WinShell-Portable.ps1 -RepoRoot %CD% -OutDir dist -Version ${{ steps.ver.outputs.version }} -Mode Engine
+            powershell -File tools\win-native\ci\Package-WinShell-Portable.ps1 -RepoRoot %CD% -OutDir dist -Version ${{ steps.ver.outputs.version }} -Mode Engine -Config Release
             ```
 
             See `docs` / `tools/win-native` and `README.txt` inside the shell zip.
