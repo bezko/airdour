@@ -13526,6 +13526,233 @@ EngineHost::smoke_midi_edit ()
 	}
 }
 
+
+bool
+EngineHost::quantize_midi_notes ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"quantize: no Session";
+		return false;
+	}
+	if (!ensure_midi_region (32.f) || !_impl->midi_region) {
+		_snap.detail = L"quantize: no MIDI region";
+		return false;
+	}
+	try {
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count <= 0) {
+			_snap.detail = L"quantize: no notes";
+			return false;
+		}
+
+		bool have_sel = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				have_sel = true;
+				break;
+			}
+		}
+
+		struct Kept {
+			uint8_t pitch;
+			uint8_t velocity;
+			float   start_sec;
+			float   length_sec;
+		};
+		std::vector<Kept> keep;
+		keep.reserve ((size_t)_snap.midi_note_count);
+
+		const bool was_snap = _snap.snap_enabled;
+		_snap.snap_enabled = true;
+
+		int moved = 0;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			Kept k;
+			k.pitch = n.pitch;
+			k.velocity = n.velocity;
+			k.length_sec = n.length_sec;
+			const bool do_q = !have_sel || n.selected;
+			if (do_q) {
+				float q = snap_time (n.start_sec);
+				if (q < 0.f) {
+					q = 0.f;
+				}
+				if (std::fabs (q - n.start_sec) > 1.0e-4f) {
+					++moved;
+				}
+				k.start_sec = q;
+			} else {
+				k.start_sec = n.start_sec;
+			}
+			keep.push_back (k);
+		}
+		_snap.snap_enabled = was_snap;
+
+		std::shared_ptr<Playlist> playlist = _impl->midi_track
+		                                        ? _impl->midi_track->playlist ()
+		                                        : std::shared_ptr<Playlist> ();
+		if (!playlist) {
+			_snap.detail = L"quantize: no playlist";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("quantize midi");
+		playlist->clear_changes ();
+		playlist->clear_owned_changes ();
+		playlist->remove_region (_impl->midi_region);
+		playlist->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		_impl->midi_region.reset ();
+		_impl->selected_midi_note_id = -1;
+		if (!ensure_midi_region (32.f)) {
+			_snap.detail = L"quantize: region rebuild failed";
+			return false;
+		}
+		int added = 0;
+		for (size_t i = 0; i < keep.size (); ++i) {
+			if (add_midi_note (keep[i].pitch, keep[i].start_sec,
+			                   keep[i].length_sec, keep[i].velocity)) {
+				++added;
+			} else {
+				std::fprintf (stderr,
+				              "airdour_win_shell: quantize re-add note %zu failed "
+				              "(p=%u t=%.3f)\n",
+				              i, (unsigned)keep[i].pitch, keep[i].start_sec);
+				std::fflush (stderr);
+			}
+		}
+		_impl->selected_midi_note_id = -1;
+		refresh_midi_notes_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: quantize ok (notes=%d moved=%d added=%d dens=%d)\n",
+		              _snap.midi_note_count, moved, added, _snap.snap_density);
+		std::fflush (stderr);
+		_snap.detail = L"MIDI quantized to snap grid";
+		return added > 0 || keep.empty ();
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: quantize exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_quantize ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-quantize failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-quantize FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-quantize FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		/* Wipe existing notes by rebuild empty. */
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for quantize smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-quantize FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		set_snap_density (1); /* beat */
+		set_snap_enabled (true);
+
+		/* Off-grid starts at fixed 120 BPM (0.5s/beat): 0.13→0.0, 0.63→0.5, 1.12→1.0 */
+		bool a = add_midi_note (60, 0.13f, 0.25f, 100);
+		bool b = add_midi_note (64, 0.63f, 0.25f, 100);
+		bool c = add_midi_note (67, 1.12f, 0.25f, 100);
+		refresh_midi_notes_snap ();
+		if (!a || !b || !c || _snap.midi_note_count < 3) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-quantize FAILED (add count=%d)\n",
+			              _snap.midi_note_count);
+			std::fflush (stderr);
+			return false;
+		}
+
+		clear_midi_note_selection (); /* quantize ALL */
+		if (!quantize_midi_notes ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-quantize FAILED (quantize)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count < 3) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-quantize FAILED (after count=%d)\n",
+			              _snap.midi_note_count);
+			std::fflush (stderr);
+			return false;
+		}
+
+		bool ok60 = false, ok64 = false, ok67 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			if (n.pitch == 60 && std::fabs (n.start_sec - 0.0f) < 0.06f) {
+				ok60 = true;
+			}
+			if (n.pitch == 64 && std::fabs (n.start_sec - 0.5f) < 0.06f) {
+				ok64 = true;
+			}
+			if (n.pitch == 67 && std::fabs (n.start_sec - 1.0f) < 0.06f) {
+				ok67 = true;
+			}
+		}
+		if (!ok60 || !ok64 || !ok67) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-quantize FAILED (grid)\n");
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				std::fprintf (stderr, "  note p=%u t=%.3f\n",
+				              (unsigned)_snap.midi_notes[i].pitch,
+				              _snap.midi_notes[i].start_sec);
+			}
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-quantize ok (notes=%d dens=beat)\n",
+		              _snap.midi_note_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-quantize ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-quantize exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+
 void
 EngineHost::refresh_snapshot ()
 {
@@ -15782,6 +16009,20 @@ EngineHost::smoke_midi_edit ()
 {
 	return false;
 }
+
+
+bool
+EngineHost::quantize_midi_notes ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_quantize ()
+{
+	return false;
+}
+
 
 bool
 EngineHost::configure_backend_midi ()

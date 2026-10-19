@@ -988,6 +988,13 @@ public:
 	void clear_midi_note_selection ();
 	bool delete_selected_midi_note ();
 
+	/**
+	 * Quantize selected MIDI notes (or all notes if none selected) to the
+	 * current snap grid density. Forces grid math even when Snap UI is off.
+	 * Rebuilds the MIDI region (Windows-safe; no NoteDiff WriterLock).
+	 */
+	bool quantize_midi_notes ();
+
 	/** Best-effort connect MidiTrack output to first physical MIDI playback port. */
 	bool connect_midi_output ();
 
@@ -1005,6 +1012,12 @@ public:
 	 * Also attaches Reasonable Synth and checks master routing when available.
 	 */
 	bool smoke_midi_edit ();
+
+	/**
+	 * Add off-grid notes, quantize to beat grid, verify starts snap.
+	 * For --smoke-midi-quantize.
+	 */
+	bool smoke_midi_quantize ();
 
 	std::string session_dir () const;
 	std::string last_export_path () const;

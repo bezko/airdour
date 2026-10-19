@@ -42,6 +42,7 @@ enum class TransportHit {
 	Consolidate,
 	Freeze,
 	Snap,
+	Quantize,
 	CountIn,
 	Click,
 	TempoDown,
@@ -177,6 +178,7 @@ private:
 	D2D1_RECT_F _consolidate_btn;
 	D2D1_RECT_F _freeze_btn;
 	D2D1_RECT_F _snap_btn;
+	D2D1_RECT_F _quantize_btn;
 	D2D1_RECT_F _count_btn;
 	D2D1_RECT_F _click_btn;
 	D2D1_RECT_F _tempo_dn_btn;

@@ -236,7 +236,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_gate,
                             bool smoke_spectrum,
                             bool smoke_correlation,
-                            bool smoke_loudness)
+                            bool smoke_loudness,
+                            bool smoke_midi_quantize)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -323,13 +324,24 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit ok\n");
 		} else {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit FAILED\n");
+			_smoke_failed = true;
 		}
+		std::fflush (stderr);
+	} else if (ok && smoke_midi_quantize && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_quantize ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_quantize) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-quantize FAILED (no session)\n");
+		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
 		if (_engine.smoke_midi ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi ok\n");
 		} else {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi FAILED\n");
+			_smoke_failed = true;
 		}
 		std::fflush (stderr);
 	} else if (ok && _engine.snapshot ().session_ok) {
@@ -2514,6 +2526,19 @@ ShellWindow::do_toggle_snap ()
 }
 
 void
+ShellWindow::do_quantize_midi_notes ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.quantize_midi_notes ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_cycle_snap_density ()
 {
 	if (!_engine.is_linked ()) {
@@ -3041,6 +3066,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else {
 				do_toggle_snap ();
 			}
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Q' || wparam == 'q')) {
+			/* Q = quantize selected (or all) MIDI notes to snap grid. */
+			do_quantize_midi_notes ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'C' || wparam == 'c')) {
 			do_toggle_count_in ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'K' || wparam == 'k')) {
@@ -3621,6 +3649,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		} else {
 			do_toggle_snap ();
 		}
+		return true;
+	}
+	if (th == TransportHit::Quantize) {
+		do_quantize_midi_notes ();
 		return true;
 	}
 	if (th == TransportHit::CountIn) {
@@ -5221,6 +5253,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"B", L"Consolidate / bounce selection in place" },
 		{ L"Z", L"Freeze / unfreeze focused audio track" },
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
+		{ L"Q / Qnt", L"Quantize MIDI notes to snap grid" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },

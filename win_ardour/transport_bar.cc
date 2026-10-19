@@ -34,6 +34,7 @@ TransportBar::TransportBar ()
 	, _split_btn ()
 	, _fade_btn ()
 	, _snap_btn ()
+	, _quantize_btn ()
 	, _count_btn ()
 	, _click_btn ()
 	, _tempo_dn_btn ()
@@ -113,6 +114,7 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_consolidate_btn, x, btn_w);
 	place (_freeze_btn, x, btn_w);
 	place (_snap_btn, x, btn_w);
+	place (_quantize_btn, x, btn_w);
 	place (_count_btn, x, btn_w);
 	place (_click_btn, x, btn_w);
 	place (_tempo_dn_btn, x, narrow);
@@ -211,6 +213,9 @@ TransportBar::hit_test (float x, float y) const
 	}
 	if (contains (_snap_btn, x, y)) {
 		return TransportHit::Snap;
+	}
+	if (contains (_quantize_btn, x, y)) {
+		return TransportHit::Quantize;
 	}
 	if (contains (_count_btn, x, y)) {
 		return TransportHit::CountIn;
@@ -337,6 +342,7 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_consolidate_btn, L"Cons", false);
 	draw_btn (_freeze_btn, L"Frz", _freeze_active);
 	draw_btn (_snap_btn, L"Snap", _snap_enabled);
+	draw_btn (_quantize_btn, L"Qnt", false);
 	draw_btn (_count_btn, L"Count", _count_in_enabled);
 	draw_btn (_click_btn, L"Click", _click_enabled);
 	draw_btn (_tempo_dn_btn, L"−", false);

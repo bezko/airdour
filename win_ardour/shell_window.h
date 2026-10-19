@@ -114,7 +114,8 @@ public:
 	                    bool smoke_gate = false,
 	                    bool smoke_spectrum = false,
 	                    bool smoke_correlation = false,
-	                    bool smoke_loudness = false);
+	                    bool smoke_loudness = false,
+	                    bool smoke_midi_quantize = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -216,6 +217,7 @@ private:
 	void sync_transport_freeze_from_engine ();
 	void do_toggle_snap ();
 	void do_cycle_snap_density ();
+	void do_quantize_midi_notes ();
 	void do_toggle_loop ();
 	void do_toggle_punch ();
 	void do_toggle_count_in ();
