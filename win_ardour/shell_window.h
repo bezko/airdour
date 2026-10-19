@@ -107,7 +107,8 @@ public:
 	                    bool smoke_comp = false,
 	                    bool smoke_eq = false,
 	                    bool smoke_delay = false,
-	                    bool smoke_limiter = false);
+	                    bool smoke_limiter = false,
+	                    bool smoke_gate = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -118,8 +119,8 @@ private:
 		WavePending, /* click may become select or pan */
 		WavePan,
 		Fader,
-		FxParam, /* drag Mixer FX param 1 (Blend / Comp thr / EQ L / Delay time / Limiter ceil) */
-		FxParam2, /* drag Mixer FX param 2 (Comp ratio / EQ mid / Delay fb / Limiter release) */
+		FxParam, /* drag Mixer FX param 1 (Blend / Comp thr / EQ L / Delay time / Limiter ceil / Gate thr) */
+		FxParam2, /* drag Mixer FX param 2 (Comp ratio / EQ mid / Delay fb / Limiter release / Gate hold) */
 		FxParam3, /* drag Mixer FX param 3 (EQ High) */
 		Pan, /* drag Mixer pan azimuth */
 		Send, /* drag Mixer aux send level */

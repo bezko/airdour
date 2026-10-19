@@ -389,6 +389,7 @@ children = [
         'libs/plugins/a-delay.lv2',
         'libs/plugins/a-eq.lv2',
         'libs/plugins/a-limiter.lv2',
+        'libs/plugins/a-gate.lv2',
         'libs/plugins/a-reverb.lv2',
         'libs/plugins/a-fluidsynth.lv2',
         #'libs/plugins/a-vapor.lv2',
@@ -441,7 +442,7 @@ _WINDOWS_ONLY_EXCLUDE = set([
         # control_protocol lives under libs/ctrl-interface (kept).
         'libs/surfaces',
         # Cairo UI LV2 plugins — need cairo; headless graph skips them.
-        # a-comp / a-eq / a-delay / a-limiter are DSP-only (no Cairo) so they stay in the Windows-only build.
+        # a-comp / a-eq / a-delay / a-limiter / a-gate are DSP-only (no Cairo) so they stay in the Windows-only build.
         'libs/plugins/a-exp.lv2',
 ])
 

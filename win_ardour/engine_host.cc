@@ -503,6 +503,12 @@ public:
 	float           track_limiter_release_ms;
 	std::string     track_limiter_name;
 	std::weak_ptr<PluginInsert> track_limiter;
+	bool            track_gate_ok;
+	bool            track_gate_bypassed;
+	float           track_gate_threshold_db;
+	float           track_gate_hold_ms;
+	std::string     track_gate_name;
+	std::weak_ptr<PluginInsert> track_gate;
 	bool            plugins_scanned;
 
 	Impl ()
@@ -540,6 +546,10 @@ public:
 		, track_limiter_bypassed (false)
 		, track_limiter_ceiling_db (-0.3f)
 		, track_limiter_release_ms (100.f)
+		, track_gate_ok (false)
+		, track_gate_bypassed (false)
+		, track_gate_threshold_db (-40.f)
+		, track_gate_hold_ms (50.f)
 		, plugins_scanned (false)
 	{
 	}
@@ -695,6 +705,12 @@ EngineHost::EngineHost ()
 	_snap.track_limiter_release_ms = 100.f;
 	_snap.track_limiter_ceiling_norm = (-0.3f - (-20.f)) / 20.f;
 	_snap.track_limiter_release_norm = (100.f - 1.f) / 1999.f;
+	_snap.track_gate_ok = false;
+	_snap.track_gate_bypassed = false;
+	_snap.track_gate_threshold_db = -40.f;
+	_snap.track_gate_hold_ms = 50.f;
+	_snap.track_gate_threshold_norm = (-40.f - (-60.f)) / 60.f;
+	_snap.track_gate_hold_norm = (50.f - 1.f) / 499.f;
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -726,6 +742,7 @@ EngineHost::EngineHost ()
 	_snap.track_eq_name.clear ();
 	_snap.track_delay_name.clear ();
 	_snap.track_limiter_name.clear ();
+	_snap.track_gate_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -1661,11 +1678,11 @@ EngineHost::ensure_session ()
 		const char* tone_flag = std::getenv ("AIRDOUR_WIN_SHELL_DEMO_TONES");
 		const bool want_tones = (tone_flag && tone_flag[0] == '1');
 
-		step ("new_audio_track x5");
+		step ("new_audio_track x6");
 		AudioTrackList created = _impl->session->new_audio_track (
 			1, 2,
 			std::shared_ptr<RouteGroup> (),
-			5u /* default Audio 1–5 (Reverb/Comp/EQ/Delay/Limiter); add more via UI */,
+			6u /* default Audio 1–6 (Reverb/Comp/EQ/Delay/Limiter/Gate); add more via UI */,
 			"Audio",
 			PresentationInfo::max_order);
 
@@ -1733,14 +1750,14 @@ EngineHost::ensure_session ()
 					track->gain_control ()->set_value (_track_gain[t], Controllable::NoGroup);
 				}
 			}
-			_snap.detail = L"Session + PeakMeter — demo tones on Audio 1–5";
+			_snap.detail = L"Session + PeakMeter — demo tones on Audio 1–6";
 		} else {
 			for (size_t t = 0; t < _impl->tracks.size (); ++t) {
 				if (_impl->tracks[t] && _impl->tracks[t]->gain_control ()) {
 					_impl->tracks[t]->gain_control ()->set_value (_track_gain[t], Controllable::NoGroup);
 				}
 			}
-			_snap.detail = L"Session + PeakMeter — empty Audio 1–5 (no demo tones)";
+			_snap.detail = L"Session + PeakMeter — empty Audio 1–6 (no demo tones)";
 		}
 
 		/* Best-effort ACE Reverb on Audio 1 (headless insert, no GTK UI). */
@@ -1761,6 +1778,10 @@ EngineHost::ensure_session ()
 		if (_impl->tracks.size () > 4) {
 			insert_track_limiter (4);
 		}
+		/* Best-effort ACE Gate on Audio 6 (Threshold / Hold D2D). */
+		if (_impl->tracks.size () > 5) {
+			insert_track_gate (5);
+		}
 
 		step ("aux bus + sends");
 		ensure_aux_sends ();
@@ -1776,6 +1797,7 @@ EngineHost::ensure_session ()
 		refresh_track_eq_snap ();
 		refresh_track_delay_snap ();
 		refresh_track_limiter_snap ();
+		refresh_track_gate_snap ();
 		step ("ready");
 		return true;
 	} catch (SessionException& e) {
@@ -1854,6 +1876,12 @@ EngineHost::destroy_session ()
 	_impl->track_limiter_release_ms = 100.f;
 	_impl->track_limiter_name.clear ();
 	_impl->track_limiter.reset ();
+	_impl->track_gate_ok = false;
+	_impl->track_gate_bypassed = false;
+	_impl->track_gate_threshold_db = -40.f;
+	_impl->track_gate_hold_ms = 50.f;
+	_impl->track_gate_name.clear ();
+	_impl->track_gate.reset ();
 	_impl->selected_track = -1;
 	_impl->selected_region.reset ();
 	if (_impl->session) {
@@ -7436,19 +7464,37 @@ EngineHost::smoke_tracks ()
 			std::fflush (stderr);
 			return false;
 		}
-		if (!add_audio_track () || _snap.audio_track_count != n0 + 1) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (add → %d)\n",
-			              _snap.audio_track_count);
-			std::fflush (stderr);
-			return false;
-		}
-		const int n1 = _snap.audio_track_count;
-		/* New track is empty — remove it. */
-		if (!remove_audio_track (n1 - 1, true) || _snap.audio_track_count != n0) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (remove → %d)\n",
-			              _snap.audio_track_count);
-			std::fflush (stderr);
-			return false;
+		/* Default session now fills Audio 1–6 (kMeters). At max: remove then
+		 * re-add; otherwise add then remove. */
+		if (n0 >= EngineSnapshot::kMeters) {
+			if (!remove_audio_track (n0 - 1, true)
+			    || _snap.audio_track_count != n0 - 1) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (remove@max → %d)\n",
+				              _snap.audio_track_count);
+				std::fflush (stderr);
+				return false;
+			}
+			if (!add_audio_track () || _snap.audio_track_count != n0) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (re-add → %d)\n",
+				              _snap.audio_track_count);
+				std::fflush (stderr);
+				return false;
+			}
+		} else {
+			if (!add_audio_track () || _snap.audio_track_count != n0 + 1) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (add → %d)\n",
+				              _snap.audio_track_count);
+				std::fflush (stderr);
+				return false;
+			}
+			const int n1 = _snap.audio_track_count;
+			/* New track is empty — remove it. */
+			if (!remove_audio_track (n1 - 1, true) || _snap.audio_track_count != n0) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (remove → %d)\n",
+				              _snap.audio_track_count);
+				std::fflush (stderr);
+				return false;
+			}
 		}
 		bool had_midi = _snap.midi_track_ok || _impl->midi_track;
 		if (had_midi) {
@@ -7465,8 +7511,8 @@ EngineHost::smoke_tracks ()
 		}
 		collect_tracks ();
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-tracks ok (audio %d→%d→%d midi ok)\n",
-		              n0, n1, _snap.audio_track_count);
+		              "airdour_win_shell: smoke-tracks ok (audio %d→…→%d midi ok)\n",
+		              n0, _snap.audio_track_count);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-tracks ok";
 		return true;
@@ -8893,6 +8939,10 @@ static const uint32_t kAceDelayFeedbackPort = 8; /* Feedback % */
 static const char* kAceLimiterUri = "urn:ardour:a-limiter";
 static const uint32_t kAceLimiterCeilingPort = 0; /* Ceiling dB */
 static const uint32_t kAceLimiterReleasePort = 1; /* Release ms */
+/* Bundled ACE Gate (libs/plugins/a-gate.lv2) — DSP-only. */
+static const char* kAceGateUri = "urn:ardour:a-gate";
+static const uint32_t kAceGateThresholdPort = 0; /* Threshold dB */
+static const uint32_t kAceGateHoldPort = 1; /* Hold ms */
 
 static float
 comp_threshold_to_norm (float db)
@@ -8991,6 +9041,34 @@ limiter_norm_to_release (float n)
 {
 	n = std::max (0.f, std::min (1.f, n));
 	return 1.f + n * 1999.f;
+}
+
+static float
+gate_threshold_to_norm (float db)
+{
+	db = std::max (-60.f, std::min (0.f, db));
+	return (db - (-60.f)) / 60.f;
+}
+
+static float
+gate_norm_to_threshold (float n)
+{
+	n = std::max (0.f, std::min (1.f, n));
+	return -60.f + n * 60.f;
+}
+
+static float
+gate_hold_to_norm (float ms)
+{
+	ms = std::max (1.f, std::min (500.f, ms));
+	return (ms - 1.f) / 499.f;
+}
+
+static float
+gate_norm_to_hold (float n)
+{
+	n = std::max (0.f, std::min (1.f, n));
+	return 1.f + n * 499.f;
 }
 
 } // namespace
@@ -9258,6 +9336,26 @@ find_ace_limiter_info ()
 	return PluginInfoPtr ();
 }
 
+static PluginInfoPtr
+find_ace_gate_info ()
+{
+	try {
+		const PluginInfoList& plugs = PluginManager::instance ().lv2_plugin_info ();
+		for (PluginInfoList::const_iterator i = plugs.begin (); i != plugs.end (); ++i) {
+			if (!*i) {
+				continue;
+			}
+			if ((*i)->unique_id == kAceGateUri
+			    || (*i)->name.find ("ACE Gate") != std::string::npos
+			    || (*i)->name.find ("a-gate") != std::string::npos) {
+				return *i;
+			}
+		}
+	} catch (...) {
+	}
+	return PluginInfoPtr ();
+}
+
 static std::shared_ptr<PluginInsert>
 find_ace_reverb_insert (std::shared_ptr<Route> route, std::string* out_name = nullptr)
 {
@@ -9408,6 +9506,36 @@ find_ace_limiter_insert (std::shared_ptr<Route> route, std::string* out_name = n
 			found = pi;
 			if (out_name) {
 				*out_name = pname.empty () ? "ACE Limiter" : pname;
+			}
+		}
+	});
+	return found;
+}
+
+static std::shared_ptr<PluginInsert>
+find_ace_gate_insert (std::shared_ptr<Route> route, std::string* out_name = nullptr)
+{
+	std::shared_ptr<PluginInsert> found;
+	if (!route) {
+		return found;
+	}
+	route->foreach_processor ([&] (std::weak_ptr<Processor> wp) {
+		if (found) {
+			return;
+		}
+		std::shared_ptr<Processor> p = wp.lock ();
+		std::shared_ptr<PluginInsert> pi = std::dynamic_pointer_cast<PluginInsert> (p);
+		if (!pi || !pi->plugin ()) {
+			return;
+		}
+		std::string uid = pi->plugin ()->unique_id ();
+		std::string pname = pi->name ();
+		if (uid.find (kAceGateUri) == 0
+		    || pname.find ("ACE Gate") != std::string::npos
+		    || pname.find ("a-gate") != std::string::npos) {
+			found = pi;
+			if (out_name) {
+				*out_name = pname.empty () ? "ACE Gate" : pname;
 			}
 		}
 	});
@@ -11365,6 +11493,325 @@ EngineHost::smoke_limiter ()
 	}
 }
 
+
+void
+EngineHost::refresh_track_gate_snap ()
+{
+	_snap.track_gate_ok = false;
+	_snap.track_gate_bypassed = false;
+	_snap.track_gate_threshold_db = _impl ? _impl->track_gate_threshold_db : -40.f;
+	_snap.track_gate_hold_ms = _impl ? _impl->track_gate_hold_ms : 50.f;
+	_snap.track_gate_threshold_norm = gate_threshold_to_norm (_snap.track_gate_threshold_db);
+	_snap.track_gate_hold_norm = gate_hold_to_norm (_snap.track_gate_hold_ms);
+	_snap.track_gate_name.clear ();
+	if (!_impl || _impl->tracks.size () < 6 || !_impl->tracks[5]) {
+		return;
+	}
+	std::string name;
+	std::shared_ptr<PluginInsert> pi = _impl->track_gate.lock ();
+	if (!pi) {
+		pi = find_ace_gate_insert (_impl->tracks[5], &name);
+		if (pi) {
+			_impl->track_gate = pi;
+		}
+	} else {
+		name = pi->name ().empty () ? "ACE Gate" : pi->name ();
+	}
+	if (!pi) {
+		_impl->track_gate_ok = false;
+		return;
+	}
+	_impl->track_gate_ok = true;
+	_impl->track_gate_name = name.empty () ? "ACE Gate" : name;
+	_impl->track_gate_bypassed = !pi->active ();
+	try {
+		std::shared_ptr<AutomationControl> thr = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceGateThresholdPort));
+		std::shared_ptr<AutomationControl> hold = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceGateHoldPort));
+		if (thr) {
+			_impl->track_gate_threshold_db = (float)thr->get_value ();
+		}
+		if (hold) {
+			_impl->track_gate_hold_ms = (float)hold->get_value ();
+		}
+	} catch (...) {
+	}
+	_snap.track_gate_ok = true;
+	_snap.track_gate_bypassed = _impl->track_gate_bypassed;
+	_snap.track_gate_threshold_db = _impl->track_gate_threshold_db;
+	_snap.track_gate_hold_ms = _impl->track_gate_hold_ms;
+	_snap.track_gate_threshold_norm = gate_threshold_to_norm (_impl->track_gate_threshold_db);
+	_snap.track_gate_hold_norm = gate_hold_to_norm (_impl->track_gate_hold_ms);
+	_snap.track_gate_name = utf8_to_wide (_impl->track_gate_name);
+}
+
+bool
+EngineHost::insert_track_gate (int track)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"insert Gate: no audio track";
+		return false;
+	}
+	std::shared_ptr<AudioTrack> at = _impl->tracks[track];
+	std::string existing;
+	std::shared_ptr<PluginInsert> already = find_ace_gate_insert (at, &existing);
+	if (already) {
+		_impl->track_gate = already;
+		_impl->track_gate_ok = true;
+		_impl->track_gate_name = existing;
+		refresh_track_gate_snap ();
+		return true;
+	}
+
+	ensure_plugins_scanned ();
+	try {
+		PluginInfoPtr info = find_ace_gate_info ();
+		if (!info) {
+			_snap.detail = L"ACE Gate not found (check ARDOUR_DLL_PATH/LV2)";
+			std::fprintf (stderr, "airdour_win_shell: ACE Gate LV2 missing\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		PluginPtr plugin = info->load (*_impl->session);
+		if (!plugin) {
+			_snap.detail = L"ACE Gate load failed";
+			return false;
+		}
+
+		std::shared_ptr<PluginInsert> pi (
+		    new PluginInsert (*_impl->session, *at, plugin));
+		pi->set_strict_io (true);
+		if (at->add_processor (pi, PreFader) != 0) {
+			_snap.detail = L"ACE Gate add_processor failed";
+			return false;
+		}
+
+		_impl->track_gate = pi;
+		_impl->track_gate_ok = true;
+		_impl->track_gate_bypassed = !pi->active ();
+		_impl->track_gate_name = info->name.empty () ? "ACE Gate" : info->name;
+		try {
+			std::shared_ptr<AutomationControl> thr = pi->automation_control (
+			    Evoral::Parameter (PluginAutomation, 0, kAceGateThresholdPort));
+			std::shared_ptr<AutomationControl> hold = pi->automation_control (
+			    Evoral::Parameter (PluginAutomation, 0, kAceGateHoldPort));
+			if (thr) {
+				_impl->track_gate_threshold_db = (float)thr->get_value ();
+			}
+			if (hold) {
+				_impl->track_gate_hold_ms = (float)hold->get_value ();
+			}
+		} catch (...) {
+		}
+		refresh_track_gate_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: Gate \"%s\" on Audio %d (pre-fader)\n",
+		              _impl->track_gate_name.c_str (), track + 1);
+		std::fflush (stderr);
+		_snap.detail = L"ACE Gate on Audio 6";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: insert_track_gate: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_gate_bypassed (int track, bool bypassed)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_gate (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_gate.lock ();
+	if (!pi) {
+		pi = find_ace_gate_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_gate = pi;
+	}
+	try {
+		if (bypassed) {
+			pi->deactivate ();
+		} else {
+			pi->activate ();
+		}
+		_impl->track_gate_bypassed = !pi->active ();
+		refresh_track_gate_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_track_gate_bypass (int track)
+{
+	refresh_track_gate_snap ();
+	return set_track_gate_bypassed (track, !_snap.track_gate_bypassed);
+}
+
+bool
+EngineHost::set_track_gate_threshold_db (int track, float db)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_gate (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_gate.lock ();
+	if (!pi) {
+		pi = find_ace_gate_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_gate = pi;
+	}
+	db = std::max (-60.f, std::min (0.f, db));
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceGateThresholdPort));
+		if (!ac) {
+			_snap.detail = L"ACE Gate Threshold missing";
+			return false;
+		}
+		ac->set_value (db, Controllable::NoGroup);
+		_impl->track_gate_threshold_db = (float)ac->get_value ();
+		refresh_track_gate_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_gate_hold_ms (int track, float ms)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_gate (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_gate.lock ();
+	if (!pi) {
+		pi = find_ace_gate_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_gate = pi;
+	}
+	ms = std::max (1.f, std::min (500.f, ms));
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceGateHoldPort));
+		if (!ac) {
+			_snap.detail = L"ACE Gate Hold missing";
+			return false;
+		}
+		ac->set_value (ms, Controllable::NoGroup);
+		_impl->track_gate_hold_ms = (float)ac->get_value ();
+		refresh_track_gate_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_gate_threshold_norm (int track, float norm_0_1)
+{
+	return set_track_gate_threshold_db (track, gate_norm_to_threshold (norm_0_1));
+}
+
+bool
+EngineHost::set_track_gate_hold_norm (int track, float norm_0_1)
+{
+	return set_track_gate_hold_ms (track, gate_norm_to_hold (norm_0_1));
+}
+
+bool
+EngineHost::smoke_gate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-gate failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.size () < 6 || !_impl->tracks[5]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-gate FAILED (need Audio 6)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!insert_track_gate (5) || !_snap.track_gate_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-gate FAILED (insert)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::string verified;
+		if (!find_ace_gate_insert (_impl->tracks[5], &verified)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-gate FAILED (not on route)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!set_track_gate_bypassed (5, false) || _snap.track_gate_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-gate FAILED (bypass clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_gate_threshold_db (5, -35.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-gate FAILED (Threshold)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_gate_threshold_db < -35.5f || _snap.track_gate_threshold_db > -34.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-gate FAILED (thr=%.1f)\n",
+			              _snap.track_gate_threshold_db);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_gate_hold_ms (5, 80.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-gate FAILED (Hold)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_gate_hold_ms < 70.f || _snap.track_gate_hold_ms > 90.f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-gate FAILED (hold=%.1f)\n",
+			              _snap.track_gate_hold_ms);
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-gate ok (fx=%s thr=%.1f hold=%.0fms)\n",
+		              verified.c_str (), _snap.track_gate_threshold_db,
+		              _snap.track_gate_hold_ms);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-gate ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-gate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_perf (unsigned sample_secs)
 {
@@ -12213,6 +12660,7 @@ EngineHost::refresh_snapshot ()
 			refresh_track_eq_snap ();
 			refresh_track_delay_snap ();
 			refresh_track_limiter_snap ();
+			refresh_track_gate_snap ();
 		} else {
 			_snap.waves_from_session = false;
 			_snap.session_record_armed = false;
@@ -12405,6 +12853,12 @@ EngineHost::EngineHost ()
 	_snap.track_limiter_release_ms = 100.f;
 	_snap.track_limiter_ceiling_norm = (-0.3f - (-20.f)) / 20.f;
 	_snap.track_limiter_release_norm = (100.f - 1.f) / 1999.f;
+	_snap.track_gate_ok = false;
+	_snap.track_gate_bypassed = false;
+	_snap.track_gate_threshold_db = -40.f;
+	_snap.track_gate_hold_ms = 50.f;
+	_snap.track_gate_threshold_norm = (-40.f - (-60.f)) / 60.f;
+	_snap.track_gate_hold_norm = (50.f - 1.f) / 499.f;
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -12436,6 +12890,7 @@ EngineHost::EngineHost ()
 	_snap.track_eq_name.clear ();
 	_snap.track_delay_name.clear ();
 	_snap.track_limiter_name.clear ();
+	_snap.track_gate_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -14091,6 +14546,66 @@ EngineHost::smoke_limiter ()
 }
 
 bool
+EngineHost::insert_track_gate (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::toggle_track_gate_bypass (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::set_track_gate_bypassed (int track, bool bypassed)
+{
+	(void)track;
+	(void)bypassed;
+	return false;
+}
+
+bool
+EngineHost::set_track_gate_threshold_db (int track, float db)
+{
+	(void)track;
+	(void)db;
+	return false;
+}
+
+bool
+EngineHost::set_track_gate_hold_ms (int track, float ms)
+{
+	(void)track;
+	(void)ms;
+	return false;
+}
+
+bool
+EngineHost::set_track_gate_threshold_norm (int track, float norm_0_1)
+{
+	(void)track;
+	(void)norm_0_1;
+	return false;
+}
+
+bool
+EngineHost::set_track_gate_hold_norm (int track, float norm_0_1)
+{
+	(void)track;
+	(void)norm_0_1;
+	return false;
+}
+
+bool
+EngineHost::smoke_gate ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_vst3 ()
 {
 	return false;
@@ -14125,6 +14640,11 @@ EngineHost::refresh_track_delay_snap ()
 
 void
 EngineHost::refresh_track_limiter_snap ()
+{
+}
+
+void
+EngineHost::refresh_track_gate_snap ()
 {
 }
 

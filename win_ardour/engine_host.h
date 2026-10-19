@@ -107,6 +107,12 @@ struct EngineSnapshot {
 	float        track_limiter_release_ms; /* Release 1..2000 ms */
 	float        track_limiter_ceiling_norm; /* 0..1 UI */
 	float        track_limiter_release_norm; /* 0..1 UI */
+	bool         track_gate_ok; /* ACE Gate on Audio 6 (track 5) */
+	bool         track_gate_bypassed;
+	float        track_gate_threshold_db; /* Threshold −60..0 dB */
+	float        track_gate_hold_ms; /* Hold 1..500 ms */
+	float        track_gate_threshold_norm; /* 0..1 UI */
+	float        track_gate_hold_norm; /* 0..1 UI */
 	float        midi_activity; /* 0..1 decaying activity indicator */
 	int          midi_device_count;
 	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices];
@@ -122,6 +128,7 @@ struct EngineSnapshot {
 	std::wstring track_eq_name; /* e.g. ACE EQ */
 	std::wstring track_delay_name; /* e.g. ACE Delay */
 	std::wstring track_limiter_name; /* e.g. ACE Limiter */
+	std::wstring track_gate_name; /* e.g. ACE Gate */
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
 	std::wstring export_path; /* last exported WAV (UTF-16 display) */
@@ -844,6 +851,13 @@ public:
 	bool set_track_limiter_release_ms (int track, float ms);
 	bool set_track_limiter_ceiling_norm (int track, float norm_0_1);
 	bool set_track_limiter_release_norm (int track, float norm_0_1);
+	bool insert_track_gate (int track = 5);
+	bool toggle_track_gate_bypass (int track = 5);
+	bool set_track_gate_bypassed (int track, bool bypassed);
+	bool set_track_gate_threshold_db (int track, float db);
+	bool set_track_gate_hold_ms (int track, float ms);
+	bool set_track_gate_threshold_norm (int track, float norm_0_1);
+	bool set_track_gate_hold_norm (int track, float norm_0_1);
 
 	/**
 	 * Ensure ACE Reverb on Audio 1; verify on route; toggle bypass; set Blend.
@@ -874,6 +888,11 @@ public:
 	 * For --smoke-limiter.
 	 */
 	bool smoke_limiter ();
+	/**
+	 * Insert ACE Gate on Audio 6; set Threshold −35 dB / Hold 80 ms.
+	 * For --smoke-gate.
+	 */
+	bool smoke_gate ();
 
 	/**
 	 * Scan system VST3 dirs (+ VST3_PATH / AIRDOUR_SMOKE_VST3); list; optionally
@@ -972,6 +991,7 @@ private:
 	void refresh_track_eq_snap ();
 	void refresh_track_delay_snap ();
 	void refresh_track_limiter_snap ();
+	void refresh_track_gate_snap ();
 	bool ensure_plugins_scanned ();
 
 	bool        _started;

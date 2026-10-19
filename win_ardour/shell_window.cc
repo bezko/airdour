@@ -232,7 +232,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_comp,
                             bool smoke_eq,
                             bool smoke_delay,
-                            bool smoke_limiter)
+                            bool smoke_limiter,
+                            bool smoke_gate)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -396,6 +397,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_limiter) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-limiter FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_gate && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_gate ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_fx_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_gate) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-gate FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1130,6 +1144,13 @@ ShellWindow::sync_mixer_fx_from_engine ()
 			_mixers[i].set_fx_param_count (2);
 			_mixers[i].set_fx_param (_engine_snap.track_limiter_ceiling_norm);
 			_mixers[i].set_fx_param2 (_engine_snap.track_limiter_release_norm);
+		} else if (i == 5 && _engine_snap.track_gate_ok
+		           && !_engine_snap.track_gate_name.empty ()) {
+			_mixers[i].set_fx_label (_engine_snap.track_gate_name.c_str ());
+			_mixers[i].set_fx_bypassed (_engine_snap.track_gate_bypassed);
+			_mixers[i].set_fx_param_count (2);
+			_mixers[i].set_fx_param (_engine_snap.track_gate_threshold_norm);
+			_mixers[i].set_fx_param2 (_engine_snap.track_gate_hold_norm);
 		} else {
 			_mixers[i].set_fx_label (nullptr);
 			_mixers[i].set_fx_bypassed (false);
@@ -3743,7 +3764,9 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_drag = DragMode::FxParam2;
 		_drag_index = fxpi2;
 		if (_mixers[fxpi2].drag_fx_param2_to (x)) {
-			if (fxpi2 == 4 && _engine_snap.track_limiter_ok) {
+			if (fxpi2 == 5 && _engine_snap.track_gate_ok) {
+				_engine.set_track_gate_hold_norm (fxpi2, _mixers[fxpi2].fx_param2 ());
+			} else if (fxpi2 == 4 && _engine_snap.track_limiter_ok) {
 				_engine.set_track_limiter_release_norm (fxpi2, _mixers[fxpi2].fx_param2 ());
 			} else if (fxpi2 == 3 && _engine_snap.track_delay_ok) {
 				_engine.set_track_delay_feedback_norm (fxpi2, _mixers[fxpi2].fx_param2 ());
@@ -3767,7 +3790,9 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_drag = DragMode::FxParam;
 		_drag_index = fxpi;
 		if (_mixers[fxpi].drag_fx_param_to (x)) {
-			if (fxpi == 4 && _engine_snap.track_limiter_ok) {
+			if (fxpi == 5 && _engine_snap.track_gate_ok) {
+				_engine.set_track_gate_threshold_norm (fxpi, _mixers[fxpi].fx_param ());
+			} else if (fxpi == 4 && _engine_snap.track_limiter_ok) {
 				_engine.set_track_limiter_ceiling_norm (fxpi, _mixers[fxpi].fx_param ());
 			} else if (fxpi == 3 && _engine_snap.track_delay_ok) {
 				_engine.set_track_delay_time_norm (fxpi, _mixers[fxpi].fx_param ());
@@ -3791,7 +3816,13 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	int fxi = hit_mixer_fx (x, y);
 	if (fxi >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
-			if (fxi == 4) {
+			if (fxi == 5) {
+				if (_mixers[fxi].has_fx ()) {
+					_engine.toggle_track_gate_bypass (fxi);
+				} else {
+					_engine.insert_track_gate (fxi);
+				}
+			} else if (fxi == 4) {
 				if (_mixers[fxi].has_fx ()) {
 					_engine.toggle_track_limiter_bypass (fxi);
 				} else {
@@ -3960,7 +3991,10 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 
 	if (_drag == DragMode::FxParam && _drag_index >= 0 && _drag_index < kTracks) {
 		if (_mixers[_drag_index].drag_fx_param_to (x)) {
-			if (_drag_index == 4 && _engine_snap.track_limiter_ok) {
+			if (_drag_index == 5 && _engine_snap.track_gate_ok) {
+				_engine.set_track_gate_threshold_norm (
+					_drag_index, _mixers[_drag_index].fx_param ());
+			} else if (_drag_index == 4 && _engine_snap.track_limiter_ok) {
 				_engine.set_track_limiter_ceiling_norm (
 					_drag_index, _mixers[_drag_index].fx_param ());
 			} else if (_drag_index == 3 && _engine_snap.track_delay_ok) {
@@ -3985,7 +4019,10 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 
 	if (_drag == DragMode::FxParam2 && _drag_index >= 0 && _drag_index < kTracks) {
 		if (_mixers[_drag_index].drag_fx_param2_to (x)) {
-			if (_drag_index == 4 && _engine_snap.track_limiter_ok) {
+			if (_drag_index == 5 && _engine_snap.track_gate_ok) {
+				_engine.set_track_gate_hold_norm (
+					_drag_index, _mixers[_drag_index].fx_param2 ());
+			} else if (_drag_index == 4 && _engine_snap.track_limiter_ok) {
 				_engine.set_track_limiter_release_norm (
 					_drag_index, _mixers[_drag_index].fx_param2 ());
 			} else if (_drag_index == 3 && _engine_snap.track_delay_ok) {

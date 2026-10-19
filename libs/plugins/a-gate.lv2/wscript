@@ -1,0 +1,39 @@
+#!/usr/bin/env python
+import re
+import waflib.extras.autowaf as autowaf
+import waflib.Utils as Utils
+
+def options(opt):
+    pass
+
+def configure(conf):
+    autowaf.check_pkg(conf, 'lv2', atleast_version='1.0.0',
+                      uselib_store='LV2_1_0_0')
+
+def build(bld):
+    bundle = 'a-gate.lv2'
+    module_pat = re.sub('^lib', '', bld.env.cshlib_PATTERN)
+    module_ext = module_pat[module_pat.rfind('.'):]
+
+    for i in ['manifest.ttl', 'a-gate.ttl']:
+        obj = bld(features='subst')
+        obj.source = i + '.in'
+        obj.target = '../../LV2/%s/%s' % (bundle, i)
+        obj.install_path = '${LV2DIR}/%s' % bundle
+        obj.chmod = Utils.O644
+        obj.LIB_EXT = module_ext
+
+    # DSP-only (no Cairo). Matches a-limiter / a-comp / a-eq / a-delay.
+    obj = bld(features     = 'c cshlib',
+              source       = 'a-gate.c',
+              name         = 'a-gate',
+              cflags       = [ bld.env['compiler_flags_dict']['pic'],  bld.env['compiler_flags_dict']['c99'] ],
+              includes     = [ '../../ardour' ],
+              target       = '../../LV2/%s/a-gate' % bundle,
+              install_path = '${LV2DIR}/%s' % bundle,
+              use          = 'LV2_1_0_0'
+              )
+    obj.env.cshlib_PATTERN = module_pat
+    obj.env.cxxshlib_PATTERN = module_pat
+
+# vi:set ts=4 sw=4 et:
