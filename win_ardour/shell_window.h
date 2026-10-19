@@ -148,6 +148,8 @@ private:
 	void refresh_automation_lane ();
 	void write_automation_at (float x, float y);
 	void draw_mixer_pane ();
+	void draw_help_overlay ();
+	void toggle_help ();
 	void transport_play ();
 	void transport_stop ();
 	void transport_toggle ();
@@ -263,6 +265,7 @@ private:
 	SmokeRecordPhase _smoke_record;
 	DWORD            _smoke_record_start_ms;
 	bool             _smoke_failed; /* any --smoke-* reported FAILED */
+	bool             _help_visible;
 
 	D2D1_RECT_F _brand_bar;
 	D2D1_RECT_F _transport_bounds;

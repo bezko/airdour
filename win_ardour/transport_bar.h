@@ -47,7 +47,8 @@ enum class TransportHit {
 	Shuttle,
 	FitSession,
 	FitSelection,
-	FitRegions
+	FitRegions,
+	Help
 };
 
 class TransportBar
@@ -156,6 +157,7 @@ private:
 	D2D1_RECT_F _fit_session_btn;
 	D2D1_RECT_F _fit_selection_btn;
 	D2D1_RECT_F _fit_regions_btn;
+	D2D1_RECT_F _help_btn;
 	bool        _playing;
 	bool        _recording;
 	bool        _record_armed;

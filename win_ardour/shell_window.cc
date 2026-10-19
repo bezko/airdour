@@ -111,6 +111,7 @@ ShellWindow::ShellWindow ()
 	, _smoke_record (SmokeRecordPhase::Off)
 	, _smoke_record_start_ms (0)
 	, _smoke_failed (false)
+	, _help_visible (false)
 	, _brand_bar ()
 	, _transport_bounds ()
 	, _editor_pane ()
@@ -2253,7 +2254,17 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		return 0;
 	case WM_KEYDOWN:
 		if (wparam == VK_ESCAPE) {
-			PostQuitMessage (0);
+			if (_help_visible) {
+				_help_visible = false;
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			} else {
+				PostQuitMessage (0);
+			}
+		} else if (wparam == VK_F1
+		           || ((wparam == VK_OEM_2 || wparam == VK_DIVIDE)
+		               && (GetKeyState (VK_SHIFT) & 0x8000))) {
+			/* F1 or Shift+/ (?) — toggle shortcuts help. */
+			toggle_help ();
 		} else if (wparam == VK_SPACE) {
 			transport_toggle ();
 		} else if (wparam == VK_DELETE || wparam == VK_BACK) {
@@ -2680,7 +2691,18 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	float x, y;
 	client_from_lparam (lparam, &x, &y);
 
+	if (_help_visible) {
+		/* Any click dismisses the shortcuts overlay. */
+		_help_visible = false;
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
 	TransportHit th = _transport.hit_test (x, y);
+	if (th == TransportHit::Help) {
+		toggle_help ();
+		return true;
+	}
 	if (th == TransportHit::Play) {
 		transport_play ();
 		return true;
@@ -3985,6 +4007,93 @@ ShellWindow::draw_midi_lane ()
 }
 
 void
+ShellWindow::toggle_help ()
+{
+	_help_visible = !_help_visible;
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::draw_help_overlay ()
+{
+	if (!_rt) {
+		return;
+	}
+
+	/* Dim the shell; card lists bindings the shell actually handles. */
+	_brush_pane->SetOpacity (0.78f);
+	_rt->FillRectangle (D2D1::RectF (0, 0, (float)_width, (float)_height), _brush_pane);
+	_brush_pane->SetOpacity (1.f);
+
+	float pad = 28.f * _dpi_scale;
+	float card_w = std::min ((float)_width - pad * 2.f, 720.f * _dpi_scale);
+	float card_h = std::min ((float)_height - pad * 2.f, 520.f * _dpi_scale);
+	float cx = ((float)_width - card_w) * 0.5f;
+	float cy = ((float)_height - card_h) * 0.5f;
+	D2D1_RECT_F card = D2D1::RectF (cx, cy, cx + card_w, cy + card_h);
+	_rt->FillRectangle (card, _brush_pane);
+	_rt->DrawRectangle (card, _brush_accent, 1.5f * _dpi_scale);
+
+	DWRITE_TEXT_ALIGNMENT ta = _fmt_pane->GetTextAlignment ();
+	_fmt_pane->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
+	_rt->DrawTextW (L"Airdour — shortcuts", 20, _fmt_pane,
+	                D2D1::RectF (card.left + 16.f * _dpi_scale, card.top + 10.f * _dpi_scale,
+	                             card.right - 16.f * _dpi_scale, card.top + 34.f * _dpi_scale),
+	                _brush_brand);
+	_fmt_pane->SetTextAlignment (ta);
+
+	struct Row { const wchar_t* key; const wchar_t* action; };
+	static const Row kRows[] = {
+		{ L"Space", L"Play / Stop" },
+		{ L"Esc", L"Close help · quit app" },
+		{ L"F1  /  ?", L"Toggle this help" },
+		{ L"Ctrl+Z / Y", L"Undo / Redo" },
+		{ L"Ctrl+S / O / E", L"Save / Open / Export" },
+		{ L"S / F / Del", L"Split · Fade · Delete selection" },
+		{ L"G / Shift+G", L"Snap on/off · cycle density" },
+		{ L"L / P", L"Loop · Punch" },
+		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
+		{ L"M / Shift+M", L"Add / remove marker" },
+		{ L"C / K", L"Count-in · Click (metronome)" },
+		{ L"− / +", L"Tempo −1 / +1 BPM" },
+		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
+		{ L"Home / 0", L"Follow transport (reset view)" },
+		{ L"← →  Shift+←→", L"Scroll editor · larger step" },
+		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
+		{ L"Ctrl+±", L"Zoom in / out (center)" },
+		{ L"F2", L"Rename focused track" },
+		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
+		{ L"U", L"Apply / clear track group" },
+	};
+
+	float y = card.top + 40.f * _dpi_scale;
+	float row_h = 20.f * _dpi_scale;
+	float col0 = card.left + 18.f * _dpi_scale;
+	float col1 = card.left + 190.f * _dpi_scale;
+	float bot = card.bottom - 28.f * _dpi_scale;
+	DWRITE_TEXT_ALIGNMENT ta_m = _fmt_meta->GetTextAlignment ();
+	_fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
+	for (size_t i = 0; i < sizeof (kRows) / sizeof (kRows[0]); ++i) {
+		if (y + row_h > bot) {
+			break;
+		}
+		_rt->DrawTextW (kRows[i].key, (UINT32)wcslen (kRows[i].key), _fmt_meta,
+		                D2D1::RectF (col0, y, col1 - 8.f * _dpi_scale, y + row_h),
+		                _brush_accent);
+		_rt->DrawTextW (kRows[i].action, (UINT32)wcslen (kRows[i].action), _fmt_meta,
+		                D2D1::RectF (col1, y, card.right - 16.f * _dpi_scale, y + row_h),
+		                _brush_body);
+		y += row_h;
+	}
+	_fmt_meta->SetTextAlignment (ta_m);
+
+	_rt->DrawTextW (L"Click anywhere or Esc to close", 30, _fmt_meta,
+	                D2D1::RectF (card.left + 16.f * _dpi_scale, card.bottom - 24.f * _dpi_scale,
+	                             card.right - 16.f * _dpi_scale, card.bottom - 6.f * _dpi_scale),
+	                _brush_body);
+}
+
+void
 ShellWindow::draw_mixer_pane ()
 {
 	const D2D1_RECT_F& r = _mixer_pane;
@@ -4060,6 +4169,9 @@ ShellWindow::on_paint ()
 
 	draw_editor_pane ();
 	draw_mixer_pane ();
+	if (_help_visible) {
+		draw_help_overlay ();
+	}
 
 	wchar_t status[384];
 	if (_engine_snap.running) {

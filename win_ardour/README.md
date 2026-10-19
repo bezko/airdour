@@ -6,8 +6,9 @@
 
 - Brand window (**Airdour**), DPI-aware layout
 - **Transport** — Play / Stop (+ spacebar); engine start/stop; playhead locked to content
-- **Editor** — 3 stacked wave lanes (Audio 1–3), linked zoom/pan, labels
-- **Mixer** — 4 strips (Audio 1–3 + MIDI 1): faders, **M/S**, rec-arm (audio), PeakMeter
+- **Editor** — stacked wave lanes + MIDI piano-roll, linked zoom/pan, Fit/Sel/All, scrub
+- **Mixer** — strips + Monitor + History; faders, **M/S**, rec-arm, PeakMeter
+- **Help** — `?` / F1 / **?** button toggles shortcuts overlay (bindings the shell supports)
 - Playhead follows Session transport when attached, else engine `processed_samples`
 - Optional **engine attach** (Dummy or WASAPI shared)
 - `--timeout N` for unattended smoke
