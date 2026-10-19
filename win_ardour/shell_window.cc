@@ -211,7 +211,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_click,
                             bool smoke_tracks,
                             bool smoke_rename,
-                            bool smoke_group)
+                            bool smoke_group,
+                            bool smoke_monitor)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -496,6 +497,20 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_monitor && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_monitor ()) {
+			_smoke_failed = true;
+		} else {
+			sync_monitor_from_engine ();
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_monitor) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-monitor FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -525,6 +540,12 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	sync_track_labels_from_engine ();
 	sync_mixer_gains_from_engine ();
 	sync_mixer_group_from_engine ();
+	if (_engine.is_linked () && _engine_snap.session_ok) {
+		_engine.ensure_monitor_section ();
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	sync_monitor_from_engine ();
 	layout_panes ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
@@ -1456,6 +1477,54 @@ ShellWindow::do_toggle_group_pick (int audio_index)
 }
 
 void
+ShellWindow::sync_monitor_from_engine ()
+{
+	_monitor.set_available (_engine_snap.monitor_ok);
+	_monitor.set_dim (_engine_snap.monitor_dim);
+	_monitor.set_mono (_engine_snap.monitor_mono);
+	_monitor.set_mute (_engine_snap.monitor_cut);
+}
+
+void
+ShellWindow::do_toggle_monitor_dim ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.toggle_monitor_dim ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_monitor_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_toggle_monitor_mono ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.toggle_monitor_mono ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_monitor_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_toggle_monitor_cut ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.toggle_monitor_cut ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_monitor_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_apply_or_clear_group ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -1881,7 +1950,14 @@ ShellWindow::layout_panes ()
 	float mix_inner = _mixer_pane.right - _mixer_pane.left - mix_inset * 2.f;
 	float strip_gap = 6.f * _dpi_scale;
 	const int n_mix = std::max (1, n_mixer_strips ());
-	float strip_w = (mix_inner - strip_gap * (float)(n_mix - 1)) / (float)n_mix;
+	/* Reserve a narrow Monitor strip on the right. */
+	float mon_w = 56.f * _dpi_scale;
+	float strips_inner = mix_inner - mon_w - strip_gap;
+	if (strips_inner < 40.f * _dpi_scale) {
+		mon_w = 48.f * _dpi_scale;
+		strips_inner = mix_inner - mon_w - strip_gap;
+	}
+	float strip_w = (strips_inner - strip_gap * (float)(n_mix - 1)) / (float)n_mix;
 	for (int i = 0; i < kMixerStripsMax; ++i) {
 		_mixers[i].layout (D2D1::RectF (0, 0, 0, 0), _dpi_scale);
 	}
@@ -1889,6 +1965,8 @@ ShellWindow::layout_panes ()
 		float x0 = _mixer_pane.left + mix_inset + (float)i * (strip_w + strip_gap);
 		_mixers[i].layout (D2D1::RectF (x0, mix_top, x0 + strip_w, mix_bot), _dpi_scale);
 	}
+	float mon_x = _mixer_pane.right - mix_inset - mon_w;
+	_monitor.layout (D2D1::RectF (mon_x, mix_top, mon_x + mon_w, mix_bot), _dpi_scale);
 }
 
 bool
@@ -2460,6 +2538,20 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::Group) {
 		do_apply_or_clear_group ();
+		return true;
+	}
+
+	MonitorHit mh = _monitor.hit_test (x, y);
+	if (mh == MonitorHit::Dim) {
+		do_toggle_monitor_dim ();
+		return true;
+	}
+	if (mh == MonitorHit::Mono) {
+		do_toggle_monitor_mono ();
+		return true;
+	}
+	if (mh == MonitorHit::Mute) {
+		do_toggle_monitor_cut ();
 		return true;
 	}
 
@@ -3182,6 +3274,7 @@ ShellWindow::on_tick ()
 	sync_mixer_mute_solo_from_engine ();
 	sync_mixer_pan_from_engine ();
 	sync_mixer_send_from_engine ();
+	sync_monitor_from_engine ();
 
 	if (_timeout_secs > 0 && (now - _start_tick) >= (_timeout_secs * 1000u)) {
 		PostQuitMessage (0);
@@ -3577,6 +3670,8 @@ ShellWindow::draw_mixer_pane ()
 		_mixers[i].draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
 		                 _brush_pane_edge, _brush_meter_hot, _fmt_pane, _fmt_meta, _dpi_scale);
 	}
+	_monitor.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
+	               _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
 }
 
 void

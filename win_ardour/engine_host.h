@@ -131,6 +131,10 @@ struct EngineSnapshot {
 	bool         group_shares_gain;
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
+	bool         monitor_ok; /* Session monitor_out + MonitorProcessor */
+	bool         monitor_dim; /* MonitorProcessor::dim_all */
+	bool         monitor_mono;
+	bool         monitor_cut; /* cut_all = monitor mute */
 	float        transport_sec;
 	std::wstring detail;
 };
@@ -472,6 +476,23 @@ public:
 	 */
 	bool smoke_group ();
 
+	/**
+	 * Ensure Session monitor bus + MonitorProcessor (add_monitor_section).
+	 * Honest GTK MonitorSection equivalent for dim / mono / cut.
+	 */
+	bool ensure_monitor_section ();
+	bool set_monitor_dim (bool enable);
+	bool toggle_monitor_dim ();
+	bool set_monitor_mono (bool enable);
+	bool toggle_monitor_mono ();
+	bool set_monitor_cut (bool enable); /* mute / cut_all */
+	bool toggle_monitor_cut ();
+
+	/**
+	 * Ensure monitor; dim→mono→cut on then off. For --smoke-monitor.
+	 */
+	bool smoke_monitor ();
+
 	/** Ensure a Session MidiTrack exists (creates one if needed). */
 	bool ensure_midi_track ();
 
@@ -583,6 +604,7 @@ private:
 	void refresh_pan_flags ();
 	void refresh_send_flags ();
 	void refresh_group_flags ();
+	void refresh_monitor_flags ();
 	bool ensure_aux_sends ();
 	void refresh_history_flags ();
 	void refresh_selection_snap ();

@@ -36,6 +36,7 @@
 #include "ardour/session_directory.h"
 #include "ardour/presentation_info.h"
 #include "ardour/route_group.h"
+#include "ardour/monitor_processor.h"
 #include "ardour/rc_configuration.h"
 #include "ardour/region.h"
 #include "ardour/region_factory.h"
@@ -418,6 +419,10 @@ EngineHost::EngineHost ()
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
 	_snap.group_name[0] = L'\0';
+	_snap.monitor_ok = false;
+	_snap.monitor_dim = false;
+	_snap.monitor_mono = false;
+	_snap.monitor_cut = false;
 	_snap.aux_bus_ok = false;
 	_snap.midi_muted = false;
 	_snap.midi_soloed = false;
@@ -5252,6 +5257,196 @@ EngineHost::smoke_group ()
 	}
 }
 
+void
+EngineHost::refresh_monitor_flags ()
+{
+	_snap.monitor_ok = false;
+	_snap.monitor_dim = false;
+	_snap.monitor_mono = false;
+	_snap.monitor_cut = false;
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	try {
+		std::shared_ptr<Route> mon = _impl->session->monitor_out ();
+		if (!mon || !mon->monitor_control ()) {
+			return;
+		}
+		std::shared_ptr<MonitorProcessor> mp = mon->monitor_control ();
+		_snap.monitor_ok = true;
+		_snap.monitor_dim = mp->dim_all ();
+		_snap.monitor_mono = mp->mono ();
+		_snap.monitor_cut = mp->cut_all ();
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::ensure_monitor_section ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		if (_impl->session->monitor_out ()
+		    && _impl->session->monitor_out ()->monitor_control ()) {
+			refresh_monitor_flags ();
+			return _snap.monitor_ok;
+		}
+		if (!_impl->session->master_out ()) {
+			_snap.detail = L"monitor — no master";
+			return false;
+		}
+		/* Public path: RC Config use-monitor-bus → Session::config_changed
+		 * → add_monitor_section() (private). */
+		if (!Config->get_use_monitor_bus ()) {
+			Config->set_use_monitor_bus (true);
+		}
+		refresh_monitor_flags ();
+		if (!_snap.monitor_ok) {
+			_snap.detail = L"monitor create failed";
+			std::fprintf (stderr, "airdour_win_shell: ensure_monitor_section FAILED\n");
+			std::fflush (stderr);
+			return false;
+		}
+		_snap.detail = L"monitor section ready";
+		std::fprintf (stderr, "airdour_win_shell: Monitor section ready (dim/mono/cut)\n");
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: ensure_monitor_section: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"monitor failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"monitor failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::set_monitor_dim (bool enable)
+{
+	if (!ensure_monitor_section ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<MonitorProcessor> mp =
+			_impl->session->monitor_out ()->monitor_control ();
+		mp->set_dim_all (enable);
+		refresh_monitor_flags ();
+		_snap.detail = enable ? L"monitor dim" : L"monitor undim";
+		return _snap.monitor_dim == enable;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_monitor_dim ()
+{
+	refresh_monitor_flags ();
+	return set_monitor_dim (!_snap.monitor_dim);
+}
+
+bool
+EngineHost::set_monitor_mono (bool enable)
+{
+	if (!ensure_monitor_section ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<MonitorProcessor> mp =
+			_impl->session->monitor_out ()->monitor_control ();
+		mp->set_mono (enable);
+		refresh_monitor_flags ();
+		_snap.detail = enable ? L"monitor mono" : L"monitor stereo";
+		return _snap.monitor_mono == enable;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_monitor_mono ()
+{
+	refresh_monitor_flags ();
+	return set_monitor_mono (!_snap.monitor_mono);
+}
+
+bool
+EngineHost::set_monitor_cut (bool enable)
+{
+	if (!ensure_monitor_section ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<MonitorProcessor> mp =
+			_impl->session->monitor_out ()->monitor_control ();
+		mp->set_cut_all (enable);
+		refresh_monitor_flags ();
+		_snap.detail = enable ? L"monitor mute" : L"monitor unmute";
+		return _snap.monitor_cut == enable;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_monitor_cut ()
+{
+	refresh_monitor_flags ();
+	return set_monitor_cut (!_snap.monitor_cut);
+}
+
+bool
+EngineHost::smoke_monitor ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-monitor failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_monitor_section ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-monitor FAILED (ensure)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_monitor_dim (true) || !_snap.monitor_dim) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-monitor FAILED (dim on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_monitor_mono (true) || !_snap.monitor_mono) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-monitor FAILED (mono on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_monitor_cut (true) || !_snap.monitor_cut) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-monitor FAILED (cut on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_monitor_dim (false) || _snap.monitor_dim
+		    || !set_monitor_mono (false) || _snap.monitor_mono
+		    || !set_monitor_cut (false) || _snap.monitor_cut) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-monitor FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-monitor ok (dim/mono/cut)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-monitor ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-monitor exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_tempo ()
 {
@@ -7203,6 +7398,7 @@ EngineHost::refresh_snapshot ()
 			refresh_pan_flags ();
 			refresh_send_flags ();
 			refresh_group_flags ();
+			refresh_monitor_flags ();
 			refresh_history_flags ();
 			refresh_selection_snap ();
 			refresh_locations_snap ();
@@ -7281,6 +7477,10 @@ EngineHost::EngineHost ()
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
 	_snap.group_name[0] = L'\0';
+	_snap.monitor_ok = false;
+	_snap.monitor_dim = false;
+	_snap.monitor_mono = false;
+	_snap.monitor_cut = false;
 	_snap.aux_bus_ok = false;
 	_snap.available = false;
 	_snap.running = false;
@@ -8184,6 +8384,62 @@ EngineHost::toggle_route_group_active ()
 
 bool
 EngineHost::smoke_group ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_monitor_flags ()
+{
+}
+
+bool
+EngineHost::ensure_monitor_section ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_monitor_dim (bool enable)
+{
+	(void)enable;
+	return false;
+}
+
+bool
+EngineHost::toggle_monitor_dim ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_monitor_mono (bool enable)
+{
+	(void)enable;
+	return false;
+}
+
+bool
+EngineHost::toggle_monitor_mono ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_monitor_cut (bool enable)
+{
+	(void)enable;
+	return false;
+}
+
+bool
+EngineHost::toggle_monitor_cut ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_monitor ()
 {
 	return false;
 }

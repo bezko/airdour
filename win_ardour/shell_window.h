@@ -24,6 +24,7 @@
 #include "automation_lane.h"
 #include "engine_host.h"
 #include "mixer_strip.h"
+#include "monitor_strip.h"
 #include "transport_bar.h"
 #include "wave_strip.h"
 
@@ -79,7 +80,8 @@ public:
 	                    bool smoke_click = false,
 	                    bool smoke_tracks = false,
 	                    bool smoke_rename = false,
-	                    bool smoke_group = false);
+	                    bool smoke_group = false,
+	                    bool smoke_monitor = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -168,6 +170,10 @@ private:
 	void do_rename_focused_track ();
 	void do_toggle_group_pick (int audio_index);
 	void do_apply_or_clear_group ();
+	void do_toggle_monitor_dim ();
+	void do_toggle_monitor_mono ();
+	void do_toggle_monitor_cut ();
+	void sync_monitor_from_engine ();
 	int  n_audio_lanes () const;
 	int  n_mixer_strips () const;
 	int  midi_mixer_index () const;
@@ -282,5 +288,6 @@ private:
 	EditorLane     _lanes[kTracks];
 	AutomationLane _auto_lane;
 	MixerStrip     _mixers[kMixerStrips];
+	MonitorStrip   _monitor;
 	float          _auto_last_write_sec;
 };
