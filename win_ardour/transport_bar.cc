@@ -36,6 +36,9 @@ TransportBar::TransportBar ()
 	, _click_btn ()
 	, _tempo_dn_btn ()
 	, _tempo_up_btn ()
+	, _add_audio_btn ()
+	, _add_midi_btn ()
+	, _remove_track_btn ()
 	, _playing (false)
 	, _recording (false)
 	, _record_armed (false)
@@ -55,8 +58,8 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	_bounds = bounds;
 	float h = bounds.bottom - bounds.top;
 	float btn_h = h - 10.f * dpi_scale;
-	float btn_w = 40.f * dpi_scale;
-	float narrow = 28.f * dpi_scale;
+	float btn_w = 36.f * dpi_scale;
+	float narrow = 26.f * dpi_scale;
 	float y0 = bounds.top + 5.f * dpi_scale;
 	float x0 = bounds.left + 8.f * dpi_scale;
 	float gap = 3.f * dpi_scale;
@@ -78,6 +81,9 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_click_btn, x, btn_w);
 	place (_tempo_dn_btn, x, narrow);
 	place (_tempo_up_btn, x, narrow);
+	place (_add_audio_btn, x, narrow + 4.f * dpi_scale);
+	place (_add_midi_btn, x, narrow + 4.f * dpi_scale);
+	place (_remove_track_btn, x, narrow);
 	place (_import_btn, x, btn_w * 1.15f);
 	place (_save_btn, x, btn_w);
 	place (_open_btn, x, btn_w);
@@ -125,6 +131,15 @@ TransportBar::hit_test (float x, float y) const
 	}
 	if (contains (_tempo_up_btn, x, y)) {
 		return TransportHit::TempoUp;
+	}
+	if (contains (_add_audio_btn, x, y)) {
+		return TransportHit::AddAudio;
+	}
+	if (contains (_add_midi_btn, x, y)) {
+		return TransportHit::AddMidi;
+	}
+	if (contains (_remove_track_btn, x, y)) {
+		return TransportHit::RemoveTrack;
 	}
 	if (contains (_import_btn, x, y)) {
 		return TransportHit::Import;
@@ -187,6 +202,9 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_click_btn, L"Click", _click_enabled);
 	draw_btn (_tempo_dn_btn, L"−", false);
 	draw_btn (_tempo_up_btn, L"+", false);
+	draw_btn (_add_audio_btn, L"+A", false);
+	draw_btn (_add_midi_btn, L"+M", false);
+	draw_btn (_remove_track_btn, L"−T", false);
 	draw_btn (_import_btn, L"Import", false);
 	draw_btn (_save_btn, L"Save", false);
 	draw_btn (_open_btn, L"Open", false);

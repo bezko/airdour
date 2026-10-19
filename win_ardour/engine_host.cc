@@ -419,6 +419,8 @@ EngineHost::EngineHost ()
 	_snap.tempo_bpm = 120.f;
 	_snap.count_in_enabled = false;
 	_snap.click_enabled = false;
+	_snap.audio_track_count = 0;
+	_snap.midi_track_count = 0;
 	_snap.marker_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
@@ -575,7 +577,7 @@ EngineHost::ensure_session ()
 		AudioTrackList created = _impl->session->new_audio_track (
 			1, 2,
 			std::shared_ptr<RouteGroup> (),
-			(uint32_t)EngineSnapshot::kMeters,
+			3u /* default Audio 1–3; add more via UI */,
 			"Audio",
 			PresentationInfo::max_order);
 
@@ -659,6 +661,8 @@ EngineHost::ensure_session ()
 		step ("aux bus + sends");
 		ensure_aux_sends ();
 
+		_snap.audio_track_count = (int)_impl->tracks.size ();
+		_snap.midi_track_count = _impl->midi_track ? 1 : 0;
 		_snap.session_ok = true;
 		_snap.meters_real = true;
 		_snap.waves_from_session = true;
@@ -771,6 +775,7 @@ EngineHost::collect_tracks ()
 {
 	_impl->tracks.clear ();
 	_impl->aux_bus.reset ();
+	_snap.audio_track_count = 0;
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -789,6 +794,18 @@ EngineHost::collect_tracks ()
 				break;
 			}
 		}
+		_snap.audio_track_count = (int)_impl->tracks.size ();
+		/* Rebind primary MIDI track if Session still has one. */
+		if (!_impl->midi_track) {
+			for (RouteList::const_iterator it = routes->begin (); it != routes->end (); ++it) {
+				std::shared_ptr<MidiTrack> mt = std::dynamic_pointer_cast<MidiTrack> (*it);
+				if (mt) {
+					_impl->midi_track = mt;
+					break;
+				}
+			}
+		}
+		_snap.midi_track_count = _impl->midi_track ? 1 : 0;
 		std::shared_ptr<RouteList const> all = _impl->session->get_routes ();
 		if (all) {
 			for (RouteList::const_iterator it = all->begin (); it != all->end (); ++it) {
@@ -921,12 +938,13 @@ EngineHost::open_session (const std::string& session_dir, const std::string& sna
 			AudioTrackList created = _impl->session->new_audio_track (
 				1, 2,
 				std::shared_ptr<RouteGroup> (),
-				(uint32_t)EngineSnapshot::kMeters,
+				3u,
 				"Audio",
 				PresentationInfo::max_order);
 			for (AudioTrackList::iterator it = created.begin (); it != created.end (); ++it) {
 				_impl->tracks.push_back (*it);
 			}
+			collect_tracks ();
 		}
 
 		for (size_t t = 0; t < _impl->tracks.size () && t < (size_t)EngineSnapshot::kMeters; ++t) {
@@ -4440,6 +4458,234 @@ EngineHost::smoke_click ()
 }
 
 bool
+EngineHost::add_audio_track ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	collect_tracks ();
+	if ((int)_impl->tracks.size () >= EngineSnapshot::kMeters) {
+		_snap.detail = L"add audio — at max tracks";
+		return false;
+	}
+	try {
+		AudioTrackList created = _impl->session->new_audio_track (
+			1, 2,
+			std::shared_ptr<RouteGroup> (),
+			1u,
+			"Audio",
+			PresentationInfo::max_order);
+		if (created.empty () || !created.front ()) {
+			_snap.detail = L"add audio failed";
+			return false;
+		}
+		size_t idx = _impl->tracks.size ();
+		if (idx < (size_t)EngineSnapshot::kMeters
+		    && created.front ()->gain_control ()) {
+			created.front ()->gain_control ()->set_value (
+				_track_gain[idx < (size_t)EngineSnapshot::kMeters ? idx : 0],
+				Controllable::NoGroup);
+		}
+		collect_tracks ();
+		ensure_aux_sends ();
+		refresh_region_flags ();
+		refresh_mute_solo_flags ();
+		refresh_pan_flags ();
+		refresh_send_flags ();
+		_snap.detail = L"audio track added";
+		std::fprintf (stderr, "airdour_win_shell: add audio → count=%d\n",
+		              _snap.audio_track_count);
+		std::fflush (stderr);
+		return _snap.audio_track_count > 0;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: add_audio_track: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"add audio failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"add audio failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::add_midi_track ()
+{
+	if (!ensure_midi_track ()) {
+		return false;
+	}
+	collect_tracks ();
+	_snap.detail = L"MIDI track ready";
+	return _snap.midi_track_count > 0 || _snap.midi_track_ok;
+}
+
+bool
+EngineHost::remove_audio_track (int index, bool require_empty_or_selected)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	collect_tracks ();
+	if ((int)_impl->tracks.size () <= 1) {
+		_snap.detail = L"remove audio — need ≥1";
+		return false;
+	}
+	if (index < 0 || index >= (int)_impl->tracks.size () || !_impl->tracks[index]) {
+		_snap.detail = L"remove audio — bad index";
+		return false;
+	}
+	refresh_region_flags ();
+	bool empty = !_snap.track_has_regions[index];
+	bool selected = (_snap.selection_track == index);
+	if (require_empty_or_selected && !empty && !selected) {
+		_snap.detail = L"remove audio — not empty/selected";
+		return false;
+	}
+	try {
+		std::shared_ptr<Route> r = _impl->tracks[index];
+		if (_snap.selection_track == index) {
+			_snap.has_selection = false;
+			_snap.selection_track = -1;
+			_impl->selected_track = -1;
+			_impl->selected_region.reset ();
+		} else if (_snap.selection_track > index) {
+			_snap.selection_track -= 1;
+			_impl->selected_track = _snap.selection_track;
+		}
+		_impl->session->remove_route (r);
+		collect_tracks ();
+		ensure_aux_sends ();
+		refresh_region_flags ();
+		refresh_mute_solo_flags ();
+		refresh_pan_flags ();
+		refresh_send_flags ();
+		refresh_selection_snap ();
+		_snap.detail = L"audio track removed";
+		std::fprintf (stderr, "airdour_win_shell: remove audio[%d] → count=%d\n",
+		              index, _snap.audio_track_count);
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: remove_audio_track: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"remove audio failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"remove audio failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::remove_selected_or_empty_audio_track ()
+{
+	collect_tracks ();
+	refresh_region_flags ();
+	if (_snap.has_selection && _snap.selection_track >= 0) {
+		return remove_audio_track (_snap.selection_track, false);
+	}
+	for (int i = (int)_impl->tracks.size () - 1; i >= 0; --i) {
+		if (i < EngineSnapshot::kMeters && !_snap.track_has_regions[i]) {
+			return remove_audio_track (i, true);
+		}
+	}
+	_snap.detail = L"remove — no selected/empty audio";
+	return false;
+}
+
+bool
+EngineHost::remove_midi_track ()
+{
+	if (!_impl || !_impl->session || !_impl->midi_track) {
+		_snap.detail = L"remove MIDI — none";
+		return false;
+	}
+	try {
+		std::shared_ptr<Route> r = _impl->midi_track;
+		_impl->midi_region.reset ();
+		_impl->midi_track.reset ();
+		_impl->midi_synth_ok = false;
+		_impl->midi_synth_to_master = false;
+		_impl->midi_synth_name.clear ();
+		_impl->selected_midi_note_id = -1;
+		_impl->session->remove_route (r);
+		collect_tracks ();
+		refresh_midi_snap ();
+		_snap.midi_track_count = 0;
+		_snap.detail = L"MIDI track removed";
+		std::fprintf (stderr, "airdour_win_shell: remove MIDI\n");
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: remove_midi_track: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"remove MIDI failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"remove MIDI failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_tracks ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-tracks failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		const int n0 = _snap.audio_track_count;
+		if (n0 < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (no audio)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!add_audio_track () || _snap.audio_track_count != n0 + 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (add → %d)\n",
+			              _snap.audio_track_count);
+			std::fflush (stderr);
+			return false;
+		}
+		const int n1 = _snap.audio_track_count;
+		/* New track is empty — remove it. */
+		if (!remove_audio_track (n1 - 1, true) || _snap.audio_track_count != n0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (remove → %d)\n",
+			              _snap.audio_track_count);
+			std::fflush (stderr);
+			return false;
+		}
+		bool had_midi = _snap.midi_track_ok || _impl->midi_track;
+		if (had_midi) {
+			if (!remove_midi_track () || _snap.midi_track_count != 0) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (remove MIDI)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		if (!add_midi_track () || (!_snap.midi_track_ok && _snap.midi_track_count < 1)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (add MIDI)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		collect_tracks ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-tracks ok (audio %d→%d→%d midi ok)\n",
+		              n0, n1, _snap.audio_track_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-tracks ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-tracks exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::smoke_tempo ()
 {
 	if (!_impl || !_impl->session) {
@@ -6494,6 +6740,8 @@ EngineHost::EngineHost ()
 	_snap.tempo_bpm = 120.f;
 	_snap.count_in_enabled = false;
 	_snap.click_enabled = false;
+	_snap.audio_track_count = 0;
+	_snap.midi_track_count = 0;
 	_snap.marker_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
@@ -7253,6 +7501,44 @@ EngineHost::toggle_clicking ()
 
 bool
 EngineHost::smoke_click ()
+{
+	return false;
+}
+
+bool
+EngineHost::add_audio_track ()
+{
+	return false;
+}
+
+bool
+EngineHost::add_midi_track ()
+{
+	return false;
+}
+
+bool
+EngineHost::remove_audio_track (int index, bool require_empty_or_selected)
+{
+	(void)index;
+	(void)require_empty_or_selected;
+	return false;
+}
+
+bool
+EngineHost::remove_selected_or_empty_audio_track ()
+{
+	return false;
+}
+
+bool
+EngineHost::remove_midi_track ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_tracks ()
 {
 	return false;
 }

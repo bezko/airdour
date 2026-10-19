@@ -31,7 +31,7 @@ struct EngineMidiNoteSnap {
 };
 
 struct EngineSnapshot {
-	static constexpr int kMeters = 3;
+	static constexpr int kMeters = 6; /* max audio tracks (Editor lanes / meters) */
 	static constexpr int kMaxMarkers = 8;
 	static constexpr int kMaxMidiDevices = 16;
 	static constexpr int kMaxMidiNotes = 96;
@@ -117,6 +117,8 @@ struct EngineSnapshot {
 	float        tempo_bpm; /* Session TempoMap BPM at t=0 (quarter-note) */
 	bool         count_in_enabled; /* Session config count-in before record roll */
 	bool         click_enabled; /* RC Config clicking — audible metronome */
+	int          audio_track_count; /* Session audio tracks (1..kMeters) */
+	int          midi_track_count; /* 0 or 1 in this shell */
 	float        transport_sec;
 	std::wstring detail;
 };
@@ -401,6 +403,26 @@ public:
 	 * For --smoke-click. Does not roll transport.
 	 */
 	bool smoke_click ();
+
+	/** Create one more Audio track (up to kMeters). Aux send attached. */
+	bool add_audio_track ();
+	/** Create MIDI track if missing (ensure_midi_track). */
+	bool add_midi_track ();
+	/**
+	 * Remove audio track at index. Keeps ≥1 audio.
+	 * If require_empty_or_selected: only when empty or currently selected.
+	 */
+	bool remove_audio_track (int index, bool require_empty_or_selected = true);
+	/** Remove selected audio, else last empty audio; keeps ≥1. */
+	bool remove_selected_or_empty_audio_track ();
+	/** Remove MIDI track when present (clears piano-roll state). */
+	bool remove_midi_track ();
+
+	/**
+	 * Add audio 3→4→5, remove empty back; MIDI remove/add; restore ≥3.
+	 * For --smoke-tracks.
+	 */
+	bool smoke_tracks ();
 
 	/** Ensure a Session MidiTrack exists (creates one if needed). */
 	bool ensure_midi_track ();

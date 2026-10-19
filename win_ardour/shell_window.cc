@@ -147,15 +147,23 @@ ShellWindow::ShellWindow ()
 	enable_dpi_awareness ();
 	_engine_snap = _engine.snapshot ();
 
-	static const wchar_t* labels[kTracks] = { L"Audio 1", L"Audio 2", L"Audio 3" };
-	static const float gains[kTracks] = { 0.85f, 0.72f, 0.60f };
-	for (int i = 0; i < kTracks; ++i) {
-		wcsncpy_s (_lanes[i].label, labels[i], _TRUNCATE);
+	for (int i = 0; i < kTracksMax; ++i) {
+		wchar_t lab[24];
+		_snwprintf_s (lab, _TRUNCATE, L"Audio %d", i + 1);
+		wcsncpy_s (_lanes[i].label, lab, _TRUNCATE);
 		_lanes[i].bounds = D2D1::RectF ();
-		_mixers[i].set_label (labels[i]);
-		_mixers[i].set_gain (gains[i]);
+		_mixers[i].set_label (lab);
+		_mixers[i].set_gain (0.85f - 0.04f * (float)i);
 		_mixers[i].set_midi_strip (false);
 	}
+	for (int i = 0; i < kMixerStripsMax; ++i) {
+		if (i >= kTracksMax) {
+			_mixers[i].set_label (L"MIDI 1");
+			_mixers[i].set_gain (0.85f);
+			_mixers[i].set_midi_strip (true);
+		}
+	}
+	/* Default MIDI strip after 3 audio (session default). */
 	_mixers[3].set_label (L"MIDI 1");
 	_mixers[3].set_gain (0.85f);
 	_mixers[3].set_midi_strip (true);
@@ -198,7 +206,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_snap,
                             bool smoke_punch,
                             bool smoke_tempo,
-                            bool smoke_click)
+                            bool smoke_click,
+                            bool smoke_tracks)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -438,6 +447,20 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_tracks && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_tracks ()) {
+			_smoke_failed = true;
+		} else {
+			sync_track_labels_from_engine ();
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_tracks) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -464,6 +487,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	sync_transport_loop_from_engine ();
 	sync_transport_punch_from_engine ();
 	sync_transport_tempo_from_engine ();
+	sync_track_labels_from_engine ();
+	layout_panes ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
 	if (autoplay) {
@@ -497,32 +522,94 @@ ShellWindow::sync_transport_tempo_from_engine ()
 	_transport.set_click_enabled (_engine_snap.click_enabled);
 }
 
+int
+ShellWindow::n_audio_lanes () const
+{
+	int n = _engine_snap.audio_track_count;
+	if (!_engine_snap.session_ok || n < 1) {
+		n = 3;
+	}
+	if (n > kTracksMax) {
+		n = kTracksMax;
+	}
+	return n;
+}
+
+int
+ShellWindow::n_mixer_strips () const
+{
+	int n = n_audio_lanes ();
+	if (_engine_snap.midi_track_ok || _engine_snap.midi_track_count > 0 || !_engine_snap.session_ok) {
+		++n;
+	}
+	if (n > kMixerStripsMax) {
+		n = kMixerStripsMax;
+	}
+	return n;
+}
+
+int
+ShellWindow::midi_mixer_index () const
+{
+	return n_audio_lanes ();
+}
+
+void
+ShellWindow::sync_track_labels_from_engine ()
+{
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < kTracksMax; ++i) {
+		wchar_t lab[24];
+		_snwprintf_s (lab, _TRUNCATE, L"Audio %d", i + 1);
+		wcsncpy_s (_lanes[i].label, lab, _TRUNCATE);
+		_mixers[i].set_label (lab);
+		_mixers[i].set_midi_strip (false);
+	}
+	const int mi = midi_mixer_index ();
+	if (mi >= 0 && mi < kMixerStripsMax) {
+		_mixers[mi].set_label (L"MIDI 1");
+		_mixers[mi].set_midi_strip (true);
+	}
+	(void)na;
+}
+
 void
 ShellWindow::sync_mixer_arm_from_engine ()
 {
-	for (int i = 0; i < kTracks; ++i) {
-		bool armed = (i < EngineSnapshot::kMeters) && _engine_snap.track_armed[i];
-		_mixers[i].set_armed (armed);
+	const int na = n_audio_lanes ();
+	const int mi = midi_mixer_index ();
+	for (int i = 0; i < kMixerStripsMax; ++i) {
+		_mixers[i].set_armed (false);
 	}
-	_mixers[3].set_armed (false);
+	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
+		_mixers[i].set_armed (_engine_snap.track_armed[i]);
+	}
+	if (mi >= 0 && mi < kMixerStripsMax) {
+		_mixers[mi].set_armed (false);
+	}
 	_transport.set_record_armed (_engine_snap.session_record_armed);
 }
 
 void
 ShellWindow::sync_mixer_mute_solo_from_engine ()
 {
-	for (int i = 0; i < kTracks; ++i) {
+	const int na = n_audio_lanes ();
+	const int mi = midi_mixer_index ();
+	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_muted (_engine_snap.track_muted[i]);
 		_mixers[i].set_soloed (_engine_snap.track_soloed[i]);
 	}
-	_mixers[3].set_muted (_engine_snap.midi_muted);
-	_mixers[3].set_soloed (_engine_snap.midi_soloed);
+	if (mi >= 0 && mi < kMixerStripsMax) {
+		_mixers[mi].set_muted (_engine_snap.midi_muted);
+		_mixers[mi].set_soloed (_engine_snap.midi_soloed);
+	}
 }
 
 void
 ShellWindow::sync_mixer_pan_from_engine ()
 {
-	for (int i = 0; i < kTracks; ++i) {
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_pan (_engine_snap.track_pan[i]);
 	}
 	_transport.set_recording (_engine_snap.session_recording);
@@ -531,7 +618,8 @@ ShellWindow::sync_mixer_pan_from_engine ()
 void
 ShellWindow::sync_mixer_send_from_engine ()
 {
-	for (int i = 0; i < kTracks; ++i) {
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_send (_engine_snap.track_send[i]);
 	}
 }
@@ -991,6 +1079,63 @@ ShellWindow::do_toggle_click ()
 }
 
 void
+ShellWindow::do_add_audio_track ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.add_audio_track ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_track_labels_from_engine ();
+	sync_mixer_arm_from_engine ();
+	sync_mixer_mute_solo_from_engine ();
+	sync_mixer_pan_from_engine ();
+	sync_mixer_send_from_engine ();
+	layout_panes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_add_midi_track ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.add_midi_track ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_track_labels_from_engine ();
+	sync_mixer_mute_solo_from_engine ();
+	layout_panes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_remove_track ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	/* Shift+−T removes MIDI when present; else selected/empty audio. */
+	if ((GetKeyState (VK_SHIFT) & 0x8000)
+	    && (_engine_snap.midi_track_ok || _engine_snap.midi_track_count > 0)) {
+		_engine.remove_midi_track ();
+	} else {
+		_engine.remove_selected_or_empty_audio_track ();
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_track_labels_from_engine ();
+	sync_mixer_arm_from_engine ();
+	sync_mixer_mute_solo_from_engine ();
+	sync_mixer_pan_from_engine ();
+	sync_mixer_send_from_engine ();
+	layout_panes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_nudge_tempo (float delta)
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -1331,9 +1476,14 @@ ShellWindow::layout_panes ()
 	float midi_h = 96.f * _dpi_scale; /* ~24-key piano-roll */
 	float lanes_top = _editor_ruler.bottom + 4.f * _dpi_scale;
 	float lanes_bot = _editor_pane.bottom - inset - midi_h - lane_gap;
-	float lane_h = (lanes_bot - lanes_top - lane_gap * (kTracks - 1)) / (float)kTracks;
+	const int n_lanes = std::max (1, n_audio_lanes ());
+	float lane_h = (lanes_bot - lanes_top - lane_gap * (float)(n_lanes - 1)) / (float)n_lanes;
 
-	for (int i = 0; i < kTracks; ++i) {
+	for (int i = 0; i < kTracksMax; ++i) {
+		_lanes[i].bounds = D2D1::RectF ();
+	}
+	_auto_lane_bounds = D2D1::RectF ();
+	for (int i = 0; i < n_lanes; ++i) {
 		float y0 = lanes_top + (float)i * (lane_h + lane_gap);
 		if (i == 0) {
 			/* Split Audio 1: waveform on top, gain automation underneath. */
@@ -1359,8 +1509,12 @@ ShellWindow::layout_panes ()
 	float mix_bot = _mixer_pane.bottom - mix_inset;
 	float mix_inner = _mixer_pane.right - _mixer_pane.left - mix_inset * 2.f;
 	float strip_gap = 6.f * _dpi_scale;
-	float strip_w = (mix_inner - strip_gap * (kMixerStrips - 1)) / (float)kMixerStrips;
-	for (int i = 0; i < kMixerStrips; ++i) {
+	const int n_mix = std::max (1, n_mixer_strips ());
+	float strip_w = (mix_inner - strip_gap * (float)(n_mix - 1)) / (float)n_mix;
+	for (int i = 0; i < kMixerStripsMax; ++i) {
+		_mixers[i].layout (D2D1::RectF (0, 0, 0, 0), _dpi_scale);
+	}
+	for (int i = 0; i < n_mix; ++i) {
 		float x0 = _mixer_pane.left + mix_inset + (float)i * (strip_w + strip_gap);
 		_mixers[i].layout (D2D1::RectF (x0, mix_top, x0 + strip_w, mix_bot), _dpi_scale);
 	}
@@ -1624,7 +1778,8 @@ ShellWindow::midi_time_at_x (float x) const
 int
 ShellWindow::hit_editor_lane (float x, float y) const
 {
-	for (int i = 0; i < kTracks; ++i) {
+	const int n = n_audio_lanes ();
+	for (int i = 0; i < n; ++i) {
 		const D2D1_RECT_F& r = _lanes[i].bounds;
 		if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
 			return i;
@@ -1636,7 +1791,8 @@ ShellWindow::hit_editor_lane (float x, float y) const
 int
 ShellWindow::hit_mixer_arm (float x, float y) const
 {
-	for (int i = 0; i < kTracks; ++i) {
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < na; ++i) {
 		if (_mixers[i].hit_arm (x, y)) {
 			return i;
 		}
@@ -1647,7 +1803,8 @@ ShellWindow::hit_mixer_arm (float x, float y) const
 int
 ShellWindow::hit_mixer_mute (float x, float y) const
 {
-	for (int i = 0; i < kMixerStrips; ++i) {
+	const int n = n_mixer_strips ();
+	for (int i = 0; i < n; ++i) {
 		if (_mixers[i].hit_mute (x, y)) {
 			return i;
 		}
@@ -1658,7 +1815,8 @@ ShellWindow::hit_mixer_mute (float x, float y) const
 int
 ShellWindow::hit_mixer_solo (float x, float y) const
 {
-	for (int i = 0; i < kMixerStrips; ++i) {
+	const int n = n_mixer_strips ();
+	for (int i = 0; i < n; ++i) {
 		if (_mixers[i].hit_solo (x, y)) {
 			return i;
 		}
@@ -1669,7 +1827,8 @@ ShellWindow::hit_mixer_solo (float x, float y) const
 int
 ShellWindow::hit_mixer_pan (float x, float y) const
 {
-	for (int i = 0; i < kTracks; ++i) {
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < na; ++i) {
 		if (_mixers[i].hit_pan (x, y)) {
 			return i;
 		}
@@ -1680,7 +1839,8 @@ ShellWindow::hit_mixer_pan (float x, float y) const
 int
 ShellWindow::hit_mixer_send (float x, float y) const
 {
-	for (int i = 0; i < kTracks; ++i) {
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < na; ++i) {
 		if (_mixers[i].hit_send (x, y)) {
 			return i;
 		}
@@ -1691,7 +1851,8 @@ ShellWindow::hit_mixer_send (float x, float y) const
 int
 ShellWindow::hit_mixer_meter (float x, float y) const
 {
-	for (int i = 0; i < kMixerStrips; ++i) {
+	const int n = n_mixer_strips ();
+	for (int i = 0; i < n; ++i) {
 		if (_mixers[i].hit_meter (x, y)) {
 			return i;
 		}
@@ -1702,7 +1863,8 @@ ShellWindow::hit_mixer_meter (float x, float y) const
 int
 ShellWindow::hit_mixer_fx (float x, float y) const
 {
-	for (int i = 0; i < kTracks; ++i) {
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < na; ++i) {
 		if (_mixers[i].hit_fx (x, y)) {
 			return i;
 		}
@@ -1713,7 +1875,8 @@ ShellWindow::hit_mixer_fx (float x, float y) const
 int
 ShellWindow::hit_mixer_fx_param (float x, float y) const
 {
-	for (int i = 0; i < kTracks; ++i) {
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < na; ++i) {
 		if (_mixers[i].hit_fx_param (x, y)) {
 			return i;
 		}
@@ -1724,7 +1887,8 @@ ShellWindow::hit_mixer_fx_param (float x, float y) const
 int
 ShellWindow::hit_mixer_fader (float x, float y) const
 {
-	for (int i = 0; i < kMixerStrips; ++i) {
+	const int n = n_mixer_strips ();
+	for (int i = 0; i < n; ++i) {
 		if (_mixers[i].hit_fader (x, y)) {
 			return i;
 		}
@@ -1837,6 +2001,18 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		do_nudge_tempo (1.f);
 		return true;
 	}
+	if (th == TransportHit::AddAudio) {
+		do_add_audio_track ();
+		return true;
+	}
+	if (th == TransportHit::AddMidi) {
+		do_add_midi_track ();
+		return true;
+	}
+	if (th == TransportHit::RemoveTrack) {
+		do_remove_track ();
+		return true;
+	}
 
 	if (hit_editor_ruler (x, y) && _engine.is_linked () && _engine_snap.session_ok) {
 		float time_sec = _lanes[0].strip.time_at_x (_editor_ruler, x);
@@ -1891,7 +2067,7 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	int mute_i = hit_mixer_mute (x, y);
 	if (mute_i >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
-			if (mute_i == 3) {
+			if (mute_i == midi_mixer_index ()) {
 				_engine.toggle_midi_muted ();
 			} else {
 				_engine.toggle_track_muted (mute_i);
@@ -1907,7 +2083,7 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	int solo_i = hit_mixer_solo (x, y);
 	if (solo_i >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
-			if (solo_i == 3) {
+			if (solo_i == midi_mixer_index ()) {
 				_engine.toggle_midi_soloed ();
 			} else {
 				_engine.toggle_track_soloed (solo_i);
@@ -2003,7 +2179,7 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_drag = DragMode::Fader;
 		_drag_index = mi;
 		_mixers[mi].drag_to (y);
-		if (mi == 3) {
+		if (mi == midi_mixer_index ()) {
 			_engine.set_midi_gain (_mixers[mi].gain ());
 		} else {
 			_engine.set_track_gain (mi, _mixers[mi].gain ());
@@ -2109,9 +2285,9 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 	float x, y;
 	client_from_lparam (lparam, &x, &y);
 
-	if (_drag == DragMode::Fader && _drag_index >= 0 && _drag_index < kMixerStrips) {
+	if (_drag == DragMode::Fader && _drag_index >= 0 && _drag_index < n_mixer_strips ()) {
 		if (_mixers[_drag_index].drag_to (y)) {
-			if (_drag_index == 3) {
+			if (_drag_index == midi_mixer_index ()) {
 				_engine.set_midi_gain (_mixers[_drag_index].gain ());
 			} else {
 				_engine.set_track_gain (_drag_index, _mixers[_drag_index].gain ());
@@ -2414,7 +2590,8 @@ ShellWindow::on_tick ()
 		last_wave = now;
 	}
 
-	for (int i = 0; i < kTracks; ++i) {
+	const int n_lanes = n_audio_lanes ();
+	for (int i = 0; i < n_lanes; ++i) {
 		wp.gain = _mixers[i].gain ();
 		_lanes[i].strip.update_view (wp);
 
@@ -2449,8 +2626,14 @@ ShellWindow::on_tick ()
 		_mixers[i].set_meter_peak (peak, clip);
 		_mixers[i].meter_tick (dt);
 	}
-	_mixers[3].set_meter_peak (_engine_snap.midi_activity, false);
-	_mixers[3].meter_tick (dt);
+	{
+		const int mi = midi_mixer_index ();
+		if (mi >= 0 && mi < kMixerStripsMax
+		    && (_engine_snap.midi_track_ok || _engine_snap.midi_track_count > 0)) {
+			_mixers[mi].set_meter_peak (_engine_snap.midi_activity, false);
+			_mixers[mi].meter_tick (dt);
+		}
+	}
 	sync_mixer_fx_from_engine ();
 	sync_mixer_mute_solo_from_engine ();
 	sync_mixer_pan_from_engine ();
@@ -2843,7 +3026,8 @@ ShellWindow::draw_mixer_pane ()
 	                             r.right - inset, r.top + 30.f * _dpi_scale),
 	                _brush_body);
 
-	for (int i = 0; i < kMixerStrips; ++i) {
+	const int n_mix = n_mixer_strips ();
+	for (int i = 0; i < n_mix; ++i) {
 		_mixers[i].draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
 		                 _brush_pane_edge, _brush_meter_hot, _fmt_pane, _fmt_meta, _dpi_scale);
 	}

@@ -37,8 +37,11 @@
 class ShellWindow
 {
 public:
-	static constexpr int kTracks = 3;
-	static constexpr int kMixerStrips = 4; /* Audio 1–3 + MIDI */
+	static constexpr int kTracksMax = 6; /* matches EngineSnapshot::kMeters */
+	static constexpr int kMixerStripsMax = 7; /* up to 6 audio + 1 MIDI */
+	/* Legacy aliases used by older loops — prefer n_audio_lanes(). */
+	static constexpr int kTracks = kTracksMax;
+	static constexpr int kMixerStrips = kMixerStripsMax;
 
 	ShellWindow ();
 	~ShellWindow ();
@@ -73,7 +76,8 @@ public:
 	                    bool smoke_snap = false,
 	                    bool smoke_punch = false,
 	                    bool smoke_tempo = false,
-	                    bool smoke_click = false);
+	                    bool smoke_click = false,
+	                    bool smoke_tracks = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -152,6 +156,13 @@ private:
 	void do_toggle_count_in ();
 	void do_toggle_click ();
 	void do_nudge_tempo (float delta);
+	void do_add_audio_track ();
+	void do_add_midi_track ();
+	void do_remove_track ();
+	int  n_audio_lanes () const;
+	int  n_mixer_strips () const;
+	int  midi_mixer_index () const;
+	void sync_track_labels_from_engine ();
 	void draw_editor_grid ();
 	void draw_punch_overlay ();
 	void do_add_marker_at_playhead ();

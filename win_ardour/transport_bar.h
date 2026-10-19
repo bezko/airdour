@@ -36,7 +36,10 @@ enum class TransportHit {
 	CountIn,
 	Click,
 	TempoDown,
-	TempoUp
+	TempoUp,
+	AddAudio,
+	AddMidi,
+	RemoveTrack
 };
 
 class TransportBar
@@ -109,6 +112,9 @@ private:
 	D2D1_RECT_F _click_btn;
 	D2D1_RECT_F _tempo_dn_btn;
 	D2D1_RECT_F _tempo_up_btn;
+	D2D1_RECT_F _add_audio_btn;
+	D2D1_RECT_F _add_midi_btn;
+	D2D1_RECT_F _remove_track_btn;
 	bool        _playing;
 	bool        _recording;
 	bool        _record_armed;
