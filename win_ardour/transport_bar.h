@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Direct2D transport: Play / Stop / Rec / Import / Save / Open / Export.
+ * Direct2D transport: Play / Stop / Rec / Import / Save / Open / Export / Loop / Mark.
  */
 
 #pragma once
@@ -25,7 +25,9 @@ enum class TransportHit {
 	Import,
 	Save,
 	Open,
-	Export
+	Export,
+	Loop,
+	Mark
 };
 
 class TransportBar
@@ -43,6 +45,12 @@ public:
 
 	void set_record_armed (bool armed) { _record_armed = armed; }
 	bool record_armed () const { return _record_armed; }
+
+	void set_loop_playing (bool on) { _loop_playing = on; }
+	bool loop_playing () const { return _loop_playing; }
+
+	void set_loop_active (bool on) { _loop_active = on; }
+	bool loop_active () const { return _loop_active; }
 
 	TransportHit hit_test (float x, float y) const;
 
@@ -67,7 +75,11 @@ private:
 	D2D1_RECT_F _save_btn;
 	D2D1_RECT_F _open_btn;
 	D2D1_RECT_F _export_btn;
+	D2D1_RECT_F _loop_btn;
+	D2D1_RECT_F _mark_btn;
 	bool        _playing;
 	bool        _recording;
 	bool        _record_armed;
+	bool        _loop_playing;
+	bool        _loop_active;
 };

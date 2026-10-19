@@ -36,6 +36,7 @@
 #include "ardour/region.h"
 #include "ardour/region_factory.h"
 #include "ardour/route.h"
+#include "ardour/location.h"
 #include "ardour/session.h"
 #include "ardour/session_event.h"
 #include "ardour/audiofilesource.h"
@@ -47,6 +48,7 @@
 #include "pbd/error.h"
 #include "pbd/event_loop.h"
 #include "pbd/failed_constructor.h"
+#include "pbd/memento_command.h"
 #include "pbd/rwlock.h"
 #include "pbd/xml++.h"
 #include "temporal/types.h"
@@ -312,6 +314,15 @@ EngineHost::EngineHost ()
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
 	_snap.selection_end_sec = 0.f;
+	_snap.loop_active = false;
+	_snap.loop_playing = false;
+	_snap.loop_start_sec = 0.f;
+	_snap.loop_end_sec = 0.f;
+	_snap.marker_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
+		_snap.markers[i].sec = 0.f;
+		_snap.markers[i].name[0] = L'\0';
+	}
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -571,6 +582,11 @@ EngineHost::destroy_session ()
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
 	_snap.selection_end_sec = 0.f;
+	_snap.loop_active = false;
+	_snap.loop_playing = false;
+	_snap.loop_start_sec = 0.f;
+	_snap.loop_end_sec = 0.f;
+	_snap.marker_count = 0;
 	_snap.session_path.clear ();
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_has_regions[i] = false;
@@ -1984,6 +2000,377 @@ EngineHost::smoke_undo ()
 }
 
 void
+EngineHost::refresh_locations_snap ()
+{
+	_snap.loop_active = false;
+	_snap.loop_playing = false;
+	_snap.loop_start_sec = 0.f;
+	_snap.loop_end_sec = 0.f;
+	_snap.marker_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
+		_snap.markers[i].sec = 0.f;
+		_snap.markers[i].name[0] = L'\0';
+	}
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return;
+		}
+		_snap.loop_playing = _impl->session->get_play_loop ();
+		Location* loop = locs->auto_loop_location ();
+		if (loop && !loop->is_hidden () && loop->end_sample () > loop->start_sample ()) {
+			_snap.loop_active = true;
+			_snap.loop_start_sec = (float)loop->start_sample () / (float)sr;
+			_snap.loop_end_sec = (float)loop->end_sample () / (float)sr;
+		}
+		const Locations::LocationList& list = locs->list ();
+		int n = 0;
+		for (Locations::LocationList::const_iterator it = list.begin ();
+		     it != list.end () && n < EngineSnapshot::kMaxMarkers; ++it) {
+			Location* loc = *it;
+			if (!loc || !loc->is_mark () || loc->is_hidden () || loc->is_xrun ()) {
+				continue;
+			}
+			_snap.markers[n].sec = (float)loc->start_sample () / (float)sr;
+			std::wstring wname = utf8_to_wide (loc->name ());
+			wcsncpy_s (_snap.markers[n].name, wname.c_str (), _TRUNCATE);
+			++n;
+		}
+		_snap.marker_count = n;
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::set_loop_range (float start_sec, float end_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (end_sec < start_sec) {
+		float t = start_sec;
+		start_sec = end_sec;
+		end_sec = t;
+	}
+	if (end_sec - start_sec < 0.05f) {
+		end_sec = start_sec + 1.f;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t start_s = (samplepos_t)std::llround ((double)start_sec * (double)sr);
+		samplepos_t end_s = (samplepos_t)std::llround ((double)end_sec * (double)sr);
+		if (end_s <= start_s) {
+			end_s = start_s + sr;
+		}
+
+		_impl->session->begin_reversible_command ("set auto loop range");
+		Location* loop = locs->auto_loop_location ();
+		if (!loop) {
+			Location* loc = new Location (
+				*_impl->session,
+				timepos_t (start_s),
+				timepos_t (end_s),
+				"Loop",
+				Location::IsAutoLoop);
+			XMLNode& before = locs->get_state ();
+			locs->add (loc, true);
+			_impl->session->set_auto_loop_location (loc);
+			XMLNode& after = locs->get_state ();
+			_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		} else {
+			XMLNode& before = loop->get_state ();
+			loop->set_hidden (false, 0);
+			loop->set (timepos_t (start_s), timepos_t (end_s));
+			XMLNode& after = loop->get_state ();
+			_impl->session->add_command (new MementoCommand<Location> (*loop, &before, &after));
+		}
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"loop range set";
+		std::fprintf (stderr, "airdour_win_shell: loop [%.2f..%.2f]s\n",
+		              _snap.loop_start_sec, _snap.loop_end_sec);
+		std::fflush (stderr);
+		return _snap.loop_active;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: set_loop_range exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"loop set failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"loop set failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::set_loop_start (float start_sec)
+{
+	float end = _snap.loop_active ? _snap.loop_end_sec : (start_sec + 2.f);
+	if (end <= start_sec + 0.05f) {
+		end = start_sec + 2.f;
+	}
+	return set_loop_range (start_sec, end);
+}
+
+bool
+EngineHost::set_loop_end (float end_sec)
+{
+	float start = _snap.loop_active ? _snap.loop_start_sec : 0.f;
+	if (end_sec <= start + 0.05f) {
+		start = std::max (0.f, end_sec - 2.f);
+	}
+	return set_loop_range (start, end_sec);
+}
+
+bool
+EngineHost::set_loop_play (bool enable)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		if (enable && !_snap.loop_active) {
+			/* Default loop around playhead if none yet. */
+			float t = _snap.transport_sec;
+			if (!set_loop_range (t, t + 2.f)) {
+				return false;
+			}
+		}
+		_impl->session->request_play_loop (enable, true);
+		refresh_locations_snap ();
+		_snap.detail = enable ? L"loop play on" : L"loop play off";
+		std::fprintf (stderr, "airdour_win_shell: loop play %s\n", enable ? "on" : "off");
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		_snap.detail = L"loop play failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_loop_play ()
+{
+	return set_loop_play (!_snap.loop_playing);
+}
+
+bool
+EngineHost::add_marker_at (float time_sec, const std::string& name)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		if (time_sec < 0.f) {
+			time_sec = 0.f;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		std::string marker_name = name;
+		if (marker_name.empty ()) {
+			locs->next_available_name (marker_name, "mark");
+		}
+		timepos_t where (sample);
+		Location* location = new Location (
+			*_impl->session, where, where, marker_name, Location::IsMark);
+
+		_impl->session->begin_reversible_command ("add marker");
+		XMLNode& before = locs->get_state ();
+		locs->add (location, true);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"marker added";
+		std::fprintf (stderr, "airdour_win_shell: marker \"%s\" @ %.2fs (count=%d)\n",
+		              marker_name.c_str (), time_sec, _snap.marker_count);
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: add_marker exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"marker add failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"marker add failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::remove_marker_near (float time_sec, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop), Location::IsMark);
+		if (!hit) {
+			_snap.detail = L"no marker near click";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("remove marker");
+		XMLNode& before = locs->get_state ();
+		locs->remove (hit);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"marker removed";
+		std::fprintf (stderr, "airdour_win_shell: removed marker near %.2fs (count=%d)\n",
+		              time_sec, _snap.marker_count);
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		_snap.detail = L"marker remove failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::locate_to (float time_sec, bool snap_to_marker, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		if (time_sec < 0.f) {
+			time_sec = 0.f;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		if (snap_to_marker) {
+			Locations* locs = _impl->session->locations ();
+			if (locs) {
+				samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+				if (slop < 1) {
+					slop = 1;
+				}
+				Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop), Location::IsMark);
+				if (hit) {
+					sample = hit->start_sample ();
+					time_sec = (float)sample / (float)sr;
+				}
+			}
+		}
+		_impl->session->request_locate (sample, true, MustStop, TRS_UI);
+		_snap.transport_sec = time_sec;
+		_snap.detail = snap_to_marker ? L"located (snap mark)" : L"located";
+		return true;
+	} catch (...) {
+		_snap.detail = L"locate failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_loop_markers ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-loop failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_loop_range (0.5f, 2.5f) || !_snap.loop_active) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop FAILED (set range)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (std::fabs (_snap.loop_start_sec - 0.5f) > 0.05f
+		    || std::fabs (_snap.loop_end_sec - 2.5f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop FAILED (range mismatch %.2f..%.2f)\n",
+			              _snap.loop_start_sec, _snap.loop_end_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!add_marker_at (1.0f, "smokeA") || !add_marker_at (2.0f, "smokeB")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop FAILED (add markers)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.marker_count < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop FAILED (marker_count=%d)\n",
+			              _snap.marker_count);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!remove_marker_near (2.0f, 0.4f) || _snap.marker_count < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop FAILED (remove)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop ok (loop [%.2f..%.2f] markers=%d)\n",
+		              _snap.loop_start_sec, _snap.loop_end_sec, _snap.marker_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-loop ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-loop exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+void
 EngineHost::refresh_snapshot ()
 {
 	_snap.gain = _gain;
@@ -2010,6 +2397,7 @@ EngineHost::refresh_snapshot ()
 			refresh_record_flags ();
 			refresh_history_flags ();
 			refresh_selection_snap ();
+			refresh_locations_snap ();
 		} else {
 			_snap.waves_from_session = false;
 			_snap.session_record_armed = false;
@@ -2018,6 +2406,9 @@ EngineHost::refresh_snapshot ()
 			_snap.redo_depth = 0;
 			_snap.has_selection = false;
 			_snap.selection_track = -1;
+			_snap.loop_active = false;
+			_snap.loop_playing = false;
+			_snap.marker_count = 0;
 			for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 				_snap.track_has_regions[i] = false;
 				_snap.track_armed[i] = false;
@@ -2081,6 +2472,15 @@ EngineHost::EngineHost ()
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
 	_snap.selection_end_sec = 0.f;
+	_snap.loop_active = false;
+	_snap.loop_playing = false;
+	_snap.loop_start_sec = 0.f;
+	_snap.loop_end_sec = 0.f;
+	_snap.marker_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
+		_snap.markers[i].sec = 0.f;
+		_snap.markers[i].name[0] = L'\0';
+	}
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -2328,6 +2728,72 @@ EngineHost::smoke_undo ()
 	return false;
 }
 
+bool
+EngineHost::set_loop_range (float start_sec, float end_sec)
+{
+	(void)start_sec;
+	(void)end_sec;
+	return false;
+}
+
+bool
+EngineHost::set_loop_start (float start_sec)
+{
+	(void)start_sec;
+	return false;
+}
+
+bool
+EngineHost::set_loop_end (float end_sec)
+{
+	(void)end_sec;
+	return false;
+}
+
+bool
+EngineHost::set_loop_play (bool enable)
+{
+	(void)enable;
+	return false;
+}
+
+bool
+EngineHost::toggle_loop_play ()
+{
+	return false;
+}
+
+bool
+EngineHost::add_marker_at (float time_sec, const std::string& name)
+{
+	(void)time_sec;
+	(void)name;
+	return false;
+}
+
+bool
+EngineHost::remove_marker_near (float time_sec, float slop_sec)
+{
+	(void)time_sec;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::locate_to (float time_sec, bool snap_to_marker, float slop_sec)
+{
+	(void)time_sec;
+	(void)snap_to_marker;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::smoke_loop_markers ()
+{
+	return false;
+}
+
 void
 EngineHost::refresh_history_flags ()
 {
@@ -2335,6 +2801,11 @@ EngineHost::refresh_history_flags ()
 
 void
 EngineHost::refresh_selection_snap ()
+{
+}
+
+void
+EngineHost::refresh_locations_snap ()
 {
 }
 

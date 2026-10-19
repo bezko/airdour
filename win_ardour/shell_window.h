@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Win32 + Direct2D + DirectWrite shell: transport, multi-track editor,
- * mixer faders + meters, record arm, WAV import, undo, region select.
+ * mixer faders + meters, record, import, undo, loop, markers.
  */
 
 #pragma once
@@ -45,8 +45,8 @@ public:
 	/**
 	 * When smoke_timeout_secs > 0, create Session/PeakMeter but do not auto-roll
 	 * (avoids intermittent AVs under Dummy/WASAPI during unattended --timeout).
-	 * smoke_import / smoke_record / smoke_undo exercise paths without changing
-	 * the plain --timeout exit-0 contract when those flags are off.
+	 * smoke_* flags exercise paths without changing the plain --timeout
+	 * exit-0 contract when those flags are off.
 	 */
 	bool attach_engine (const std::string& backend_name,
 	                    unsigned smoke_timeout_secs = 0,
@@ -55,6 +55,7 @@ public:
 	                    bool smoke_save_load = false,
 	                    bool smoke_export = false,
 	                    bool smoke_undo = false,
+	                    bool smoke_loop = false,
 	                    const std::string& open_session_path = std::string ());
 	int  run_message_loop (unsigned timeout_secs);
 
@@ -107,10 +108,17 @@ private:
 	void do_undo ();
 	void do_redo ();
 	void do_delete_selection ();
+	void do_toggle_loop ();
+	void do_add_marker_at_playhead ();
+	void do_remove_marker_at_playhead ();
 	void sync_mixer_arm_from_engine ();
+	void sync_transport_loop_from_engine ();
 	void apply_shared_view (int source_lane);
 	void reset_shared_view ();
 	void apply_region_selection_to_lanes ();
+	void apply_loop_to_lanes ();
+	void draw_editor_ruler ();
+	bool hit_editor_ruler (float x, float y) const;
 	int  hit_editor_lane (float x, float y) const;
 	int  hit_mixer_fader (float x, float y) const;
 	int  hit_mixer_arm (float x, float y) const;
@@ -146,6 +154,7 @@ private:
 	D2D1_RECT_F _brand_bar;
 	D2D1_RECT_F _transport_bounds;
 	D2D1_RECT_F _editor_pane;
+	D2D1_RECT_F _editor_ruler;
 	D2D1_RECT_F _mixer_pane;
 	D2D1_RECT_F _status_bar;
 
@@ -161,6 +170,8 @@ private:
 	ID2D1SolidColorBrush*     _brush_rms;
 	ID2D1SolidColorBrush*     _brush_playhead;
 	ID2D1SolidColorBrush*     _brush_selection;
+	ID2D1SolidColorBrush*     _brush_loop;
+	ID2D1SolidColorBrush*     _brush_marker;
 	ID2D1SolidColorBrush*     _brush_meter_hot;
 	ID2D1LinearGradientBrush* _brush_bg;
 	IDWriteTextFormat*        _fmt_brand;

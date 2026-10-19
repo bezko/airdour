@@ -27,6 +27,8 @@ constexpr D2D1_COLOR_F kPeak       = { 0.220f, 0.920f, 0.820f, 1.f };
 constexpr D2D1_COLOR_F kRms        = { 0.120f, 0.420f, 0.400f, 0.85f };
 constexpr D2D1_COLOR_F kPlayhead   = { 0.980f, 0.780f, 0.220f, 1.f };
 constexpr D2D1_COLOR_F kSelection  = { 0.350f, 0.780f, 0.920f, 1.f };
+constexpr D2D1_COLOR_F kLoop       = { 0.920f, 0.620f, 0.220f, 1.f };
+constexpr D2D1_COLOR_F kMarker     = { 0.780f, 0.860f, 0.420f, 1.f };
 constexpr D2D1_COLOR_F kMeterHot   = { 0.95f, 0.35f, 0.22f, 1.f };
 
 #ifndef WM_DPICHANGED
@@ -104,6 +106,7 @@ ShellWindow::ShellWindow ()
 	, _brand_bar ()
 	, _transport_bounds ()
 	, _editor_pane ()
+	, _editor_ruler ()
 	, _mixer_pane ()
 	, _status_bar ()
 	, _d2d_factory (nullptr)
@@ -118,6 +121,8 @@ ShellWindow::ShellWindow ()
 	, _brush_rms (nullptr)
 	, _brush_playhead (nullptr)
 	, _brush_selection (nullptr)
+	, _brush_loop (nullptr)
+	, _brush_marker (nullptr)
 	, _brush_meter_hot (nullptr)
 	, _brush_bg (nullptr)
 	, _fmt_brand (nullptr)
@@ -161,6 +166,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_save_load,
                             bool smoke_export,
                             bool smoke_undo,
+                            bool smoke_loop,
                             const std::string& open_session_path)
 {
 	if (!_engine.is_linked ()) {
@@ -227,6 +233,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_loop && _engine.snapshot ().session_ok) {
+		if (_engine.smoke_loop_markers ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop ok\n");
+		} else {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop FAILED\n");
+		}
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_record && _engine.snapshot ().session_ok) {
 		_smoke_record = SmokeRecordPhase::NeedArm;
 		std::fprintf (stderr, "airdour_win_shell: smoke-record scheduled (arm → ~1.2s take)\n");
@@ -238,6 +253,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_mixer_arm_from_engine ();
+	sync_transport_loop_from_engine ();
+	apply_loop_to_lanes ();
+	apply_region_selection_to_lanes ();
 	if (autoplay) {
 		_transport_playing = true;
 		_transport.set_playing (true);
@@ -246,6 +264,13 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		}
 	}
 	return ok;
+}
+
+void
+ShellWindow::sync_transport_loop_from_engine ()
+{
+	_transport.set_loop_active (_engine_snap.loop_active);
+	_transport.set_loop_playing (_engine_snap.loop_playing);
 }
 
 void
@@ -573,6 +598,55 @@ ShellWindow::apply_region_selection_to_lanes ()
 }
 
 void
+ShellWindow::apply_loop_to_lanes ()
+{
+	for (int i = 0; i < kTracks; ++i) {
+		_lanes[i].strip.set_loop_range (
+			_engine_snap.loop_active,
+			_engine_snap.loop_start_sec,
+			_engine_snap.loop_end_sec);
+	}
+}
+
+void
+ShellWindow::do_toggle_loop ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.toggle_loop_play ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_transport_loop_from_engine ();
+	apply_loop_to_lanes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_add_marker_at_playhead ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.add_marker_at (_playhead_sec);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_remove_marker_at_playhead ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.remove_marker_near (_playhead_sec);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_undo ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -683,6 +757,8 @@ ShellWindow::discard_device_resources ()
 {
 	if (_brush_bg) { _brush_bg->Release (); _brush_bg = nullptr; }
 	if (_brush_meter_hot) { _brush_meter_hot->Release (); _brush_meter_hot = nullptr; }
+	if (_brush_marker) { _brush_marker->Release (); _brush_marker = nullptr; }
+	if (_brush_loop) { _brush_loop->Release (); _brush_loop = nullptr; }
 	if (_brush_selection) { _brush_selection->Release (); _brush_selection = nullptr; }
 	if (_brush_playhead) { _brush_playhead->Release (); _brush_playhead = nullptr; }
 	if (_brush_rms) { _brush_rms->Release (); _brush_rms = nullptr; }
@@ -728,6 +804,8 @@ ShellWindow::ensure_device_resources ()
 	_rt->CreateSolidColorBrush (kRms, &_brush_rms);
 	_rt->CreateSolidColorBrush (kPlayhead, &_brush_playhead);
 	_rt->CreateSolidColorBrush (kSelection, &_brush_selection);
+	_rt->CreateSolidColorBrush (kLoop, &_brush_loop);
+	_rt->CreateSolidColorBrush (kMarker, &_brush_marker);
 	_rt->CreateSolidColorBrush (kMeterHot, &_brush_meter_hot);
 
 	ID2D1GradientStopCollection* stops = nullptr;
@@ -744,7 +822,7 @@ ShellWindow::ensure_device_resources ()
 
 	return _brush_brand && _brush_body && _brush_accent && _brush_pane
 	    && _brush_peak && _brush_rms && _brush_playhead && _brush_selection
-	    && _brush_meter_hot && _brush_bg;
+	    && _brush_loop && _brush_marker && _brush_meter_hot && _brush_bg;
 }
 
 void
@@ -773,14 +851,17 @@ ShellWindow::layout_panes ()
 	_mixer_pane = D2D1::RectF (split + gap * 0.5f, body_top, right, body_bot);
 
 	float inset = 12.f * _dpi_scale;
-	float title_h = 40.f * _dpi_scale;
+	float title_h = 32.f * _dpi_scale;
+	float ruler_h = 22.f * _dpi_scale;
 	float label_w = 64.f * _dpi_scale;
 	float lane_gap = 6.f * _dpi_scale;
-	float lanes_top = _editor_pane.top + title_h;
-	float lanes_bot = _editor_pane.bottom - inset;
-	float lane_h = (lanes_bot - lanes_top - lane_gap * (kTracks - 1)) / (float)kTracks;
 	float wave_left = _editor_pane.left + inset + label_w;
 	float wave_right = _editor_pane.right - inset;
+	_editor_ruler = D2D1::RectF (wave_left, _editor_pane.top + title_h,
+	                             wave_right, _editor_pane.top + title_h + ruler_h);
+	float lanes_top = _editor_ruler.bottom + 4.f * _dpi_scale;
+	float lanes_bot = _editor_pane.bottom - inset;
+	float lane_h = (lanes_bot - lanes_top - lane_gap * (kTracks - 1)) / (float)kTracks;
 
 	for (int i = 0; i < kTracks; ++i) {
 		float y0 = lanes_top + (float)i * (lane_h + lane_gap);
@@ -896,6 +977,32 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (wparam == VK_HOME || wparam == '0') {
 			reset_shared_view ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
+		} else if (wparam == 'L' || wparam == 'l') {
+			do_toggle_loop ();
+		} else if (wparam == VK_OEM_4) { /* [ */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				_engine.set_loop_start (_playhead_sec);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_transport_loop_from_engine ();
+				apply_loop_to_lanes ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			}
+		} else if (wparam == VK_OEM_6) { /* ] */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				_engine.set_loop_end (_playhead_sec);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_transport_loop_from_engine ();
+				apply_loop_to_lanes ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			}
+		} else if (wparam == 'M' || wparam == 'm') {
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
+				do_remove_marker_at_playhead ();
+			} else {
+				do_add_marker_at_playhead ();
+			}
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Z' || wparam == 'z')) {
 			do_undo ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Y' || wparam == 'y')) {
@@ -944,6 +1051,13 @@ ShellWindow::client_from_lparam (LPARAM lparam, float* out_x, float* out_y) cons
 {
 	*out_x = (float)(short)LOWORD (lparam);
 	*out_y = (float)(short)HIWORD (lparam);
+}
+
+bool
+ShellWindow::hit_editor_ruler (float x, float y) const
+{
+	const D2D1_RECT_F& r = _editor_ruler;
+	return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 }
 
 int
@@ -1041,6 +1155,24 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		prompt_export_wav ();
 		return true;
 	}
+	if (th == TransportHit::Loop) {
+		do_toggle_loop ();
+		return true;
+	}
+	if (th == TransportHit::Mark) {
+		do_add_marker_at_playhead ();
+		return true;
+	}
+
+	if (hit_editor_ruler (x, y) && _engine.is_linked () && _engine_snap.session_ok) {
+		float time_sec = _lanes[0].strip.time_at_x (_editor_ruler, x);
+		_engine.locate_to (time_sec, true /* snap to marker */, 0.4f);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_playhead_sec = _engine_snap.transport_sec;
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
 
 	int arm = hit_mixer_arm (x, y);
 	if (arm >= 0) {
@@ -1075,6 +1207,26 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	int lane = hit_editor_lane (x, y);
 	if (lane >= 0) {
+		const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
+		const bool ctrl = (GetKeyState (VK_CONTROL) & 0x8000) != 0;
+		const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
+		if (_engine.is_linked () && _engine_snap.session_ok
+		    && (shift || ctrl || alt)) {
+			float time_sec = _lanes[lane].strip.time_at_x (_lanes[lane].bounds, x);
+			if (shift) {
+				_engine.set_loop_start (time_sec);
+			} else if (ctrl) {
+				_engine.set_loop_end (time_sec);
+			} else {
+				_engine.add_marker_at (time_sec);
+			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_transport_loop_from_engine ();
+			apply_loop_to_lanes ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
 		/* Click selects a region; drag past threshold pans the timeline. */
 		_drag = DragMode::WavePending;
 		_drag_index = lane;
@@ -1223,7 +1375,9 @@ ShellWindow::on_tick ()
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 		sync_mixer_arm_from_engine ();
+		sync_transport_loop_from_engine ();
 		apply_region_selection_to_lanes ();
+		apply_loop_to_lanes ();
 		last_poll = now;
 	}
 
@@ -1287,6 +1441,64 @@ ShellWindow::on_tick ()
 }
 
 void
+ShellWindow::draw_editor_ruler ()
+{
+	const D2D1_RECT_F& rr = _editor_ruler;
+	if (rr.right <= rr.left) {
+		return;
+	}
+	_rt->FillRectangle (rr, _brush_pane_edge);
+	_rt->DrawRectangle (rr, _brush_body, 1.f);
+
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float w = rr.right - rr.left;
+
+	if (_engine_snap.loop_active && _brush_loop) {
+		float n0 = (_engine_snap.loop_start_sec - view0) / span;
+		float n1 = (_engine_snap.loop_end_sec - view0) / span;
+		n0 = std::max (0.f, std::min (1.f, n0));
+		n1 = std::max (0.f, std::min (1.f, n1));
+		if (n1 > n0) {
+			_brush_loop->SetOpacity (0.35f);
+			_rt->FillRectangle (
+				D2D1::RectF (rr.left + n0 * w, rr.top, rr.left + n1 * w, rr.bottom),
+				_brush_loop);
+			_brush_loop->SetOpacity (1.f);
+		}
+	}
+
+	for (int i = 0; i < _engine_snap.marker_count; ++i) {
+		float n = (_engine_snap.markers[i].sec - view0) / span;
+		if (n < 0.f || n > 1.f) {
+			continue;
+		}
+		float px = rr.left + n * w;
+		float thick = std::max (1.5f, 2.f * _dpi_scale);
+		_rt->FillRectangle (
+			D2D1::RectF (px - thick * 0.5f, rr.top, px + thick * 0.5f, rr.bottom),
+			_brush_marker);
+		const wchar_t* name = _engine_snap.markers[i].name;
+		if (name[0]) {
+			_rt->DrawTextW (name, (UINT32)wcslen (name), _fmt_meta,
+			                D2D1::RectF (px + 2.f * _dpi_scale, rr.top,
+			                             px + 48.f * _dpi_scale, rr.bottom),
+			                _brush_marker);
+		}
+	}
+
+	/* Playhead tick on ruler. */
+	float ph = (_playhead_sec - view0) / span;
+	if (ph >= 0.f && ph <= 1.f) {
+		float px = rr.left + ph * w;
+		float thick = std::max (1.5f, 2.f * _dpi_scale);
+		_rt->FillRectangle (
+			D2D1::RectF (px - thick * 0.5f, rr.top, px + thick * 0.5f, rr.bottom),
+			_brush_playhead);
+	}
+}
+
+void
 ShellWindow::draw_editor_pane ()
 {
 	const D2D1_RECT_F& r = _editor_pane;
@@ -1296,11 +1508,11 @@ ShellWindow::draw_editor_pane ()
 
 	float inset = 12.f * _dpi_scale;
 	_rt->DrawTextW (L"Editor", 6, _fmt_pane,
-	                D2D1::RectF (r.left + inset, r.top + 8.f * _dpi_scale,
-	                             r.left + inset + 80.f * _dpi_scale, r.top + 30.f * _dpi_scale),
+	                D2D1::RectF (r.left + inset, r.top + 4.f * _dpi_scale,
+	                             r.left + inset + 80.f * _dpi_scale, r.top + 26.f * _dpi_scale),
 	                _brush_brand);
 
-	wchar_t caption[160];
+	wchar_t caption[180];
 	int with_audio = 0;
 	for (int i = 0; i < kTracks; ++i) {
 		if (_lanes[i].strip.has_regions ()) {
@@ -1308,19 +1520,25 @@ ShellWindow::draw_editor_pane ()
 		}
 	}
 	if (_engine_snap.waves_from_session) {
-		if (_engine_snap.has_selection) {
+		if (_engine_snap.loop_active) {
+			_snwprintf_s (caption, _TRUNCATE,
+			              L"loop [%.1f–%.1f]%s  ·  marks %d  ·  Shift/Ctrl/Alt+click",
+			              _engine_snap.loop_start_sec, _engine_snap.loop_end_sec,
+			              _engine_snap.loop_playing ? L" ▶" : L"",
+			              _engine_snap.marker_count);
+		} else if (_engine_snap.has_selection) {
 			_snwprintf_s (caption, _TRUNCATE,
 			              L"%d tracks  ·  sel T%d [%.1f–%.1f]s  ·  Del · Ctrl+Z/Y",
 			              kTracks, _engine_snap.selection_track + 1,
 			              _engine_snap.selection_start_sec, _engine_snap.selection_end_sec);
 		} else if (with_audio > 0) {
 			_snwprintf_s (caption, _TRUNCATE,
-			              L"%d tracks  ·  %d with audio  ·  click region · undo %u",
-			              kTracks, with_audio, (unsigned)_engine_snap.undo_depth);
+			              L"%d tracks  ·  %d with audio  ·  marks %d  ·  [ ] loop",
+			              kTracks, with_audio, _engine_snap.marker_count);
 		} else {
 			_snwprintf_s (caption, _TRUNCATE,
-			              L"%d tracks  ·  empty lanes  ·  playhead %.1fs",
-			              kTracks, _playhead_sec);
+			              L"%d tracks  ·  empty  ·  [ ]=loop  M=mark  L=loop play",
+			              kTracks);
 		}
 	} else if (_lanes[0].strip.interacting ()) {
 		_snwprintf_s (caption, _TRUNCATE,
@@ -1332,11 +1550,15 @@ ShellWindow::draw_editor_pane ()
 		              kTracks);
 	}
 	_rt->DrawTextW (caption, (UINT32)wcslen (caption), _fmt_meta,
-	                D2D1::RectF (r.left + inset + 90.f * _dpi_scale, r.top + 10.f * _dpi_scale,
-	                             r.right - inset, r.top + 30.f * _dpi_scale),
+	                D2D1::RectF (r.left + inset + 90.f * _dpi_scale, r.top + 6.f * _dpi_scale,
+	                             r.right - inset, r.top + 26.f * _dpi_scale),
 	                _brush_body);
 
+	draw_editor_ruler ();
+
 	float label_w = 64.f * _dpi_scale;
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
 	for (int i = 0; i < kTracks; ++i) {
 		const D2D1_RECT_F& lb = _lanes[i].bounds;
 		D2D1_RECT_F label_rc = D2D1::RectF (
@@ -1348,6 +1570,20 @@ ShellWindow::draw_editor_pane ()
 		_rt->FillRectangle (lb, _brush_pane_edge);
 		_lanes[i].strip.draw (_rt, lb, _brush_peak, _brush_rms, _brush_body,
 		                      _brush_playhead, _brush_selection, _dpi_scale);
+
+		/* Marker hairlines across lanes. */
+		float lane_w = lb.right - lb.left;
+		for (int m = 0; m < _engine_snap.marker_count; ++m) {
+			float n = (_engine_snap.markers[m].sec - view0) / span;
+			if (n < 0.f || n > 1.f) {
+				continue;
+			}
+			float px = lb.left + n * lane_w;
+			_brush_marker->SetOpacity (0.55f);
+			_rt->DrawLine (D2D1::Point2F (px, lb.top), D2D1::Point2F (px, lb.bottom),
+			               _brush_marker, 1.f * _dpi_scale);
+			_brush_marker->SetOpacity (1.f);
+		}
 	}
 }
 

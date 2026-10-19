@@ -70,8 +70,14 @@ public:
 	/** Absolute-time selection highlight (seconds); inactive clears. */
 	void set_selection (bool active, float start_sec, float end_sec);
 
+	/** Absolute-time loop range overlay; inactive clears. */
+	void set_loop_range (bool active, float start_sec, float end_sec);
+
 	/** Map client X within strip bounds to absolute time (seconds). */
 	float time_at_x (const D2D1_RECT_F& bounds, float x) const;
+
+	/** Map absolute time to X within strip bounds. */
+	float x_at_time (const D2D1_RECT_F& bounds, float time_sec) const;
 
 	float  zoom () const { return _zoom; }
 	float  pan () const { return _pan; }
@@ -96,4 +102,7 @@ private:
 	bool               _sel_active;
 	float              _sel_start_sec;
 	float              _sel_end_sec;
+	bool               _loop_active;
+	float              _loop_start_sec;
+	float              _loop_end_sec;
 };

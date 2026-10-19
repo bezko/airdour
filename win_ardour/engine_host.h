@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * UI-thread engine + minimal Session attach for win_ardour.
- * Peak meters, transport, record arm, WAV import, save/load, undo, region select.
+ * Peak meters, transport, record, import, undo, loop, markers.
  */
 
 #pragma once
@@ -10,8 +10,14 @@
 #include <cstdint>
 #include <string>
 
+struct EngineMarkerSnap {
+	float        sec;
+	wchar_t      name[24];
+};
+
 struct EngineSnapshot {
 	static constexpr int kMeters = 3;
+	static constexpr int kMaxMarkers = 8;
 
 	bool         available; /* compiled with AIRDOUR_WIN_SHELL_WITH_ENGINE */
 	bool         running;
@@ -29,6 +35,12 @@ struct EngineSnapshot {
 	int          selection_track; /* 0..kMeters-1, or -1 */
 	float        selection_start_sec;
 	float        selection_end_sec;
+	bool         loop_active; /* auto-loop Location exists with positive length */
+	bool         loop_playing; /* Session get_play_loop() */
+	float        loop_start_sec;
+	float        loop_end_sec;
+	int          marker_count;
+	EngineMarkerSnap markers[kMaxMarkers];
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
 	std::wstring export_path; /* last exported WAV (UTF-16 display) */
@@ -137,6 +149,27 @@ public:
 	 */
 	bool smoke_undo ();
 
+	/** Create/update Session auto-loop Location [start_sec, end_sec]. */
+	bool set_loop_range (float start_sec, float end_sec);
+	/** Set loop start or end (keeps the other; creates a 1s default span if needed). */
+	bool set_loop_start (float start_sec);
+	bool set_loop_end (float end_sec);
+	bool set_loop_play (bool enable);
+	bool toggle_loop_play ();
+
+	/** Add IsMark at time_sec (name auto if empty). */
+	bool add_marker_at (float time_sec, const std::string& name = std::string ());
+	/** Remove nearest IsMark within slop_sec of time_sec. */
+	bool remove_marker_near (float time_sec, float slop_sec = 0.35f);
+	/** Locate transport to time_sec (optional snap to nearest mark within slop). */
+	bool locate_to (float time_sec, bool snap_to_marker = false, float slop_sec = 0.35f);
+
+	/**
+	 * Set loop 0.5–2.5s, add two marks, remove one; verify snapshot.
+	 * Does not enable loop-play (avoids forced roll during --timeout).
+	 */
+	bool smoke_loop_markers ();
+
 	std::string session_dir () const;
 	std::string last_export_path () const;
 
@@ -165,6 +198,7 @@ private:
 	void refresh_record_flags ();
 	void refresh_history_flags ();
 	void refresh_selection_snap ();
+	void refresh_locations_snap ();
 	void collect_tracks ();
 	void update_session_path_snap ();
 	bool compute_export_range (int64_t* start_sample, int64_t* end_sample) const;
