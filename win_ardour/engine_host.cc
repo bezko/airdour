@@ -443,6 +443,11 @@ EngineHost::EngineHost ()
 	_snap.pref_snap_default = false;
 	_snap.pref_click_default = true; /* shell default until RC / prefs load */
 	_snap.vst3_path_hint[0] = L'\0';
+	_snap.recent_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMaxRecent; ++i) {
+		_snap.recent_label[i][0] = L'\0';
+		_snap.recent_path[i][0] = L'\0';
+	}
 	_snap.aux_bus_ok = false;
 	_snap.midi_muted = false;
 	_snap.midi_soloed = false;
@@ -785,6 +790,273 @@ EngineHost::smoke_prefs ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-prefs exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+namespace {
+
+std::string
+path_basename_utf8 (const std::string& path)
+{
+	if (path.empty ()) {
+		return std::string ();
+	}
+	size_t slash = path.find_last_of ("/\\");
+	if (slash == std::string::npos) {
+		return path;
+	}
+	if (slash + 1 >= path.size ()) {
+		/* trailing slash — take previous component */
+		size_t end = slash;
+		while (end > 0 && (path[end - 1] == '/' || path[end - 1] == '\\')) {
+			--end;
+		}
+		size_t prev = path.find_last_of ("/\\", end ? end - 1 : 0);
+		if (prev == std::string::npos) {
+			return path.substr (0, end);
+		}
+		return path.substr (prev + 1, end - prev - 1);
+	}
+	return path.substr (slash + 1);
+}
+
+} // namespace
+
+void
+EngineHost::refresh_recent_snap ()
+{
+	_snap.recent_count = (int)std::min (_recent.size (), (size_t)EngineSnapshot::kMaxRecent);
+	for (int i = 0; i < EngineSnapshot::kMaxRecent; ++i) {
+		if (i < _snap.recent_count) {
+			std::string base = path_basename_utf8 (_recent[i].path);
+			if (base.empty ()) {
+				base = _recent[i].path;
+			}
+			copy_name_to_snap (_snap.recent_label[i], EngineSnapshot::kRecentLabelLen, base);
+			copy_name_to_snap (_snap.recent_path[i], EngineSnapshot::kRecentPathLen, _recent[i].path);
+		} else {
+			_snap.recent_label[i][0] = L'\0';
+			_snap.recent_path[i][0] = L'\0';
+		}
+	}
+}
+
+void
+EngineHost::load_recent_sessions ()
+{
+	if (!_impl || !_impl->ardour_inited || !Config) {
+		refresh_recent_snap ();
+		return;
+	}
+	try {
+		_recent.clear ();
+		XMLNode* root = Config->instant_xml ("WinShellRecent");
+		if (root) {
+			const XMLNodeList& kids = root->children ();
+			for (XMLNodeList::const_iterator it = kids.begin ();
+			     it != kids.end () && _recent.size () < (size_t)EngineSnapshot::kMaxRecent;
+			     ++it) {
+				XMLNode* n = *it;
+				if (!n || n->name () != "Session") {
+					continue;
+				}
+				std::string path;
+				std::string snap = "win_shell";
+				if (!n->get_property ("path", path) || path.empty ()) {
+					continue;
+				}
+				n->get_property ("snapshot", snap);
+				if (snap.empty ()) {
+					snap = "win_shell";
+				}
+				RecentEntry e;
+				e.path = path;
+				e.snapshot = snap;
+				_recent.push_back (e);
+			}
+		}
+		refresh_recent_snap ();
+		std::fprintf (stderr, "airdour_win_shell: recent loaded (count=%d)\n", _snap.recent_count);
+		std::fflush (stderr);
+	} catch (...) {
+		refresh_recent_snap ();
+	}
+}
+
+bool
+EngineHost::save_recent_sessions ()
+{
+	if (!_impl || !_impl->ardour_inited || !Config) {
+		return false;
+	}
+	try {
+		XMLNode root ("WinShellRecent");
+		for (size_t i = 0; i < _recent.size () && i < (size_t)EngineSnapshot::kMaxRecent; ++i) {
+			XMLNode* child = root.add_child ("Session");
+			if (!child) {
+				continue;
+			}
+			child->set_property ("path", _recent[i].path);
+			child->set_property ("snapshot",
+			                     _recent[i].snapshot.empty () ? "win_shell" : _recent[i].snapshot);
+		}
+		Config->add_instant_xml (root);
+		refresh_recent_snap ();
+		std::fprintf (stderr, "airdour_win_shell: recent saved (count=%d)\n", _snap.recent_count);
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+void
+EngineHost::remember_recent_session (const std::string& session_dir,
+                                     const std::string& snapshot,
+                                     bool persist)
+{
+	if (session_dir.empty ()) {
+		return;
+	}
+	std::string snap = snapshot.empty () ? "win_shell" : snapshot;
+	/* Dedupe (case-insensitive path compare on Windows). */
+	for (auto it = _recent.begin (); it != _recent.end (); ) {
+		if (_stricmp (it->path.c_str (), session_dir.c_str ()) == 0) {
+			it = _recent.erase (it);
+		} else {
+			++it;
+		}
+	}
+	RecentEntry e;
+	e.path = session_dir;
+	e.snapshot = snap;
+	_recent.insert (_recent.begin (), e);
+	while (_recent.size () > (size_t)EngineSnapshot::kMaxRecent) {
+		_recent.pop_back ();
+	}
+	refresh_recent_snap ();
+	if (persist) {
+		save_recent_sessions ();
+	}
+}
+
+void
+EngineHost::clear_recent_sessions (bool persist)
+{
+	_recent.clear ();
+	refresh_recent_snap ();
+	if (persist) {
+		save_recent_sessions ();
+	}
+}
+
+int
+EngineHost::recent_count () const
+{
+	return (int)_recent.size ();
+}
+
+bool
+EngineHost::recent_entry (int index, std::string* path, std::string* snapshot) const
+{
+	if (index < 0 || index >= (int)_recent.size ()) {
+		return false;
+	}
+	if (path) {
+		*path = _recent[index].path;
+	}
+	if (snapshot) {
+		*snapshot = _recent[index].snapshot;
+	}
+	return true;
+}
+
+bool
+EngineHost::open_recent (int index)
+{
+	std::string path;
+	std::string snap;
+	if (!recent_entry (index, &path, &snap)) {
+		_snap.detail = L"recent open failed — bad index";
+		return false;
+	}
+	return open_session (path, snap); /* remember_recent inside open_session */
+}
+
+bool
+EngineHost::smoke_recent ()
+{
+	if (!_impl || !_impl->ardour_inited || !Config) {
+		_snap.detail = L"smoke-recent failed — Config not ready";
+		return false;
+	}
+	try {
+		std::vector<RecentEntry> saved = _recent;
+
+		const std::string probe_a = "C:\\AirdourSmoke\\SessionA";
+		const std::string probe_b = "C:\\AirdourSmoke\\SessionB";
+		clear_recent_sessions (false);
+		remember_recent_session (probe_a, "win_shell", false);
+		remember_recent_session (probe_b, "snap_b", false);
+		/* B should be front; A second; dedupe re-push A → A front, B second. */
+		remember_recent_session (probe_a, "win_shell", false);
+		if (_recent.size () != 2 || _recent[0].path != probe_a || _recent[1].path != probe_b
+		    || _recent[1].snapshot != "snap_b") {
+			std::fprintf (stderr, "airdour_win_shell: smoke-recent FAILED (order/dedupe)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!save_recent_sessions ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-recent FAILED (save)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		_recent.clear ();
+		refresh_recent_snap ();
+		load_recent_sessions ();
+		if (_recent.size () != 2 || _recent[0].path != probe_a || _recent[1].snapshot != "snap_b") {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-recent FAILED (reload count=%zu)\n",
+			              _recent.size ());
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* Restore prior list so interactive prefs stay intact. */
+		_recent = saved;
+		save_recent_sessions ();
+
+		/* Live reopen: remember current session dir if present. */
+		if (_impl->session && !_impl->session_dir.empty ()) {
+			remember_recent_session (_impl->session_dir,
+			                         _impl->session->snap_name ().empty ()
+			                             ? "win_shell"
+			                             : _impl->session->snap_name (),
+			                         true);
+			std::string path;
+			std::string snap;
+			if (!recent_entry (0, &path, &snap) || path != _impl->session_dir) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-recent FAILED (remember current)\n");
+				std::fflush (stderr);
+				return false;
+			}
+			if (!open_recent (0) || !_snap.session_ok) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-recent FAILED (open_recent)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+
+		std::fprintf (stderr, "airdour_win_shell: smoke-recent ok (persist + open)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-recent ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-recent exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -1296,6 +1568,7 @@ EngineHost::open_session (const std::string& session_dir, const std::string& sna
 		update_session_path_snap ();
 		refresh_region_flags ();
 		refresh_record_flags ();
+		remember_recent_session (session_dir, snap, true);
 		_snap.detail = L"session reopened — Editor peaks from disk";
 		std::fprintf (stderr, "airdour_win_shell: opened %s (tracks=%u regions0=%d)\n",
 		              session_dir.c_str (),
@@ -1687,6 +1960,7 @@ EngineHost::start ()
 	}
 
 	load_shell_prefs ();
+	load_recent_sessions ();
 	if (_backend_name.empty ()) {
 		_backend_name = _pref_backend.empty () ? "Dummy" : _pref_backend;
 	}
@@ -8201,6 +8475,11 @@ EngineHost::EngineHost ()
 	_snap.pref_snap_default = false;
 	_snap.pref_click_default = true;
 	_snap.vst3_path_hint[0] = L'\0';
+	_snap.recent_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMaxRecent; ++i) {
+		_snap.recent_label[i][0] = L'\0';
+		_snap.recent_path[i][0] = L'\0';
+	}
 	_snap.aux_bus_ok = false;
 	_snap.available = false;
 	_snap.running = false;
@@ -8377,6 +8656,70 @@ EngineHost::set_pref_click_default (bool on)
 
 bool
 EngineHost::smoke_prefs ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_recent_snap ()
+{
+	_snap.recent_count = 0;
+}
+
+void
+EngineHost::load_recent_sessions ()
+{
+	refresh_recent_snap ();
+}
+
+bool
+EngineHost::save_recent_sessions ()
+{
+	return false;
+}
+
+void
+EngineHost::remember_recent_session (const std::string& session_dir,
+                                     const std::string& snapshot,
+                                     bool persist)
+{
+	(void)session_dir;
+	(void)snapshot;
+	(void)persist;
+}
+
+void
+EngineHost::clear_recent_sessions (bool persist)
+{
+	(void)persist;
+	_recent.clear ();
+	refresh_recent_snap ();
+}
+
+int
+EngineHost::recent_count () const
+{
+	return 0;
+}
+
+bool
+EngineHost::recent_entry (int index, std::string* path, std::string* snapshot) const
+{
+	(void)index;
+	(void)path;
+	(void)snapshot;
+	return false;
+}
+
+bool
+EngineHost::open_recent (int index)
+{
+	(void)index;
+	return false;
+}
+
+bool
+EngineHost::smoke_recent ()
 {
 	return false;
 }

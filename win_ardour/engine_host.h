@@ -157,6 +157,13 @@ struct EngineSnapshot {
 	bool         pref_click_default; /* mirrors Config clicking when saved */
 	static constexpr int kPrefsHintLen = 96;
 	wchar_t      vst3_path_hint[kPrefsHintLen];
+	/* Recent sessions (WinShellRecent instant.xml, beside WinShellPrefs). */
+	static constexpr int kMaxRecent = 8;
+	static constexpr int kRecentLabelLen = 48;
+	static constexpr int kRecentPathLen = 96;
+	int          recent_count;
+	wchar_t      recent_label[kMaxRecent][kRecentLabelLen]; /* folder basename */
+	wchar_t      recent_path[kMaxRecent][kRecentPathLen]; /* truncated display path */
 	std::wstring detail;
 };
 
@@ -190,6 +197,25 @@ public:
 	 * For --smoke-prefs.
 	 */
 	bool smoke_prefs ();
+
+	/** Load WinShellRecent (sibling of WinShellPrefs in instant.xml). */
+	void load_recent_sessions ();
+	/** Persist WinShellRecent; does not rewrite WinShellPrefs. */
+	bool save_recent_sessions ();
+	/** Push path to front of recent list (dedupe); optionally persist. */
+	void remember_recent_session (const std::string& session_dir,
+	                              const std::string& snapshot = "win_shell",
+	                              bool persist = true);
+	void clear_recent_sessions (bool persist = true);
+	int  recent_count () const;
+	/** Copy path/snapshot for index; false if out of range. */
+	bool recent_entry (int index, std::string* path, std::string* snapshot) const;
+	/** open_session for a remembered index. */
+	bool open_recent (int index);
+	/**
+	 * Remember → save → clobber → reload → open first. For --smoke-recent.
+	 */
+	bool smoke_recent ();
 
 	/** Start backend + scaffold minimal Session (tracks + demo tones). */
 	bool start ();
@@ -711,6 +737,12 @@ private:
 	uint32_t    _pref_period_frames;
 	bool        _pref_snap_default;
 	bool        _pref_click_default;
+	struct RecentEntry {
+		std::string path;
+		std::string snapshot;
+	};
+	std::vector<RecentEntry> _recent;
+	void refresh_recent_snap ();
 	float       _gain;
 	float       _track_gain[EngineSnapshot::kMeters];
 	EngineSnapshot _snap;

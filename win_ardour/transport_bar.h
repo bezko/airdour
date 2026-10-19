@@ -129,6 +129,7 @@ public:
 
 	const D2D1_RECT_F& bounds () const { return _bounds; }
 	const D2D1_RECT_F& shuttle_btn () const { return _shuttle_btn; }
+	const D2D1_RECT_F& open_btn () const { return _open_btn; }
 
 private:
 	D2D1_RECT_F _bounds;

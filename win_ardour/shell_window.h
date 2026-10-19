@@ -27,6 +27,7 @@
 #include "history_panel.h"
 #include "mixer_strip.h"
 #include "prefs_panel.h"
+#include "recent_panel.h"
 #include "monitor_strip.h"
 #include "transport_bar.h"
 #include "wave_strip.h"
@@ -92,7 +93,8 @@ public:
 	                    bool smoke_locate = false,
 	                    bool smoke_zoom = false,
 	                    bool smoke_history = false,
-	                    bool smoke_prefs = false);
+	                    bool smoke_prefs = false,
+	                    bool smoke_recent = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -168,6 +170,10 @@ private:
 	void prompt_import_audio ();
 	void do_save_session ();
 	void prompt_open_session ();
+	void toggle_recent_menu ();
+	void sync_recent_from_engine ();
+	void apply_recent_hit (RecentHit hit);
+	void open_recent_at (int index);
 	void prompt_export_wav ();
 	void do_undo ();
 	void do_redo ();
@@ -323,5 +329,6 @@ private:
 	HistoryPanel   _history;
 	PrefsPanel     _prefs;
 	AboutPanel     _about;
+	RecentPanel    _recent;
 	float          _auto_last_write_sec;
 };

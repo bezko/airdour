@@ -219,7 +219,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_locate,
                             bool smoke_zoom,
                             bool smoke_history,
-                            bool smoke_prefs)
+                            bool smoke_prefs,
+                            bool smoke_recent)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -599,6 +600,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_recent && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_recent ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_recent_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_recent) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-recent FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -636,6 +652,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	sync_monitor_from_engine ();
 	sync_history_from_engine ();
 	sync_prefs_from_engine ();
+	sync_recent_from_engine ();
 	layout_panes ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
@@ -1040,7 +1057,96 @@ ShellWindow::prompt_open_session ()
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_mixer_arm_from_engine ();
+	sync_recent_from_engine ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::sync_recent_from_engine ()
+{
+	_recent.set_rows (_engine_snap.recent_count, _engine_snap.recent_label, _engine_snap.recent_path);
+}
+
+void
+ShellWindow::toggle_recent_menu ()
+{
+	dismiss_splash ();
+	if (_prefs_visible) {
+		_prefs_visible = false;
+		_prefs.set_visible (false);
+	}
+	if (_about.about_visible ()) {
+		_about.set_about_visible (false);
+	}
+	if (_help_visible) {
+		_help_visible = false;
+	}
+	bool on = !_recent.visible ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_recent_from_engine ();
+	_recent.set_visible (on);
+	if (on) {
+		_recent.layout_under (_transport.open_btn (), (float)_width, (float)_height, _dpi_scale);
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::open_recent_at (int index)
+{
+	_recent.set_visible (false);
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	if (_engine.open_recent (index)) {
+		std::fprintf (stderr, "airdour_win_shell: recent open ok (index=%d)\n", index);
+	} else {
+		std::fprintf (stderr, "airdour_win_shell: recent open FAILED (index=%d)\n", index);
+	}
+	std::fflush (stderr);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_arm_from_engine ();
+	sync_track_labels_from_engine ();
+	sync_recent_from_engine ();
+	layout_panes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::apply_recent_hit (RecentHit hit)
+{
+	switch (hit) {
+	case RecentHit::Outside:
+		_recent.set_visible (false);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	case RecentHit::Browse:
+		_recent.set_visible (false);
+		prompt_open_session ();
+		return;
+	case RecentHit::Clear:
+		_engine.clear_recent_sessions (true);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_recent_from_engine ();
+		_recent.layout_under (_transport.open_btn (), (float)_width, (float)_height, _dpi_scale);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	default: {
+		int row = RecentPanel::row_index (hit);
+		if (row >= 0) {
+			open_recent_at (row);
+		}
+		return;
+	}
+	}
 }
 
 void
@@ -2278,7 +2384,10 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			return 0;
 		}
 		if (wparam == VK_ESCAPE) {
-			if (_prefs_visible) {
+			if (_recent.visible ()) {
+				_recent.set_visible (false);
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			} else if (_prefs_visible) {
 				_prefs_visible = false;
 				_prefs.set_visible (false);
 				InvalidateRect (_hwnd, nullptr, FALSE);
@@ -2291,6 +2400,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else {
 				PostQuitMessage (0);
 			}
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'O' || wparam == 'o')
+		           && (GetKeyState (VK_SHIFT) & 0x8000)) {
+			/* Ctrl+Shift+O — recent sessions menu. */
+			toggle_recent_menu ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && wparam == VK_OEM_COMMA) {
 			/* Ctrl+, — Preferences. */
 			toggle_prefs ();
@@ -2394,8 +2508,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_nudge_tempo (-1.f);
 		} else if (wparam == VK_OEM_PLUS || wparam == VK_ADD) {
 			do_nudge_tempo (1.f);
-		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'O' || wparam == 'o')) {
-			prompt_open_session ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'O' || wparam == 'o')
+		           && !(GetKeyState (VK_SHIFT) & 0x8000)) {
+			prompt_open_session (); /* Ctrl+O browse; Ctrl+Shift+O = recent menu */
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')) {
 			prompt_export_wav ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == VK_OEM_PLUS || wparam == VK_ADD)) {
@@ -2733,6 +2848,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
+	if (_recent.visible ()) {
+		apply_recent_hit (_recent.hit_test (x, y));
+		return true;
+	}
+
 	if (_prefs_visible) {
 		PrefsHit ph = _prefs.hit_test (x, y);
 		apply_prefs_hit (ph);
@@ -2788,7 +2908,7 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 	if (th == TransportHit::Open) {
-		prompt_open_session ();
+		toggle_recent_menu ();
 		return true;
 	}
 	if (th == TransportHit::Export) {
@@ -4256,7 +4376,8 @@ ShellWindow::draw_help_overlay ()
 		{ L"F3", L"About Airdour" },
 		{ L"Ctrl+,", L"Preferences" },
 		{ L"Ctrl+Z / Y", L"Undo / Redo" },
-		{ L"Ctrl+S / O / E", L"Save / Open / Export" },
+		{ L"Ctrl+S / O / E", L"Save / Open browse / Export" },
+		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"L / P", L"Loop · Punch" },
@@ -4389,6 +4510,11 @@ ShellWindow::on_paint ()
 		_prefs.layout ((float)_width, (float)_height, _dpi_scale);
 		_prefs.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
 		             _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
+	}
+	if (_recent.visible ()) {
+		_recent.layout_under (_transport.open_btn (), (float)_width, (float)_height, _dpi_scale);
+		_recent.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
+		              _brush_pane_edge, _fmt_meta, _dpi_scale);
 	}
 	if (_about.splash_visible ()) {
 		_about.draw_splash (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
