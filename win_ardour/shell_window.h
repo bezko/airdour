@@ -125,7 +125,8 @@ public:
 	                    bool smoke_midi_chord = false,
 	                    bool smoke_midi_arp = false,
 	                    bool smoke_midi_scale = false,
-	                    bool smoke_midi_cc = false);
+	                    bool smoke_midi_cc = false,
+	                    bool smoke_midi_bend = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -427,5 +428,5 @@ private:
 	RecoveryPanel  _recovery;
 	float          _auto_last_write_sec;
 	float          _midi_cc_last_write_sec;
-	int            _midi_cc_number; /* 7 volume / 1 mod / 11 expr */
+	int            _midi_cc_number; /* 7 Vol / 1 Mod / 11 Expr / -1 Bend */
 };

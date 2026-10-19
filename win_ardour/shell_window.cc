@@ -258,7 +258,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_chord,
                             bool smoke_midi_arp,
                             bool smoke_midi_scale,
-                            bool smoke_midi_cc)
+                            bool smoke_midi_cc,
+                            bool smoke_midi_bend)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -447,6 +448,18 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_cc) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi_bend && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_bend ()) {
+			_smoke_failed = true;
+		} else {
+			_midi_cc_number = -1;
+			refresh_midi_cc_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_bend) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-bend FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -1278,6 +1291,8 @@ ShellWindow::midi_cc_label () const
 		return L"CC1 · Mod";
 	case 11:
 		return L"CC11 · Expr";
+	case -1:
+		return L"Bend";
 	default:
 		return L"CC7 · Volume";
 	}
@@ -1290,12 +1305,18 @@ ShellWindow::cycle_midi_cc_controller ()
 		_midi_cc_number = 1;
 	} else if (_midi_cc_number == 1) {
 		_midi_cc_number = 11;
+	} else if (_midi_cc_number == 11) {
+		_midi_cc_number = -1; /* pitch bend */
 	} else {
 		_midi_cc_number = 7;
 	}
 	_midi_cc_last_write_sec = -1.f;
 	if (_engine.is_linked () && _engine_snap.session_ok) {
-		_engine.ensure_midi_cc_automation (_midi_cc_number);
+		if (_midi_cc_number < 0) {
+			_engine.ensure_midi_bend_automation ();
+		} else {
+			_engine.ensure_midi_cc_automation (_midi_cc_number);
+		}
 	}
 	refresh_midi_cc_lane ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
@@ -1310,10 +1331,19 @@ ShellWindow::refresh_midi_cc_lane ()
 	float curve[AutomationLane::kMaxColumns];
 	size_t n = AutomationLane::kMaxColumns;
 	if (_engine.is_linked () && _engine_snap.session_ok) {
-		_engine.fill_midi_cc_automation_curve (
-			view0, span, curve, n, _midi_cc_number);
+		if (_midi_cc_number < 0) {
+			_engine.fill_midi_bend_automation_curve (view0, span, curve, n);
+		} else {
+			_engine.fill_midi_cc_automation_curve (
+				view0, span, curve, n, _midi_cc_number);
+		}
 	} else {
-		const float def = (_midi_cc_number == 7) ? (100.f / 127.f) : 0.f;
+		float def = 0.f;
+		if (_midi_cc_number == 7) {
+			def = 100.f / 127.f;
+		} else if (_midi_cc_number < 0) {
+			def = 0.5f;
+		}
 		for (size_t i = 0; i < n; ++i) {
 			curve[i] = def;
 		}
@@ -1324,9 +1354,14 @@ ShellWindow::refresh_midi_cc_lane ()
 	float py[AutomationLane::kMaxPoints];
 	int npt = 0;
 	if (_engine.is_linked () && _engine_snap.session_ok) {
-		npt = _engine.fill_midi_cc_automation_points (
-			view0, span, px, py, (int)AutomationLane::kMaxPoints,
-			_midi_cc_number);
+		if (_midi_cc_number < 0) {
+			npt = _engine.fill_midi_bend_automation_points (
+				view0, span, px, py, (int)AutomationLane::kMaxPoints);
+		} else {
+			npt = _engine.fill_midi_cc_automation_points (
+				view0, span, px, py, (int)AutomationLane::kMaxPoints,
+				_midi_cc_number);
+		}
 	}
 	_midi_cc_lane.set_points (px, py, (size_t)std::max (0, npt));
 	_midi_cc_lane.set_playhead_norm (_lanes[0].strip.playhead_norm ());
@@ -1344,7 +1379,13 @@ ShellWindow::write_midi_cc_at (float x, float y)
 	    && std::fabs (time_sec - _midi_cc_last_write_sec) < 0.035f) {
 		return;
 	}
-	if (_engine.write_midi_cc_automation (time_sec, value, _midi_cc_number)) {
+	bool ok = false;
+	if (_midi_cc_number < 0) {
+		ok = _engine.write_midi_bend_automation (time_sec, value);
+	} else {
+		ok = _engine.write_midi_cc_automation (time_sec, value, _midi_cc_number);
+	}
+	if (ok) {
 		_midi_cc_last_write_sec = time_sec;
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
@@ -4905,7 +4946,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_drag = DragMode::MidiCcWrite;
 		_drag_index = 0;
 		_midi_cc_last_write_sec = -1.f;
-		_engine.ensure_midi_cc_automation (_midi_cc_number);
+		if (_midi_cc_number < 0) {
+			_engine.ensure_midi_bend_automation ();
+		} else {
+			_engine.ensure_midi_cc_automation (_midi_cc_number);
+		}
 		write_midi_cc_at (x, y);
 		SetCapture (_hwnd);
 		SetCursor (LoadCursorW (nullptr, IDC_CROSS));
@@ -6229,7 +6274,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F5 / Chd", L"MIDI chord Off→Maj→Min · multi-key latch" },
 		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
-		{ L"F8", L"MIDI CC lane · cycle CC7 Vol → CC1 Mod → CC11 Expr" },
+		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },

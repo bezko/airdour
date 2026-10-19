@@ -3865,6 +3865,18 @@ EngineHost::smoke_automation ()
 
 namespace {
 
+int
+clamp_midi_channel (int channel)
+{
+	if (channel < 0) {
+		return 0;
+	}
+	if (channel > 15) {
+		return 15;
+	}
+	return channel;
+}
+
 std::shared_ptr<AutomationList>
 midi_cc_alist (std::shared_ptr<MidiRegion> region, int cc, int channel)
 {
@@ -3881,13 +3893,27 @@ midi_cc_alist (std::shared_ptr<MidiRegion> region, int cc, int channel)
 	if (cc > 127) {
 		cc = 127;
 	}
-	if (channel < 0) {
-		channel = 0;
-	}
-	if (channel > 15) {
-		channel = 15;
-	}
+	channel = clamp_midi_channel (channel);
 	Evoral::Parameter param (MidiCCAutomation, (uint8_t)channel, (uint32_t)cc);
+	std::shared_ptr<AutomationControl> ac = model->automation_control (param, true);
+	if (!ac) {
+		return std::shared_ptr<AutomationList> ();
+	}
+	return ac->alist ();
+}
+
+std::shared_ptr<AutomationList>
+midi_bend_alist (std::shared_ptr<MidiRegion> region, int channel)
+{
+	if (!region) {
+		return std::shared_ptr<AutomationList> ();
+	}
+	std::shared_ptr<MidiModel> model = region->model ();
+	if (!model) {
+		return std::shared_ptr<AutomationList> ();
+	}
+	channel = clamp_midi_channel (channel);
+	Evoral::Parameter param (MidiPitchBenderAutomation, (uint8_t)channel, 0);
 	std::shared_ptr<AutomationControl> ac = model->automation_control (param, true);
 	if (!ac) {
 		return std::shared_ptr<AutomationList> ();
@@ -4131,6 +4157,223 @@ EngineHost::smoke_midi_cc ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::ensure_midi_bend_automation (int channel)
+{
+	if (!ensure_midi_region () || !_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationList> al = midi_bend_alist (_impl->midi_region, channel);
+		if (!al) {
+			return false;
+		}
+		al->set_automation_state (Play);
+		_snap.detail = L"MIDI bend automation Play";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::clear_midi_bend_automation (int channel)
+{
+	if (!ensure_midi_region () || !_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationList> al = midi_bend_alist (_impl->midi_region, channel);
+		if (!al) {
+			return false;
+		}
+		al->clear ();
+		_snap.detail = L"MIDI bend automation cleared";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::write_midi_bend_automation (float time_sec, float value_0_1, int channel)
+{
+	value_0_1 = std::max (0.f, std::min (1.f, value_0_1));
+	time_sec = snap_time (time_sec);
+	if (time_sec < 0.f) {
+		time_sec = 0.f;
+	}
+	if (!ensure_midi_bend_automation (channel)) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationList> al = midi_bend_alist (_impl->midi_region, channel);
+		if (!al) {
+			return false;
+		}
+		const double beats_per_sec = 120.0 / 60.0;
+		Temporal::Beats beats =
+		    Temporal::Beats::from_double ((double)time_sec * beats_per_sec);
+		if (beats < Temporal::Beats ()) {
+			beats = Temporal::Beats ();
+		}
+		double bend_val = (double)value_0_1 * 16383.0;
+		bool added = al->editor_add (timepos_t (beats), bend_val, true);
+		if (!added) {
+			al->add (timepos_t (beats), bend_val, true, true);
+		}
+		_snap.detail = L"MIDI bend automation point";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::fill_midi_bend_automation_curve (float view_start_sec,
+                                            float view_span_sec,
+                                            float* y_0_1,
+                                            size_t n,
+                                            int channel)
+{
+	if (!y_0_1 || n == 0) {
+		return false;
+	}
+	const float def = 0.5f; /* center */
+	for (size_t i = 0; i < n; ++i) {
+		y_0_1[i] = def;
+	}
+	if (!_impl || !_impl->session || !_impl->midi_region) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationList> al = midi_bend_alist (_impl->midi_region, channel);
+		if (!al || al->empty ()) {
+			return true;
+		}
+		const double beats_per_sec = 120.0 / 60.0;
+		float span = std::max (0.001f, view_span_sec);
+		for (size_t i = 0; i < n; ++i) {
+			float t = view_start_sec + ((float)i + 0.5f) / (float)n * span;
+			if (t < 0.f) {
+				t = 0.f;
+			}
+			Temporal::Beats beats =
+			    Temporal::Beats::from_double ((double)t * beats_per_sec);
+			float v = (float)al->eval (timepos_t (beats));
+			y_0_1[i] = std::max (0.f, std::min (1.f, v / 16383.f));
+		}
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+int
+EngineHost::fill_midi_bend_automation_points (float view_start_sec,
+                                             float view_span_sec,
+                                             float* x_norm,
+                                             float* y_0_1,
+                                             int max_n,
+                                             int channel)
+{
+	if (!x_norm || !y_0_1 || max_n <= 0) {
+		return 0;
+	}
+	if (!_impl || !_impl->session || !_impl->midi_region) {
+		return 0;
+	}
+	try {
+		std::shared_ptr<AutomationList> al = midi_bend_alist (_impl->midi_region, channel);
+		if (!al || al->empty ()) {
+			return 0;
+		}
+		const double beats_per_sec = 120.0 / 60.0;
+		float span = std::max (0.001f, view_span_sec);
+		float view_end = view_start_sec + span;
+		int written = 0;
+		for (AutomationList::const_iterator it = al->begin ();
+		     it != al->end () && written < max_n; ++it) {
+			if (!*it) {
+				continue;
+			}
+			double sec = Temporal::DoubleableBeats ((*it)->when.beats ()).to_double ()
+			             / beats_per_sec;
+			if (sec < (double)view_start_sec || sec > (double)view_end) {
+				continue;
+			}
+			x_norm[written] = (float)((sec - (double)view_start_sec) / (double)span);
+			y_0_1[written] = std::max (0.f, std::min (1.f, (float)((*it)->value / 16383.0)));
+			++written;
+		}
+		return written;
+	} catch (...) {
+		return 0;
+	}
+}
+
+bool
+EngineHost::smoke_midi_bend ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-midi-bend failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-bend FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!clear_midi_bend_automation ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-bend FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* 0.0 → 0, 0.5 → ~8191.5, 1.0 → 16383 */
+		if (!write_midi_bend_automation (0.0f, 0.0f)
+		    || !write_midi_bend_automation (2.0f, 0.5f)
+		    || !write_midi_bend_automation (4.0f, 1.0f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-bend FAILED (write points)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::shared_ptr<AutomationList> al = midi_bend_alist (_impl->midi_region, 0);
+		if (!al || al->size () < 3) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-bend FAILED (size=%u)\n",
+			              al ? (unsigned)al->size () : 0u);
+			std::fflush (stderr);
+			return false;
+		}
+		const double beats_per_sec = 120.0 / 60.0;
+		Temporal::Beats mid_b = Temporal::Beats::from_double (2.0 * beats_per_sec);
+		float mid = (float)al->eval (timepos_t (mid_b));
+		if (mid < 8000.f || mid > 8400.f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-bend FAILED (eval@2s=%.3f)\n",
+			              mid);
+			std::fflush (stderr);
+			return false;
+		}
+		if (al->automation_state () != Play) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-bend FAILED (state!=Play)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-bend ok (pts=%u eval@2s=%.1f Play)\n",
+		              (unsigned)al->size (), mid);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-bend ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-bend exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17920,6 +18163,70 @@ EngineHost::fill_midi_cc_automation_points (float view_start_sec,
 
 bool
 EngineHost::smoke_midi_cc ()
+{
+	return false;
+}
+
+bool
+EngineHost::ensure_midi_bend_automation (int channel)
+{
+	(void)channel;
+	return false;
+}
+
+bool
+EngineHost::write_midi_bend_automation (float time_sec, float value_0_1, int channel)
+{
+	(void)time_sec;
+	(void)value_0_1;
+	(void)channel;
+	return false;
+}
+
+bool
+EngineHost::clear_midi_bend_automation (int channel)
+{
+	(void)channel;
+	return false;
+}
+
+bool
+EngineHost::fill_midi_bend_automation_curve (float view_start_sec,
+                                            float view_span_sec,
+                                            float* y_0_1,
+                                            size_t n,
+                                            int channel)
+{
+	(void)view_start_sec;
+	(void)view_span_sec;
+	(void)channel;
+	if (y_0_1) {
+		for (size_t i = 0; i < n; ++i) {
+			y_0_1[i] = 0.5f;
+		}
+	}
+	return false;
+}
+
+int
+EngineHost::fill_midi_bend_automation_points (float view_start_sec,
+                                             float view_span_sec,
+                                             float* x_norm,
+                                             float* y_0_1,
+                                             int max_n,
+                                             int channel)
+{
+	(void)view_start_sec;
+	(void)view_span_sec;
+	(void)x_norm;
+	(void)y_0_1;
+	(void)max_n;
+	(void)channel;
+	return 0;
+}
+
+bool
+EngineHost::smoke_midi_bend ()
 {
 	return false;
 }

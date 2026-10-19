@@ -419,8 +419,28 @@ public:
 	                                     int max_n,
 	                                     int cc = kMidiCcVolume,
 	                                     int channel = 0);
-	/** Clear → 3 CC7 points → Play. For --smoke-midi-cc. */
+	/** Clear → 3 CC7 points → Play; also verifies CC1. For --smoke-midi-cc. */
 	bool smoke_midi_cc ();
+
+	/**
+	 * MidiModel pitch-bend AutomationList (0..16383; UI maps 0..1, center=0.5).
+	 */
+	bool ensure_midi_bend_automation (int channel = 0);
+	bool write_midi_bend_automation (float time_sec, float value_0_1, int channel = 0);
+	bool clear_midi_bend_automation (int channel = 0);
+	bool fill_midi_bend_automation_curve (float view_start_sec,
+	                                      float view_span_sec,
+	                                      float* y_0_1,
+	                                      size_t n,
+	                                      int channel = 0);
+	int  fill_midi_bend_automation_points (float view_start_sec,
+	                                       float view_span_sec,
+	                                       float* x_norm,
+	                                       float* y_0_1,
+	                                       int max_n,
+	                                       int channel = 0);
+	/** Clear → 3 bend points → Play. For --smoke-midi-bend. */
+	bool smoke_midi_bend ();
 
 	/** Clear PeakMeter max-peak / clip latch on Audio track (0..kMeters-1). */
 	bool clear_track_meter_clip (int track);
