@@ -68,8 +68,10 @@
 #include "ardour/sndfilesource.h"
 #include "ardour/source_factory.h"
 #include "ardour/dB.h"
+#include "ardour/interthread_info.h"
 #include "ardour/pitch.h"
 #include "ardour/reverse.h"
+#include "ardour/strip_silence.h"
 #include "ardour/stretch.h"
 #include "ardour/timefx_request.h"
 #include "ardour/types.h"
@@ -307,6 +309,103 @@ write_pcm16_wav (const std::string& path_utf8, int sample_rate, int n_samples, f
 				s = -1.f;
 			}
 			int16_t sample = (int16_t)std::lrintf (s * 32767.f);
+			unsigned char b[2] = {
+				(unsigned char)(sample & 0xff),
+				(unsigned char)((sample >> 8) & 0xff)
+			};
+			if (!wr (b, 2)) {
+				ok = false;
+				break;
+			}
+		}
+	}
+	fclose (f);
+	return ok;
+}
+
+/** PCM16 mono WAV with silence / tone / silence / tone (for strip-silence smoke). */
+bool
+write_pcm16_wav_gated (const std::string& path_utf8, int sample_rate,
+                       float freq_hz, float amp,
+                       float silence_sec, float tone_sec)
+{
+	if (silence_sec < 0.05f) {
+		silence_sec = 0.05f;
+	}
+	if (tone_sec < 0.1f) {
+		tone_sec = 0.1f;
+	}
+	const int n_sil = (int)std::llround ((double)sample_rate * (double)silence_sec);
+	const int n_tone = (int)std::llround ((double)sample_rate * (double)tone_sec);
+	const int n_samples = n_sil + n_tone + n_sil + n_tone;
+	std::wstring wpath = utf8_path_to_wide (path_utf8);
+	if (wpath.empty ()) {
+		return false;
+	}
+	FILE* f = _wfopen (wpath.c_str (), L"wb");
+	if (!f) {
+		return false;
+	}
+
+	const int channels = 1;
+	const int bits = 16;
+	const int byte_rate = sample_rate * channels * (bits / 8);
+	const int block_align = channels * (bits / 8);
+	const uint32_t data_bytes = (uint32_t)n_samples * (uint32_t)block_align;
+	const uint32_t riff_size = 36u + data_bytes;
+
+	auto wr = [&] (const void* p, size_t n) {
+		return fwrite (p, 1, n, f) == n;
+	};
+	auto wr32 = [&] (uint32_t v) {
+		unsigned char b[4] = {
+			(unsigned char)(v & 0xff),
+			(unsigned char)((v >> 8) & 0xff),
+			(unsigned char)((v >> 16) & 0xff),
+			(unsigned char)((v >> 24) & 0xff)
+		};
+		return wr (b, 4);
+	};
+	auto wr16 = [&] (uint16_t v) {
+		unsigned char b[2] = {
+			(unsigned char)(v & 0xff),
+			(unsigned char)((v >> 8) & 0xff)
+		};
+		return wr (b, 2);
+	};
+
+	bool ok = wr ("RIFF", 4) && wr32 (riff_size) && wr ("WAVE", 4)
+	       && wr ("fmt ", 4) && wr32 (16) && wr16 (1) && wr16 ((uint16_t)channels)
+	       && wr32 ((uint32_t)sample_rate) && wr32 ((uint32_t)byte_rate)
+	       && wr16 ((uint16_t)block_align) && wr16 ((uint16_t)bits)
+	       && wr ("data", 4) && wr32 (data_bytes);
+
+	auto sample_at = [&] (int i) -> int16_t {
+		bool in_tone = false;
+		int tone_i = 0;
+		if (i >= n_sil && i < n_sil + n_tone) {
+			in_tone = true;
+			tone_i = i - n_sil;
+		} else if (i >= n_sil + n_tone + n_sil) {
+			in_tone = true;
+			tone_i = i - (n_sil + n_tone + n_sil);
+		}
+		if (!in_tone) {
+			return 0;
+		}
+		float ph = 6.2831853f * freq_hz * ((float)tone_i / (float)sample_rate);
+		float s = amp * std::sin (ph);
+		if (s > 1.f) {
+			s = 1.f;
+		} else if (s < -1.f) {
+			s = -1.f;
+		}
+		return (int16_t)std::lrintf (s * 32767.f);
+	};
+
+	if (ok) {
+		for (int i = 0; i < n_samples; ++i) {
+			int16_t sample = sample_at (i);
 			unsigned char b[2] = {
 				(unsigned char)(sample & 0xff),
 				(unsigned char)((sample >> 8) & 0xff)
@@ -4924,6 +5023,130 @@ EngineHost::normalize_selected (float target_dbfs)
 	}
 }
 
+bool
+EngineHost::strip_silence_selected (float threshold_dbfs,
+                                    float min_silence_sec,
+                                    float fade_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (!ar) {
+		_snap.detail = L"strip silence — select an audio region";
+		return false;
+	}
+	try {
+		std::shared_ptr<Playlist> pl = ar->playlist ();
+		if (!pl) {
+			_snap.detail = L"strip silence — no playlist";
+			return false;
+		}
+
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		if (!std::isfinite (threshold_dbfs) || threshold_dbfs > 0.f) {
+			threshold_dbfs = -40.f;
+		}
+		if (threshold_dbfs < -120.f) {
+			threshold_dbfs = -120.f;
+		}
+		if (!(min_silence_sec > 0.f) || !std::isfinite (min_silence_sec)) {
+			min_silence_sec = 0.05f;
+		}
+		if (!(fade_sec >= 0.f) || !std::isfinite (fade_sec)) {
+			fade_sec = 0.005f;
+		}
+
+		samplecnt_t min_len = (samplecnt_t)std::llround ((double)min_silence_sec * (double)sr);
+		if (min_len < 1) {
+			min_len = 1;
+		}
+		samplecnt_t fade_len = (samplecnt_t)std::llround ((double)fade_sec * (double)sr);
+		if (fade_len < 0) {
+			fade_len = 0;
+		}
+
+		Sample thresh = dB_to_coefficient (threshold_dbfs);
+		InterThreadInfo itt;
+		itt.cancel = false;
+		itt.done = false;
+		AudioIntervalResult silences = ar->find_silence (thresh, min_len, fade_len, itt);
+		if (itt.cancel) {
+			_snap.detail = L"strip silence cancelled";
+			return false;
+		}
+
+		AudioIntervalMap smap;
+		smap[ar] = silences;
+
+		int n0 = track_region_count (_impl->selected_track);
+		float pos_sec = (float)ar->position_sample () / (float)sr;
+		int track = _impl->selected_track;
+
+		StripSilence filter (*_impl->session, smap, fade_len);
+		if (ar->apply (filter, nullptr) != 0) {
+			_snap.detail = L"strip silence failed";
+			return false;
+		}
+
+		if (filter.results.empty ()) {
+			/* Entire region was silence — leave selection; nothing to replace. */
+			_snap.detail = L"strip silence — all quiet (no change)";
+			std::fprintf (stderr, "airdour_win_shell: strip silence — all silence, no replace\n");
+			std::fflush (stderr);
+			return true;
+		}
+
+		_impl->session->begin_reversible_command ("strip silence");
+		pl->clear_changes ();
+		pl->clear_owned_changes ();
+		pl->freeze ();
+		std::vector<std::shared_ptr<Region> >::iterator res = filter.results.begin ();
+		pl->replace_region (ar, *res, (*res)->position ());
+		++res;
+		while (res != filter.results.end ()) {
+			pl->add_region (*res, (*res)->position ());
+			++res;
+		}
+		pl->thaw ();
+		std::vector<Command*> cmds;
+		pl->rdiff (cmds);
+		_impl->session->add_commands (cmds);
+		_impl->session->add_command (new StatefulDiffCommand (pl));
+		_impl->session->commit_reversible_command ();
+
+		if (track < 0 || !select_region_at (track, pos_sec + 0.01f)) {
+			_impl->selected_region = filter.results.front ();
+			_impl->selected_track = track;
+			refresh_selection_snap ();
+		}
+		refresh_region_flags ();
+		refresh_history_flags ();
+
+		int n1 = track_region_count (track >= 0 ? track : 0);
+		std::fprintf (stderr,
+		              "airdour_win_shell: strip silence ok (thresh=%.1f dBFS silences=%u "
+		              "results=%u regions %d→%d)\n",
+		              threshold_dbfs, (unsigned)silences.size (),
+		              (unsigned)filter.results.size (), n0, n1);
+		std::fflush (stderr);
+		_snap.detail = L"strip silence — peaks refresh";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: strip silence exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"strip silence exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"strip silence failed";
+		return false;
+	}
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -5628,6 +5851,91 @@ EngineHost::smoke_normalize ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-normalize exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_strip_silence ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-strip-silence failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-silence FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		std::string wav = path_join (
+			_impl->session_dir,
+			string_compose ("import_gated_%1.wav", 1));
+		/* silence | tone | silence | tone — strip should yield 2 audible regions. */
+		if (!write_pcm16_wav_gated (wav, (int)sr, 440.f, 0.28f, 0.15f, 0.25f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-silence FAILED (write gated wav)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_audio_file (0, wav)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-silence FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-silence FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		int n0 = track_region_count (0);
+		if (n0 < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-silence FAILED (n0=%d)\n", n0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!strip_silence_selected (-40.f, 0.05f, 0.005f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-silence FAILED (strip)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		int n1 = track_region_count (0);
+		if (n1 < n0 + 1) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-strip-silence FAILED (regions %d→%d, want ≥%d)\n",
+			              n0, n1, n0 + 1);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-strip-silence ok (regions %d→%d)\n",
+		              n0, n1);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-strip-silence ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-strip-silence exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -10424,6 +10732,17 @@ EngineHost::normalize_selected (float target_dbfs)
 	return false;
 }
 
+bool
+EngineHost::strip_silence_selected (float threshold_dbfs,
+                                    float min_silence_sec,
+                                    float fade_sec)
+{
+	(void)threshold_dbfs;
+	(void)min_silence_sec;
+	(void)fade_sec;
+	return false;
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -10513,6 +10832,12 @@ EngineHost::smoke_reverse ()
 
 bool
 EngineHost::smoke_normalize ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_strip_silence ()
 {
 	return false;
 }

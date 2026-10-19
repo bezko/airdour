@@ -100,7 +100,8 @@ public:
 	                    bool smoke_stretch = false,
 	                    bool smoke_pitch = false,
 	                    bool smoke_reverse = false,
-	                    bool smoke_normalize = false);
+	                    bool smoke_normalize = false,
+	                    bool smoke_strip_silence = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -194,6 +195,7 @@ private:
 	void do_pitch_shift_selection (float semitones = 1.f);
 	void do_reverse_selection ();
 	void do_normalize_selection (float target_dbfs = -1.f);
+	void do_strip_silence_selection ();
 	void do_toggle_snap ();
 	void do_cycle_snap_density ();
 	void do_toggle_loop ();

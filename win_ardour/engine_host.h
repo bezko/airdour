@@ -435,6 +435,15 @@ public:
 	 */
 	bool normalize_selected (float target_dbfs = -1.f);
 
+	/**
+	 * Strip silence from selected AudioRegion (find_silence + StripSilence Filter).
+	 * Threshold dBFS (default −40); min silence / fade in seconds.
+	 * Quiet spans removed; audible parts become one or more regions.
+	 */
+	bool strip_silence_selected (float threshold_dbfs = -40.f,
+	                             float min_silence_sec = 0.05f,
+	                             float fade_sec = 0.005f);
+
 	/** Snap-to-grid: TempoMap beat/bar (fallback fixed 120 BPM). */
 	void set_snap_enabled (bool on);
 	bool snap_enabled () const;
@@ -502,6 +511,12 @@ public:
 	 * For --smoke-normalize.
 	 */
 	bool smoke_normalize ();
+
+	/**
+	 * Import gated tone (silence gaps) → strip silence → ≥2 regions.
+	 * For --smoke-strip-silence.
+	 */
+	bool smoke_strip_silence ();
 
 	/**
 	 * Enable beat snap; verify 1.1s → ~1.0s; density bar; off → identity.
