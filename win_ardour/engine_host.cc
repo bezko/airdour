@@ -418,6 +418,7 @@ EngineHost::EngineHost ()
 	_snap.punch_end_sec = 0.f;
 	_snap.tempo_bpm = 120.f;
 	_snap.count_in_enabled = false;
+	_snap.click_enabled = false;
 	_snap.marker_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
@@ -756,6 +757,7 @@ EngineHost::destroy_session ()
 	_snap.punch_end_sec = 0.f;
 	_snap.tempo_bpm = 120.f;
 	_snap.count_in_enabled = false;
+	_snap.click_enabled = false;
 	_snap.marker_count = 0;
 	_snap.session_path.clear ();
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
@@ -4270,11 +4272,13 @@ EngineHost::refresh_tempo_snap ()
 {
 	_snap.tempo_bpm = 120.f;
 	_snap.count_in_enabled = false;
+	_snap.click_enabled = false;
 	if (!_impl || !_impl->session) {
 		return;
 	}
 	try {
 		_snap.count_in_enabled = _impl->session->config.get_count_in ();
+		_snap.click_enabled = Config->get_clicking ();
 		Temporal::TempoMap::SharedPtr tm = Temporal::TempoMap::fetch ();
 		if (tm) {
 			Temporal::TempoPoint const& tp = tm->tempo_at (Temporal::timepos_t (0));
@@ -4363,6 +4367,76 @@ bool
 EngineHost::toggle_count_in ()
 {
 	return set_count_in (!_snap.count_in_enabled);
+}
+
+bool
+EngineHost::set_clicking (bool enable)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		/* Ensure click-record-only is off so click is audible on Play, not only Rec. */
+		if (enable && Config->get_click_record_only ()) {
+			Config->set_click_record_only (false);
+		}
+		Config->set_clicking (enable);
+		/* ParameterChanged updates Session::_clicking; also reconnect if needed. */
+		if (enable) {
+			_impl->session->reconnect_click_output ();
+		}
+		refresh_tempo_snap ();
+		_snap.detail = enable ? L"click on — metronome"
+		                      : L"click off";
+		std::fprintf (stderr, "airdour_win_shell: click %s\n", enable ? "on" : "off");
+		std::fflush (stderr);
+		return enable ? _snap.click_enabled : !_snap.click_enabled;
+	} catch (...) {
+		_snap.detail = L"click set failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_clicking ()
+{
+	return set_clicking (!_snap.click_enabled);
+}
+
+bool
+EngineHost::smoke_click ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-click failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_clicking (false) || _snap.click_enabled || Config->get_clicking ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-click FAILED (disable)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_clicking (true) || !_snap.click_enabled || !Config->get_clicking ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-click FAILED (enable)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_impl->session->click_io ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-click FAILED (no ClickIO)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-click ok (off→on + ClickIO)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-click ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-click exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 bool
@@ -6419,6 +6493,7 @@ EngineHost::EngineHost ()
 	_snap.punch_end_sec = 0.f;
 	_snap.tempo_bpm = 120.f;
 	_snap.count_in_enabled = false;
+	_snap.click_enabled = false;
 	_snap.marker_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
@@ -7159,6 +7234,25 @@ EngineHost::toggle_count_in ()
 
 bool
 EngineHost::smoke_tempo ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_clicking (bool enable)
+{
+	(void)enable;
+	return false;
+}
+
+bool
+EngineHost::toggle_clicking ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_click ()
 {
 	return false;
 }

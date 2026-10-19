@@ -197,7 +197,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_edit,
                             bool smoke_snap,
                             bool smoke_punch,
-                            bool smoke_tempo)
+                            bool smoke_tempo,
+                            bool smoke_click)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -424,6 +425,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_click && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_click ()) {
+			_smoke_failed = true;
+		} else {
+			sync_transport_tempo_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_click) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-click FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -480,6 +494,7 @@ ShellWindow::sync_transport_tempo_from_engine ()
 {
 	_transport.set_tempo_bpm (_engine_snap.tempo_bpm);
 	_transport.set_count_in_enabled (_engine_snap.count_in_enabled);
+	_transport.set_click_enabled (_engine_snap.click_enabled);
 }
 
 void
@@ -956,6 +971,19 @@ ShellWindow::do_toggle_count_in ()
 		return;
 	}
 	_engine.toggle_count_in ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_transport_tempo_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_toggle_click ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.toggle_clicking ();
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_transport_tempo_from_engine ();
@@ -1497,6 +1525,8 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			}
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'C' || wparam == 'c')) {
 			do_toggle_count_in ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'K' || wparam == 'k')) {
+			do_toggle_click ();
 		} else if (wparam == VK_OEM_MINUS || wparam == VK_SUBTRACT) {
 			do_nudge_tempo (-1.f);
 		} else if (wparam == VK_OEM_PLUS || wparam == VK_ADD) {
@@ -1793,6 +1823,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::CountIn) {
 		do_toggle_count_in ();
+		return true;
+	}
+	if (th == TransportHit::Click) {
+		do_toggle_click ();
 		return true;
 	}
 	if (th == TransportHit::TempoDown) {

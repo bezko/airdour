@@ -72,7 +72,8 @@ public:
 	                    bool smoke_edit = false,
 	                    bool smoke_snap = false,
 	                    bool smoke_punch = false,
-	                    bool smoke_tempo = false);
+	                    bool smoke_tempo = false,
+	                    bool smoke_click = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -149,6 +150,7 @@ private:
 	void do_toggle_loop ();
 	void do_toggle_punch ();
 	void do_toggle_count_in ();
+	void do_toggle_click ();
 	void do_nudge_tempo (float delta);
 	void draw_editor_grid ();
 	void draw_punch_overlay ();

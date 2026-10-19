@@ -116,6 +116,7 @@ struct EngineSnapshot {
 	bool         grid_line_bar[kMaxGridLines]; /* thicker bar lines */
 	float        tempo_bpm; /* Session TempoMap BPM at t=0 (quarter-note) */
 	bool         count_in_enabled; /* Session config count-in before record roll */
+	bool         click_enabled; /* RC Config clicking — audible metronome */
 	float        transport_sec;
 	std::wstring detail;
 };
@@ -321,6 +322,13 @@ public:
 	bool set_count_in (bool enable);
 	bool toggle_count_in ();
 
+	/**
+	 * RC Config clicking — Session metronome on ClickIO → physical outs.
+	 * Audible during play/record when enabled (unless click-record-only).
+	 */
+	bool set_clicking (bool enable);
+	bool toggle_clicking ();
+
 	/** Count audio regions on a track playlist (smoke / diagnostics). */
 	int track_region_count (int track) const;
 
@@ -387,6 +395,12 @@ public:
 	 * toggle count-in; restore 120 + count-in off. For --smoke-tempo.
 	 */
 	bool smoke_tempo ();
+
+	/**
+	 * Toggle Config clicking off→on; verify snapshot + Config.
+	 * For --smoke-click. Does not roll transport.
+	 */
+	bool smoke_click ();
 
 	/** Ensure a Session MidiTrack exists (creates one if needed). */
 	bool ensure_midi_track ();

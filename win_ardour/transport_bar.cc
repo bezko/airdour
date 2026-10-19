@@ -33,6 +33,7 @@ TransportBar::TransportBar ()
 	, _fade_btn ()
 	, _snap_btn ()
 	, _count_btn ()
+	, _click_btn ()
 	, _tempo_dn_btn ()
 	, _tempo_up_btn ()
 	, _playing (false)
@@ -43,6 +44,7 @@ TransportBar::TransportBar ()
 	, _punch_enabled (false)
 	, _snap_enabled (false)
 	, _count_in_enabled (false)
+	, _click_enabled (false)
 	, _tempo_bpm (120.f)
 {
 }
@@ -73,6 +75,7 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_fade_btn, x, btn_w);
 	place (_snap_btn, x, btn_w);
 	place (_count_btn, x, btn_w);
+	place (_click_btn, x, btn_w);
 	place (_tempo_dn_btn, x, narrow);
 	place (_tempo_up_btn, x, narrow);
 	place (_import_btn, x, btn_w * 1.15f);
@@ -113,6 +116,9 @@ TransportBar::hit_test (float x, float y) const
 	}
 	if (contains (_count_btn, x, y)) {
 		return TransportHit::CountIn;
+	}
+	if (contains (_click_btn, x, y)) {
+		return TransportHit::Click;
 	}
 	if (contains (_tempo_dn_btn, x, y)) {
 		return TransportHit::TempoDown;
@@ -178,6 +184,7 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_fade_btn, L"Fade", false);
 	draw_btn (_snap_btn, L"Snap", _snap_enabled);
 	draw_btn (_count_btn, L"Count", _count_in_enabled);
+	draw_btn (_click_btn, L"Click", _click_enabled);
 	draw_btn (_tempo_dn_btn, L"−", false);
 	draw_btn (_tempo_up_btn, L"+", false);
 	draw_btn (_import_btn, L"Import", false);
@@ -197,6 +204,8 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  %d BPM  ·  count-in", m, s, bpm_i);
 	} else if (_record_armed) {
 		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  %d BPM  ·  rec armed", m, s, bpm_i);
+	} else if (_click_enabled) {
+		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  %d BPM  ·  click", m, s, bpm_i);
 	} else {
 		_snwprintf_s (clock, _TRUNCATE,
 		              _snap_enabled ? L"%02d:%05.2f  ·  %d BPM  ·  snap"
