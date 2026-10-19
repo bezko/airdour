@@ -22,7 +22,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $RepoRoot = (Resolve-Path $RepoRoot).Path
-$OutDir = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $OutDir))
+if (-not [System.IO.Path]::IsPathRooted($OutDir)) {
+    $OutDir = Join-Path $RepoRoot $OutDir
+}
+$OutDir = [System.IO.Path]::GetFullPath($OutDir)
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 if ($RefreshPortable -or -not $StageDir) {
@@ -94,7 +97,15 @@ if ($appVer -match '^v(.+)$') { $appVer = $Matches[1] }
 # Drop -rel suffix noise for AppVersion (keep in filename).
 $appVerClean = ($appVer -replace '-rel$', '')
 
-$outBase = "airdour-$Version-win64-setup"
+# Engine stage has backends\wasapi; UiOnly (GHA) does not — suffix the setup name.
+$isEngine = Test-Path (Join-Path $StageDir "backends\wasapi\wasapi_audiobackend.dll")
+$outBase = if ($isEngine) {
+    "airdour-$Version-win64-setup"
+} else {
+    "airdour-$Version-win64-setup-ui"
+}
+Write-Host ("Installer mode: " + $(if ($isEngine) { "Engine" } else { "UiOnly (-setup-ui.exe)" }))
+
 $iss = Join-Path $RepoRoot "tools\win-native\installer\airdour.iss"
 if (-not (Test-Path $iss)) { throw "Missing $iss" }
 

@@ -4,12 +4,15 @@
 #   - push tags matching v* (e.g. v0.1.0)
 #   - manual workflow_dispatch (builds a draft/prerelease zip)
 #
-# Publishes:
+# Publishes (GHA windows-latest — honest UiOnly + scripts):
 #   1) airdour-*-win64-ci.zip — WASAPI I/O smoke lib + sources + BUILD_STATUS
-#   2) airdour-*-win64-shell-ui.zip — portable D2D shell (UiOnly; GHA-honest)
-# Full Engine portable zip (Dummy/WASAPI + ACE LV2, MSVC Release /MD default)
-# is produced on a laptop agent via Package-WinShell-Portable.ps1
-# (Mode=Engine -Config Release).
+#   2) airdour-*-win64-shell-ui.zip — portable D2D shell (UiOnly)
+#   3) airdour-*-win64-setup-ui.exe — Inno installer of the UiOnly shell (when ISCC works)
+#   4) airdour-*-win64-installer-src.zip — .iss + packaging scripts for laptop Engine setup.exe
+#
+# Full Engine portable zip + Engine setup.exe (Dummy/WASAPI + ACE LV2, MSVC Release /MD)
+# are produced on a laptop agent via Package-WinShell-Portable.ps1 + Package-WinShell-Installer.ps1
+# (Mode=Engine -Config Release). Attach those to the same GitHub Release.
 
 name: Windows MSVC Release
 
@@ -31,7 +34,7 @@ jobs:
   release-win64:
     name: Build and publish win64 release zip
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
@@ -82,32 +85,88 @@ jobs:
           & $exe.FullName --timeout 2 --no-engine
           if ($LASTEXITCODE -ne 0) { throw "UiOnly shell smoke exit $LASTEXITCODE" }
 
-      - name: Package release zips
+      - name: Package release zips + UiOnly installer
         id: pkg
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $shell = Get-ChildItem -Path build-win64 -Recurse -Filter "airdour_win_shell.exe" | Select-Object -First 1
-          $zips = & .\tools\win-native\ci\Package-Release.ps1 `
+          & .\tools\win-native\ci\Package-Release.ps1 `
             -RepoRoot (Get-Location) `
             -OutDir (Join-Path (Get-Location) "dist") `
             -Version "${{ steps.ver.outputs.version }}" `
             -BuildDir (Join-Path (Get-Location) "build-win64") `
             -ShellExe $(if ($shell) { $shell.FullName } else { "" }) `
             -GitSha "${{ github.sha }}" `
-            -GitRef "${{ github.ref }}"
-          Get-ChildItem dist -Filter "*.zip" | ForEach-Object { Write-Host "ZIP $($_.FullName) ($([int]($_.Length/1KB)) KB)" }
+            -GitRef "${{ github.ref }}" `
+            -BootstrapInno
+          Get-ChildItem dist -Filter "*.zip" | ForEach-Object {
+            Write-Host "ZIP $($_.Name) ($([int]($_.Length/1KB)) KB)"
+          }
+          Get-ChildItem dist -Filter "*.exe" | ForEach-Object {
+            Write-Host "EXE $($_.Name) ($([int]($_.Length/1KB)) KB)"
+          }
           Get-Content (Join-Path dist stage BUILD_STATUS.txt) -ErrorAction SilentlyContinue
-          # Prefer shell zip path for summary if present
           $shellZip = Get-ChildItem dist -Filter "airdour-*-win64-shell*.zip" | Select-Object -First 1
           if ($shellZip) { echo "shell_zip=$($shellZip.FullName)" >> $env:GITHUB_OUTPUT }
+          $setup = Get-ChildItem dist -Filter "airdour-*-win64-setup*.exe" | Select-Object -First 1
+          if ($setup) {
+            echo "setup_exe=$($setup.FullName)" >> $env:GITHUB_OUTPUT
+            echo "has_setup=true" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "has_setup=false" >> $env:GITHUB_OUTPUT
+            Write-Warning "No setup.exe produced (Inno bootstrap or compile failed) - installer-src.zip still published"
+          }
+
+      - name: Smoke UiOnly installer (silent CURRENTUSER)
+        if: steps.pkg.outputs.has_setup == 'true'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist -Filter "airdour-*-win64-setup*.exe" | Select-Object -First 1
+          $inst = Join-Path $env:TEMP "Airdour-gha-install"
+          if (Test-Path $inst) { Remove-Item $inst -Recurse -Force }
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/SP-",
+            "/DIR=$inst"
+          ) -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Silent install exit $($p.ExitCode)" }
+          $bat = Join-Path $inst "run-airdour.bat"
+          if (-not (Test-Path $bat)) { throw "Missing $bat after install" }
+          & $bat --timeout 2 --no-engine
+          if ($LASTEXITCODE -ne 0) { throw "Installed UiOnly smoke exit $LASTEXITCODE" }
+          $unins = Get-ChildItem $inst -Filter "unins*.exe" | Select-Object -First 1
+          if ($unins) {
+            $u = Start-Process -FilePath $unins.FullName -ArgumentList @(
+              "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
+            ) -Wait -PassThru
+            Write-Host "uninstall_exit=$($u.ExitCode)"
+          }
 
       - name: Upload release artifacts (Actions)
         uses: actions/upload-artifact@v4
         with:
           name: airdour-${{ steps.ver.outputs.version }}-win64
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.exe
           if-no-files-found: error
+
+      - name: Collect release file list
+        id: files
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $paths = @()
+          Get-ChildItem dist -Filter "*.zip" -ErrorAction SilentlyContinue | ForEach-Object { $paths += $_.FullName }
+          Get-ChildItem dist -Filter "*.exe" -ErrorAction SilentlyContinue | ForEach-Object { $paths += $_.FullName }
+          if ($paths.Count -eq 0) { throw "No dist zip/exe to publish" }
+          # Multiline output for softprops/action-gh-release
+          $joined = $paths -join "`n"
+          echo "list<<EOF" >> $env:GITHUB_OUTPUT
+          echo $joined >> $env:GITHUB_OUTPUT
+          echo "EOF" >> $env:GITHUB_OUTPUT
+          Write-Host "Publishing $($paths.Count) file(s):"
+          $paths | ForEach-Object { Write-Host "  $_" }
 
       - name: Publish GitHub Release (tags only)
         if: github.ref_type == 'tag'
@@ -118,28 +177,32 @@ jobs:
           draft: false
           prerelease: ${{ inputs.prerelease == true }}
           generate_release_notes: true
-          files: dist/*.zip
+          files: ${{ steps.files.outputs.list }}
           body: |
             ## Airdour Windows release (`${{ steps.ver.outputs.version }}`)
 
             **Brand:** Airdour · **GUI:** Win32 + Direct2D/DirectWrite (no GTK2)
             **Audio path:** WASAPI shared only (no ASIO / DirectSound / exclusive)
 
-            ### Artifacts
+            ### Artifacts from GitHub Actions (`windows-latest`)
             - `airdour-*-win64-ci.zip` — WASAPI I/O smoke lib + sources + BUILD_STATUS
             - `airdour-*-win64-shell-ui.zip` — portable **UiOnly** `airdour_win_shell` (unzip + `run-airdour.bat --no-engine`)
+            - `airdour-*-win64-setup-ui.exe` — **Inno Setup** installer of the UiOnly shell (when ISCC bootstrap succeeds)
+            - `airdour-*-win64-installer-src.zip` — `airdour.iss` + packaging scripts to build the **Engine** installer offline
 
-            ### Engine portable zip (laptop — MSVC Release default)
-            Full Dummy/WASAPI + ACE LV2 package (`airdour-*-win64-shell.zip`) from `build-rel` + Release shell:
+            ### Engine portable + installer (laptop — MSVC Release; not built on GHA yet)
+            Full Dummy/WASAPI + ACE LV2 package needs `build-rel` + vcpkg Release DLLs (too heavy for default GHA):
 
             ```bat
             powershell -File tools\win-native\ci\Package-WinShell-Portable.ps1 -RepoRoot %CD% -OutDir dist -Version ${{ steps.ver.outputs.version }} -Mode Engine -Config Release
+            powershell -File tools\win-native\ci\Package-WinShell-Installer.ps1 -RepoRoot %CD% -OutDir dist -Version ${{ steps.ver.outputs.version }} -RefreshPortable -BootstrapInno
             ```
 
-            See `docs` / `tools/win-native` and `README.txt` inside the shell zip.
+            Attach `airdour-*-win64-shell.zip` and `airdour-*-win64-setup.exe` to this release.
 
             ### Not included yet
-            - NSIS / MSIX installer
+            - Code-signed installer
             - GTK plugin UIs
+            - Full Engine build inside GitHub-hosted runners
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
