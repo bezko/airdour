@@ -47,6 +47,8 @@ enum class TransportHit {
 	MidiTransDown,
 	MidiVelUp,
 	MidiVelDown,
+	MidiLenUp,
+	MidiLenDown,
 	CountIn,
 	Click,
 	TempoDown,
@@ -187,6 +189,8 @@ private:
 	D2D1_RECT_F _midi_trans_dn_btn;
 	D2D1_RECT_F _midi_vel_up_btn;
 	D2D1_RECT_F _midi_vel_dn_btn;
+	D2D1_RECT_F _midi_len_up_btn;
+	D2D1_RECT_F _midi_len_dn_btn;
 	D2D1_RECT_F _count_btn;
 	D2D1_RECT_F _click_btn;
 	D2D1_RECT_F _tempo_dn_btn;

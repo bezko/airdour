@@ -9,6 +9,7 @@
  *                         [--smoke-export] [--smoke-undo] [--smoke-loop]
  *                         [--smoke-midi] [--smoke-midi-edit] [--smoke-midi-quantize]
  *                         [--smoke-midi-transpose] [--smoke-midi-velocity]
+ *                         [--smoke-midi-length]
  *                         [--smoke-plugin]
  *                         [--smoke-perf] [--smoke-vst3] [--smoke-mute-solo]
  *                         [--smoke-pan] [--smoke-send] [--smoke-automation]
@@ -121,6 +122,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_midi_quantize = parse_flag (argc, argv, L"--smoke-midi-quantize");
 	bool smoke_midi_transpose = parse_flag (argc, argv, L"--smoke-midi-transpose");
 	bool smoke_midi_velocity = parse_flag (argc, argv, L"--smoke-midi-velocity");
+	bool smoke_midi_length = parse_flag (argc, argv, L"--smoke-midi-length");
 	bool smoke_plugin = parse_flag (argc, argv, L"--smoke-plugin");
 	bool smoke_vst3 = parse_flag (argc, argv, L"--smoke-vst3");
 	bool smoke_mute_solo = parse_flag (argc, argv, L"--smoke-mute-solo");
@@ -207,7 +209,7 @@ wmain (int argc, wchar_t** argv)
 		                         smoke_eq, smoke_delay, smoke_limiter, smoke_gate,
 	                         smoke_spectrum, smoke_correlation, smoke_loudness,
 	                         smoke_midi_quantize, smoke_midi_transpose,
-	                         smoke_midi_velocity)) {
+	                         smoke_midi_velocity, smoke_midi_length)) {
 			const char* be = backend.empty () ? "(prefs/Dummy)" : backend.c_str ();
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", be);
 		} else {

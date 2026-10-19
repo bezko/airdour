@@ -106,6 +106,8 @@ ShellWindow::ShellWindow ()
 	, _midi_draw_start_sec (0.f)
 	, _midi_draw_pitch (60)
 	, _midi_vel_drag (100)
+	, _midi_trim_start_sec (0.f)
+	, _midi_trim_end_sec (0.f)
 	, _transport_playing (false)
 	, _playhead_sec (0.f)
 	, _last_tick_ms (0)
@@ -240,7 +242,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_loudness,
                             bool smoke_midi_quantize,
                             bool smoke_midi_transpose,
-                            bool smoke_midi_velocity)
+                            bool smoke_midi_velocity,
+                            bool smoke_midi_length)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -355,6 +358,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_velocity) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi_length && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_length ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_length) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-length FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -2586,6 +2598,19 @@ ShellWindow::do_nudge_midi_velocity (int delta)
 }
 
 void
+ShellWindow::do_nudge_midi_length (float delta_sec)
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.nudge_midi_length (delta_sec)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_cycle_snap_density ()
 {
 	if (!_engine.is_linked ()) {
@@ -3153,6 +3178,19 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_move_audio_track (-1);
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_DOWN) {
 			do_move_audio_track (+1);
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == VK_LEFT || wparam == VK_RIGHT)) {
+			/* Alt+←/→ = MIDI note length ± (snap unit when snap on; else 50ms). */
+			if (_engine.is_linked () && _engine_snap.midi_note_count > 0) {
+				float unit = _engine.snap_unit_sec ();
+				if (!_engine_snap.snap_enabled) {
+					unit = 0.05f;
+				}
+				if (GetKeyState (VK_SHIFT) & 0x8000) {
+					unit *= 4.f;
+				}
+				do_nudge_midi_length (wparam == VK_RIGHT ? unit : -unit);
+			}
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
 		           && !(GetKeyState (VK_MENU) & 0x8000)
 		           && (wparam == VK_UP || wparam == VK_DOWN)) {
@@ -3790,6 +3828,17 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		do_nudge_midi_velocity ((GetKeyState (VK_SHIFT) & 0x8000) ? -8 : -1);
 		return true;
 	}
+	if (th == TransportHit::MidiLenUp || th == TransportHit::MidiLenDown) {
+		float unit = _engine.is_linked () ? _engine.snap_unit_sec () : 0.5f;
+		if (!_engine_snap.snap_enabled) {
+			unit = 0.05f;
+		}
+		if (GetKeyState (VK_SHIFT) & 0x8000) {
+			unit *= 4.f;
+		}
+		do_nudge_midi_length (th == TransportHit::MidiLenUp ? unit : -unit);
+		return true;
+	}
 	if (th == TransportHit::CountIn) {
 		do_toggle_count_in ();
 		return true;
@@ -3950,6 +3999,53 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			return true;
 		}
 		uint8_t pitch = midi_pitch_at_y (y);
+		/* Prefer trim handles on note edges (same pad as audio region trim). */
+		{
+			const float pad = std::max (7.f, 9.f * _dpi_scale);
+			int best_edge = -1; /* 0=start 1=end */
+			int best_i = -1;
+			float best_d = pad + 1.f;
+			for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
+				const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
+				if (n.pitch != pitch) {
+					continue;
+				}
+				float x0 = _lanes[0].strip.x_at_time (_midi_lane, n.start_sec);
+				float x1 = _lanes[0].strip.x_at_time (_midi_lane, n.start_sec + n.length_sec);
+				if (x1 - x0 < 2.f) {
+					x1 = x0 + 2.f;
+				}
+				float ds = std::fabs (x - x0);
+				float de = std::fabs (x - x1);
+				if (ds <= pad && ds <= best_d) {
+					best_d = ds;
+					best_edge = 0;
+					best_i = i;
+				}
+				if (de <= pad && de < best_d) {
+					best_d = de;
+					best_edge = 1;
+					best_i = i;
+				}
+			}
+			if (best_i >= 0 && best_edge >= 0) {
+				const EngineMidiNoteSnap& n = _engine_snap.midi_notes[best_i];
+				_engine.select_midi_note_at (n.start_sec + n.length_sec * 0.5f, n.pitch);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				_drag = (best_edge == 0) ? DragMode::MidiTrimStart : DragMode::MidiTrimEnd;
+				_drag_index = -1;
+				_midi_trim_start_sec = n.start_sec;
+				_midi_trim_end_sec = n.start_sec + n.length_sec;
+				_pan_down_x = x;
+				_pan_down_y = y;
+				_pan_last_x = x;
+				SetCapture (_hwnd);
+				SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return true;
+			}
+		}
 		if (_engine.select_midi_note_at (time_sec, pitch)) {
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
@@ -4547,6 +4643,31 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
+	if (_drag == DragMode::MidiTrimStart || _drag == DragMode::MidiTrimEnd) {
+		_pan_last_x = x;
+		float t = midi_time_at_x (x);
+		if (_engine_snap.snap_enabled) {
+			t = _engine.snap_time (t);
+		}
+		if (_drag == DragMode::MidiTrimStart) {
+			float end = _midi_trim_end_sec;
+			if (t > end - 0.05f) {
+				t = end - 0.05f;
+			}
+			if (t < 0.f) {
+				t = 0.f;
+			}
+			_midi_trim_start_sec = t;
+		} else {
+			float start = _midi_trim_start_sec;
+			if (t < start + 0.05f) {
+				t = start + 0.05f;
+			}
+			_midi_trim_end_sec = t;
+		}
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
 
 	if (_drag == DragMode::RulerScrub && _engine.is_linked () && _engine_snap.session_ok) {
 		_pan_last_x = x;
@@ -4608,6 +4729,17 @@ ShellWindow::on_mouse_up ()
 	}
 	if (_drag == DragMode::MidiVelocity && _engine.is_linked () && _engine_snap.session_ok) {
 		_engine.set_midi_velocity (_midi_vel_drag);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+	if ((_drag == DragMode::MidiTrimStart || _drag == DragMode::MidiTrimEnd)
+	    && _engine.is_linked () && _engine_snap.session_ok) {
+		if (_drag == DragMode::MidiTrimStart) {
+			_engine.set_midi_note_start (_midi_trim_start_sec);
+		} else {
+			_engine.set_midi_note_end (_midi_trim_end_sec);
+		}
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 		InvalidateRect (_hwnd, nullptr, FALSE);
@@ -5171,13 +5303,20 @@ ShellWindow::draw_midi_lane ()
 	}
 
 	/* Session MIDI notes — height scales with velocity (bottom-aligned in row). */
+	const bool trimming = (_drag == DragMode::MidiTrimStart || _drag == DragMode::MidiTrimEnd);
 	for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
 		const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
 		if (n.pitch < kMidiPitchLo || n.pitch > kMidiPitchHi) {
 			continue;
 		}
-		float x0 = _lanes[0].strip.x_at_time (r, n.start_sec);
-		float x1 = _lanes[0].strip.x_at_time (r, n.start_sec + n.length_sec);
+		float t0 = n.start_sec;
+		float t1 = n.start_sec + n.length_sec;
+		if (trimming && n.selected) {
+			t0 = _midi_trim_start_sec;
+			t1 = _midi_trim_end_sec;
+		}
+		float x0 = _lanes[0].strip.x_at_time (r, t0);
+		float x1 = _lanes[0].strip.x_at_time (r, t1);
 		if (x1 < r.left || x0 > r.right) {
 			continue;
 		}
@@ -5498,6 +5637,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Q / Qnt", L"Quantize MIDI notes to snap grid" },
 		{ L". / ,  Shift", L"MIDI transpose ±1 · ±12 (T+/T−)" },
 		{ L"↑ / ↓  Shift", L"MIDI velocity ±1 · ±8 (V+/V−)" },
+		{ L"Alt+←/→  Shift", L"MIDI note length ± (L+/L−; snap unit)" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },

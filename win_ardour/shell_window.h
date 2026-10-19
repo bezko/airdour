@@ -117,7 +117,8 @@ public:
 	                    bool smoke_loudness = false,
 	                    bool smoke_midi_quantize = false,
 	                    bool smoke_midi_transpose = false,
-	                    bool smoke_midi_velocity = false);
+	                    bool smoke_midi_velocity = false,
+	                    bool smoke_midi_length = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -142,6 +143,8 @@ private:
 		RegionMove, /* drag selected region body */
 		MidiDraw, /* click/drag on MIDI piano-roll to create a note */
 		MidiVelocity, /* drag velocity lane → set selected/all note velocity */
+		MidiTrimStart, /* drag note left edge → trim start */
+		MidiTrimEnd, /* drag note right edge → trim end */
 		TrackReorderPending, /* mixer label click; may become reorder drag */
 		TrackReorder, /* drag mixer strip label to reorder */
 		RulerScrub, /* drag editor ruler → continuous locate */
@@ -223,6 +226,7 @@ private:
 	void do_quantize_midi_notes ();
 	void do_transpose_midi_notes (int semitones);
 	void do_nudge_midi_velocity (int delta);
+	void do_nudge_midi_length (float delta_sec);
 	void do_toggle_loop ();
 	void do_toggle_punch ();
 	void do_toggle_count_in ();
@@ -320,6 +324,8 @@ private:
 	float _midi_draw_start_sec;
 	uint8_t _midi_draw_pitch;
 	int     _midi_vel_drag; /* live preview 1..127 while MidiVelocity drag */
+	float   _midi_trim_start_sec; /* live preview while MidiTrim* drag */
+	float   _midi_trim_end_sec;
 
 	bool  _transport_playing;
 	float _playhead_sec;

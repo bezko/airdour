@@ -5760,6 +5760,12 @@ snap_grid_params (int density, uint32_t* bar_mod, uint32_t* beat_div)
 } // namespace
 
 float
+EngineHost::snap_unit_sec () const
+{
+	return (float)snap_unit_sec_fallback (_snap.snap_density);
+}
+
+float
 EngineHost::snap_time (float time_sec) const
 {
 	if (!_snap.snap_enabled) {
@@ -14301,6 +14307,454 @@ EngineHost::smoke_midi_velocity ()
 	}
 }
 
+namespace {
+constexpr float kMidiMinLengthSec = 0.05f;
+} // namespace
+
+bool
+EngineHost::nudge_midi_length (float delta_sec)
+{
+	if (delta_sec == 0.f) {
+		return true;
+	}
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"length: no Session";
+		return false;
+	}
+	if (!ensure_midi_region (32.f) || !_impl->midi_region) {
+		_snap.detail = L"length: no MIDI region";
+		return false;
+	}
+	try {
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count <= 0) {
+			_snap.detail = L"length: no notes";
+			return false;
+		}
+
+		bool have_sel = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				have_sel = true;
+				break;
+			}
+		}
+
+		struct Kept {
+			uint8_t pitch;
+			uint8_t velocity;
+			float   start_sec;
+			float   length_sec;
+		};
+		std::vector<Kept> keep;
+		keep.reserve ((size_t)_snap.midi_note_count);
+		int moved = 0;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			Kept k;
+			k.pitch = n.pitch;
+			k.velocity = n.velocity;
+			k.start_sec = n.start_sec;
+			const bool do_l = !have_sel || n.selected;
+			if (do_l) {
+				float len = n.length_sec + delta_sec;
+				if (len < kMidiMinLengthSec) {
+					len = kMidiMinLengthSec;
+				}
+				if (_snap.snap_enabled) {
+					float end = snap_time (k.start_sec + len);
+					len = end - k.start_sec;
+					if (len < kMidiMinLengthSec) {
+						len = kMidiMinLengthSec;
+					}
+				}
+				if (std::fabs (len - n.length_sec) > 1e-4f) {
+					++moved;
+				}
+				k.length_sec = len;
+			} else {
+				k.length_sec = n.length_sec;
+			}
+			keep.push_back (k);
+		}
+
+		std::shared_ptr<Playlist> playlist = _impl->midi_track
+		                                        ? _impl->midi_track->playlist ()
+		                                        : std::shared_ptr<Playlist> ();
+		if (!playlist) {
+			_snap.detail = L"length: no playlist";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("midi length");
+		playlist->clear_changes ();
+		playlist->clear_owned_changes ();
+		playlist->remove_region (_impl->midi_region);
+		playlist->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		_impl->midi_region.reset ();
+		_impl->selected_midi_note_id = -1;
+		if (!ensure_midi_region (32.f)) {
+			_snap.detail = L"length: region rebuild failed";
+			return false;
+		}
+		int added = 0;
+		int32_t first_id = -1;
+		for (size_t i = 0; i < keep.size (); ++i) {
+			if (add_midi_note (keep[i].pitch, keep[i].start_sec,
+			                   keep[i].length_sec, keep[i].velocity)) {
+				++added;
+				if (first_id < 0 && _impl->selected_midi_note_id >= 0) {
+					first_id = _impl->selected_midi_note_id;
+				}
+			}
+		}
+		_impl->selected_midi_note_id = first_id;
+		refresh_midi_notes_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: length ok (notes=%d moved=%d added=%d d=%+.3f)\n",
+		              _snap.midi_note_count, moved, added, delta_sec);
+		std::fflush (stderr);
+		_snap.detail = L"MIDI length nudged";
+		return added > 0 || keep.empty ();
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: length exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_midi_note_start (float start_sec)
+{
+	if (start_sec < 0.f) {
+		start_sec = 0.f;
+	}
+	if (_snap.snap_enabled) {
+		start_sec = snap_time (start_sec);
+	}
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"length: no Session";
+		return false;
+	}
+	if (!ensure_midi_region (32.f) || !_impl->midi_region) {
+		_snap.detail = L"length: no MIDI region";
+		return false;
+	}
+	try {
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count <= 0) {
+			_snap.detail = L"length: no notes";
+			return false;
+		}
+
+		bool have_sel = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				have_sel = true;
+				break;
+			}
+		}
+		if (!have_sel) {
+			_snap.detail = L"length: select a note to trim";
+			return false;
+		}
+
+		struct Kept {
+			uint8_t pitch;
+			uint8_t velocity;
+			float   start_sec;
+			float   length_sec;
+		};
+		std::vector<Kept> keep;
+		keep.reserve ((size_t)_snap.midi_note_count);
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			Kept k;
+			k.pitch = n.pitch;
+			k.velocity = n.velocity;
+			if (n.selected) {
+				float end = n.start_sec + n.length_sec;
+				float s = start_sec;
+				if (s > end - kMidiMinLengthSec) {
+					s = end - kMidiMinLengthSec;
+				}
+				if (s < 0.f) {
+					s = 0.f;
+				}
+				k.start_sec = s;
+				k.length_sec = end - s;
+				if (k.length_sec < kMidiMinLengthSec) {
+					k.length_sec = kMidiMinLengthSec;
+				}
+			} else {
+				k.start_sec = n.start_sec;
+				k.length_sec = n.length_sec;
+			}
+			keep.push_back (k);
+		}
+
+		std::shared_ptr<Playlist> playlist = _impl->midi_track
+		                                        ? _impl->midi_track->playlist ()
+		                                        : std::shared_ptr<Playlist> ();
+		if (!playlist) {
+			return false;
+		}
+		_impl->session->begin_reversible_command ("midi trim start");
+		playlist->clear_changes ();
+		playlist->clear_owned_changes ();
+		playlist->remove_region (_impl->midi_region);
+		playlist->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		_impl->midi_region.reset ();
+		_impl->selected_midi_note_id = -1;
+		if (!ensure_midi_region (32.f)) {
+			return false;
+		}
+		int32_t first_id = -1;
+		for (size_t i = 0; i < keep.size (); ++i) {
+			if (add_midi_note (keep[i].pitch, keep[i].start_sec,
+			                   keep[i].length_sec, keep[i].velocity)) {
+				if (first_id < 0 && _impl->selected_midi_note_id >= 0) {
+					first_id = _impl->selected_midi_note_id;
+				}
+			}
+		}
+		_impl->selected_midi_note_id = first_id;
+		refresh_midi_notes_snap ();
+		_snap.detail = L"MIDI note start trimmed";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_midi_note_end (float end_sec)
+{
+	if (end_sec < 0.f) {
+		end_sec = 0.f;
+	}
+	if (_snap.snap_enabled) {
+		end_sec = snap_time (end_sec);
+	}
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"length: no Session";
+		return false;
+	}
+	if (!ensure_midi_region (32.f) || !_impl->midi_region) {
+		_snap.detail = L"length: no MIDI region";
+		return false;
+	}
+	try {
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count <= 0) {
+			_snap.detail = L"length: no notes";
+			return false;
+		}
+
+		bool have_sel = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				have_sel = true;
+				break;
+			}
+		}
+		if (!have_sel) {
+			_snap.detail = L"length: select a note to trim";
+			return false;
+		}
+
+		struct Kept {
+			uint8_t pitch;
+			uint8_t velocity;
+			float   start_sec;
+			float   length_sec;
+		};
+		std::vector<Kept> keep;
+		keep.reserve ((size_t)_snap.midi_note_count);
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			Kept k;
+			k.pitch = n.pitch;
+			k.velocity = n.velocity;
+			k.start_sec = n.start_sec;
+			if (n.selected) {
+				float len = end_sec - n.start_sec;
+				if (len < kMidiMinLengthSec) {
+					len = kMidiMinLengthSec;
+				}
+				k.length_sec = len;
+			} else {
+				k.length_sec = n.length_sec;
+			}
+			keep.push_back (k);
+		}
+
+		std::shared_ptr<Playlist> playlist = _impl->midi_track
+		                                        ? _impl->midi_track->playlist ()
+		                                        : std::shared_ptr<Playlist> ();
+		if (!playlist) {
+			return false;
+		}
+		_impl->session->begin_reversible_command ("midi trim end");
+		playlist->clear_changes ();
+		playlist->clear_owned_changes ();
+		playlist->remove_region (_impl->midi_region);
+		playlist->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		_impl->midi_region.reset ();
+		_impl->selected_midi_note_id = -1;
+		if (!ensure_midi_region (32.f)) {
+			return false;
+		}
+		int32_t first_id = -1;
+		for (size_t i = 0; i < keep.size (); ++i) {
+			if (add_midi_note (keep[i].pitch, keep[i].start_sec,
+			                   keep[i].length_sec, keep[i].velocity)) {
+				if (first_id < 0 && _impl->selected_midi_note_id >= 0) {
+					first_id = _impl->selected_midi_note_id;
+				}
+			}
+		}
+		_impl->selected_midi_note_id = first_id;
+		refresh_midi_notes_snap ();
+		_snap.detail = L"MIDI note end trimmed";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_length ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-length failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-length FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-length FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for length smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-length FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+
+		if (!add_midi_note (60, 0.0f, 1.0f, 100) || _snap.midi_note_count < 1) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-length FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.midi_note_count > 0) {
+			_impl->selected_midi_note_id = _snap.midi_notes[0].id;
+			refresh_midi_notes_snap ();
+		}
+
+		if (!set_midi_note_end (0.5f)) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-length FAILED (trim end)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		bool ok05 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 60
+			    && _snap.midi_notes[i].length_sec >= 0.45f
+			    && _snap.midi_notes[i].length_sec <= 0.55f) {
+				ok05 = true;
+			}
+		}
+		if (!ok05) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-length FAILED (after trim)\n");
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				std::fprintf (stderr, "  note p=%u len=%.3f\n",
+				              (unsigned)_snap.midi_notes[i].pitch,
+				              _snap.midi_notes[i].length_sec);
+			}
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!nudge_midi_length (0.25f)) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-length FAILED (nudge)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		bool ok075 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 60
+			    && _snap.midi_notes[i].length_sec >= 0.70f
+			    && _snap.midi_notes[i].length_sec <= 0.80f) {
+				ok075 = true;
+			}
+		}
+		set_snap_enabled (snap_was);
+		if (!ok075) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-length FAILED (after nudge)\n");
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				std::fprintf (stderr, "  note p=%u len=%.3f\n",
+				              (unsigned)_snap.midi_notes[i].pitch,
+				              _snap.midi_notes[i].length_sec);
+			}
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-length ok (len~0.75 notes=%d)\n",
+		              _snap.midi_note_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-length ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-length exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 
 void
 EngineHost::refresh_snapshot ()
@@ -16607,7 +17061,38 @@ EngineHost::smoke_midi_velocity ()
 	return false;
 }
 
+bool
+EngineHost::nudge_midi_length (float delta_sec)
+{
+	(void)delta_sec;
+	return false;
+}
 
+bool
+EngineHost::set_midi_note_start (float start_sec)
+{
+	(void)start_sec;
+	return false;
+}
+
+bool
+EngineHost::set_midi_note_end (float end_sec)
+{
+	(void)end_sec;
+	return false;
+}
+
+float
+EngineHost::snap_unit_sec () const
+{
+	return 0.5f;
+}
+
+bool
+EngineHost::smoke_midi_length ()
+{
+	return false;
+}
 
 
 bool

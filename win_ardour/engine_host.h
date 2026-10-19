@@ -1009,6 +1009,19 @@ public:
 	/** Set absolute velocity for selected notes (or all if none selected). */
 	bool set_midi_velocity (int velocity);
 
+	/**
+	 * Nudge length of selected notes (or all if none selected) by delta_sec.
+	 * Min length 0.05s. When snap is on, ends are snapped after nudge.
+	 * Rebuilds the MIDI region (Windows-safe).
+	 */
+	bool nudge_midi_length (float delta_sec);
+	/** Trim start of selected note(s); snaps when snap is on. Min length 0.05s. */
+	bool set_midi_note_start (float start_sec);
+	/** Trim end of selected note(s); snaps when snap is on. Min length 0.05s. */
+	bool set_midi_note_end (float end_sec);
+	/** Grid unit in seconds for current snap density (120 BPM fallback). */
+	float snap_unit_sec () const;
+
 	/** Best-effort connect MidiTrack output to first physical MIDI playback port. */
 	bool connect_midi_output ();
 
@@ -1042,6 +1055,11 @@ public:
 	 * Add note, nudge velocity −20, set 64, verify. For --smoke-midi-velocity.
 	 */
 	bool smoke_midi_velocity ();
+
+	/**
+	 * Add fixed-length note, trim end, nudge length, verify. For --smoke-midi-length.
+	 */
+	bool smoke_midi_length ();
 
 	std::string session_dir () const;
 	std::string last_export_path () const;
