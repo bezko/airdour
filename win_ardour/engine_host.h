@@ -1022,6 +1022,20 @@ public:
 	/** Grid unit in seconds for current snap density (120 BPM fallback). */
 	float snap_unit_sec () const;
 
+	/**
+	 * Copy selected MIDI notes to the in-app clipboard (relative timing kept).
+	 * Returns false if nothing is selected.
+	 */
+	bool copy_selected_midi_notes ();
+	/** Copy then remove selected notes (Windows-safe rebuild). */
+	bool cut_selected_midi_notes ();
+	/**
+	 * Paste clipboard notes. at_sec < 0 → transport playhead.
+	 * Cluster earliest note anchors at at_sec; snaps origin when Snap is on.
+	 */
+	bool paste_midi_notes (float at_sec = -1.f);
+	bool has_midi_clipboard () const;
+
 	/** Best-effort connect MidiTrack output to first physical MIDI playback port. */
 	bool connect_midi_output ();
 
@@ -1060,6 +1074,11 @@ public:
 	 * Add fixed-length note, trim end, nudge length, verify. For --smoke-midi-length.
 	 */
 	bool smoke_midi_length ();
+
+	/**
+	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.
+	 */
+	bool smoke_midi_clipboard ();
 
 	std::string session_dir () const;
 	std::string last_export_path () const;
@@ -1144,6 +1163,14 @@ private:
 	float       _gain;
 	float       _track_gain[EngineSnapshot::kMeters];
 	EngineSnapshot _snap;
+
+	struct MidiClipNote {
+		uint8_t pitch;
+		uint8_t velocity;
+		float   start_rel_sec; /* relative to earliest copied note */
+		float   length_sec;
+	};
+	std::vector<MidiClipNote> _midi_clipboard;
 
 #ifdef AIRDOUR_WIN_SHELL_WITH_ENGINE
 	class Impl;

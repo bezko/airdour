@@ -14755,6 +14755,357 @@ EngineHost::smoke_midi_length ()
 	}
 }
 
+bool
+EngineHost::has_midi_clipboard () const
+{
+	return !_midi_clipboard.empty ();
+}
+
+bool
+EngineHost::copy_selected_midi_notes ()
+{
+	refresh_midi_notes_snap ();
+	_midi_clipboard.clear ();
+	if (_snap.midi_note_count <= 0) {
+		_snap.detail = L"MIDI copy: no notes";
+		return false;
+	}
+	bool have_sel = false;
+	float t0 = 1.0e9f;
+	for (int i = 0; i < _snap.midi_note_count; ++i) {
+		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+		if (!n.selected) {
+			continue;
+		}
+		have_sel = true;
+		if (n.start_sec < t0) {
+			t0 = n.start_sec;
+		}
+	}
+	if (!have_sel) {
+		_snap.detail = L"MIDI copy: nothing selected";
+		return false;
+	}
+	for (int i = 0; i < _snap.midi_note_count; ++i) {
+		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+		if (!n.selected) {
+			continue;
+		}
+		MidiClipNote c;
+		c.pitch = n.pitch;
+		c.velocity = n.velocity;
+		c.start_rel_sec = n.start_sec - t0;
+		c.length_sec = n.length_sec;
+		if (c.length_sec < 0.05f) {
+			c.length_sec = 0.05f;
+		}
+		_midi_clipboard.push_back (c);
+	}
+	std::fprintf (stderr, "airdour_win_shell: MIDI copy (%zu notes)\n",
+	              _midi_clipboard.size ());
+	std::fflush (stderr);
+	_snap.detail = L"MIDI notes copied";
+	return !_midi_clipboard.empty ();
+}
+
+bool
+EngineHost::cut_selected_midi_notes ()
+{
+	if (!copy_selected_midi_notes ()) {
+		return false;
+	}
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"MIDI cut: no Session";
+		return false;
+	}
+	if (!ensure_midi_region (32.f) || !_impl->midi_region) {
+		_snap.detail = L"MIDI cut: no MIDI region";
+		return false;
+	}
+	try {
+		refresh_midi_notes_snap ();
+		struct Kept {
+			uint8_t pitch;
+			uint8_t velocity;
+			float   start_sec;
+			float   length_sec;
+		};
+		std::vector<Kept> keep;
+		keep.reserve ((size_t)_snap.midi_note_count);
+		int removed = 0;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			if (n.selected) {
+				++removed;
+				continue;
+			}
+			Kept k;
+			k.pitch = n.pitch;
+			k.velocity = n.velocity;
+			k.start_sec = n.start_sec;
+			k.length_sec = n.length_sec;
+			keep.push_back (k);
+		}
+		if (removed <= 0) {
+			return false;
+		}
+
+		std::shared_ptr<Playlist> playlist = _impl->midi_track
+		                                        ? _impl->midi_track->playlist ()
+		                                        : std::shared_ptr<Playlist> ();
+		if (!playlist) {
+			return false;
+		}
+		_impl->session->begin_reversible_command ("cut midi notes");
+		playlist->clear_changes ();
+		playlist->clear_owned_changes ();
+		playlist->remove_region (_impl->midi_region);
+		playlist->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		_impl->midi_region.reset ();
+		_impl->selected_midi_note_id = -1;
+		if (!ensure_midi_region (32.f)) {
+			return false;
+		}
+		for (size_t i = 0; i < keep.size (); ++i) {
+			add_midi_note (keep[i].pitch, keep[i].start_sec,
+			               keep[i].length_sec, keep[i].velocity);
+		}
+		_impl->selected_midi_note_id = -1;
+		refresh_midi_notes_snap ();
+		std::fprintf (stderr, "airdour_win_shell: MIDI cut (removed=%d kept=%zu clip=%zu)\n",
+		              removed, keep.size (), _midi_clipboard.size ());
+		std::fflush (stderr);
+		_snap.detail = L"MIDI notes cut";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: MIDI cut exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::paste_midi_notes (float at_sec)
+{
+	if (_midi_clipboard.empty ()) {
+		_snap.detail = L"MIDI paste: clipboard empty";
+		return false;
+	}
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"MIDI paste: no Session";
+		return false;
+	}
+	if (at_sec < 0.f) {
+		at_sec = _snap.transport_sec;
+	}
+	if (at_sec < 0.f) {
+		at_sec = 0.f;
+	}
+	if (_snap.snap_enabled) {
+		at_sec = snap_time (at_sec);
+	}
+	if (!ensure_midi_region (32.f) || !_impl->midi_region) {
+		_snap.detail = L"MIDI paste: no MIDI region";
+		return false;
+	}
+	try {
+		int added = 0;
+		int32_t first_id = -1;
+		for (size_t i = 0; i < _midi_clipboard.size (); ++i) {
+			const MidiClipNote& c = _midi_clipboard[i];
+			float start = at_sec + c.start_rel_sec;
+			if (start < 0.f) {
+				start = 0.f;
+			}
+			if (add_midi_note (c.pitch, start, c.length_sec, c.velocity)) {
+				++added;
+				if (first_id < 0 && _impl->selected_midi_note_id >= 0) {
+					first_id = _impl->selected_midi_note_id;
+				}
+			}
+		}
+		_impl->selected_midi_note_id = first_id;
+		refresh_midi_notes_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: MIDI paste (added=%d at=%.3f clip=%zu)\n",
+		              added, at_sec, _midi_clipboard.size ());
+		std::fflush (stderr);
+		_snap.detail = L"MIDI notes pasted";
+		return added > 0;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: MIDI paste exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_clipboard ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-clipboard failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for clipboard smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+
+		if (!add_midi_note (60, 0.0f, 0.4f, 100) || _snap.midi_note_count < 1) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		_impl->selected_midi_note_id = _snap.midi_notes[0].id;
+		refresh_midi_notes_snap ();
+
+		if (!copy_selected_midi_notes () || !has_midi_clipboard ()) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (copy)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!paste_midi_notes (1.0f)) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (paste)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count < 2) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (count after paste=%d)\n",
+			              _snap.midi_note_count);
+			std::fflush (stderr);
+			return false;
+		}
+		bool got_paste = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 60
+			    && _snap.midi_notes[i].start_sec >= 0.95f
+			    && _snap.midi_notes[i].start_sec <= 1.05f) {
+				got_paste = true;
+				_impl->selected_midi_note_id = _snap.midi_notes[i].id;
+			}
+		}
+		if (!got_paste) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (paste locate)\n");
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				std::fprintf (stderr, "  note p=%u t=%.3f\n",
+				              (unsigned)_snap.midi_notes[i].pitch,
+				              _snap.midi_notes[i].start_sec);
+			}
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+
+		if (!cut_selected_midi_notes ()) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (cut)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count != 1) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (after cut count=%d)\n",
+			              _snap.midi_note_count);
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!paste_midi_notes (2.0f)) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (repaste)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		bool got2 = false;
+		bool got0 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch != 60) {
+				continue;
+			}
+			if (_snap.midi_notes[i].start_sec >= -0.05f
+			    && _snap.midi_notes[i].start_sec <= 0.05f) {
+				got0 = true;
+			}
+			if (_snap.midi_notes[i].start_sec >= 1.95f
+			    && _snap.midi_notes[i].start_sec <= 2.05f) {
+				got2 = true;
+			}
+		}
+		set_snap_enabled (snap_was);
+		if (!got0 || !got2 || _snap.midi_note_count < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (final)\n");
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				std::fprintf (stderr, "  note p=%u t=%.3f\n",
+				              (unsigned)_snap.midi_notes[i].pitch,
+				              _snap.midi_notes[i].start_sec);
+			}
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-clipboard ok (notes=%d copy/paste/cut)\n",
+		              _snap.midi_note_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-clipboard ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 
 void
 EngineHost::refresh_snapshot ()
@@ -17090,6 +17441,37 @@ EngineHost::snap_unit_sec () const
 
 bool
 EngineHost::smoke_midi_length ()
+{
+	return false;
+}
+
+bool
+EngineHost::has_midi_clipboard () const
+{
+	return false;
+}
+
+bool
+EngineHost::copy_selected_midi_notes ()
+{
+	return false;
+}
+
+bool
+EngineHost::cut_selected_midi_notes ()
+{
+	return false;
+}
+
+bool
+EngineHost::paste_midi_notes (float at_sec)
+{
+	(void)at_sec;
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_clipboard ()
 {
 	return false;
 }
