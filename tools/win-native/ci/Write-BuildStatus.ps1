@@ -42,16 +42,20 @@ What is NOT in this artifact yet
 --------------------------------
 STAGED   libpbd / libardour / hardour — laptop-proven; wire into CI next
 STAGED   WinMME MIDI inside wasapi backend
-OUT      gtk2_ardour / libs/tk on MSVC (dead end; use win_ardour)
+OUT      gtk2_ardour / libs/tk / libs/canvas / libs/surfaces (GTK) on Windows-only
+OUT      Cairo / cairomm — not required for win_shell or hardour
 BLOCKED  NSIS / MSIX installer (zip only for now)
 
-Dependency expectations (headless product)
-------------------------------------------
+Dependency expectations (Windows-only product)
+----------------------------------------------
 Prefer vcpkg (x64-windows) with binary caching:
   glib libxml2 libsndfile curl libarchive liblo taglib
   overlay glibmm-2.4 + sigc++-2.0 (not stock glibmm 2.68+)
-  rubberband vamp-sdk
+  rubberband vamp-sdk lilv fftw3 aubio
   pthreads4w (until Win32 thread migration completes)
+Non-UI third-party still linked: fluidsynth, zita-resampler/convolver,
+  qm-dsp, vamp-plugins, hidapi, aaf, ptformat, libltc, boost (headers).
+NOT linked: cairo, cairomm, pangocairo, GTK2/ytk, PortAudio (default path).
 
 Secrets
 -------

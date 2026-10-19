@@ -415,12 +415,13 @@ children = [
 ]
 
 # Paths dropped from the default Windows-only product graph (Airdour).
-# GTK2/ytk stack is intentionally out of scope for MSVC (dead end); headless first.
+# Never require libs/tk, gtk2_ardour, or Cairo canvas for win_shell / hardour.
+# GUI is Win32+D2D (`win_ardour`); GTK control surfaces need ytk/gtkmm2ext — out.
 _WINDOWS_ONLY_EXCLUDE = set([
         'libs/vfork',
         'libs/ardouralsautil',
         'libs/auscan',
-        # GTK2 / bundled ytk — GUI path is GTK3/gvsbuild or Direct2D later
+        # GTK2 / bundled ytk — dead end on MSVC; product GUI is win_ardour
         'libs/clearlooks-newer',
         'libs/tk/ztk',
         'libs/tk/ydk-pixbuf',
@@ -435,6 +436,9 @@ _WINDOWS_ONLY_EXCLUDE = set([
         'libs/widgets',
         'libs/waveview',
         'gtk2_ardour',
+        # Hardware surfaces link libgtkmm2ext / libytkmm / cairomm — not on D2D path.
+        # control_protocol lives under libs/ctrl-interface (kept).
+        'libs/surfaces',
         # Cairo UI LV2 plugins — need cairo; headless graph skips them
         'libs/plugins/a-comp.lv2',
         'libs/plugins/a-exp.lv2',
@@ -812,9 +816,10 @@ int main() { return 0; }''',
     compiler_flags.extend(
         ('-DBOOST_SYSTEM_NO_DEPRECATED', '-D_ISOC9X_SOURCE',
          '-D_LARGEFILE64_SOURCE', '-D_FILE_OFFSET_BITS=64'))
-    cxx_flags.extend(
-        ('-D__STDC_LIMIT_MACROS', '-D__STDC_FORMAT_MACROS',
-         '-DCANVAS_DEBUG'))
+    cxx_flags.extend(('-D__STDC_LIMIT_MACROS', '-D__STDC_FORMAT_MACROS'))
+    # Canvas debug macros only when Cairo canvas is in the build graph.
+    if not conf.is_defined('AIRDOUR_WINDOWS_ONLY'):
+        cxx_flags.append('-DCANVAS_DEBUG')
 
     # Do not use Boost.System library
     cxx_flags.append('-DBOOST_ERROR_CODE_HEADER_ONLY')
@@ -1289,11 +1294,8 @@ int main () { int x = SFC_RF64_AUTO_DOWNGRADE; return 0; }
         conf.env.append_value('LIB', 'intl')
         # TODO this should only be necessary for a debug build
         conf.env.append_value('LIB', 'dbghelp')
-
-        # work around GdkDrawable BitBlt performance issue on windows
-        # see http://gareus.org/wiki/ardour_windows_gdk_and_cairo
-        conf.env.append_value('CFLAGS', '-DUSE_CAIRO_IMAGE_SURFACE')
-        conf.env.append_value('CXXFLAGS', '-DUSE_CAIRO_IMAGE_SURFACE')
+        # No USE_CAIRO_IMAGE_SURFACE: Airdour mingw/msvc is AIRDOUR_WINDOWS_ONLY
+        # (no gtk2_ardour / Cairo canvas). GTK Gdk BitBlt workaround does not apply.
         conf.define ('WINDOWS', 1)
 
         have_ptw_semaphore = conf.check_cc(fragment = '''
@@ -1329,10 +1331,7 @@ int main () { return 0; }
         conf.env.append_value('CXXFLAGS', '-DCOMPILER_MSVC')
         conf.env.append_value('CFLAGS', '-D_USE_MATH_DEFINES')
         conf.env.append_value('CXXFLAGS', '-D_USE_MATH_DEFINES')
-        # work around GdkDrawable BitBlt performance issue on windows
-        # see http://gareus.org/wiki/ardour_windows_gdk_and_cairo
-        conf.env.append_value('CFLAGS', '-DUSE_CAIRO_IMAGE_SURFACE')
-        conf.env.append_value('CXXFLAGS', '-DUSE_CAIRO_IMAGE_SURFACE')
+        # No USE_CAIRO_IMAGE_SURFACE on MSVC Windows-only (no GTK/Cairo canvas).
         if conf.env['DEBUG']:
             conf.env.append_value('LIB', 'pthreadVC3d')
         else:
@@ -1665,7 +1664,10 @@ const char* const ardour_config_info = "\\n\\
     config_text.close ()
     print('')
 
-    if Options.options.dist_target == 'mingw' or Options.options.dist_target == 'msvc':
+    # gtk2_ardour/windows_icon.rc is only for the GTK frontend (excluded on
+    # AIRDOUR_WINDOWS_ONLY). win_ardour uses its own Win32 resources if needed.
+    if ((Options.options.dist_target == 'mingw' or Options.options.dist_target == 'msvc')
+            and not conf.is_defined('AIRDOUR_WINDOWS_ONLY')):
         create_resource_file(Options.options.program_name)
 
 def build(bld):

@@ -275,8 +275,6 @@ if(AIRDOUR_BUILD_WIN_SHELL)
       "${AIRDOUR_SRC_ROOT}/libs/ptformat"
       "${AIRDOUR_SRC_ROOT}/libs/vst3"
       "${AIRDOUR_SRC_ROOT}/libs/panners"
-      "${AIRDOUR_SRC_ROOT}/libs/surfaces"
-      "${AIRDOUR_SRC_ROOT}/libs/tk"
       "${AIRDOUR_WAF_BUILD_DIR}/libs/pbd"
       "${AIRDOUR_WAF_BUILD_DIR}/libs/ardour"
       "${_vcpkg_prefix}/include"

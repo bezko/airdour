@@ -11,7 +11,7 @@
 1. Visual Studio 2022+ (Desktop C++, MSVC) + Windows 10/11 SDK (x64)
 2. CMake ≥ 3.20
 3. vcpkg at a **short path** (recommended `C:\vcpkg`) — see `Install-HeadlessDeps.ps1`
-4. **No** Steinberg ASIO SDK; **no** GTK2 (GUI is `win_ardour` Direct2D)
+4. **No** Steinberg ASIO SDK; **no** GTK2 / `libs/tk` / Cairo canvas (GUI is `win_ardour` Direct2D)
 
 ## Quick smoke (what CI builds today)
 
@@ -87,8 +87,9 @@ Manifest for the next deps stage: `tools/win-native/vcpkg.json` (core only — n
 6. [x] hardour engine-only smoke (dummy + WASAPI shared)
 7. [x] Minimal Win32+D2D shell (`airdour_win_shell`) — laptop + CI target
 8. [ ] Tune period/CPU on a cheap laptop; measured WasapiIO latency
-9. [ ] Port WinMME MIDI; grow `win_ardour` (engine attach, wave strip)
-10. [ ] Installer release zip (no GTK2-on-MSVC)
+9. [x] Port WinMME MIDI; grow `win_ardour` (engine attach, wave strip, FX)
+10. [x] Windows-only cull: waf/cmake never require `libs/tk`, `gtk2_ardour`, Cairo canvas
+11. [ ] Installer (NSIS/MSIX); Engine portable zip already ships via `Package-WinShell-Portable.ps1`
 
 ## Success for this phase
 
