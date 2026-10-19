@@ -150,6 +150,13 @@ struct EngineSnapshot {
 	int          tc_minutes;
 	int          tc_seconds;
 	int          tc_frames;
+	/* Preferences (RC Config + WinShellPrefs instant.xml). */
+	std::wstring pref_backend; /* "Dummy" or "WASAPI" */
+	uint32_t     pref_period_frames; /* 0 = Auto */
+	bool         pref_snap_default;
+	bool         pref_click_default; /* mirrors Config clicking when saved */
+	static constexpr int kPrefsHintLen = 96;
+	wchar_t      vst3_path_hint[kPrefsHintLen];
 	std::wstring detail;
 };
 
@@ -166,6 +173,23 @@ public:
 
 	/** Request WASAPI/Dummy period frames before start (0 = backend Auto). */
 	void set_period_frames (uint32_t frames);
+
+	/** Load WinShellPrefs instant.xml + refresh prefs snapshot fields. */
+	void load_shell_prefs ();
+	/** Write WinShellPrefs + Config::save_state (clicking). */
+	bool save_shell_prefs ();
+	void set_pref_backend (const std::string& name); /* Dummy / WASAPI */
+	void set_pref_period_frames (uint32_t frames);
+	void set_pref_snap_default (bool on);
+	/** Click default → Config::set_clicking (+ save on save_shell_prefs). */
+	bool set_pref_click_default (bool on);
+	void refresh_prefs_snap ();
+
+	/**
+	 * Toggle click + snap prefs; save RC + instant; verify reload.
+	 * For --smoke-prefs.
+	 */
+	bool smoke_prefs ();
 
 	/** Start backend + scaffold minimal Session (tracks + demo tones). */
 	bool start ();
@@ -683,6 +707,10 @@ private:
 	std::string _backend_name;
 	std::string _last_export_path;
 	uint32_t    _period_frames; /* 0 = Auto */
+	std::string _pref_backend; /* Dummy / WASAPI — next start if CLI omits --backend */
+	uint32_t    _pref_period_frames;
+	bool        _pref_snap_default;
+	bool        _pref_click_default;
 	float       _gain;
 	float       _track_gain[EngineSnapshot::kMeters];
 	EngineSnapshot _snap;

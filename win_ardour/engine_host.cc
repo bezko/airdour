@@ -395,8 +395,12 @@ public:
 
 EngineHost::EngineHost ()
 	: _started (false)
-	, _backend_name ("Dummy")
+	, _backend_name () /* empty → resolve from WinShellPrefs / Dummy in start() */
 	, _period_frames (0)
+	, _pref_backend ("Dummy")
+	, _pref_period_frames (0)
+	, _pref_snap_default (false)
+	, _pref_click_default (true)
 	, _gain (0.85f)
 	, _impl (new Impl)
 {
@@ -434,6 +438,11 @@ EngineHost::EngineHost ()
 	_snap.tc_minutes = 0;
 	_snap.tc_seconds = 0;
 	_snap.tc_frames = 0;
+	_snap.pref_backend = L"Dummy";
+	_snap.pref_period_frames = 0;
+	_snap.pref_snap_default = false;
+	_snap.pref_click_default = true; /* shell default until RC / prefs load */
+	_snap.vst3_path_hint[0] = L'\0';
 	_snap.aux_bus_ok = false;
 	_snap.midi_muted = false;
 	_snap.midi_soloed = false;
@@ -552,7 +561,9 @@ EngineHost::prepare (const std::string& backend_name)
 	if (!backend_name.empty ()) {
 		_backend_name = backend_name;
 	}
-	_snap.backend = utf8_to_wide (resolve_backend_name (_backend_name));
+	_snap.backend = utf8_to_wide (resolve_backend_name (
+		_backend_name.empty () ? (_pref_backend.empty () ? "Dummy" : _pref_backend)
+		                       : _backend_name));
 	_snap.detail = L"prepared — press Play to start";
 }
 
@@ -560,6 +571,225 @@ void
 EngineHost::set_period_frames (uint32_t frames)
 {
 	_period_frames = frames;
+}
+
+void
+EngineHost::refresh_prefs_snap ()
+{
+	_snap.pref_backend = utf8_to_wide (_pref_backend.empty () ? "Dummy" : _pref_backend);
+	_snap.pref_period_frames = _pref_period_frames;
+	_snap.pref_snap_default = _pref_snap_default;
+	_snap.pref_click_default = _pref_click_default;
+
+	std::string hint;
+	const char* env = std::getenv ("VST3_PATH");
+	if (env && env[0]) {
+		hint = env;
+	} else if (_impl && _impl->ardour_inited && Config) {
+		hint = Config->get_plugin_path_vst3 ();
+	}
+	if (hint.empty ()) {
+		_snap.vst3_path_hint[0] = L'\0';
+	} else {
+		copy_name_to_snap (_snap.vst3_path_hint, EngineSnapshot::kPrefsHintLen, hint);
+	}
+}
+
+void
+EngineHost::load_shell_prefs ()
+{
+	if (!_impl || !_impl->ardour_inited || !Config) {
+		refresh_prefs_snap ();
+		return;
+	}
+	try {
+		_pref_click_default = Config->get_clicking ();
+		XMLNode* node = Config->instant_xml ("WinShellPrefs");
+		if (node) {
+			std::string be;
+			if (node->get_property ("backend", be) && !be.empty ()) {
+				if (be == "WASAPI" || be == "wasapi") {
+					_pref_backend = "WASAPI";
+				} else {
+					_pref_backend = "Dummy";
+				}
+			}
+			uint32_t period = 0;
+			if (node->get_property ("period", period)) {
+				_pref_period_frames = period;
+			}
+			int snap = 0;
+			if (node->get_property ("snap-default", snap)) {
+				_pref_snap_default = (snap != 0);
+			}
+			int click = 0;
+			if (node->get_property ("click-default", click)) {
+				_pref_click_default = (click != 0);
+			}
+		}
+		/* Keep RC Config clicking aligned with the shell preference. */
+		Config->set_clicking (_pref_click_default);
+		refresh_prefs_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: prefs loaded (backend=%s period=%u snap=%d click=%d)\n",
+		              _pref_backend.c_str (), (unsigned)_pref_period_frames,
+		              _pref_snap_default ? 1 : 0, _pref_click_default ? 1 : 0);
+		std::fflush (stderr);
+	} catch (...) {
+		refresh_prefs_snap ();
+	}
+}
+
+bool
+EngineHost::save_shell_prefs ()
+{
+	if (!_impl || !_impl->ardour_inited || !Config) {
+		_snap.detail = L"prefs save failed — Config not ready";
+		return false;
+	}
+	try {
+		Config->set_clicking (_pref_click_default);
+		if (Config->save_state () != 0) {
+			_snap.detail = L"prefs: Config::save_state failed";
+			std::fprintf (stderr, "airdour_win_shell: Config::save_state failed\n");
+			std::fflush (stderr);
+			return false;
+		}
+		XMLNode node ("WinShellPrefs");
+		node.set_property ("backend", _pref_backend.empty () ? "Dummy" : _pref_backend);
+		node.set_property ("period", _pref_period_frames);
+		node.set_property ("snap-default", _pref_snap_default ? 1 : 0);
+		node.set_property ("click-default", _pref_click_default ? 1 : 0);
+		Config->add_instant_xml (node);
+		refresh_prefs_snap ();
+		_snap.detail = L"preferences saved (RC + instant.xml)";
+		std::fprintf (stderr,
+		              "airdour_win_shell: prefs saved (backend=%s period=%u snap=%d click=%d)\n",
+		              _pref_backend.c_str (), (unsigned)_pref_period_frames,
+		              _pref_snap_default ? 1 : 0, _pref_click_default ? 1 : 0);
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		_snap.detail = L"prefs save exception";
+		std::fprintf (stderr, "airdour_win_shell: prefs save exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		_snap.detail = L"prefs save failed";
+		return false;
+	}
+}
+
+void
+EngineHost::set_pref_backend (const std::string& name)
+{
+	if (name == "WASAPI" || name == "wasapi") {
+		_pref_backend = "WASAPI";
+	} else {
+		_pref_backend = "Dummy";
+	}
+	refresh_prefs_snap ();
+}
+
+void
+EngineHost::set_pref_period_frames (uint32_t frames)
+{
+	_pref_period_frames = frames;
+	refresh_prefs_snap ();
+}
+
+void
+EngineHost::set_pref_snap_default (bool on)
+{
+	_pref_snap_default = on;
+	if (_impl && _impl->session) {
+		set_snap_enabled (on);
+	} else {
+		_snap.snap_enabled = on;
+	}
+	refresh_prefs_snap ();
+}
+
+bool
+EngineHost::set_pref_click_default (bool on)
+{
+	_pref_click_default = on;
+	refresh_prefs_snap ();
+	if (_impl && _impl->session) {
+		return set_clicking (on);
+	}
+	if (_impl && _impl->ardour_inited && Config) {
+		Config->set_clicking (on);
+	}
+	return true;
+}
+
+bool
+EngineHost::smoke_prefs ()
+{
+	if (!_impl || !_impl->ardour_inited || !Config) {
+		_snap.detail = L"smoke-prefs failed — Config not ready";
+		return false;
+	}
+	try {
+		const std::string be0 = _pref_backend;
+		const uint32_t period0 = _pref_period_frames;
+		const bool snap0 = _pref_snap_default;
+		const bool click0 = _pref_click_default;
+
+		set_pref_backend ("WASAPI");
+		set_pref_period_frames (512);
+		set_pref_snap_default (true);
+		if (!set_pref_click_default (false)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-prefs FAILED (click off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!save_shell_prefs ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-prefs FAILED (save)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* Clobber in-memory prefs only (do not touch Config) then reload from disk. */
+		_pref_backend = "Dummy";
+		_pref_period_frames = 0;
+		_pref_snap_default = false;
+		_pref_click_default = true;
+		load_shell_prefs ();
+
+		if (_pref_backend != "WASAPI" || _pref_period_frames != 512 || !_pref_snap_default
+		    || _pref_click_default || Config->get_clicking ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-prefs FAILED (reload be=%s period=%u snap=%d click=%d cfg=%d)\n",
+			              _pref_backend.c_str (), (unsigned)_pref_period_frames,
+			              _pref_snap_default ? 1 : 0, _pref_click_default ? 1 : 0,
+			              Config->get_clicking () ? 1 : 0);
+			std::fflush (stderr);
+			return false;
+		}
+
+		set_pref_backend (be0);
+		set_pref_period_frames (period0);
+		set_pref_snap_default (snap0);
+		set_pref_click_default (click0);
+		if (!save_shell_prefs ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-prefs FAILED (restore save)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr, "airdour_win_shell: smoke-prefs ok (WASAPI/512/snap/click round-trip)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-prefs ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-prefs exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 bool
@@ -617,8 +847,8 @@ EngineHost::ensure_session ()
 		BusProfile profile;
 		profile.master_out_channels = 2;
 
-		/* Enable click so something always hits the graph when rolling. */
-		Config->set_clicking (true);
+		/* Click default from prefs / RC (shell ctor defaults to on). */
+		Config->set_clicking (_pref_click_default);
 
 		step ("Session ctor (new/unnamed)…");
 		/* unnamed=true matches unit-test / headless new-session path. */
@@ -1456,6 +1686,14 @@ EngineHost::start ()
 		_impl->ardour_inited = true;
 	}
 
+	load_shell_prefs ();
+	if (_backend_name.empty ()) {
+		_backend_name = _pref_backend.empty () ? "Dummy" : _pref_backend;
+	}
+	if (_period_frames == 0 && _pref_period_frames > 0) {
+		_period_frames = _pref_period_frames;
+	}
+
 	step ("SessionEvent pool");
 	SessionEvent::create_per_thread_pool ("win-shell", 512);
 
@@ -1497,6 +1735,10 @@ EngineHost::start ()
 
 	_started = true;
 	ensure_session ();
+	if (_pref_snap_default) {
+		set_snap_enabled (true);
+	}
+	refresh_prefs_snap ();
 	refresh_snapshot ();
 	if (_snap.session_ok) {
 		_snap.detail = L"Session + PeakMeter — UI thread; audio on RT";
@@ -7915,8 +8157,12 @@ EngineHost::snapshot () const
 
 EngineHost::EngineHost ()
 	: _started (false)
-	, _backend_name ("Dummy")
+	, _backend_name ()
 	, _period_frames (0)
+	, _pref_backend ("Dummy")
+	, _pref_period_frames (0)
+	, _pref_snap_default (false)
+	, _pref_click_default (true)
 	, _gain (0.85f)
 {
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
@@ -7950,6 +8196,11 @@ EngineHost::EngineHost ()
 	_snap.tc_minutes = 0;
 	_snap.tc_seconds = 0;
 	_snap.tc_frames = 0;
+	_snap.pref_backend = L"Dummy";
+	_snap.pref_period_frames = 0;
+	_snap.pref_snap_default = false;
+	_snap.pref_click_default = true;
+	_snap.vst3_path_hint[0] = L'\0';
 	_snap.aux_bus_ok = false;
 	_snap.available = false;
 	_snap.running = false;
@@ -8068,6 +8319,66 @@ void
 EngineHost::set_period_frames (uint32_t frames)
 {
 	_period_frames = frames;
+}
+
+void
+EngineHost::refresh_prefs_snap ()
+{
+	_snap.pref_backend = (_pref_backend == "WASAPI") ? L"WASAPI" : L"Dummy";
+	_snap.pref_period_frames = _pref_period_frames;
+	_snap.pref_snap_default = _pref_snap_default;
+	_snap.pref_click_default = _pref_click_default;
+}
+
+void
+EngineHost::load_shell_prefs ()
+{
+	refresh_prefs_snap ();
+}
+
+bool
+EngineHost::save_shell_prefs ()
+{
+	return false;
+}
+
+void
+EngineHost::set_pref_backend (const std::string& name)
+{
+	if (name == "WASAPI" || name == "wasapi") {
+		_pref_backend = "WASAPI";
+	} else {
+		_pref_backend = "Dummy";
+	}
+	refresh_prefs_snap ();
+}
+
+void
+EngineHost::set_pref_period_frames (uint32_t frames)
+{
+	_pref_period_frames = frames;
+	refresh_prefs_snap ();
+}
+
+void
+EngineHost::set_pref_snap_default (bool on)
+{
+	_pref_snap_default = on;
+	refresh_prefs_snap ();
+}
+
+bool
+EngineHost::set_pref_click_default (bool on)
+{
+	_pref_click_default = on;
+	refresh_prefs_snap ();
+	return false;
+}
+
+bool
+EngineHost::smoke_prefs ()
+{
+	return false;
 }
 
 bool

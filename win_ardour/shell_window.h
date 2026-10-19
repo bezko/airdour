@@ -25,6 +25,7 @@
 #include "engine_host.h"
 #include "history_panel.h"
 #include "mixer_strip.h"
+#include "prefs_panel.h"
 #include "monitor_strip.h"
 #include "transport_bar.h"
 #include "wave_strip.h"
@@ -85,7 +86,8 @@ public:
 	                    bool smoke_monitor = false,
 	                    bool smoke_locate = false,
 	                    bool smoke_zoom = false,
-	                    bool smoke_history = false);
+	                    bool smoke_history = false,
+	                    bool smoke_prefs = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -150,6 +152,9 @@ private:
 	void draw_mixer_pane ();
 	void draw_help_overlay ();
 	void toggle_help ();
+	void toggle_prefs ();
+	void sync_prefs_from_engine ();
+	void apply_prefs_hit (PrefsHit hit);
 	void transport_play ();
 	void transport_stop ();
 	void transport_toggle ();
@@ -266,6 +271,7 @@ private:
 	DWORD            _smoke_record_start_ms;
 	bool             _smoke_failed; /* any --smoke-* reported FAILED */
 	bool             _help_visible;
+	bool             _prefs_visible;
 
 	D2D1_RECT_F _brand_bar;
 	D2D1_RECT_F _transport_bounds;
@@ -308,5 +314,6 @@ private:
 	MixerStrip     _mixers[kMixerStrips];
 	MonitorStrip   _monitor;
 	HistoryPanel   _history;
+	PrefsPanel     _prefs;
 	float          _auto_last_write_sec;
 };

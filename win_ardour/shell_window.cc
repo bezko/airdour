@@ -112,6 +112,7 @@ ShellWindow::ShellWindow ()
 	, _smoke_record_start_ms (0)
 	, _smoke_failed (false)
 	, _help_visible (false)
+	, _prefs_visible (false)
 	, _brand_bar ()
 	, _transport_bounds ()
 	, _editor_pane ()
@@ -216,7 +217,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_monitor,
                             bool smoke_locate,
                             bool smoke_zoom,
-                            bool smoke_history)
+                            bool smoke_history,
+                            bool smoke_prefs)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -581,6 +583,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_prefs && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_prefs ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_prefs_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_prefs) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-prefs FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -617,6 +634,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 	sync_monitor_from_engine ();
 	sync_history_from_engine ();
+	sync_prefs_from_engine ();
 	layout_panes ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
@@ -2254,12 +2272,19 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		return 0;
 	case WM_KEYDOWN:
 		if (wparam == VK_ESCAPE) {
-			if (_help_visible) {
+			if (_prefs_visible) {
+				_prefs_visible = false;
+				_prefs.set_visible (false);
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			} else if (_help_visible) {
 				_help_visible = false;
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			} else {
 				PostQuitMessage (0);
 			}
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && wparam == VK_OEM_COMMA) {
+			/* Ctrl+, — Preferences. */
+			toggle_prefs ();
 		} else if (wparam == VK_F1
 		           || ((wparam == VK_OEM_2 || wparam == VK_DIVIDE)
 		               && (GetKeyState (VK_SHIFT) & 0x8000))) {
@@ -2691,6 +2716,12 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	float x, y;
 	client_from_lparam (lparam, &x, &y);
 
+	if (_prefs_visible) {
+		PrefsHit ph = _prefs.hit_test (x, y);
+		apply_prefs_hit (ph);
+		return true;
+	}
+
 	if (_help_visible) {
 		/* Any click dismisses the shortcuts overlay. */
 		_help_visible = false;
@@ -2701,6 +2732,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	TransportHit th = _transport.hit_test (x, y);
 	if (th == TransportHit::Help) {
 		toggle_help ();
+		return true;
+	}
+	if (th == TransportHit::Prefs) {
+		toggle_prefs ();
 		return true;
 	}
 	if (th == TransportHit::Play) {
@@ -4009,7 +4044,90 @@ ShellWindow::draw_midi_lane ()
 void
 ShellWindow::toggle_help ()
 {
+	if (_prefs_visible) {
+		_prefs_visible = false;
+		_prefs.set_visible (false);
+	}
 	_help_visible = !_help_visible;
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::sync_prefs_from_engine ()
+{
+	_prefs.set_current_backend (_engine_snap.backend.c_str ());
+	_prefs.set_pref_backend (_engine_snap.pref_backend.c_str ());
+	_prefs.set_current_period (_engine_snap.period_frames, _engine_snap.sample_rate);
+	_prefs.set_pref_period (_engine_snap.pref_period_frames);
+	_prefs.set_click_default (_engine_snap.pref_click_default);
+	_prefs.set_snap_default (_engine_snap.pref_snap_default);
+	_prefs.set_vst3_hint (_engine_snap.vst3_path_hint);
+}
+
+void
+ShellWindow::toggle_prefs ()
+{
+	if (_help_visible) {
+		_help_visible = false;
+	}
+	_prefs_visible = !_prefs_visible;
+	_prefs.set_visible (_prefs_visible);
+	if (_prefs_visible) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_prefs_from_engine ();
+		_prefs.set_status (L"");
+		_prefs.layout ((float)_width, (float)_height, _dpi_scale);
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::apply_prefs_hit (PrefsHit hit)
+{
+	switch (hit) {
+	case PrefsHit::Close:
+		_prefs_visible = false;
+		_prefs.set_visible (false);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	case PrefsHit::BackendDummy:
+		_engine.set_pref_backend ("Dummy");
+		break;
+	case PrefsHit::BackendWasapi:
+		_engine.set_pref_backend ("WASAPI");
+		break;
+	case PrefsHit::PeriodAuto:
+		_engine.set_pref_period_frames (0);
+		break;
+	case PrefsHit::Period480:
+		_engine.set_pref_period_frames (480);
+		break;
+	case PrefsHit::Period512:
+		_engine.set_pref_period_frames (512);
+		break;
+	case PrefsHit::ClickToggle:
+		_engine.set_pref_click_default (!_engine.snapshot ().pref_click_default);
+		break;
+	case PrefsHit::SnapToggle:
+		_engine.set_pref_snap_default (!_engine.snapshot ().pref_snap_default);
+		break;
+	case PrefsHit::Save:
+		if (_engine.save_shell_prefs ()) {
+			_prefs.set_status (L"Saved");
+		} else {
+			_prefs.set_status (L"Save failed");
+		}
+		break;
+	case PrefsHit::None:
+	default:
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_prefs_from_engine ();
+	sync_transport_tempo_from_engine ();
+	_transport.set_snap_enabled (_engine_snap.snap_enabled);
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
@@ -4047,6 +4165,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Space", L"Play / Stop" },
 		{ L"Esc", L"Close help · quit app" },
 		{ L"F1  /  ?", L"Toggle this help" },
+		{ L"Ctrl+,", L"Preferences" },
 		{ L"Ctrl+Z / Y", L"Undo / Redo" },
 		{ L"Ctrl+S / O / E", L"Save / Open / Export" },
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
@@ -4171,6 +4290,11 @@ ShellWindow::on_paint ()
 	draw_mixer_pane ();
 	if (_help_visible) {
 		draw_help_overlay ();
+	}
+	if (_prefs_visible) {
+		_prefs.layout ((float)_width, (float)_height, _dpi_scale);
+		_prefs.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
+		             _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
 	}
 
 	wchar_t status[384];
