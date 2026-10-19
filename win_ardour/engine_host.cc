@@ -484,6 +484,13 @@ public:
 	int             track_comp_sidechain_src;
 	std::string     track_comp_name;
 	std::weak_ptr<PluginInsert> track_comp;
+	bool            track_eq_ok;
+	bool            track_eq_bypassed;
+	float           track_eq_gain_l_db;
+	float           track_eq_gain_m_db;
+	float           track_eq_gain_h_db;
+	std::string     track_eq_name;
+	std::weak_ptr<PluginInsert> track_eq;
 	bool            plugins_scanned;
 
 	Impl ()
@@ -508,6 +515,11 @@ public:
 		, track_comp_ratio (4.f)
 		, track_comp_sidechain (false)
 		, track_comp_sidechain_src (-1)
+		, track_eq_ok (false)
+		, track_eq_bypassed (false)
+		, track_eq_gain_l_db (0.f)
+		, track_eq_gain_m_db (0.f)
+		, track_eq_gain_h_db (0.f)
 		, plugins_scanned (false)
 	{
 	}
@@ -643,6 +655,14 @@ EngineHost::EngineHost ()
 	_snap.track_comp_ratio_norm = (4.f - 1.f) / 19.f;
 	_snap.track_comp_sidechain = false;
 	_snap.track_comp_sidechain_src = -1;
+	_snap.track_eq_ok = false;
+	_snap.track_eq_bypassed = false;
+	_snap.track_eq_gain_l_db = 0.f;
+	_snap.track_eq_gain_m_db = 0.f;
+	_snap.track_eq_gain_h_db = 0.f;
+	_snap.track_eq_gain_l_norm = 0.5f;
+	_snap.track_eq_gain_m_norm = 0.5f;
+	_snap.track_eq_gain_h_norm = 0.5f;
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -671,6 +691,7 @@ EngineHost::EngineHost ()
 	_snap.track_fx_name.clear ();
 	_snap.track_fx_param_name = L"Blend";
 	_snap.track_comp_name.clear ();
+	_snap.track_eq_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -1694,6 +1715,10 @@ EngineHost::ensure_session ()
 		if (_impl->tracks.size () > 1) {
 			insert_track_comp (1);
 		}
+		/* Best-effort ACE EQ on Audio 3 (Gain L / Gain 2 / Gain H D2D). */
+		if (_impl->tracks.size () > 2) {
+			insert_track_eq (2);
+		}
 
 		step ("aux bus + sends");
 		ensure_aux_sends ();
@@ -1706,6 +1731,7 @@ EngineHost::ensure_session ()
 		refresh_region_flags ();
 		refresh_track_fx_snap ();
 		refresh_track_comp_snap ();
+		refresh_track_eq_snap ();
 		step ("ready");
 		return true;
 	} catch (SessionException& e) {
@@ -1765,6 +1791,13 @@ EngineHost::destroy_session ()
 	_impl->track_comp_sidechain_src = -1;
 	_impl->track_comp_name.clear ();
 	_impl->track_comp.reset ();
+	_impl->track_eq_ok = false;
+	_impl->track_eq_bypassed = false;
+	_impl->track_eq_gain_l_db = 0.f;
+	_impl->track_eq_gain_m_db = 0.f;
+	_impl->track_eq_gain_h_db = 0.f;
+	_impl->track_eq_name.clear ();
+	_impl->track_eq.reset ();
 	_impl->selected_track = -1;
 	_impl->selected_region.reset ();
 	if (_impl->session) {
@@ -8791,6 +8824,11 @@ static const char* kAceCompUri = "urn:ardour:a-comp";
 static const uint32_t kAceCompRatioPort = 3;
 static const uint32_t kAceCompThresholdPort = 4;
 static const uint32_t kAceCompSidechainPort = 9;
+/* Bundled ACE EQ (libs/plugins/a-eq.lv2) — DSP-only, no cairo. */
+static const char* kAceEqUri = "urn:ardour:a-eq";
+static const uint32_t kAceEqGainLPort = 1; /* Gain L */
+static const uint32_t kAceEqGain2Port = 6; /* Gain 2 (mid) */
+static const uint32_t kAceEqGainHPort = 15; /* Gain H */
 
 static float
 comp_threshold_to_norm (float db)
@@ -8818,6 +8856,20 @@ comp_norm_to_ratio (float n)
 {
 	n = std::max (0.f, std::min (1.f, n));
 	return 1.f + n * 19.f;
+}
+
+static float
+eq_gain_to_norm (float db)
+{
+	db = std::max (-20.f, std::min (20.f, db));
+	return (db - (-20.f)) / 40.f;
+}
+
+static float
+eq_norm_to_gain (float n)
+{
+	n = std::max (0.f, std::min (1.f, n));
+	return -20.f + n * 40.f;
 }
 
 } // namespace
@@ -9025,6 +9077,26 @@ find_ace_comp_info ()
 	return PluginInfoPtr ();
 }
 
+static PluginInfoPtr
+find_ace_eq_info ()
+{
+	try {
+		const PluginInfoList& plugs = PluginManager::instance ().lv2_plugin_info ();
+		for (PluginInfoList::const_iterator i = plugs.begin (); i != plugs.end (); ++i) {
+			if (!*i) {
+				continue;
+			}
+			if ((*i)->unique_id == kAceEqUri
+			    || (*i)->name.find ("ACE EQ") != std::string::npos
+			    || (*i)->name.find ("a-eq") != std::string::npos) {
+				return *i;
+			}
+		}
+	} catch (...) {
+	}
+	return PluginInfoPtr ();
+}
+
 static std::shared_ptr<PluginInsert>
 find_ace_reverb_insert (std::shared_ptr<Route> route, std::string* out_name = nullptr)
 {
@@ -9085,6 +9157,36 @@ find_ace_comp_insert (std::shared_ptr<Route> route, std::string* out_name = null
 			found = pi;
 			if (out_name) {
 				*out_name = pname.empty () ? "ACE Compressor" : pname;
+			}
+		}
+	});
+	return found;
+}
+
+static std::shared_ptr<PluginInsert>
+find_ace_eq_insert (std::shared_ptr<Route> route, std::string* out_name = nullptr)
+{
+	std::shared_ptr<PluginInsert> found;
+	if (!route) {
+		return found;
+	}
+	route->foreach_processor ([&] (std::weak_ptr<Processor> wp) {
+		if (found) {
+			return;
+		}
+		std::shared_ptr<Processor> p = wp.lock ();
+		std::shared_ptr<PluginInsert> pi = std::dynamic_pointer_cast<PluginInsert> (p);
+		if (!pi || !pi->plugin ()) {
+			return;
+		}
+		std::string uid = pi->plugin ()->unique_id ();
+		std::string pname = pi->name ();
+		if (uid.find (kAceEqUri) == 0
+		    || pname.find ("ACE EQ") != std::string::npos
+		    || pname.find ("a-eq") != std::string::npos) {
+			found = pi;
+			if (out_name) {
+				*out_name = pname.empty () ? "ACE EQ" : pname;
 			}
 		}
 	});
@@ -10023,6 +10125,389 @@ EngineHost::smoke_comp ()
 	}
 }
 
+void
+EngineHost::refresh_track_eq_snap ()
+{
+	_snap.track_eq_ok = false;
+	_snap.track_eq_bypassed = false;
+	_snap.track_eq_gain_l_db = _impl ? _impl->track_eq_gain_l_db : 0.f;
+	_snap.track_eq_gain_m_db = _impl ? _impl->track_eq_gain_m_db : 0.f;
+	_snap.track_eq_gain_h_db = _impl ? _impl->track_eq_gain_h_db : 0.f;
+	_snap.track_eq_gain_l_norm = eq_gain_to_norm (_snap.track_eq_gain_l_db);
+	_snap.track_eq_gain_m_norm = eq_gain_to_norm (_snap.track_eq_gain_m_db);
+	_snap.track_eq_gain_h_norm = eq_gain_to_norm (_snap.track_eq_gain_h_db);
+	_snap.track_eq_name.clear ();
+	if (!_impl || _impl->tracks.size () < 3 || !_impl->tracks[2]) {
+		return;
+	}
+	std::string name;
+	std::shared_ptr<PluginInsert> pi = _impl->track_eq.lock ();
+	if (!pi) {
+		pi = find_ace_eq_insert (_impl->tracks[2], &name);
+		if (pi) {
+			_impl->track_eq = pi;
+		}
+	} else {
+		name = pi->name ().empty () ? "ACE EQ" : pi->name ();
+	}
+	if (!pi) {
+		_impl->track_eq_ok = false;
+		return;
+	}
+	_impl->track_eq_ok = true;
+	_impl->track_eq_name = name.empty () ? "ACE EQ" : name;
+	_impl->track_eq_bypassed = !pi->active ();
+	try {
+		std::shared_ptr<AutomationControl> gl = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceEqGainLPort));
+		std::shared_ptr<AutomationControl> gm = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceEqGain2Port));
+		std::shared_ptr<AutomationControl> gh = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceEqGainHPort));
+		if (gl) {
+			_impl->track_eq_gain_l_db = (float)gl->get_value ();
+		}
+		if (gm) {
+			_impl->track_eq_gain_m_db = (float)gm->get_value ();
+		}
+		if (gh) {
+			_impl->track_eq_gain_h_db = (float)gh->get_value ();
+		}
+	} catch (...) {
+	}
+	_snap.track_eq_ok = true;
+	_snap.track_eq_bypassed = _impl->track_eq_bypassed;
+	_snap.track_eq_gain_l_db = _impl->track_eq_gain_l_db;
+	_snap.track_eq_gain_m_db = _impl->track_eq_gain_m_db;
+	_snap.track_eq_gain_h_db = _impl->track_eq_gain_h_db;
+	_snap.track_eq_gain_l_norm = eq_gain_to_norm (_impl->track_eq_gain_l_db);
+	_snap.track_eq_gain_m_norm = eq_gain_to_norm (_impl->track_eq_gain_m_db);
+	_snap.track_eq_gain_h_norm = eq_gain_to_norm (_impl->track_eq_gain_h_db);
+	_snap.track_eq_name = utf8_to_wide (_impl->track_eq_name);
+}
+
+bool
+EngineHost::insert_track_eq (int track)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"insert EQ: no audio track";
+		return false;
+	}
+	std::shared_ptr<AudioTrack> at = _impl->tracks[track];
+	std::string existing;
+	std::shared_ptr<PluginInsert> already = find_ace_eq_insert (at, &existing);
+	if (already) {
+		_impl->track_eq = already;
+		_impl->track_eq_ok = true;
+		_impl->track_eq_name = existing;
+		refresh_track_eq_snap ();
+		return true;
+	}
+
+	ensure_plugins_scanned ();
+	try {
+		PluginInfoPtr info = find_ace_eq_info ();
+		if (!info) {
+			_snap.detail = L"ACE EQ not found (check ARDOUR_DLL_PATH/LV2)";
+			std::fprintf (stderr, "airdour_win_shell: ACE EQ LV2 missing\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		PluginPtr plugin = info->load (*_impl->session);
+		if (!plugin) {
+			_snap.detail = L"ACE EQ load failed";
+			return false;
+		}
+
+		std::shared_ptr<PluginInsert> pi (
+		    new PluginInsert (*_impl->session, *at, plugin));
+		pi->set_strict_io (true);
+		if (at->add_processor (pi, PreFader) != 0) {
+			_snap.detail = L"ACE EQ add_processor failed";
+			return false;
+		}
+
+		_impl->track_eq = pi;
+		_impl->track_eq_ok = true;
+		_impl->track_eq_bypassed = !pi->active ();
+		_impl->track_eq_name = info->name.empty () ? "ACE EQ" : info->name;
+		try {
+			std::shared_ptr<AutomationControl> gl = pi->automation_control (
+			    Evoral::Parameter (PluginAutomation, 0, kAceEqGainLPort));
+			std::shared_ptr<AutomationControl> gm = pi->automation_control (
+			    Evoral::Parameter (PluginAutomation, 0, kAceEqGain2Port));
+			std::shared_ptr<AutomationControl> gh = pi->automation_control (
+			    Evoral::Parameter (PluginAutomation, 0, kAceEqGainHPort));
+			if (gl) {
+				_impl->track_eq_gain_l_db = (float)gl->get_value ();
+			}
+			if (gm) {
+				_impl->track_eq_gain_m_db = (float)gm->get_value ();
+			}
+			if (gh) {
+				_impl->track_eq_gain_h_db = (float)gh->get_value ();
+			}
+		} catch (...) {
+		}
+		refresh_track_eq_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: EQ \"%s\" on Audio %d (pre-fader)\n",
+		              _impl->track_eq_name.c_str (), track + 1);
+		std::fflush (stderr);
+		_snap.detail = L"ACE EQ on Audio 3";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: insert_track_eq: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_eq_bypassed (int track, bool bypassed)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_eq (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_eq.lock ();
+	if (!pi) {
+		pi = find_ace_eq_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_eq = pi;
+	}
+	try {
+		if (bypassed) {
+			pi->deactivate ();
+		} else {
+			pi->activate ();
+		}
+		_impl->track_eq_bypassed = !pi->active ();
+		refresh_track_eq_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_track_eq_bypass (int track)
+{
+	refresh_track_eq_snap ();
+	return set_track_eq_bypassed (track, !_snap.track_eq_bypassed);
+}
+
+bool
+EngineHost::set_track_eq_gain_l_db (int track, float db)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_eq (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_eq.lock ();
+	if (!pi) {
+		pi = find_ace_eq_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_eq = pi;
+	}
+	db = std::max (-20.f, std::min (20.f, db));
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceEqGainLPort));
+		if (!ac) {
+			_snap.detail = L"ACE EQ Gain L missing";
+			return false;
+		}
+		ac->set_value (db, Controllable::NoGroup);
+		_impl->track_eq_gain_l_db = (float)ac->get_value ();
+		refresh_track_eq_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_eq_gain_m_db (int track, float db)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_eq (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_eq.lock ();
+	if (!pi) {
+		pi = find_ace_eq_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_eq = pi;
+	}
+	db = std::max (-20.f, std::min (20.f, db));
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceEqGain2Port));
+		if (!ac) {
+			_snap.detail = L"ACE EQ Gain 2 missing";
+			return false;
+		}
+		ac->set_value (db, Controllable::NoGroup);
+		_impl->track_eq_gain_m_db = (float)ac->get_value ();
+		refresh_track_eq_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_eq_gain_h_db (int track, float db)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_eq (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_eq.lock ();
+	if (!pi) {
+		pi = find_ace_eq_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_eq = pi;
+	}
+	db = std::max (-20.f, std::min (20.f, db));
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceEqGainHPort));
+		if (!ac) {
+			_snap.detail = L"ACE EQ Gain H missing";
+			return false;
+		}
+		ac->set_value (db, Controllable::NoGroup);
+		_impl->track_eq_gain_h_db = (float)ac->get_value ();
+		refresh_track_eq_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_eq_gain_l_norm (int track, float norm_0_1)
+{
+	return set_track_eq_gain_l_db (track, eq_norm_to_gain (norm_0_1));
+}
+
+bool
+EngineHost::set_track_eq_gain_m_norm (int track, float norm_0_1)
+{
+	return set_track_eq_gain_m_db (track, eq_norm_to_gain (norm_0_1));
+}
+
+bool
+EngineHost::set_track_eq_gain_h_norm (int track, float norm_0_1)
+{
+	return set_track_eq_gain_h_db (track, eq_norm_to_gain (norm_0_1));
+}
+
+bool
+EngineHost::smoke_eq ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-eq failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.size () < 3 || !_impl->tracks[2]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-eq FAILED (need Audio 3)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!insert_track_eq (2) || !_snap.track_eq_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-eq FAILED (insert)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::string verified;
+		if (!find_ace_eq_insert (_impl->tracks[2], &verified)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-eq FAILED (not on route)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!set_track_eq_bypassed (2, false) || _snap.track_eq_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-eq FAILED (bypass clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_eq_gain_l_db (2, -6.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-eq FAILED (Gain L)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_eq_gain_l_db < -6.5f || _snap.track_eq_gain_l_db > -5.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-eq FAILED (L=%.1f)\n",
+			              _snap.track_eq_gain_l_db);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_eq_gain_m_db (2, 3.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-eq FAILED (Gain 2)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_eq_gain_m_db < 2.5f || _snap.track_eq_gain_m_db > 3.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-eq FAILED (M=%.1f)\n",
+			              _snap.track_eq_gain_m_db);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_eq_gain_h_db (2, -3.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-eq FAILED (Gain H)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_eq_gain_h_db < -3.5f || _snap.track_eq_gain_h_db > -2.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-eq FAILED (H=%.1f)\n",
+			              _snap.track_eq_gain_h_db);
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-eq ok (fx=%s L=%.1f M=%.1f H=%.1f)\n",
+		              verified.c_str (), _snap.track_eq_gain_l_db,
+		              _snap.track_eq_gain_m_db, _snap.track_eq_gain_h_db);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-eq ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-eq exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_perf (unsigned sample_secs)
 {
@@ -10868,6 +11353,7 @@ EngineHost::refresh_snapshot ()
 			refresh_midi_snap ();
 			refresh_track_fx_snap ();
 			refresh_track_comp_snap ();
+			refresh_track_eq_snap ();
 		} else {
 			_snap.waves_from_session = false;
 			_snap.session_record_armed = false;
@@ -11040,6 +11526,14 @@ EngineHost::EngineHost ()
 	_snap.track_comp_ratio_norm = (4.f - 1.f) / 19.f;
 	_snap.track_comp_sidechain = false;
 	_snap.track_comp_sidechain_src = -1;
+	_snap.track_eq_ok = false;
+	_snap.track_eq_bypassed = false;
+	_snap.track_eq_gain_l_db = 0.f;
+	_snap.track_eq_gain_m_db = 0.f;
+	_snap.track_eq_gain_h_db = 0.f;
+	_snap.track_eq_gain_l_norm = 0.5f;
+	_snap.track_eq_gain_m_norm = 0.5f;
+	_snap.track_eq_gain_h_norm = 0.5f;
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -11068,6 +11562,7 @@ EngineHost::EngineHost ()
 	_snap.track_fx_name.clear ();
 	_snap.track_fx_param_name = L"Blend";
 	_snap.track_comp_name.clear ();
+	_snap.track_eq_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -12527,6 +13022,82 @@ EngineHost::smoke_comp ()
 }
 
 bool
+EngineHost::insert_track_eq (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::toggle_track_eq_bypass (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::set_track_eq_bypassed (int track, bool bypassed)
+{
+	(void)track;
+	(void)bypassed;
+	return false;
+}
+
+bool
+EngineHost::set_track_eq_gain_l_db (int track, float db)
+{
+	(void)track;
+	(void)db;
+	return false;
+}
+
+bool
+EngineHost::set_track_eq_gain_m_db (int track, float db)
+{
+	(void)track;
+	(void)db;
+	return false;
+}
+
+bool
+EngineHost::set_track_eq_gain_h_db (int track, float db)
+{
+	(void)track;
+	(void)db;
+	return false;
+}
+
+bool
+EngineHost::set_track_eq_gain_l_norm (int track, float norm_0_1)
+{
+	(void)track;
+	(void)norm_0_1;
+	return false;
+}
+
+bool
+EngineHost::set_track_eq_gain_m_norm (int track, float norm_0_1)
+{
+	(void)track;
+	(void)norm_0_1;
+	return false;
+}
+
+bool
+EngineHost::set_track_eq_gain_h_norm (int track, float norm_0_1)
+{
+	(void)track;
+	(void)norm_0_1;
+	return false;
+}
+
+bool
+EngineHost::smoke_eq ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_vst3 ()
 {
 	return false;
@@ -12546,6 +13117,11 @@ EngineHost::refresh_track_fx_snap ()
 
 void
 EngineHost::refresh_track_comp_snap ()
+{
+}
+
+void
+EngineHost::refresh_track_eq_snap ()
 {
 }
 

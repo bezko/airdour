@@ -440,10 +440,9 @@ _WINDOWS_ONLY_EXCLUDE = set([
         # control_protocol lives under libs/ctrl-interface (kept).
         'libs/surfaces',
         # Cairo UI LV2 plugins — need cairo; headless graph skips them.
-        # a-comp is DSP-only (no Cairo) so it stays in the Windows-only build.
+        # a-comp / a-eq are DSP-only (no Cairo) so they stay in the Windows-only build.
         'libs/plugins/a-exp.lv2',
         'libs/plugins/a-delay.lv2',
-        'libs/plugins/a-eq.lv2',
 ])
 
 def windows_only_children():

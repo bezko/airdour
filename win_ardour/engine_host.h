@@ -87,6 +87,14 @@ struct EngineSnapshot {
 	float        track_comp_ratio_norm; /* 0..1 UI */
 	bool         track_comp_sidechain; /* SC enabled + wired from src */
 	int          track_comp_sidechain_src; /* source track index, or −1 */
+	bool         track_eq_ok; /* ACE EQ on Audio 3 (track 2) */
+	bool         track_eq_bypassed;
+	float        track_eq_gain_l_db; /* Gain L −20..+20 */
+	float        track_eq_gain_m_db; /* Gain 2 −20..+20 */
+	float        track_eq_gain_h_db; /* Gain H −20..+20 */
+	float        track_eq_gain_l_norm; /* 0..1 UI (0.5 = 0 dB) */
+	float        track_eq_gain_m_norm;
+	float        track_eq_gain_h_norm;
 	float        midi_activity; /* 0..1 decaying activity indicator */
 	int          midi_device_count;
 	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices];
@@ -99,6 +107,7 @@ struct EngineSnapshot {
 	std::wstring track_fx_name; /* e.g. ACE Reverb on track 0 */
 	std::wstring track_fx_param_name; /* e.g. Blend */
 	std::wstring track_comp_name; /* e.g. ACE Compressor */
+	std::wstring track_eq_name; /* e.g. ACE EQ */
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
 	std::wstring export_path; /* last exported WAV (UTF-16 display) */
@@ -782,6 +791,21 @@ public:
 	bool set_track_comp_sidechain (int track, int src_track, bool enable);
 
 	/**
+	 * Insert ACE EQ (bundled LV2, DSP-only) on an audio track pre-fader.
+	 * Default track 2 = Audio 3. Idempotent when already present.
+	 * D2D exposes Gain L / Gain 2 / Gain H (−20..+20 dB).
+	 */
+	bool insert_track_eq (int track = 2);
+	bool toggle_track_eq_bypass (int track = 2);
+	bool set_track_eq_bypassed (int track, bool bypassed);
+	bool set_track_eq_gain_l_db (int track, float db);
+	bool set_track_eq_gain_m_db (int track, float db);
+	bool set_track_eq_gain_h_db (int track, float db);
+	bool set_track_eq_gain_l_norm (int track, float norm_0_1);
+	bool set_track_eq_gain_m_norm (int track, float norm_0_1);
+	bool set_track_eq_gain_h_norm (int track, float norm_0_1);
+
+	/**
 	 * Ensure ACE Reverb on Audio 1; verify on route; toggle bypass; set Blend.
 	 * For --smoke-plugin. Hardware not required.
 	 */
@@ -792,6 +816,12 @@ public:
 	 * For --smoke-comp.
 	 */
 	bool smoke_comp ();
+
+	/**
+	 * Insert ACE EQ on Audio 3; set Gain L / Gain 2 / Gain H.
+	 * For --smoke-eq.
+	 */
+	bool smoke_eq ();
 
 	/**
 	 * Scan system VST3 dirs (+ VST3_PATH / AIRDOUR_SMOKE_VST3); list; optionally
@@ -887,6 +917,7 @@ private:
 	void refresh_midi_notes_snap ();
 	void refresh_track_fx_snap ();
 	void refresh_track_comp_snap ();
+	void refresh_track_eq_snap ();
 	bool ensure_plugins_scanned ();
 
 	bool        _started;

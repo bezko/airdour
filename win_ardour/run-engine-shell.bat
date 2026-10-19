@@ -49,6 +49,12 @@ if not exist "%WAF%\ardour\LV2\a-comp.lv2\a-comp.dll" (
     copy /Y "%WAF%\LV2\a-comp.lv2\*" "%WAF%\ardour\LV2\a-comp.lv2\" >nul
   )
 )
+if not exist "%WAF%\ardour\LV2\a-eq.lv2\a-eq.dll" (
+  if exist "%WAF%\LV2\a-eq.lv2\a-eq.dll" (
+    mkdir "%WAF%\ardour\LV2\a-eq.lv2" 2>nul
+    copy /Y "%WAF%\LV2\a-eq.lv2\*" "%WAF%\ardour\LV2\a-eq.lv2\" >nul
+  )
+)
 
 echo PATH includes ptformat + waf libs. Launching:
 echo   %EXE% %*

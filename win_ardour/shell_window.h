@@ -104,7 +104,8 @@ public:
 	                    bool smoke_strip_silence = false,
 	                    bool smoke_consolidate = false,
 	                    bool smoke_freeze = false,
-	                    bool smoke_comp = false);
+	                    bool smoke_comp = false,
+	                    bool smoke_eq = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -115,8 +116,9 @@ private:
 		WavePending, /* click may become select or pan */
 		WavePan,
 		Fader,
-		FxParam, /* drag Mixer FX param 1 (Blend / Comp thr) */
-		FxParam2, /* drag Mixer FX param 2 (Comp ratio) */
+		FxParam, /* drag Mixer FX param 1 (Blend / Comp thr / EQ L) */
+		FxParam2, /* drag Mixer FX param 2 (Comp ratio / EQ mid) */
+		FxParam3, /* drag Mixer FX param 3 (EQ High) */
 		Pan, /* drag Mixer pan azimuth */
 		Send, /* drag Mixer aux send level */
 		AutoWrite, /* click/drag Editor automation lane */
@@ -268,6 +270,7 @@ private:
 	int  hit_mixer_fx (float x, float y) const;
 	int  hit_mixer_fx_param (float x, float y) const;
 	int  hit_mixer_fx_param2 (float x, float y) const;
+	int  hit_mixer_fx_param3 (float x, float y) const;
 	int  hit_mixer_label (float x, float y) const;
 	int  hit_editor_lane_label (float x, float y) const;
 	void client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const;
