@@ -164,3 +164,6 @@ waf3-*
 # Local release packaging output
 /dist/
 
+# Inno Setup bootstrap cache (downloaded compiler installer)
+/tools/win-native/installer/cache/
+

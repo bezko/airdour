@@ -306,7 +306,7 @@ Honest limits
 - No GTK plugin UIs. Mixer shows FX name / BYP / Blend.
 - Default Engine package is MSVC Release (/MD). Pass -Config Debug for the Debug slice.
 - GitHub Actions publishes UiOnly when waf+vcpkg engine libs are not in CI yet.
-- Not an NSIS/MSIX installer.
+- Signed installer optional: Package-WinShell-Installer.ps1 (Inno Setup → dist\*-setup.exe).
 
 Smoke examples (Engine)
 -----------------------
