@@ -1799,13 +1799,14 @@ ShellWindow::draw_midi_lane ()
 	wchar_t midicap[160];
 	if (_engine_snap.midi_track_ok) {
 		_snwprintf_s (midicap, _TRUNCATE,
-		              L"%ls  ·  %d note%s  ·  %d device%s%s",
+		              L"%ls  ·  %d note%s  ·  %ls%s",
 		              _engine_snap.midi_option.empty () ? L"MIDI" : _engine_snap.midi_option.c_str (),
 		              _engine_snap.midi_note_count,
 		              _engine_snap.midi_note_count == 1 ? L"" : L"s",
-		              _engine_snap.midi_device_count,
-		              _engine_snap.midi_device_count == 1 ? L"" : L"s",
-		              _engine_snap.midi_out_connected ? L"  ·  out" : L"");
+		              _engine_snap.midi_synth_ok
+		                  ? (_engine_snap.midi_synth_name.empty () ? L"synth" : _engine_snap.midi_synth_name.c_str ())
+		                  : L"no synth",
+		              _engine_snap.midi_synth_to_master ? L"→master" : L"");
 	} else {
 		_snwprintf_s (midicap, _TRUNCATE, L"no MIDI track");
 	}

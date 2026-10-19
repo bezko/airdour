@@ -45,6 +45,9 @@
 #include "ardour/midi_source.h"
 #include "ardour/midi_track.h"
 #include "ardour/plugin.h"
+#include "ardour/plugin_insert.h"
+#include "ardour/plugin_manager.h"
+#include "ardour/port.h"
 #include "ardour/session.h"
 #include "ardour/session_event.h"
 #include "ardour/audiofilesource.h"
@@ -291,6 +294,10 @@ public:
 	Evoral::event_id_t selected_midi_note_id;
 	bool            midi_out_connected;
 	std::string     midi_out_port;
+	bool            midi_synth_ok;
+	bool            midi_synth_to_master;
+	std::string     midi_synth_name;
+	bool            plugins_scanned;
 
 	Impl ()
 		: engine (nullptr)
@@ -303,6 +310,9 @@ public:
 		, midi_activity (0.f)
 		, selected_midi_note_id (-1)
 		, midi_out_connected (false)
+		, midi_synth_ok (false)
+		, midi_synth_to_master (false)
+		, plugins_scanned (false)
 	{
 	}
 };
@@ -347,6 +357,8 @@ EngineHost::EngineHost ()
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
 	_snap.midi_region_ok = false;
+	_snap.midi_synth_ok = false;
+	_snap.midi_synth_to_master = false;
 	_snap.midi_out_connected = false;
 	_snap.midi_activity = 0.f;
 	_snap.midi_device_count = 0;
@@ -365,6 +377,7 @@ EngineHost::EngineHost ()
 	}
 	_snap.midi_selected_note_id = -1;
 	_snap.midi_option.clear ();
+	_snap.midi_synth_name.clear ();
 	_snap.midi_out_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
@@ -599,6 +612,9 @@ EngineHost::destroy_session ()
 	_impl->selected_midi_note_id = -1;
 	_impl->midi_out_connected = false;
 	_impl->midi_out_port.clear ();
+	_impl->midi_synth_ok = false;
+	_impl->midi_synth_to_master = false;
+	_impl->midi_synth_name.clear ();
 	_impl->selected_track = -1;
 	_impl->selected_region.reset ();
 	if (_impl->session) {
@@ -1222,6 +1238,10 @@ EngineHost::start ()
 		_snap.backend = utf8_to_wide (_impl->engine->current_backend_name ());
 		return false;
 	}
+
+	/* Headless-style plugin scan so bundled LV2 instruments are findable. */
+	ARDOUR::init_post_engine (0);
+	ensure_plugins_scanned ();
 
 	_started = true;
 	ensure_session ();
@@ -2478,11 +2498,65 @@ EngineHost::configure_backend_midi ()
 	return false;
 }
 
+namespace {
+
+/* Bundled ACE Reasonable Synth (libs/plugins/reasonablesynth.lv2). */
+static const char* kReasonableSynthUri = "https://community.ardour.org/node/7596";
+
+} // namespace
+
+bool
+EngineHost::ensure_plugins_scanned ()
+{
+	if (!_impl) {
+		return false;
+	}
+	if (_impl->plugins_scanned) {
+		return true;
+	}
+	try {
+		PluginManager::instance ().refresh (true);
+		_impl->plugins_scanned = true;
+		std::fprintf (stderr, "airdour_win_shell: PluginManager refresh done (LV2=%zu)\n",
+		              PluginManager::instance ().lv2_plugin_info ().size ());
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		std::fprintf (stderr, "airdour_win_shell: PluginManager refresh failed\n");
+		std::fflush (stderr);
+		return false;
+	}
+}
+
+static PluginInfoPtr
+find_reasonable_synth_info ()
+{
+	try {
+		const PluginInfoList& plugs = PluginManager::instance ().lv2_plugin_info ();
+		for (PluginInfoList::const_iterator i = plugs.begin (); i != plugs.end (); ++i) {
+			if (!*i) {
+				continue;
+			}
+			if ((*i)->unique_id == kReasonableSynthUri
+			    || (*i)->name.find ("Reasonable Synth") != std::string::npos) {
+				return *i;
+			}
+		}
+	} catch (...) {
+	}
+	return PluginInfoPtr ();
+}
+
 void
 EngineHost::refresh_midi_notes_snap ()
 {
 	_snap.midi_note_count = 0;
 	_snap.midi_region_ok = false;
+	_snap.midi_synth_ok = _impl && _impl->midi_synth_ok;
+	_snap.midi_synth_to_master = _impl && _impl->midi_synth_to_master;
+	_snap.midi_synth_name = (_impl && !_impl->midi_synth_name.empty ())
+	                            ? utf8_to_wide (_impl->midi_synth_name)
+	                            : std::wstring ();
 	_snap.midi_selected_note_id = _impl ? _impl->selected_midi_note_id : -1;
 	_snap.midi_out_connected = _impl && _impl->midi_out_connected;
 	_snap.midi_out_name = (_impl && !_impl->midi_out_port.empty ())
@@ -2682,22 +2756,119 @@ EngineHost::connect_midi_output ()
 }
 
 bool
+EngineHost::attach_midi_synth ()
+{
+	if (!_impl || !_impl->session || !_impl->midi_track) {
+		return false;
+	}
+	if (_impl->midi_synth_ok && _impl->midi_track->the_instrument ()) {
+		_snap.midi_synth_ok = true;
+		_snap.midi_synth_to_master = _impl->midi_synth_to_master;
+		_snap.midi_synth_name = utf8_to_wide (_impl->midi_synth_name);
+		return true;
+	}
+	ensure_plugins_scanned ();
+	try {
+		if (_impl->midi_track->the_instrument ()) {
+			_impl->midi_synth_ok = true;
+			_impl->midi_synth_name = _impl->midi_track->the_instrument ()->name ();
+			_impl->midi_synth_to_master =
+			    _impl->midi_track->output ()
+			    && _impl->midi_track->output ()->n_ports ().n_audio () > 0;
+			refresh_midi_notes_snap ();
+			return true;
+		}
+
+		PluginInfoPtr info = find_reasonable_synth_info ();
+		if (!info) {
+			_snap.detail = L"ACE Reasonable Synth not found (check ARDOUR_DLL_PATH/LV2)";
+			std::fprintf (stderr, "airdour_win_shell: Reasonable Synth LV2 missing\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		PluginPtr plugin = info->load (*_impl->session);
+		if (!plugin) {
+			_snap.detail = L"Reasonable Synth load failed";
+			return false;
+		}
+
+		std::shared_ptr<PluginInsert> pi (
+		    new PluginInsert (*_impl->session, *_impl->midi_track, plugin));
+		pi->set_strict_io (true);
+		if (_impl->midi_track->add_processor (pi, PreFader) != 0) {
+			_snap.detail = L"Reasonable Synth add_processor failed";
+			return false;
+		}
+
+		/* Ensure stereo audio outs and connect to master when possible. */
+		std::shared_ptr<Route> master = _impl->session->master_out ();
+		bool to_master = false;
+		if (master && _impl->midi_track->output () && master->input ()) {
+			ChanCount want = _impl->midi_track->output ()->n_ports ();
+			want.set (DataType::AUDIO, 2);
+			{
+				PBD::Mutex::Lock lm (_impl->engine->process_lock ());
+				_impl->midi_track->output ()->ensure_io (want, false);
+			}
+			uint32_t n_out = _impl->midi_track->output()->n_ports().n_audio();
+			uint32_t n_in = master->input()->n_ports().n_audio();
+			uint32_t n = std::min (n_out, n_in);
+			for (uint32_t i = 0; i < n; ++i) {
+				std::shared_ptr<Port> our = _impl->midi_track->output ()->nth (i);
+				std::shared_ptr<Port> theirs = master->input ()->nth (i);
+				if (our && theirs) {
+					_impl->midi_track->output ()->connect (our, theirs->name ());
+					to_master = true;
+				}
+			}
+		}
+
+		_impl->midi_synth_ok = true;
+		_impl->midi_synth_to_master = to_master;
+		_impl->midi_synth_name = info->name.empty () ? "ACE Reasonable Synth" : info->name;
+		refresh_midi_notes_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: synth \"%s\" on MIDI track (to_master=%d)\n",
+		              _impl->midi_synth_name.c_str (), to_master ? 1 : 0);
+		std::fflush (stderr);
+		_snap.detail = L"MIDI soft synth ready";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: attach_midi_synth: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::ensure_midi_track ()
 {
 	if (!_impl || !_impl->session) {
 		return false;
 	}
 	if (_impl->midi_track) {
+		attach_midi_synth ();
 		refresh_midi_snap ();
 		return true;
 	}
 	try {
+		ensure_plugins_scanned ();
+		PluginInfoPtr instrument = find_reasonable_synth_info ();
+
 		ChanCount midi_io (DataType::MIDI, 1);
+		/* With an instrument, request audio outs as well so routing works. */
+		ChanCount outs = midi_io;
+		if (instrument) {
+			outs.set (DataType::AUDIO, 2);
+		}
 		std::list<std::shared_ptr<MidiTrack> > created = _impl->session->new_midi_track (
 			midi_io,
-			midi_io,
+			outs,
 			true /*strict_io*/,
-			std::shared_ptr<PluginInfo> (),
+			instrument,
 			(Plugin::PresetRecord*)0,
 			std::shared_ptr<RouteGroup> (),
 			1,
@@ -2711,14 +2882,26 @@ EngineHost::ensure_midi_track ()
 			return false;
 		}
 		_impl->midi_track = created.front ();
-		/* Do not connect MIDI out here — process-thread ReaderLock on the
-		 * SMF source can deadlock UI WriterLock during note edits. Connect
-		 * from transport_play / after smoke-midi-edit instead. */
+		if (_impl->midi_track->the_instrument ()) {
+			_impl->midi_synth_ok = true;
+			_impl->midi_synth_name = _impl->midi_track->the_instrument ()->name ();
+			_impl->midi_synth_to_master =
+			    _impl->midi_track->output ()
+			    && _impl->midi_track->output ()->n_ports ().n_audio () > 0;
+			std::fprintf (stderr,
+			              "airdour_win_shell: MIDI track+synth \"%s\" / \"%s\"\n",
+			              _impl->midi_track->name ().c_str (),
+			              _impl->midi_synth_name.c_str ());
+		} else {
+			std::fprintf (stderr, "airdour_win_shell: created MIDI track \"%s\" (no synth yet)\n",
+			              _impl->midi_track->name ().c_str ());
+			attach_midi_synth ();
+		}
+		std::fflush (stderr);
+		/* Do not connect WinMME MIDI out here — SMF WriterLock vs reader deadlock
+		 * during note edits. Soft-synth audio goes through Dummy/WASAPI master. */
 		refresh_midi_snap ();
 		_snap.detail = L"MIDI track ready";
-		std::fprintf (stderr, "airdour_win_shell: created MIDI track \"%s\"\n",
-		              _impl->midi_track->name ().c_str ());
-		std::fflush (stderr);
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: MIDI track exception: %s\n", e.what ());
@@ -3155,12 +3338,20 @@ EngineHost::smoke_midi_edit ()
 			std::fflush (stderr);
 			return false;
 		}
-		/* Connect playback outs only after edits (avoids SMF Reader/Writer deadlock). */
+		/* Soft-synth must be in-graph for Dummy/WASAPI audible path (no MIDI HW). */
+		if (!attach_midi_synth () || !_snap.midi_synth_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit FAILED (synth)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Optional WinMME physical out — not required for hearing via soft-synth. */
 		connect_midi_output ();
 		refresh_midi_snap ();
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-midi-edit ok (notes=%d out=%ls)\n",
+		              "airdour_win_shell: smoke-midi-edit ok (notes=%d synth=%ls master=%d out=%ls)\n",
 		              after_del,
+		              _snap.midi_synth_name.empty () ? L"(none)" : _snap.midi_synth_name.c_str (),
+		              _snap.midi_synth_to_master ? 1 : 0,
 		              _snap.midi_out_connected ? _snap.midi_out_name.c_str () : L"(none)");
 		std::fflush (stderr);
 		_snap.detail = L"smoke-midi-edit ok";
@@ -3289,6 +3480,8 @@ EngineHost::EngineHost ()
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
 	_snap.midi_region_ok = false;
+	_snap.midi_synth_ok = false;
+	_snap.midi_synth_to_master = false;
 	_snap.midi_out_connected = false;
 	_snap.midi_activity = 0.f;
 	_snap.midi_device_count = 0;
@@ -3307,6 +3500,7 @@ EngineHost::EngineHost ()
 	}
 	_snap.midi_selected_note_id = -1;
 	_snap.midi_option.clear ();
+	_snap.midi_synth_name.clear ();
 	_snap.midi_out_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
@@ -3623,6 +3817,18 @@ EngineHost::smoke_loop_markers ()
 
 bool
 EngineHost::ensure_midi_track ()
+{
+	return false;
+}
+
+bool
+EngineHost::attach_midi_synth ()
+{
+	return false;
+}
+
+bool
+EngineHost::ensure_plugins_scanned ()
 {
 	return false;
 }

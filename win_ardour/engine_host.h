@@ -61,6 +61,8 @@ struct EngineSnapshot {
 	bool         midi_ok; /* backend MIDI option active / ports present */
 	bool         midi_track_ok; /* Session has at least one MidiTrack */
 	bool         midi_region_ok; /* playlist has a MidiRegion for editing */
+	bool         midi_synth_ok; /* in-graph soft synth on MIDI track */
+	bool         midi_synth_to_master; /* synth audio routed toward master */
 	bool         midi_out_connected; /* track output → physical MIDI (e.g. GS) */
 	float        midi_activity; /* 0..1 decaying activity indicator */
 	int          midi_device_count;
@@ -69,6 +71,7 @@ struct EngineSnapshot {
 	EngineMidiNoteSnap midi_notes[kMaxMidiNotes];
 	int32_t      midi_selected_note_id; /* Evoral id, or -1 */
 	std::wstring midi_option; /* e.g. WinMME / Dummy loopback */
+	std::wstring midi_synth_name; /* e.g. ACE Reasonable Synth */
 	std::wstring midi_out_name; /* connected playback port display name */
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
@@ -203,6 +206,12 @@ public:
 	bool ensure_midi_track ();
 
 	/**
+	 * Attach ACE Reasonable Synth (bundled LV2) to MIDI 1 and route audio
+	 * toward the master bus so notes are audible via Dummy/WASAPI shared.
+	 */
+	bool attach_midi_synth ();
+
+	/**
 	 * Ensure an empty MidiRegion on the MIDI track playlist (creates if needed).
 	 * length_sec is the region span starting at 0.
 	 */
@@ -234,7 +243,7 @@ public:
 
 	/**
 	 * Ensure region, add notes, select+delete one, verify remaining notes in model.
-	 * Does not require audible soft-synth / GS hardware.
+	 * Also attaches Reasonable Synth and checks master routing when available.
 	 */
 	bool smoke_midi_edit ();
 
@@ -272,6 +281,7 @@ private:
 	bool compute_export_range (int64_t* start_sample, int64_t* end_sample) const;
 	bool configure_backend_midi ();
 	void refresh_midi_notes_snap ();
+	bool ensure_plugins_scanned ();
 
 	bool        _started;
 	std::string _backend_name;
