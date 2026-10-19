@@ -186,6 +186,9 @@ struct EngineSnapshot {
 	bool         midi_arp_enabled; /* live arpeggiator into MidiTrack synth */
 	int          midi_arp_mode; /* 0=up 1=down 2=up-down */
 	int          midi_arp_pitch; /* currently sounding pitch, or −1 */
+	bool         midi_scale_lock; /* constrain step/click roots to scale */
+	int          midi_scale_kind; /* 0=major 1=natural minor */
+	int          midi_scale_root; /* 0=C .. 11=B */
 	int          snap_density; /* 0=bar 1=beat 2=1/2 3=1/4 */
 	int          grid_line_count; /* visible grid lines for Editor draw */
 	static constexpr int kMaxGridLines = 96;
@@ -1062,6 +1065,23 @@ public:
 	int  midi_chord_quality () const;
 	int  cycle_midi_chord_quality ();
 	/**
+	 * Scale lock for step/click: when on, the input root is snapped to the
+	 * nearest degree of major/natural-minor with midi_scale_root (0=C..11=B).
+	 * Chord mode still builds fixed maj/min intervals from that snapped root
+	 * (chord tones may leave the scale). Does not rewrite existing notes.
+	 */
+	void set_midi_scale_lock (bool on);
+	bool midi_scale_lock () const;
+	bool toggle_midi_scale_lock ();
+	void set_midi_scale_kind (int kind); /* 0=major 1=minor */
+	int  midi_scale_kind () const;
+	int  cycle_midi_scale_kind ();
+	void set_midi_scale_root (int root); /* 0..11 */
+	int  midi_scale_root () const;
+	int  cycle_midi_scale_root ();
+	/** Snap pitch to nearest scale degree when lock is on; else unchanged. */
+	uint8_t snap_pitch_to_scale (uint8_t pitch) const;
+	/**
 	 * Place a note (or maj/min triad when chord quality ≠ off) at the
 	 * transport playhead (length ≈ snap grid unit × 0.9). When advance is
 	 * true, move playhead one grid step after placing. advance=false supports
@@ -1161,6 +1181,12 @@ public:
 	 * For --smoke-midi-arp.
 	 */
 	bool smoke_midi_arp ();
+
+	/**
+	 * C-major lock snaps C#→D; chord maj from snapped root; lock off passthrough.
+	 * For --smoke-midi-scale.
+	 */
+	bool smoke_midi_scale ();
 
 	std::string session_dir () const;
 	std::string last_export_path () const;

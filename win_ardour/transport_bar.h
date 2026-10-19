@@ -53,6 +53,7 @@ enum class TransportHit {
 	MidiStep,
 	MidiChord,
 	MidiArp,
+	MidiScale,
 	CountIn,
 	Click,
 	TempoDown,
@@ -115,6 +116,14 @@ public:
 	bool midi_arp_enabled () const { return _midi_arp_enabled; }
 	void set_midi_arp_mode (int mode) { _midi_arp_mode = mode; }
 	int  midi_arp_mode () const { return _midi_arp_mode; }
+
+	/** Scale lock: lit when on; label shows root (+m for minor). */
+	void set_midi_scale_lock (bool on) { _midi_scale_lock = on; }
+	bool midi_scale_lock () const { return _midi_scale_lock; }
+	void set_midi_scale_kind (int kind) { _midi_scale_kind = kind; }
+	int  midi_scale_kind () const { return _midi_scale_kind; }
+	void set_midi_scale_root (int root) { _midi_scale_root = root; }
+	int  midi_scale_root () const { return _midi_scale_root; }
 
 	void set_freeze_active (bool on) { _freeze_active = on; }
 	bool freeze_active () const { return _freeze_active; }
@@ -212,6 +221,7 @@ private:
 	D2D1_RECT_F _midi_step_btn;
 	D2D1_RECT_F _midi_chord_btn;
 	D2D1_RECT_F _midi_arp_btn;
+	D2D1_RECT_F _midi_scale_btn;
 	D2D1_RECT_F _count_btn;
 	D2D1_RECT_F _click_btn;
 	D2D1_RECT_F _tempo_dn_btn;
@@ -243,6 +253,9 @@ private:
 	int         _midi_chord_quality;
 	bool        _midi_arp_enabled;
 	int         _midi_arp_mode;
+	bool        _midi_scale_lock;
+	int         _midi_scale_kind;
+	int         _midi_scale_root;
 	bool        _freeze_active;
 	bool        _count_in_enabled;
 	bool        _click_enabled;

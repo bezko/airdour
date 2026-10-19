@@ -252,7 +252,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_humanize,
                             bool smoke_midi_step,
                             bool smoke_midi_chord,
-                            bool smoke_midi_arp)
+                            bool smoke_midi_arp,
+                            bool smoke_midi_scale)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -421,6 +422,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_arp) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi_scale && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_scale ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_scale) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-scale FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -977,6 +987,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 	_transport.set_midi_arp_enabled (_engine_snap.midi_arp_enabled);
 	_transport.set_midi_arp_mode (_engine_snap.midi_arp_mode);
+	sync_scale_to_transport ();
 	layout_panes ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
@@ -2778,6 +2789,56 @@ ShellWindow::do_cycle_midi_arp_mode ()
 }
 
 void
+ShellWindow::sync_scale_to_transport ()
+{
+	_transport.set_midi_scale_lock (_engine_snap.midi_scale_lock);
+	_transport.set_midi_scale_kind (_engine_snap.midi_scale_kind);
+	_transport.set_midi_scale_root (_engine_snap.midi_scale_root);
+}
+
+void
+ShellWindow::do_toggle_midi_scale ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	_engine.toggle_midi_scale_lock ();
+	_engine_snap = _engine.snapshot ();
+	sync_scale_to_transport ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_cycle_midi_scale_kind ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	_engine.cycle_midi_scale_kind ();
+	if (!_engine.midi_scale_lock ()) {
+		_engine.set_midi_scale_lock (true);
+	}
+	_engine_snap = _engine.snapshot ();
+	sync_scale_to_transport ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_cycle_midi_scale_root ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	_engine.cycle_midi_scale_root ();
+	if (!_engine.midi_scale_lock ()) {
+		_engine.set_midi_scale_lock (true);
+	}
+	_engine_snap = _engine.snapshot ();
+	sync_scale_to_transport ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::sync_arp_held_from_step_keys ()
 {
 	if (!_engine.is_linked ()) {
@@ -3344,6 +3405,15 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				do_cycle_midi_arp_mode ();
 			} else {
 				do_toggle_midi_arp ();
+			}
+		} else if (wparam == VK_F7) {
+			/* F7 — scale lock; Shift=kind; Ctrl=root. */
+			if (GetKeyState (VK_CONTROL) & 0x8000) {
+				do_cycle_midi_scale_root ();
+			} else if (GetKeyState (VK_SHIFT) & 0x8000) {
+				do_cycle_midi_scale_kind ();
+			} else {
+				do_toggle_midi_scale ();
 			}
 		} else if (_engine_snap.midi_step_enabled
 		           && !(GetKeyState (VK_CONTROL) & 0x8000)
@@ -4189,6 +4259,16 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			do_cycle_midi_arp_mode ();
 		} else {
 			do_toggle_midi_arp ();
+		}
+		return true;
+	}
+	if (th == TransportHit::MidiScale) {
+		if (GetKeyState (VK_CONTROL) & 0x8000) {
+			do_cycle_midi_scale_root ();
+		} else if (GetKeyState (VK_SHIFT) & 0x8000) {
+			do_cycle_midi_scale_kind ();
+		} else {
+			do_toggle_midi_scale ();
 		}
 		return true;
 	}
@@ -5286,6 +5366,7 @@ ShellWindow::on_tick ()
 		_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 		_transport.set_midi_arp_enabled (_engine_snap.midi_arp_enabled);
 		_transport.set_midi_arp_mode (_engine_snap.midi_arp_mode);
+		sync_scale_to_transport ();
 		_transport.set_spectrum_enabled (_engine_snap.spectrum_enabled);
 		_transport.set_correlation_enabled (_engine_snap.correlation_enabled);
 		_transport.set_loudness_enabled (_engine_snap.loudness_enabled);
@@ -6005,6 +6086,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F4 / Step", L"MIDI step-record · Z/Q piano · ←→ rest" },
 		{ L"F5 / Chd", L"MIDI chord Off→Maj→Min · multi-key latch" },
 		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
+		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },

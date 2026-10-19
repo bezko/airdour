@@ -640,6 +640,9 @@ EngineHost::EngineHost ()
 	_snap.midi_arp_enabled = false;
 	_snap.midi_arp_mode = 0;
 	_snap.midi_arp_pitch = -1;
+	_snap.midi_scale_lock = false;
+	_snap.midi_scale_kind = 0;
+	_snap.midi_scale_root = 0;
 	_snap.snap_density = 1; /* beat */
 	_snap.grid_line_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
@@ -15470,6 +15473,133 @@ EngineHost::step_advance (int steps)
 	return ok;
 }
 
+void
+EngineHost::set_midi_scale_lock (bool on)
+{
+	_snap.midi_scale_lock = on;
+	_snap.detail = on ? L"MIDI scale lock on" : L"MIDI scale lock off";
+}
+
+bool
+EngineHost::midi_scale_lock () const
+{
+	return _snap.midi_scale_lock;
+}
+
+bool
+EngineHost::toggle_midi_scale_lock ()
+{
+	set_midi_scale_lock (!_snap.midi_scale_lock);
+	return _snap.midi_scale_lock;
+}
+
+void
+EngineHost::set_midi_scale_kind (int kind)
+{
+	if (kind < 0) {
+		kind = 0;
+	}
+	if (kind > 1) {
+		kind = 1;
+	}
+	_snap.midi_scale_kind = kind;
+	_snap.detail = (kind == 1) ? L"MIDI scale minor" : L"MIDI scale major";
+}
+
+int
+EngineHost::midi_scale_kind () const
+{
+	return _snap.midi_scale_kind;
+}
+
+int
+EngineHost::cycle_midi_scale_kind ()
+{
+	set_midi_scale_kind (_snap.midi_scale_kind == 0 ? 1 : 0);
+	return _snap.midi_scale_kind;
+}
+
+void
+EngineHost::set_midi_scale_root (int root)
+{
+	if (root < 0) {
+		root = 0;
+	}
+	if (root > 11) {
+		root = 11;
+	}
+	_snap.midi_scale_root = root;
+	_snap.detail = L"MIDI scale root";
+}
+
+int
+EngineHost::midi_scale_root () const
+{
+	return _snap.midi_scale_root;
+}
+
+int
+EngineHost::cycle_midi_scale_root ()
+{
+	int r = _snap.midi_scale_root + 1;
+	if (r > 11) {
+		r = 0;
+	}
+	set_midi_scale_root (r);
+	return _snap.midi_scale_root;
+}
+
+uint8_t
+EngineHost::snap_pitch_to_scale (uint8_t pitch) const
+{
+	if (!_snap.midi_scale_lock) {
+		return pitch > 127 ? 127 : pitch;
+	}
+	if (pitch > 127) {
+		pitch = 127;
+	}
+	static const int kMajor[7] = { 0, 2, 4, 5, 7, 9, 11 };
+	static const int kMinor[7] = { 0, 2, 3, 5, 7, 8, 10 }; /* natural */
+	const int* deg = (_snap.midi_scale_kind == 1) ? kMinor : kMajor;
+	const int root = _snap.midi_scale_root;
+	const int pc = (int)pitch % 12;
+	int best_pc = (root + deg[0]) % 12;
+	int best_dist = 99;
+	for (int i = 0; i < 7; ++i) {
+		int dpc = (root + deg[i]) % 12;
+		int dist = std::abs (dpc - pc);
+		if (dist > 6) {
+			dist = 12 - dist; /* wrap */
+		}
+		/* Prefer upward on ties so C#→D in C major. */
+		bool better = dist < best_dist;
+		if (!better && dist == best_dist) {
+			int up = (dpc - pc + 12) % 12;
+			int up_best = (best_pc - pc + 12) % 12;
+			better = up < up_best;
+		}
+		if (better) {
+			best_dist = dist;
+			best_pc = dpc;
+		}
+	}
+	int octave = (int)pitch / 12;
+	int out = octave * 12 + best_pc;
+	/* Keep in same octave neighborhood if wrap jumped across. */
+	if (out - (int)pitch > 6) {
+		out -= 12;
+	} else if ((int)pitch - out > 6) {
+		out += 12;
+	}
+	if (out < 0) {
+		out = 0;
+	}
+	if (out > 127) {
+		out = 127;
+	}
+	return (uint8_t)out;
+}
+
 bool
 EngineHost::step_input_midi_note (uint8_t pitch, uint8_t velocity, bool advance)
 {
@@ -15482,6 +15612,8 @@ EngineHost::step_input_midi_note (uint8_t pitch, uint8_t velocity, bool advance)
 	if (velocity > 127) {
 		velocity = 127;
 	}
+	/* Scale lock snaps the input root before chord expansion. */
+	pitch = snap_pitch_to_scale (pitch);
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"step: no Session";
 		return false;
@@ -16360,6 +16492,181 @@ EngineHost::smoke_midi_arp ()
 	}
 }
 
+bool
+EngineHost::smoke_midi_scale ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-scale failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-scale FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-scale FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for scale smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-scale FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		const bool snap_was = _snap.snap_enabled;
+		const int dens_was = _snap.snap_density;
+		const int chord_was = _snap.midi_chord_quality;
+		const bool lock_was = _snap.midi_scale_lock;
+		const int kind_was = _snap.midi_scale_kind;
+		const int root_was = _snap.midi_scale_root;
+
+		auto fail = [&] (const char* why) {
+			set_midi_chord_quality (chord_was);
+			set_midi_scale_lock (lock_was);
+			set_midi_scale_kind (kind_was);
+			set_midi_scale_root (root_was);
+			set_snap_enabled (snap_was);
+			set_snap_density (dens_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-scale FAILED (%s)\n", why);
+			std::fflush (stderr);
+			return false;
+		};
+
+		set_snap_density (1);
+		set_snap_enabled (false);
+		set_midi_chord_quality (0);
+		set_midi_scale_root (0); /* C */
+		set_midi_scale_kind (0); /* major */
+		set_midi_scale_lock (true);
+		if (!midi_scale_lock () || snap_pitch_to_scale (61) != 62) {
+			return fail ("C maj C#→D");
+		}
+		if (snap_pitch_to_scale (60) != 60) {
+			return fail ("C stays");
+		}
+
+		if (!locate_to (0.f, false, 0.f)) {
+			return fail ("locate 0");
+		}
+		/* C# root → D; place single note. */
+		if (!step_input_midi_note (61, 100, true)) {
+			return fail ("step C#");
+		}
+		refresh_midi_notes_snap ();
+		bool got_d = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 62
+			    && _snap.midi_notes[i].start_sec >= -0.05f
+			    && _snap.midi_notes[i].start_sec <= 0.08f) {
+				got_d = true;
+			}
+		}
+		if (!got_d) {
+			return fail ("verify D");
+		}
+
+		/* Chord maj from snapped C#→D: D F# A = 62,66,69 */
+		set_midi_chord_quality (1);
+		float unit = snap_unit_sec ();
+		if (!step_input_midi_note (61, 100, true)) {
+			return fail ("chord step");
+		}
+		refresh_midi_notes_snap ();
+		bool d2 = false, fs = false, a = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			if (n.start_sec < unit - 0.08f || n.start_sec > unit + 0.08f) {
+				continue;
+			}
+			if (n.pitch == 62) {
+				d2 = true;
+			}
+			if (n.pitch == 66) {
+				fs = true;
+			}
+			if (n.pitch == 69) {
+				a = true;
+			}
+		}
+		if (!d2 || !fs || !a) {
+			return fail ("chord tones leave scale");
+		}
+
+		/* Lock off: C# stays C#. */
+		set_midi_chord_quality (0);
+		set_midi_scale_lock (false);
+		if (snap_pitch_to_scale (61) != 61) {
+			return fail ("lock off");
+		}
+		if (!step_input_midi_note (61, 100, false)) {
+			return fail ("passthrough");
+		}
+		refresh_midi_notes_snap ();
+		bool got_cs = false;
+		float t = _snap.transport_sec;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 61
+			    && std::fabs (_snap.midi_notes[i].start_sec - t) < 0.08f) {
+				got_cs = true;
+			}
+		}
+		if (!got_cs) {
+			return fail ("verify C#");
+		}
+
+		/* Natural minor A: kind cycle + root. */
+		set_midi_scale_root (9); /* A */
+		set_midi_scale_kind (0);
+		if (cycle_midi_scale_kind () != 1) {
+			return fail ("cycle→min");
+		}
+		set_midi_scale_lock (true);
+		/* Bb (70) nearest in A natural minor {9,11,0,2,4,5,7} → A(69) or B(71); tie→up B */
+		if (snap_pitch_to_scale (70) != 71) {
+			return fail ("A min Bb→B");
+		}
+
+		set_midi_chord_quality (chord_was);
+		set_midi_scale_lock (lock_was);
+		set_midi_scale_kind (kind_was);
+		set_midi_scale_root (root_was);
+		set_snap_enabled (snap_was);
+		set_snap_density (dens_was);
+
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-scale ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-scale ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-scale exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 
 void
 EngineHost::refresh_snapshot ()
@@ -16543,6 +16850,9 @@ EngineHost::EngineHost ()
 	_snap.midi_arp_enabled = false;
 	_snap.midi_arp_mode = 0;
 	_snap.midi_arp_pitch = -1;
+	_snap.midi_scale_lock = false;
+	_snap.midi_scale_kind = 0;
+	_snap.midi_scale_root = 0;
 	_snap.available = false;
 	_snap.running = false;
 	_snap.session_ok = false;
@@ -16573,6 +16883,9 @@ EngineHost::EngineHost ()
 	_snap.midi_arp_enabled = false;
 	_snap.midi_arp_mode = 0;
 	_snap.midi_arp_pitch = -1;
+	_snap.midi_scale_lock = false;
+	_snap.midi_scale_kind = 0;
+	_snap.midi_scale_root = 0;
 	_snap.snap_density = 1;
 	_snap.grid_line_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
@@ -18942,6 +19255,90 @@ EngineHost::tick_arpeggiator (bool force)
 
 bool
 EngineHost::smoke_midi_arp ()
+{
+	return false;
+}
+
+void
+EngineHost::set_midi_scale_lock (bool on)
+{
+	_snap.midi_scale_lock = on;
+}
+
+bool
+EngineHost::midi_scale_lock () const
+{
+	return false;
+}
+
+bool
+EngineHost::toggle_midi_scale_lock ()
+{
+	return false;
+}
+
+void
+EngineHost::set_midi_scale_kind (int kind)
+{
+	if (kind < 0) {
+		kind = 0;
+	}
+	if (kind > 1) {
+		kind = 1;
+	}
+	_snap.midi_scale_kind = kind;
+}
+
+int
+EngineHost::midi_scale_kind () const
+{
+	return _snap.midi_scale_kind;
+}
+
+int
+EngineHost::cycle_midi_scale_kind ()
+{
+	set_midi_scale_kind (_snap.midi_scale_kind == 0 ? 1 : 0);
+	return _snap.midi_scale_kind;
+}
+
+void
+EngineHost::set_midi_scale_root (int root)
+{
+	if (root < 0) {
+		root = 0;
+	}
+	if (root > 11) {
+		root = 11;
+	}
+	_snap.midi_scale_root = root;
+}
+
+int
+EngineHost::midi_scale_root () const
+{
+	return _snap.midi_scale_root;
+}
+
+int
+EngineHost::cycle_midi_scale_root ()
+{
+	int r = _snap.midi_scale_root + 1;
+	if (r > 11) {
+		r = 0;
+	}
+	set_midi_scale_root (r);
+	return _snap.midi_scale_root;
+}
+
+uint8_t
+EngineHost::snap_pitch_to_scale (uint8_t pitch) const
+{
+	return pitch > 127 ? 127 : pitch;
+}
+
+bool
+EngineHost::smoke_midi_scale ()
 {
 	return false;
 }
