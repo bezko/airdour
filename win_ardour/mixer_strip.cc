@@ -24,8 +24,11 @@ MixerStrip::MixerStrip ()
 	, _track ()
 	, _arm_btn ()
 	, _fx_btn ()
+	, _fx_param_track ()
 	, _gain (0.85f)
+	, _fx_param (0.3f)
 	, _armed (false)
+	, _fx_bypassed (false)
 {
 	wcsncpy_s (_label, L"Track", _TRUNCATE);
 	_fx_label[0] = L'\0';
@@ -50,6 +53,18 @@ MixerStrip::set_fx_label (const wchar_t* label)
 }
 
 void
+MixerStrip::set_fx_bypassed (bool bypassed)
+{
+	_fx_bypassed = bypassed;
+}
+
+void
+MixerStrip::set_fx_param (float value_0_1)
+{
+	_fx_param = std::max (0.f, std::min (1.f, value_0_1));
+}
+
+void
 MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 {
 	_strip = strip_bounds;
@@ -69,7 +84,14 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 		_strip.right - pad,
 		_arm_btn.bottom + 4.f * dpi_scale + fx_h);
 
-	float top = _fx_btn.bottom + 6.f * dpi_scale;
+	float param_h = 10.f * dpi_scale;
+	_fx_param_track = D2D1::RectF (
+		_strip.left + pad,
+		_fx_btn.bottom + 3.f * dpi_scale,
+		_strip.right - pad,
+		_fx_btn.bottom + 3.f * dpi_scale + param_h);
+
+	float top = _fx_param_track.bottom + 6.f * dpi_scale;
 	float bot = _strip.bottom - 36.f * dpi_scale;
 	float inner_w = _strip.right - _strip.left - pad * 2.f;
 	float fader_w = inner_w * 0.42f;
@@ -119,6 +141,33 @@ bool
 MixerStrip::hit_fx (float x, float y) const
 {
 	return contains (_fx_btn, x, y);
+}
+
+bool
+MixerStrip::hit_fx_param (float x, float y) const
+{
+	if (_fx_label[0] == L'\0') {
+		return false;
+	}
+	float pad = 4.f;
+	return x >= _fx_param_track.left - pad && x <= _fx_param_track.right + pad
+	    && y >= _fx_param_track.top - pad && y <= _fx_param_track.bottom + pad;
+}
+
+bool
+MixerStrip::drag_fx_param_to (float x)
+{
+	float w = _fx_param_track.right - _fx_param_track.left;
+	if (w < 1.f) {
+		return false;
+	}
+	float t = (x - _fx_param_track.left) / w;
+	float v = std::max (0.f, std::min (1.f, t));
+	if (v == _fx_param) {
+		return false;
+	}
+	_fx_param = v;
+	return true;
 }
 
 bool
@@ -176,15 +225,38 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 	rt->DrawTextW (arm_label, (UINT32)wcslen (arm_label), fmt_meta, _arm_btn, brand);
 
 	const bool fx_on = _fx_label[0] != L'\0';
-	rt->FillRectangle (_fx_btn, fx_on ? accent : edge);
+	rt->FillRectangle (_fx_btn, edge);
 	if (fx_on) {
-		accent->SetOpacity (0.55f);
-		rt->FillRectangle (_fx_btn, accent);
-		accent->SetOpacity (1.f);
-		rt->DrawTextW (_fx_label, (UINT32)wcslen (_fx_label), fmt_meta, _fx_btn, brand);
+		if (_fx_bypassed) {
+			edge->SetOpacity (0.85f);
+			rt->FillRectangle (_fx_btn, edge);
+			edge->SetOpacity (1.f);
+			wchar_t byp[48];
+			_snwprintf_s (byp, _TRUNCATE, L"BYP %s", _fx_label);
+			rt->DrawTextW (byp, (UINT32)wcslen (byp), fmt_meta, _fx_btn, body);
+		} else {
+			accent->SetOpacity (0.55f);
+			rt->FillRectangle (_fx_btn, accent);
+			accent->SetOpacity (1.f);
+			rt->DrawTextW (_fx_label, (UINT32)wcslen (_fx_label), fmt_meta, _fx_btn, brand);
+		}
 	} else {
 		rt->DrawTextW (L"+ FX", 4, fmt_meta, _fx_btn, brand);
 	}
+
+	/* Blend param track (only when FX present). */
+	if (fx_on) {
+		rt->FillRectangle (_fx_param_track, edge);
+		float pw = _fx_param_track.right - _fx_param_track.left;
+		float fill_r = _fx_param_track.left + pw * _fx_param;
+		ID2D1SolidColorBrush* fill = _fx_bypassed ? body : accent;
+		fill->SetOpacity (_fx_bypassed ? 0.35f : 0.7f);
+		rt->FillRectangle (
+			D2D1::RectF (_fx_param_track.left, _fx_param_track.top, fill_r, _fx_param_track.bottom),
+			fill);
+		fill->SetOpacity (1.f);
+	}
+
 	fmt_meta->SetTextAlignment (ta_arm);
 	fmt_meta->SetParagraphAlignment (pa_arm);
 
@@ -210,9 +282,13 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 
 	_meter.draw (rt, accent, edge, meter_hot, dpi_scale);
 
-	wchar_t db[32];
+	wchar_t db[48];
 	float db_v = (_gain <= 0.0001f) ? -96.f : (20.f * log10f (_gain));
-	_snwprintf_s (db, _TRUNCATE, L"%.1f dB", db_v);
+	if (fx_on) {
+		_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  B %.0f%%", db_v, _fx_param * 100.f);
+	} else {
+		_snwprintf_s (db, _TRUNCATE, L"%.1f dB", db_v);
+	}
 	DWRITE_TEXT_ALIGNMENT ta2 = fmt_meta->GetTextAlignment ();
 	fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
 	rt->DrawTextW (db, (UINT32)wcslen (db), fmt_meta,

@@ -77,7 +77,7 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 | `--smoke-loop` | Set loop [0.5–2.5]s + add/remove markers |
 | `--smoke-midi` | Enumerate MIDI devices + ensure MIDI track |
 | `--smoke-midi-edit` | Add/select/delete notes + attach Reasonable Synth → master |
-| `--smoke-plugin` | Insert ACE Reverb on Audio 1 and verify it is on the route |
+| `--smoke-plugin` | Insert ACE Reverb; toggle bypass; set Blend; verify on route |
 | `--session DIR` | Open existing session folder after engine start |
 | `AIRDOUR_WIN_SHELL_SESSION=0` | Skip Session; stub meters; empty lanes |
 | `AIRDOUR_WIN_SHELL_DEMO_TONES=1` | Opt-in sine regions at Session create (prefer Import) |
@@ -89,7 +89,7 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 
 **Audio FX (v0, no GTK plugin UI):**
 - **ACE Reverb** LV2 inserted pre-fader on Audio 1 at Session create (and via Mixer **+ FX** / `--smoke-plugin`). Helper: `win_ardour\ensure-a-reverb.bat`.
-- Mixer strip shows the processor name; no LV2 GUI — headless insert only.
+- Mixer: click FX label to **bypass**/enable; drag the **Blend** bar under it (wet mix). No LV2 GUI.
 
 **MSVC notes:**
 - `process_lock().trylock()` while already held deadlocks (SRWLOCK). `Delivery::configure_io` and related asserts are `#ifndef PLATFORM_WINDOWS`.

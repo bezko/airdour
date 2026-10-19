@@ -44,10 +44,12 @@
 #include "ardour/midi_region.h"
 #include "ardour/midi_source.h"
 #include "ardour/midi_track.h"
+#include "ardour/automation_control.h"
 #include "ardour/plugin.h"
 #include "ardour/plugin_insert.h"
 #include "ardour/plugin_manager.h"
 #include "ardour/port.h"
+#include "ardour/processor.h"
 #include "ardour/session.h"
 #include "ardour/session_event.h"
 #include "ardour/audiofilesource.h"
@@ -55,6 +57,7 @@
 #include "ardour/source_factory.h"
 #include "ardour/types.h"
 #include "evoral/Note.h"
+#include "evoral/Parameter.h"
 #include "pbd/compose.h"
 #include "pbd/controllable.h"
 #include "pbd/error.h"
@@ -298,7 +301,10 @@ public:
 	bool            midi_synth_to_master;
 	std::string     midi_synth_name;
 	bool            track_fx_ok;
+	bool            track_fx_bypassed;
+	float           track_fx_param; /* Blend 0..1 */
 	std::string     track_fx_name;
+	std::weak_ptr<PluginInsert> track_fx;
 	bool            plugins_scanned;
 
 	Impl ()
@@ -315,6 +321,8 @@ public:
 		, midi_synth_ok (false)
 		, midi_synth_to_master (false)
 		, track_fx_ok (false)
+		, track_fx_bypassed (false)
+		, track_fx_param (0.3f)
 		, plugins_scanned (false)
 	{
 	}
@@ -364,6 +372,8 @@ EngineHost::EngineHost ()
 	_snap.midi_synth_to_master = false;
 	_snap.midi_out_connected = false;
 	_snap.track_fx_ok = false;
+	_snap.track_fx_bypassed = false;
+	_snap.track_fx_param = 0.3f;
 	_snap.midi_activity = 0.f;
 	_snap.midi_device_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMidiDevices; ++i) {
@@ -384,6 +394,7 @@ EngineHost::EngineHost ()
 	_snap.midi_synth_name.clear ();
 	_snap.midi_out_name.clear ();
 	_snap.track_fx_name.clear ();
+	_snap.track_fx_param_name = L"Blend";
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -625,7 +636,10 @@ EngineHost::destroy_session ()
 	_impl->midi_synth_to_master = false;
 	_impl->midi_synth_name.clear ();
 	_impl->track_fx_ok = false;
+	_impl->track_fx_bypassed = false;
+	_impl->track_fx_param = 0.3f;
 	_impl->track_fx_name.clear ();
+	_impl->track_fx.reset ();
 	_impl->selected_track = -1;
 	_impl->selected_region.reset ();
 	if (_impl->session) {
@@ -2515,6 +2529,8 @@ namespace {
 static const char* kReasonableSynthUri = "https://community.ardour.org/node/7596";
 /* Bundled ACE Reverb (libs/plugins/a-reverb.lv2) — audio-track FX, no cairo. */
 static const char* kAceReverbUri = "urn:ardour:a-reverb";
+/* LV2 control port index for Blend (wet mix); see a-reverb.ttl.in. */
+static const uint32_t kAceReverbBlendPort = 4;
 
 } // namespace
 
@@ -2580,14 +2596,13 @@ find_ace_reverb_info ()
 	return PluginInfoPtr ();
 }
 
-static bool
-track_has_ace_reverb (std::shared_ptr<Route> route, std::string* out_name)
+static std::shared_ptr<PluginInsert>
+find_ace_reverb_insert (std::shared_ptr<Route> route, std::string* out_name = nullptr)
 {
+	std::shared_ptr<PluginInsert> found;
 	if (!route) {
-		return false;
+		return found;
 	}
-	bool found = false;
-	std::string name;
 	route->foreach_processor ([&] (std::weak_ptr<Processor> wp) {
 		if (found) {
 			return;
@@ -2602,14 +2617,19 @@ track_has_ace_reverb (std::shared_ptr<Route> route, std::string* out_name)
 		if (uid == kAceReverbUri
 		    || pname.find ("ACE Reverb") != std::string::npos
 		    || pname.find ("a-reverb") != std::string::npos) {
-			found = true;
-			name = pname.empty () ? "ACE Reverb" : pname;
+			found = pi;
+			if (out_name) {
+				*out_name = pname.empty () ? "ACE Reverb" : pname;
+			}
 		}
 	});
-	if (found && out_name) {
-		*out_name = name;
-	}
 	return found;
+}
+
+static bool
+track_has_ace_reverb (std::shared_ptr<Route> route, std::string* out_name)
+{
+	return (bool)find_ace_reverb_insert (route, out_name);
 }
 
 void
@@ -2911,20 +2931,44 @@ EngineHost::attach_midi_synth ()
 void
 EngineHost::refresh_track_fx_snap ()
 {
-	_snap.track_fx_ok = _impl && _impl->track_fx_ok;
-	_snap.track_fx_name = (_impl && !_impl->track_fx_name.empty ())
-	                          ? utf8_to_wide (_impl->track_fx_name)
-	                          : std::wstring ();
+	_snap.track_fx_ok = false;
+	_snap.track_fx_bypassed = false;
+	_snap.track_fx_param = _impl ? _impl->track_fx_param : 0.3f;
+	_snap.track_fx_name.clear ();
+	_snap.track_fx_param_name = L"Blend";
 	if (!_impl || _impl->tracks.empty () || !_impl->tracks[0]) {
 		return;
 	}
 	std::string name;
-	if (track_has_ace_reverb (_impl->tracks[0], &name)) {
-		_impl->track_fx_ok = true;
-		_impl->track_fx_name = name;
-		_snap.track_fx_ok = true;
-		_snap.track_fx_name = utf8_to_wide (name);
+	std::shared_ptr<PluginInsert> pi = _impl->track_fx.lock ();
+	if (!pi) {
+		pi = find_ace_reverb_insert (_impl->tracks[0], &name);
+		if (pi) {
+			_impl->track_fx = pi;
+		}
+	} else {
+		name = pi->name ().empty () ? "ACE Reverb" : pi->name ();
 	}
+	if (!pi) {
+		_impl->track_fx_ok = false;
+		return;
+	}
+	_impl->track_fx_ok = true;
+	_impl->track_fx_name = name.empty () ? "ACE Reverb" : name;
+	_impl->track_fx_bypassed = !pi->active ();
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceReverbBlendPort));
+		if (ac) {
+			_impl->track_fx_param = (float)ac->get_value ();
+		}
+	} catch (...) {
+	}
+	_snap.track_fx_ok = true;
+	_snap.track_fx_bypassed = _impl->track_fx_bypassed;
+	_snap.track_fx_param = _impl->track_fx_param;
+	_snap.track_fx_name = utf8_to_wide (_impl->track_fx_name);
+	_snap.track_fx_param_name = L"Blend";
 }
 
 bool
@@ -2939,7 +2983,9 @@ EngineHost::insert_track_fx (int track)
 	}
 	std::shared_ptr<AudioTrack> at = _impl->tracks[track];
 	std::string existing;
-	if (track_has_ace_reverb (at, &existing)) {
+	std::shared_ptr<PluginInsert> already = find_ace_reverb_insert (at, &existing);
+	if (already) {
+		_impl->track_fx = already;
 		_impl->track_fx_ok = true;
 		_impl->track_fx_name = existing;
 		refresh_track_fx_snap ();
@@ -2970,8 +3016,19 @@ EngineHost::insert_track_fx (int track)
 			return false;
 		}
 
+		_impl->track_fx = pi;
 		_impl->track_fx_ok = true;
+		_impl->track_fx_bypassed = !pi->active ();
 		_impl->track_fx_name = info->name.empty () ? "ACE Reverb" : info->name;
+		/* Seed Blend from plugin default if control exists. */
+		try {
+			std::shared_ptr<AutomationControl> ac = pi->automation_control (
+			    Evoral::Parameter (PluginAutomation, 0, kAceReverbBlendPort));
+			if (ac) {
+				_impl->track_fx_param = (float)ac->get_value ();
+			}
+		} catch (...) {
+		}
 		refresh_track_fx_snap ();
 		std::fprintf (stderr,
 		              "airdour_win_shell: FX \"%s\" on Audio %d (pre-fader)\n",
@@ -2986,6 +3043,92 @@ EngineHost::insert_track_fx (int track)
 	} catch (...) {
 		return false;
 	}
+}
+
+bool
+EngineHost::set_track_fx_bypassed (int track, bool bypassed)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_fx (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_fx.lock ();
+	if (!pi) {
+		pi = find_ace_reverb_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_fx = pi;
+	}
+	try {
+		if (bypassed) {
+			pi->deactivate ();
+		} else {
+			pi->activate ();
+		}
+		_impl->track_fx_bypassed = !pi->active ();
+		refresh_track_fx_snap ();
+		std::fprintf (stderr, "airdour_win_shell: FX bypass=%d (active=%d)\n",
+		              _impl->track_fx_bypassed ? 1 : 0, pi->active () ? 1 : 0);
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_track_fx_bypass (int track)
+{
+	refresh_track_fx_snap ();
+	return set_track_fx_bypassed (track, !_snap.track_fx_bypassed);
+}
+
+bool
+EngineHost::set_track_fx_param (int track, float value_0_1)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_fx (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_fx.lock ();
+	if (!pi) {
+		pi = find_ace_reverb_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_fx = pi;
+	}
+	float v = std::max (0.f, std::min (1.f, value_0_1));
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceReverbBlendPort));
+		if (!ac) {
+			_snap.detail = L"ACE Reverb Blend control missing";
+			return false;
+		}
+		ac->set_value (v, Controllable::NoGroup);
+		_impl->track_fx_param = (float)ac->get_value ();
+		refresh_track_fx_snap ();
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: set_track_fx_param: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+float
+EngineHost::track_fx_param (int track) const
+{
+	(void)track;
+	return _snap.track_fx_param;
 }
 
 bool
@@ -3015,9 +3158,44 @@ EngineHost::smoke_plugin_insert ()
 			std::fflush (stderr);
 			return false;
 		}
+
+		/* Bypass off → on → off */
+		if (!set_track_fx_bypassed (0, false) || _snap.track_fx_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-plugin FAILED (bypass clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_fx_bypassed (0, true) || !_snap.track_fx_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-plugin FAILED (bypass set)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_fx_bypassed (0, false) || _snap.track_fx_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-plugin FAILED (bypass restore)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* Blend param write-through */
+		const float want = 0.72f;
+		if (!set_track_fx_param (0, want)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-plugin FAILED (param set)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		float got = _snap.track_fx_param;
+		if (got < want - 0.05f || got > want + 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-plugin FAILED (param got=%.3f want=%.3f)\n",
+			              got, want);
+			std::fflush (stderr);
+			return false;
+		}
+
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-plugin ok (fx=%s track=Audio 1 on_route=1)\n",
-		              verified.c_str ());
+		              "airdour_win_shell: smoke-plugin ok (fx=%s on_route=1 bypass=0→1→0 "
+		              "blend=%.2f)\n",
+		              verified.c_str (), got);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-plugin ok";
 		return true;
@@ -3672,6 +3850,8 @@ EngineHost::EngineHost ()
 	_snap.midi_synth_to_master = false;
 	_snap.midi_out_connected = false;
 	_snap.track_fx_ok = false;
+	_snap.track_fx_bypassed = false;
+	_snap.track_fx_param = 0.3f;
 	_snap.midi_activity = 0.f;
 	_snap.midi_device_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMidiDevices; ++i) {
@@ -3692,6 +3872,7 @@ EngineHost::EngineHost ()
 	_snap.midi_synth_name.clear ();
 	_snap.midi_out_name.clear ();
 	_snap.track_fx_name.clear ();
+	_snap.track_fx_param_name = L"Blend";
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -4022,6 +4203,36 @@ EngineHost::insert_track_fx (int track)
 {
 	(void)track;
 	return false;
+}
+
+bool
+EngineHost::toggle_track_fx_bypass (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::set_track_fx_bypassed (int track, bool bypassed)
+{
+	(void)track;
+	(void)bypassed;
+	return false;
+}
+
+bool
+EngineHost::set_track_fx_param (int track, float value_0_1)
+{
+	(void)track;
+	(void)value_0_1;
+	return false;
+}
+
+float
+EngineHost::track_fx_param (int track) const
+{
+	(void)track;
+	return 0.f;
 }
 
 bool

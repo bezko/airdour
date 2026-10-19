@@ -70,6 +70,7 @@ private:
 		WavePending, /* click may become select or pan */
 		WavePan,
 		Fader,
+		FxParam, /* drag Mixer Blend slider */
 		MidiDraw /* click/drag on MIDI lane to create a note */
 	};
 
@@ -136,6 +137,7 @@ private:
 	int  hit_mixer_fader (float x, float y) const;
 	int  hit_mixer_arm (float x, float y) const;
 	int  hit_mixer_fx (float x, float y) const;
+	int  hit_mixer_fx_param (float x, float y) const;
 	void client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const;
 	bool on_mouse_wheel (WPARAM wparam, LPARAM lparam);
 	bool on_mouse_down (LPARAM lparam);

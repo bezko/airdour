@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Direct2D mixer track strip: arm + fader + level meter (not GTK).
+ * Direct2D mixer track strip: arm + FX bypass/param + fader + level meter (not GTK).
  */
 
 #pragma once
@@ -27,6 +27,8 @@ public:
 	void set_label (const wchar_t* label);
 	/** Optional processor name shown under the track label (e.g. ACE Reverb). */
 	void set_fx_label (const wchar_t* label);
+	void set_fx_bypassed (bool bypassed);
+	void set_fx_param (float value_0_1);
 	void layout (const D2D1_RECT_F& strip_bounds, float dpi_scale);
 
 	void  set_gain (float g);
@@ -35,9 +37,14 @@ public:
 	void set_armed (bool armed) { _armed = armed; }
 	bool armed () const { return _armed; }
 
-	/** True when strip has a non-empty FX label (insert button is live). */
+	/** True when strip has a non-empty FX label (insert/bypass is live). */
 	bool has_fx () const { return _fx_label[0] != L'\0'; }
+	bool fx_bypassed () const { return _fx_bypassed; }
+	float fx_param () const { return _fx_param; }
 	bool hit_fx (float x, float y) const;
+	bool hit_fx_param (float x, float y) const;
+	/** Map x into Blend 0..1; returns true if value changed. */
+	bool drag_fx_param_to (float x);
 
 	void        set_meter_peak (float peak);
 	void        meter_tick (float dt);
@@ -67,7 +74,10 @@ private:
 	D2D1_RECT_F _track;
 	D2D1_RECT_F _arm_btn;
 	D2D1_RECT_F _fx_btn;
+	D2D1_RECT_F _fx_param_track;
 	LevelMeter  _meter;
 	float       _gain;
+	float       _fx_param;
 	bool        _armed;
+	bool        _fx_bypassed;
 };

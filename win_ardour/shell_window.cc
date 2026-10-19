@@ -334,8 +334,12 @@ ShellWindow::sync_mixer_fx_from_engine ()
 	for (int i = 0; i < kTracks; ++i) {
 		if (i == 0 && _engine_snap.track_fx_ok && !_engine_snap.track_fx_name.empty ()) {
 			_mixers[i].set_fx_label (_engine_snap.track_fx_name.c_str ());
+			_mixers[i].set_fx_bypassed (_engine_snap.track_fx_bypassed);
+			_mixers[i].set_fx_param (_engine_snap.track_fx_param);
 		} else {
 			_mixers[i].set_fx_label (nullptr);
+			_mixers[i].set_fx_bypassed (false);
+			_mixers[i].set_fx_param (0.3f);
 		}
 	}
 }
@@ -1204,6 +1208,17 @@ ShellWindow::hit_mixer_fx (float x, float y) const
 }
 
 int
+ShellWindow::hit_mixer_fx_param (float x, float y) const
+{
+	for (int i = 0; i < kTracks; ++i) {
+		if (_mixers[i].hit_fx_param (x, y)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int
 ShellWindow::hit_mixer_fader (float x, float y) const
 {
 	for (int i = 0; i < kTracks; ++i) {
@@ -1334,16 +1349,33 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
+	int fxpi = hit_mixer_fx_param (x, y);
+	if (fxpi >= 0 && _mixers[fxpi].has_fx ()) {
+		_drag = DragMode::FxParam;
+		_drag_index = fxpi;
+		if (_mixers[fxpi].drag_fx_param_to (x)) {
+			_engine.set_track_fx_param (fxpi, _mixers[fxpi].fx_param ());
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_fx_from_engine ();
+		}
+		SetCapture (_hwnd);
+		SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
 	int fxi = hit_mixer_fx (x, y);
 	if (fxi >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
-			if (_engine.insert_track_fx (fxi)) {
-				_engine.poll ();
-				_engine_snap = _engine.snapshot ();
-				sync_mixer_fx_from_engine ();
+			if (_mixers[fxi].has_fx ()) {
+				_engine.toggle_track_fx_bypass (fxi);
 			} else {
-				_engine_snap = _engine.snapshot ();
+				_engine.insert_track_fx (fxi);
 			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_fx_from_engine ();
 		}
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
@@ -1413,6 +1445,17 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 			if (_drag_index == 0) {
 				_engine_snap.gain = _mixers[0].gain ();
 			}
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+		return true;
+	}
+
+	if (_drag == DragMode::FxParam && _drag_index >= 0 && _drag_index < kTracks) {
+		if (_mixers[_drag_index].drag_fx_param_to (x)) {
+			_engine.set_track_fx_param (_drag_index, _mixers[_drag_index].fx_param ());
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_fx_from_engine ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		}
 		return true;
@@ -1888,8 +1931,11 @@ ShellWindow::draw_mixer_pane ()
 
 	wchar_t hint[160];
 	if (_engine_snap.track_fx_ok && !_engine_snap.track_fx_name.empty ()) {
-		_snwprintf_s (hint, _TRUNCATE, L"Meters: PeakMeter  ·  Audio 1 FX: %s",
-		              _engine_snap.track_fx_name.c_str ());
+		_snwprintf_s (hint, _TRUNCATE,
+		              L"Meters: PeakMeter  ·  %s%s  ·  Blend %.0f%% (click FX=bypass)",
+		              _engine_snap.track_fx_name.c_str (),
+		              _engine_snap.track_fx_bypassed ? L" BYP" : L"",
+		              _engine_snap.track_fx_param * 100.f);
 	} else if (_engine_snap.meters_real) {
 		wcsncpy_s (hint, L"Meters: Session PeakMeter  ·  click + FX on strips", _TRUNCATE);
 	} else if (_transport_playing) {

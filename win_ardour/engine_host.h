@@ -65,6 +65,8 @@ struct EngineSnapshot {
 	bool         midi_synth_to_master; /* synth audio routed toward master */
 	bool         midi_out_connected; /* track output → physical MIDI (e.g. GS) */
 	bool         track_fx_ok; /* ACE effect inserted on Audio 1 (track 0) */
+	bool         track_fx_bypassed; /* Processor hard-bypass (inactive) */
+	float        track_fx_param; /* ACE Reverb Blend 0..1 */
 	float        midi_activity; /* 0..1 decaying activity indicator */
 	int          midi_device_count;
 	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices];
@@ -75,6 +77,7 @@ struct EngineSnapshot {
 	std::wstring midi_synth_name; /* e.g. ACE Reasonable Synth */
 	std::wstring midi_out_name; /* connected playback port display name */
 	std::wstring track_fx_name; /* e.g. ACE Reverb on track 0 */
+	std::wstring track_fx_param_name; /* e.g. Blend */
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
 	std::wstring export_path; /* last exported WAV (UTF-16 display) */
@@ -219,8 +222,19 @@ public:
 	 */
 	bool insert_track_fx (int track = 0);
 
+	/** Toggle Processor activate/deactivate (hard bypass) on Audio FX insert. */
+	bool toggle_track_fx_bypass (int track = 0);
+	bool set_track_fx_bypassed (int track, bool bypassed);
+
 	/**
-	 * Ensure ACE Reverb on Audio 1; verify PluginInsert is on the processor list.
+	 * Set ACE Reverb Blend (wet mix) 0..1 via PluginInsert AutomationControl.
+	 * UI-thread safe Controllable::set_value.
+	 */
+	bool set_track_fx_param (int track, float value_0_1);
+	float track_fx_param (int track = 0) const;
+
+	/**
+	 * Ensure ACE Reverb on Audio 1; verify on route; toggle bypass; set Blend.
 	 * For --smoke-plugin. Hardware not required.
 	 */
 	bool smoke_plugin_insert ();
