@@ -94,11 +94,13 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 | `--smoke-midi` | Enumerate MIDI devices + ensure MIDI track |
 | `--smoke-midi-edit` | Add/select/delete notes + attach Reasonable Synth → master |
 | `--smoke-plugin` | Insert ACE Reverb; toggle bypass; set Blend; verify on route |
+| `--smoke-vst3` | Scan system VST3 dirs (+ `VST3_PATH`); list; insert FX on Audio 2 if found |
 | `--smoke-perf` | Sample WASAPI callback µs vs period, DSP %, xruns, working set (`--timeout` = window) |
 | `--session DIR` | Open existing session folder after engine start |
 | `AIRDOUR_WIN_SHELL_SESSION=0` | Skip Session; stub meters; empty lanes |
 | `AIRDOUR_WIN_SHELL_DEMO_TONES=1` | Opt-in sine regions at Session create (prefer Import) |
 | `ARDOUR_PANNER_PATH` | Extra search path if panners are not under `%ARDOUR_DLL_PATH%\panners` |
+| `VST3_PATH` / `AIRDOUR_SMOKE_VST3` | Extra VST3 roots / preferred plugin name for `--smoke-vst3` |
 
 **MIDI / audible path:**
 - **Soft synth:** ACE Reasonable Synth LV2 on MIDI 1 → master → Dummy/WASAPI shared (no MIDI HW needed). Helper: `win_ardour\ensure-reasonable-synth.bat`.
@@ -107,6 +109,7 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 **Audio FX (v0, no GTK plugin UI):**
 - **ACE Reverb** LV2 inserted pre-fader on Audio 1 at Session create (and via Mixer **+ FX** / `--smoke-plugin`). Helper: `win_ardour\ensure-a-reverb.bat`.
 - Mixer: click FX label to **bypass**/enable; drag the **Blend** bar under it (wet mix). No LV2 GUI.
+- **VST3** DSP scan/load via libardour (`VST3_SUPPORT`); `--smoke-vst3` inserts on Audio 2. No native VST3 editor (GTK HWND host is out of scope).
 
 **MSVC notes:**
 - `process_lock().trylock()` while already held deadlocks (SRWLOCK). `Delivery::configure_io` and related asserts are `#ifndef PLATFORM_WINDOWS`.

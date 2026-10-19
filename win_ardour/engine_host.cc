@@ -68,6 +68,10 @@
 #include "pbd/mutex.h"
 #include "pbd/property_list.h"
 #include "pbd/rwlock.h"
+
+#include <glib.h>
+#include <glibmm/fileutils.h>
+#include <glibmm/miscutils.h>
 #include "pbd/xml++.h"
 #include "temporal/beats.h"
 #include "temporal/types.h"
@@ -2573,10 +2577,13 @@ EngineHost::ensure_plugins_scanned ()
 		return true;
 	}
 	try {
+		/* Cache-only first (fast LV2 + any prior VST3 cache). */
 		PluginManager::instance ().refresh (true);
 		_impl->plugins_scanned = true;
-		std::fprintf (stderr, "airdour_win_shell: PluginManager refresh done (LV2=%zu)\n",
-		              PluginManager::instance ().lv2_plugin_info ().size ());
+		std::fprintf (stderr,
+		              "airdour_win_shell: PluginManager refresh done (LV2=%zu VST3=%zu)\n",
+		              PluginManager::instance ().lv2_plugin_info ().size (),
+		              PluginManager::instance ().vst3_plugin_info ().size ());
 		std::fflush (stderr);
 		return true;
 	} catch (...) {
@@ -2584,6 +2591,114 @@ EngineHost::ensure_plugins_scanned ()
 		std::fflush (stderr);
 		return false;
 	}
+}
+
+/** Apply VST3_PATH / AIRDOUR_SMOKE_VST3 then full (non-cache) plugin refresh. */
+static bool
+scan_vst3_fresh ()
+{
+	try {
+		const char* smoke = std::getenv ("AIRDOUR_SMOKE_VST3");
+		const char* path = std::getenv ("VST3_PATH");
+		std::string extra;
+		if (path && *path) {
+			extra = path;
+		}
+		if (smoke && *smoke) {
+			/* File → parent dir; dir used as-is. */
+			if (Glib::file_test (smoke, Glib::FILE_TEST_IS_REGULAR)) {
+				std::string dir = Glib::path_get_dirname (smoke);
+				if (!extra.empty ()) {
+					extra += G_SEARCHPATH_SEPARATOR_S;
+				}
+				extra += dir;
+			} else if (Glib::file_test (smoke, Glib::FILE_TEST_IS_DIR)) {
+				if (!extra.empty ()) {
+					extra += G_SEARCHPATH_SEPARATOR_S;
+				}
+				extra += smoke;
+			}
+		}
+		if (!extra.empty ()) {
+			Config->set_plugin_path_vst3 (extra);
+			std::fprintf (stderr, "airdour_win_shell: VST3 search path += %s\n", extra.c_str ());
+			std::fflush (stderr);
+		}
+		Config->set_use_vst3 (true);
+		/* Non-cache refresh so unscanned modules are discovered (in-host if
+		 * ardour-vst3-scanner.exe is absent). */
+		PluginManager::instance ().refresh (false);
+		const PluginInfoList& v3 = PluginManager::instance ().vst3_plugin_info ();
+		std::fprintf (stderr, "airdour_win_shell: VST3 scan done (count=%zu)\n", v3.size ());
+		size_t shown = 0;
+		for (PluginInfoList::const_iterator i = v3.begin (); i != v3.end () && shown < 12; ++i, ++shown) {
+			if (!*i) {
+				continue;
+			}
+			std::fprintf (stderr, "airdour_win_shell:   VST3[%zu] %s (%s)\n",
+			              shown, (*i)->name.c_str (), (*i)->creator.c_str ());
+		}
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: VST3 scan exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		std::fprintf (stderr, "airdour_win_shell: VST3 scan failed\n");
+		std::fflush (stderr);
+		return false;
+	}
+}
+
+static PluginInfoPtr
+find_smoke_vst3_info ()
+{
+	const char* want = std::getenv ("AIRDOUR_SMOKE_VST3");
+	std::string want_name;
+	if (want && *want) {
+		if (Glib::file_test (want, Glib::FILE_TEST_IS_REGULAR)
+		    || Glib::file_test (want, Glib::FILE_TEST_IS_DIR)) {
+			want_name = Glib::path_get_basename (want);
+			/* Strip .vst3 */
+			std::string::size_type dot = want_name.rfind (".vst3");
+			if (dot != std::string::npos) {
+				want_name = want_name.substr (0, dot);
+			}
+		} else {
+			want_name = want; /* treat as display-name substring */
+		}
+	}
+
+	try {
+		const PluginInfoList& plugs = PluginManager::instance ().vst3_plugin_info ();
+		PluginInfoPtr first_fx;
+		for (PluginInfoList::const_iterator i = plugs.begin (); i != plugs.end (); ++i) {
+			if (!*i) {
+				continue;
+			}
+			PluginInfoPtr info = *i;
+			if (info->is_instrument ()) {
+				continue;
+			}
+			if (info->n_inputs.n_audio () < 1 || info->n_outputs.n_audio () < 1) {
+				continue;
+			}
+			if (!want_name.empty ()) {
+				if (info->name.find (want_name) != std::string::npos
+				    || info->path.find (want_name) != std::string::npos) {
+					return info;
+				}
+				continue;
+			}
+			if (!first_fx) {
+				first_fx = info;
+			}
+		}
+		return first_fx;
+	} catch (...) {
+	}
+	return PluginInfoPtr ();
 }
 
 static PluginInfoPtr
@@ -3326,6 +3441,105 @@ EngineHost::smoke_plugin_insert ()
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_vst3 ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-vst3 failed — no Session";
+		return false;
+	}
+	try {
+		if (!scan_vst3_fresh ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3 FAILED (scan)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		const size_t n = PluginManager::instance ().vst3_plugin_info ().size ();
+		PluginInfoPtr info = find_smoke_vst3_info ();
+		if (!info) {
+			/* Honest success when no VST3 is installed — scan path compiled + ran. */
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3 ok (scan-only VST3=%zu; "
+			              "set VST3_PATH or AIRDOUR_SMOKE_VST3 to insert)\n",
+			              n);
+			std::fflush (stderr);
+			_snap.detail = L"smoke-vst3 scan-only";
+			return true;
+		}
+
+		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
+			collect_tracks ();
+		}
+		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3 FAILED (no Audio 2)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::shared_ptr<AudioTrack> at = _impl->tracks[1];
+		PluginPtr plugin = info->load (*_impl->session);
+		if (!plugin) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3 FAILED (load %s)\n",
+			              info->name.c_str ());
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::shared_ptr<PluginInsert> pi (
+		    new PluginInsert (*_impl->session, *at, plugin));
+		pi->set_strict_io (true);
+		if (at->add_processor (pi, PreFader) != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3 FAILED (add_processor)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* Confirm on route + bypass toggle (DSP-only; no VST3 UI). */
+		bool on_route = false;
+		at->foreach_processor ([&] (std::weak_ptr<Processor> wp) {
+			std::shared_ptr<PluginInsert> p = std::dynamic_pointer_cast<PluginInsert> (wp.lock ());
+			if (p && p == pi) {
+				on_route = true;
+			}
+		});
+		if (!on_route) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3 FAILED (not on route)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		pi->deactivate ();
+		if (pi->active ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3 FAILED (bypass)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		pi->activate ();
+		if (!pi->active ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3 FAILED (activate)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3 ok (fx=%s on Audio 2, "
+		              "scan=%zu, bypass ok, no GTK UI)\n",
+		              info->name.c_str (), n);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-vst3 ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst3 exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst3 FAILED (exception)\n");
+		std::fflush (stderr);
 		return false;
 	}
 }
@@ -4388,6 +4602,12 @@ EngineHost::track_fx_param (int track) const
 
 bool
 EngineHost::smoke_plugin_insert ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_vst3 ()
 {
 	return false;
 }

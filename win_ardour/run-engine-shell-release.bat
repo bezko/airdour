@@ -20,9 +20,14 @@ if exist "%ProgramFiles%\Microsoft Visual Studio\18\Community\Common7\Tools\VsDe
   call "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul
 )
 
-set "PATH=%VCPKG%\bin;%WAF%\pbd;%WAF%\temporal;%WAF%\midi++2;%WAF%\evoral;%WAF%\ardour;%WAF%\audiographer;%WAF%\ptformat;%WAF%\lua;%WAF%\libltc;%WAF%\ctrl-interface\control_protocol;%WAF%\backends\dummy;%WAF%\backends\wasapi;%WAF%\ardour\panners;%PATH%"
+set "PATH=%VCPKG%\bin;%WAF%\pbd;%WAF%\temporal;%WAF%\midi++2;%WAF%\evoral;%WAF%\ardour;%WAF%\audiographer;%WAF%\ptformat;%WAF%\lua;%WAF%\libltc;%WAF%\ctrl-interface\control_protocol;%WAF%\backends\dummy;%WAF%\backends\wasapi;%WAF%\ardour\panners;%WAF%\fst;%PATH%"
 set "ARDOUR_DLL_PATH=%WAF%\ardour"
 set "ARDOUR_BACKEND_PATH=%WAF%\backends\dummy;%WAF%\backends\wasapi"
+REM VST3 scanner next to libardour (PluginManager searches dll_dir and dll_dir\fst)
+if exist "%WAF%\fst\ardour-vst3-scanner.exe" if not exist "%WAF%\ardour\fst\ardour-vst3-scanner.exe" (
+  mkdir "%WAF%\ardour\fst" 2>nul
+  copy /Y "%WAF%\fst\ardour-vst3-scanner.exe" "%WAF%\ardour\fst\" >nul
+)
 
 if not exist "%WAF%\ardour\LV2\reasonablesynth.lv2\reasonablesynth.dll" (
   if exist "%WAF%\LV2\reasonablesynth.lv2\reasonablesynth.dll" (

@@ -178,7 +178,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_plugin,
                             bool smoke_perf,
                             const std::string& open_session_path,
-                            unsigned period_frames)
+                            unsigned period_frames,
+                            bool smoke_vst3)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -288,6 +289,17 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_plugin) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-plugin FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_vst3 && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_vst3 ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_vst3) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst3 FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}

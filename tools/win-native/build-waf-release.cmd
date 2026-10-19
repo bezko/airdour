@@ -9,5 +9,5 @@ set PATH=%VCPKG%\bin;%VCPKG%\tools\pkgconf;%PATH%
 set INCLUDE=%VCPKG%\include;%INCLUDE%
 set LIB=%VCPKG%\lib;%LIB%
 REM Build product spine needed by airdour_win_shell + WASAPI + ACE LV2s + panners
-python waf build -o build-rel -j %NUMBER_OF_PROCESSORS% --targets=libpbd,libtemporal,libmidipp,libevoral,libardour_cp,libardour,dummy_audiobackend,wasapi_audiobackend,a-reverb,reasonablesynth,libardour_pan1in2out,libardour_pan2in2out,libardour_panvbap,libardour_panbalance,libaudiographer,libptformat,liblua,libltc
+python waf build -o build-rel -j %NUMBER_OF_PROCESSORS% --targets=libpbd,libtemporal,libmidipp,libevoral,libardour_cp,libardour,dummy_audiobackend,wasapi_audiobackend,a-reverb,reasonablesynth,libardour_pan1in2out,libardour_pan2in2out,libardour_panvbap,libardour_panbalance,libaudiographer,libptformat,liblua,libltc,ardour-vst3-scanner
 exit /b %ERRORLEVEL%

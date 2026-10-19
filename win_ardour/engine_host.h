@@ -249,6 +249,13 @@ public:
 	bool smoke_plugin_insert ();
 
 	/**
+	 * Scan system VST3 dirs (+ VST3_PATH / AIRDOUR_SMOKE_VST3); list; optionally
+	 * insert first usable audio FX on Audio 2. DSP-only (no GTK UI).
+	 * Scan-only with VST3=0 still returns true (proves path). For --smoke-vst3.
+	 */
+	bool smoke_vst3 ();
+
+	/**
 	 * Sample WASAPI shared timing + working set while transport rolls briefly.
 	 * Prints a one-line PERF summary to stderr. For --smoke-perf.
 	 */
