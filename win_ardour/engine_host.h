@@ -176,6 +176,29 @@ public:
 	/** Send 0 → 0.75 → 0.25 on Audio 1. For --smoke-send. */
 	bool smoke_send ();
 
+	/**
+	 * Track fader AutomationList (GainAutomation). Enable Play, write points,
+	 * sample curve for Editor automation lane.
+	 */
+	bool ensure_track_gain_automation (int track = 0);
+	bool write_track_gain_automation (int track, float time_sec, float value_0_1);
+	bool clear_track_gain_automation (int track = 0);
+	/** Fill y_0_1[n] by evaluating the list across [view_start, view_start+span]. */
+	bool fill_gain_automation_curve (int track,
+	                                 float view_start_sec,
+	                                 float view_span_sec,
+	                                 float* y_0_1,
+	                                 size_t n);
+	/** Discrete points in view; returns count written (≤ max_n). */
+	int  fill_gain_automation_points (int track,
+	                                  float view_start_sec,
+	                                  float view_span_sec,
+	                                  float* x_norm,
+	                                  float* y_0_1,
+	                                  int max_n);
+	/** Clear → 3 points → Play. For --smoke-automation. */
+	bool smoke_automation ();
+
 	/** Clear PeakMeter max-peak / clip latch on Audio track (0..kMeters-1). */
 	bool clear_track_meter_clip (int track);
 

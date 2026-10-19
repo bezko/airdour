@@ -21,6 +21,7 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
+#include "automation_lane.h"
 #include "engine_host.h"
 #include "mixer_strip.h"
 #include "transport_bar.h"
@@ -66,7 +67,8 @@ public:
 	                    bool smoke_vst3 = false,
 	                    bool smoke_mute_solo = false,
 	                    bool smoke_pan = false,
-	                    bool smoke_send = false);
+	                    bool smoke_send = false,
+	                    bool smoke_automation = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -80,6 +82,7 @@ private:
 		FxParam, /* drag Mixer Blend slider */
 		Pan, /* drag Mixer pan azimuth */
 		Send, /* drag Mixer aux send level */
+		AutoWrite, /* click/drag Editor automation lane */
 		MidiDraw /* click/drag on MIDI lane to create a note */
 	};
 
@@ -114,6 +117,9 @@ private:
 	void on_tick ();
 	void layout_panes ();
 	void draw_editor_pane ();
+	void draw_automation_lane ();
+	void refresh_automation_lane ();
+	void write_automation_at (float x, float y);
 	void draw_mixer_pane ();
 	void transport_play ();
 	void transport_stop ();
@@ -192,6 +198,7 @@ private:
 	D2D1_RECT_F _editor_pane;
 	D2D1_RECT_F _editor_ruler;
 	D2D1_RECT_F _midi_lane;
+	D2D1_RECT_F _auto_lane_bounds;
 	D2D1_RECT_F _mixer_pane;
 	D2D1_RECT_F _status_bar;
 
@@ -222,5 +229,7 @@ private:
 	EngineSnapshot _engine_snap;
 	TransportBar   _transport;
 	EditorLane     _lanes[kTracks];
+	AutomationLane _auto_lane;
 	MixerStrip     _mixers[kMixerStrips];
+	float          _auto_last_write_sec;
 };

@@ -4,6 +4,7 @@
 
 #include "shell_window.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -112,6 +113,7 @@ ShellWindow::ShellWindow ()
 	, _editor_pane ()
 	, _editor_ruler ()
 	, _midi_lane ()
+	, _auto_lane_bounds ()
 	, _mixer_pane ()
 	, _status_bar ()
 	, _d2d_factory (nullptr)
@@ -137,6 +139,7 @@ ShellWindow::ShellWindow ()
 	, _fmt_pane (nullptr)
 	, _pulse (0.f)
 	, _engine_snap ()
+	, _auto_last_write_sec (-1.f)
 {
 	enable_dpi_awareness ();
 	_engine_snap = _engine.snapshot ();
@@ -186,7 +189,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_vst3,
                             bool smoke_mute_solo,
                             bool smoke_pan,
-                            bool smoke_send)
+                            bool smoke_send,
+                            bool smoke_automation)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -350,6 +354,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_automation && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_automation ()) {
+			_smoke_failed = true;
+		} else {
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_automation) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-automation FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -430,6 +447,65 @@ ShellWindow::sync_mixer_send_from_engine ()
 	for (int i = 0; i < kTracks; ++i) {
 		_mixers[i].set_send (_engine_snap.track_send[i]);
 	}
+}
+
+void
+ShellWindow::refresh_automation_lane ()
+{
+	_auto_lane.set_label (L"Gain · Audio 1");
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float curve[AutomationLane::kMaxColumns];
+	size_t n = AutomationLane::kMaxColumns;
+	if (_engine.is_linked () && _engine_snap.session_ok) {
+		_engine.fill_gain_automation_curve (0, view0, span, curve, n);
+	} else {
+		for (size_t i = 0; i < n; ++i) {
+			curve[i] = _mixers[0].gain ();
+		}
+	}
+	_auto_lane.set_curve (curve, n);
+
+	float px[AutomationLane::kMaxPoints];
+	float py[AutomationLane::kMaxPoints];
+	int npt = 0;
+	if (_engine.is_linked () && _engine_snap.session_ok) {
+		npt = _engine.fill_gain_automation_points (
+			0, view0, span, px, py, (int)AutomationLane::kMaxPoints);
+	}
+	_auto_lane.set_points (px, py, (size_t)std::max (0, npt));
+	_auto_lane.set_playhead_norm (_lanes[0].strip.playhead_norm ());
+}
+
+void
+ShellWindow::write_automation_at (float x, float y)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	float time_sec = _lanes[0].strip.time_at_x (_auto_lane_bounds, x);
+	float value = _auto_lane.value_at_y (_auto_lane_bounds, y);
+	/* Thin writes while dragging — skip near-duplicate times. */
+	if (_drag == DragMode::AutoWrite && _auto_last_write_sec >= 0.f
+	    && std::fabs (time_sec - _auto_last_write_sec) < 0.035f) {
+		return;
+	}
+	if (_engine.write_track_gain_automation (0, time_sec, value)) {
+		_auto_last_write_sec = time_sec;
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		refresh_automation_lane ();
+	}
+}
+
+void
+ShellWindow::draw_automation_lane ()
+{
+	if (_auto_lane_bounds.right <= _auto_lane_bounds.left) {
+		return;
+	}
+	_auto_lane.draw (_rt, _auto_lane_bounds, _brush_accent, _brush_body,
+	                 _brush_pane_edge, _brush_playhead, _fmt_meta, _dpi_scale);
 }
 
 void
@@ -1041,7 +1117,20 @@ ShellWindow::layout_panes ()
 
 	for (int i = 0; i < kTracks; ++i) {
 		float y0 = lanes_top + (float)i * (lane_h + lane_gap);
-		_lanes[i].bounds = D2D1::RectF (wave_left, y0, wave_right, y0 + lane_h);
+		if (i == 0) {
+			/* Split Audio 1: waveform on top, gain automation underneath. */
+			float auto_h = std::max (36.f * _dpi_scale, lane_h * 0.32f);
+			float wave_h = lane_h - auto_h - 3.f * _dpi_scale;
+			if (wave_h < 28.f * _dpi_scale) {
+				wave_h = lane_h * 0.62f;
+				auto_h = lane_h - wave_h - 3.f * _dpi_scale;
+			}
+			_lanes[0].bounds = D2D1::RectF (wave_left, y0, wave_right, y0 + wave_h);
+			_auto_lane_bounds = D2D1::RectF (
+				wave_left, y0 + wave_h + 3.f * _dpi_scale, wave_right, y0 + lane_h);
+		} else {
+			_lanes[i].bounds = D2D1::RectF (wave_left, y0, wave_right, y0 + lane_h);
+		}
 		_lanes[i].strip.resize_for_width (wave_right - wave_left);
 	}
 	_midi_lane = D2D1::RectF (wave_left, lanes_bot + lane_gap, wave_right,
@@ -1638,6 +1727,19 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
+	if (_auto_lane.hit (_auto_lane_bounds, x, y)
+	    && _engine.is_linked () && _engine_snap.session_ok) {
+		_drag = DragMode::AutoWrite;
+		_drag_index = 0;
+		_auto_last_write_sec = -1.f;
+		_engine.ensure_track_gain_automation (0);
+		write_automation_at (x, y);
+		SetCapture (_hwnd);
+		SetCursor (LoadCursorW (nullptr, IDC_CROSS));
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
 	int lane = hit_editor_lane (x, y);
 	if (lane >= 0) {
 		const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
@@ -1726,6 +1828,12 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 			sync_mixer_send_from_engine ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		}
+		return true;
+	}
+
+	if (_drag == DragMode::AutoWrite) {
+		write_automation_at (x, y);
+		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
 
@@ -1877,6 +1985,7 @@ ShellWindow::on_tick ()
 		sync_transport_loop_from_engine ();
 		apply_region_selection_to_lanes ();
 		apply_loop_to_lanes ();
+		refresh_automation_lane ();
 		last_poll = now;
 	}
 
@@ -2078,8 +2187,12 @@ ShellWindow::draw_editor_pane ()
 	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
 	for (int i = 0; i < kTracks; ++i) {
 		const D2D1_RECT_F& lb = _lanes[i].bounds;
+		float label_bot = lb.bottom;
+		if (i == 0 && _auto_lane_bounds.bottom > label_bot) {
+			label_bot = _auto_lane_bounds.bottom;
+		}
 		D2D1_RECT_F label_rc = D2D1::RectF (
-			r.left + inset, lb.top, lb.left - 4.f * _dpi_scale, lb.bottom);
+			r.left + inset, lb.top, lb.left - 4.f * _dpi_scale, label_bot);
 		(void)label_w;
 		_rt->DrawTextW (_lanes[i].label, (UINT32)wcslen (_lanes[i].label), _fmt_meta,
 		                label_rc, _brush_body);
@@ -2090,6 +2203,7 @@ ShellWindow::draw_editor_pane ()
 
 		/* Marker hairlines across lanes. */
 		float lane_w = lb.right - lb.left;
+		float mark_bot = (i == 0) ? _auto_lane_bounds.bottom : lb.bottom;
 		for (int m = 0; m < _engine_snap.marker_count; ++m) {
 			float n = (_engine_snap.markers[m].sec - view0) / span;
 			if (n < 0.f || n > 1.f) {
@@ -2097,12 +2211,13 @@ ShellWindow::draw_editor_pane ()
 			}
 			float px = lb.left + n * lane_w;
 			_brush_marker->SetOpacity (0.55f);
-			_rt->DrawLine (D2D1::Point2F (px, lb.top), D2D1::Point2F (px, lb.bottom),
+			_rt->DrawLine (D2D1::Point2F (px, lb.top), D2D1::Point2F (px, mark_bot),
 			               _brush_marker, 1.f * _dpi_scale);
 			_brush_marker->SetOpacity (1.f);
 		}
 	}
 
+	draw_automation_lane ();
 	draw_midi_lane ();
 }
 
