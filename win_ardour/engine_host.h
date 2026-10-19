@@ -995,6 +995,12 @@ public:
 	 */
 	bool quantize_midi_notes ();
 
+	/**
+	 * Transpose selected MIDI notes (or all if none selected) by semitones.
+	 * Pitch clamped to 0..127. Rebuilds the MIDI region (Windows-safe).
+	 */
+	bool transpose_midi_notes (int semitones);
+
 	/** Best-effort connect MidiTrack output to first physical MIDI playback port. */
 	bool connect_midi_output ();
 
@@ -1018,6 +1024,11 @@ public:
 	 * For --smoke-midi-quantize.
 	 */
 	bool smoke_midi_quantize ();
+
+	/**
+	 * Add notes, transpose +1 then −12, verify pitches. For --smoke-midi-transpose.
+	 */
+	bool smoke_midi_transpose ();
 
 	std::string session_dir () const;
 	std::string last_export_path () const;

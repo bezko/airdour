@@ -43,6 +43,8 @@ enum class TransportHit {
 	Freeze,
 	Snap,
 	Quantize,
+	MidiTransUp,
+	MidiTransDown,
 	CountIn,
 	Click,
 	TempoDown,
@@ -179,6 +181,8 @@ private:
 	D2D1_RECT_F _freeze_btn;
 	D2D1_RECT_F _snap_btn;
 	D2D1_RECT_F _quantize_btn;
+	D2D1_RECT_F _midi_trans_up_btn;
+	D2D1_RECT_F _midi_trans_dn_btn;
 	D2D1_RECT_F _count_btn;
 	D2D1_RECT_F _click_btn;
 	D2D1_RECT_F _tempo_dn_btn;

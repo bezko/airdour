@@ -13753,6 +13753,238 @@ EngineHost::smoke_midi_quantize ()
 }
 
 
+
+bool
+EngineHost::transpose_midi_notes (int semitones)
+{
+	if (semitones == 0) {
+		_snap.detail = L"transpose: 0 st";
+		return true;
+	}
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"transpose: no Session";
+		return false;
+	}
+	if (!ensure_midi_region (32.f) || !_impl->midi_region) {
+		_snap.detail = L"transpose: no MIDI region";
+		return false;
+	}
+	try {
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count <= 0) {
+			_snap.detail = L"transpose: no notes";
+			return false;
+		}
+
+		bool have_sel = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				have_sel = true;
+				break;
+			}
+		}
+
+		struct Kept {
+			uint8_t pitch;
+			uint8_t velocity;
+			float   start_sec;
+			float   length_sec;
+		};
+		std::vector<Kept> keep;
+		keep.reserve ((size_t)_snap.midi_note_count);
+
+		int moved = 0;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			Kept k;
+			k.velocity = n.velocity;
+			k.start_sec = n.start_sec;
+			k.length_sec = n.length_sec;
+			const bool do_t = !have_sel || n.selected;
+			if (do_t) {
+				int p = (int)n.pitch + semitones;
+				if (p < 0) {
+					p = 0;
+				}
+				if (p > 127) {
+					p = 127;
+				}
+				if (p != (int)n.pitch) {
+					++moved;
+				}
+				k.pitch = (uint8_t)p;
+			} else {
+				k.pitch = n.pitch;
+			}
+			keep.push_back (k);
+		}
+
+		std::shared_ptr<Playlist> playlist = _impl->midi_track
+		                                        ? _impl->midi_track->playlist ()
+		                                        : std::shared_ptr<Playlist> ();
+		if (!playlist) {
+			_snap.detail = L"transpose: no playlist";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("transpose midi");
+		playlist->clear_changes ();
+		playlist->clear_owned_changes ();
+		playlist->remove_region (_impl->midi_region);
+		playlist->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		_impl->midi_region.reset ();
+		_impl->selected_midi_note_id = -1;
+		if (!ensure_midi_region (32.f)) {
+			_snap.detail = L"transpose: region rebuild failed";
+			return false;
+		}
+		int added = 0;
+		for (size_t i = 0; i < keep.size (); ++i) {
+			if (add_midi_note (keep[i].pitch, keep[i].start_sec,
+			                   keep[i].length_sec, keep[i].velocity)) {
+				++added;
+			} else {
+				std::fprintf (stderr,
+				              "airdour_win_shell: transpose re-add note %zu failed "
+				              "(p=%u t=%.3f)\n",
+				              i, (unsigned)keep[i].pitch, keep[i].start_sec);
+				std::fflush (stderr);
+			}
+		}
+		_impl->selected_midi_note_id = -1;
+		refresh_midi_notes_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: transpose ok (notes=%d moved=%d added=%d st=%+d)\n",
+		              _snap.midi_note_count, moved, added, semitones);
+		std::fflush (stderr);
+		_snap.detail = L"MIDI transposed";
+		return added > 0 || keep.empty ();
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: transpose exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_transpose ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-transpose failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for transpose smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		bool a = add_midi_note (60, 0.0f, 0.4f, 100); /* C4 */
+		bool b = add_midi_note (64, 0.5f, 0.4f, 100); /* E4 */
+		refresh_midi_notes_snap ();
+		if (!a || !b || _snap.midi_note_count < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		clear_midi_note_selection ();
+		if (!transpose_midi_notes (+1)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (+1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		bool got61 = false, got65 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 61) {
+				got61 = true;
+			}
+			if (_snap.midi_notes[i].pitch == 65) {
+				got65 = true;
+			}
+		}
+		if (!got61 || !got65) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (+1 verify)\n");
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				std::fprintf (stderr, "  note p=%u\n", (unsigned)_snap.midi_notes[i].pitch);
+			}
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!transpose_midi_notes (-12)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (−12)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		bool got49 = false, got53 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 49) {
+				got49 = true;
+			}
+			if (_snap.midi_notes[i].pitch == 53) {
+				got53 = true;
+			}
+		}
+		if (!got49 || !got53) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (−12 verify)\n");
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				std::fprintf (stderr, "  note p=%u\n", (unsigned)_snap.midi_notes[i].pitch);
+			}
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-transpose ok (notes=%d +1→−12)\n",
+		              _snap.midi_note_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-transpose ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+
 void
 EngineHost::refresh_snapshot ()
 {
@@ -16022,6 +16254,21 @@ EngineHost::smoke_midi_quantize ()
 {
 	return false;
 }
+
+
+bool
+EngineHost::transpose_midi_notes (int semitones)
+{
+	(void)semitones;
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_transpose ()
+{
+	return false;
+}
+
 
 
 bool
