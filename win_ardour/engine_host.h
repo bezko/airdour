@@ -64,6 +64,7 @@ struct EngineSnapshot {
 	bool         midi_synth_ok; /* in-graph soft synth on MIDI track */
 	bool         midi_synth_to_master; /* synth audio routed toward master */
 	bool         midi_out_connected; /* track output → physical MIDI (e.g. GS) */
+	bool         track_fx_ok; /* ACE effect inserted on Audio 1 (track 0) */
 	float        midi_activity; /* 0..1 decaying activity indicator */
 	int          midi_device_count;
 	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices];
@@ -73,6 +74,7 @@ struct EngineSnapshot {
 	std::wstring midi_option; /* e.g. WinMME / Dummy loopback */
 	std::wstring midi_synth_name; /* e.g. ACE Reasonable Synth */
 	std::wstring midi_out_name; /* connected playback port display name */
+	std::wstring track_fx_name; /* e.g. ACE Reverb on track 0 */
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
 	std::wstring export_path; /* last exported WAV (UTF-16 display) */
@@ -212,6 +214,18 @@ public:
 	bool attach_midi_synth ();
 
 	/**
+	 * Insert ACE Reverb (bundled LV2, no GTK UI) on an audio track pre-fader.
+	 * Default track 0 = Audio 1. Idempotent when already present.
+	 */
+	bool insert_track_fx (int track = 0);
+
+	/**
+	 * Ensure ACE Reverb on Audio 1; verify PluginInsert is on the processor list.
+	 * For --smoke-plugin. Hardware not required.
+	 */
+	bool smoke_plugin_insert ();
+
+	/**
 	 * Ensure an empty MidiRegion on the MIDI track playlist (creates if needed).
 	 * length_sec is the region span starting at 0.
 	 */
@@ -281,6 +295,7 @@ private:
 	bool compute_export_range (int64_t* start_sample, int64_t* end_sample) const;
 	bool configure_backend_midi ();
 	void refresh_midi_notes_snap ();
+	void refresh_track_fx_snap ();
 	bool ensure_plugins_scanned ();
 
 	bool        _started;

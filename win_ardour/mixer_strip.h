@@ -25,6 +25,8 @@ public:
 	MixerStrip ();
 
 	void set_label (const wchar_t* label);
+	/** Optional processor name shown under the track label (e.g. ACE Reverb). */
+	void set_fx_label (const wchar_t* label);
 	void layout (const D2D1_RECT_F& strip_bounds, float dpi_scale);
 
 	void  set_gain (float g);
@@ -32,6 +34,10 @@ public:
 
 	void set_armed (bool armed) { _armed = armed; }
 	bool armed () const { return _armed; }
+
+	/** True when strip has a non-empty FX label (insert button is live). */
+	bool has_fx () const { return _fx_label[0] != L'\0'; }
+	bool hit_fx (float x, float y) const;
 
 	void        set_meter_peak (float peak);
 	void        meter_tick (float dt);
@@ -56,9 +62,11 @@ public:
 
 private:
 	wchar_t     _label[32];
+	wchar_t     _fx_label[40];
 	D2D1_RECT_F _strip;
 	D2D1_RECT_F _track;
 	D2D1_RECT_F _arm_btn;
+	D2D1_RECT_F _fx_btn;
 	LevelMeter  _meter;
 	float       _gain;
 	bool        _armed;

@@ -23,10 +23,12 @@ MixerStrip::MixerStrip ()
 	: _strip ()
 	, _track ()
 	, _arm_btn ()
+	, _fx_btn ()
 	, _gain (0.85f)
 	, _armed (false)
 {
 	wcsncpy_s (_label, L"Track", _TRUNCATE);
+	_fx_label[0] = L'\0';
 }
 
 void
@@ -34,6 +36,16 @@ MixerStrip::set_label (const wchar_t* label)
 {
 	if (label) {
 		wcsncpy_s (_label, label, _TRUNCATE);
+	}
+}
+
+void
+MixerStrip::set_fx_label (const wchar_t* label)
+{
+	if (label && label[0]) {
+		wcsncpy_s (_fx_label, label, _TRUNCATE);
+	} else {
+		_fx_label[0] = L'\0';
 	}
 }
 
@@ -50,7 +62,14 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 		_strip.right - pad,
 		_strip.top + 28.f * dpi_scale + arm_h);
 
-	float top = _arm_btn.bottom + 8.f * dpi_scale;
+	float fx_h = 18.f * dpi_scale;
+	_fx_btn = D2D1::RectF (
+		_strip.left + pad,
+		_arm_btn.bottom + 4.f * dpi_scale,
+		_strip.right - pad,
+		_arm_btn.bottom + 4.f * dpi_scale + fx_h);
+
+	float top = _fx_btn.bottom + 6.f * dpi_scale;
 	float bot = _strip.bottom - 36.f * dpi_scale;
 	float inner_w = _strip.right - _strip.left - pad * 2.f;
 	float fader_w = inner_w * 0.42f;
@@ -94,6 +113,12 @@ bool
 MixerStrip::hit_arm (float x, float y) const
 {
 	return contains (_arm_btn, x, y);
+}
+
+bool
+MixerStrip::hit_fx (float x, float y) const
+{
+	return contains (_fx_btn, x, y);
 }
 
 bool
@@ -149,6 +174,17 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 	fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 	const wchar_t* arm_label = _armed ? L"R · armed" : L"R · arm";
 	rt->DrawTextW (arm_label, (UINT32)wcslen (arm_label), fmt_meta, _arm_btn, brand);
+
+	const bool fx_on = _fx_label[0] != L'\0';
+	rt->FillRectangle (_fx_btn, fx_on ? accent : edge);
+	if (fx_on) {
+		accent->SetOpacity (0.55f);
+		rt->FillRectangle (_fx_btn, accent);
+		accent->SetOpacity (1.f);
+		rt->DrawTextW (_fx_label, (UINT32)wcslen (_fx_label), fmt_meta, _fx_btn, brand);
+	} else {
+		rt->DrawTextW (L"+ FX", 4, fmt_meta, _fx_btn, brand);
+	}
 	fmt_meta->SetTextAlignment (ta_arm);
 	fmt_meta->SetParagraphAlignment (pa_arm);
 

@@ -64,7 +64,7 @@ Engine builds also **copy** `ptformat.dll` / `ardour.dll` / … next to the exe 
 
 ## Session / PeakMeter / Editor / Record / Import / Save / Export / Undo / Loop / MIDI
 
-Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI 1** so mixer PeakMeters attach. Editor lanes read playlist peaks via `AudioRegion::read_peaks` — **empty tracks stay empty**. Mixer **R · arm**; transport **Rec** / **Loop** / **Mark** / **Import** / **Save** / **Open** / **Export**. **Export** bounces the master bus to a 16-bit WAV (ExportHandler, no GTK). **Ctrl+Z / Ctrl+Y** undo/redo; click a region to select; **Delete** removes it. **Loop** / **Mark** on the Editor ruler. **MIDI:** WASAPI uses real **WinMME** (not PortAudio); Dummy prefers loopback. Editor **piano-roll** (C3–B4): click/drag to draw notes, click to select, **Delete** removes; notes live in Session `MidiModel`. **ACE Reasonable Synth** (bundled LV2) sits on MIDI 1 and routes audio to master so notes are audible through Dummy/WASAPI shared — no MIDI hardware required. Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** then `ExitProcess(0)`.
+Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI 1** so mixer PeakMeters attach. Editor lanes read playlist peaks via `AudioRegion::read_peaks` — **empty tracks stay empty**. Mixer **R · arm** + **+ FX** (ACE Reverb on Audio 1, headless insert); transport **Rec** / **Loop** / **Mark** / **Import** / **Save** / **Open** / **Export**. **Export** bounces the master bus to a 16-bit WAV (ExportHandler, no GTK). **Ctrl+Z / Ctrl+Y** undo/redo; click a region to select; **Delete** removes it. **Loop** / **Mark** on the Editor ruler. **MIDI:** WASAPI uses real **WinMME** (not PortAudio); Dummy prefers loopback. Editor **piano-roll** (C3–B4): click/drag to draw notes, click to select, **Delete** removes; notes live in Session `MidiModel`. **ACE Reasonable Synth** (bundled LV2) sits on MIDI 1 and routes audio to master so notes are audible through Dummy/WASAPI shared — no MIDI hardware required. Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** then `ExitProcess(0)`.
 
 | Flag / env | Effect |
 |------------|--------|
@@ -77,6 +77,7 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 | `--smoke-loop` | Set loop [0.5–2.5]s + add/remove markers |
 | `--smoke-midi` | Enumerate MIDI devices + ensure MIDI track |
 | `--smoke-midi-edit` | Add/select/delete notes + attach Reasonable Synth → master |
+| `--smoke-plugin` | Insert ACE Reverb on Audio 1 and verify it is on the route |
 | `--session DIR` | Open existing session folder after engine start |
 | `AIRDOUR_WIN_SHELL_SESSION=0` | Skip Session; stub meters; empty lanes |
 | `AIRDOUR_WIN_SHELL_DEMO_TONES=1` | Opt-in sine regions at Session create (prefer Import) |
@@ -85,6 +86,10 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 **MIDI / audible path:**
 - **Soft synth:** ACE Reasonable Synth LV2 on MIDI 1 → master → Dummy/WASAPI shared (no MIDI HW needed). Helper: `win_ardour\ensure-reasonable-synth.bat`.
 - Live MIDI **capture** still needs a MIDI input (USB / loopMIDI). GS Wavetable is optional; soft-synth is the default hear-path.
+
+**Audio FX (v0, no GTK plugin UI):**
+- **ACE Reverb** LV2 inserted pre-fader on Audio 1 at Session create (and via Mixer **+ FX** / `--smoke-plugin`). Helper: `win_ardour\ensure-a-reverb.bat`.
+- Mixer strip shows the processor name; no LV2 GUI — headless insert only.
 
 **MSVC notes:**
 - `process_lock().trylock()` while already held deadlocks (SRWLOCK). `Delivery::configure_io` and related asserts are `#ifndef PLATFORM_WINDOWS`.

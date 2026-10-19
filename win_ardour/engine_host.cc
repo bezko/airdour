@@ -297,6 +297,8 @@ public:
 	bool            midi_synth_ok;
 	bool            midi_synth_to_master;
 	std::string     midi_synth_name;
+	bool            track_fx_ok;
+	std::string     track_fx_name;
 	bool            plugins_scanned;
 
 	Impl ()
@@ -312,6 +314,7 @@ public:
 		, midi_out_connected (false)
 		, midi_synth_ok (false)
 		, midi_synth_to_master (false)
+		, track_fx_ok (false)
 		, plugins_scanned (false)
 	{
 	}
@@ -360,6 +363,7 @@ EngineHost::EngineHost ()
 	_snap.midi_synth_ok = false;
 	_snap.midi_synth_to_master = false;
 	_snap.midi_out_connected = false;
+	_snap.track_fx_ok = false;
 	_snap.midi_activity = 0.f;
 	_snap.midi_device_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMidiDevices; ++i) {
@@ -379,6 +383,7 @@ EngineHost::EngineHost ()
 	_snap.midi_option.clear ();
 	_snap.midi_synth_name.clear ();
 	_snap.midi_out_name.clear ();
+	_snap.track_fx_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -566,10 +571,14 @@ EngineHost::ensure_session ()
 			_snap.detail = L"Session + PeakMeter — empty Audio 1–3 (no demo tones)";
 		}
 
+		/* Best-effort ACE Reverb on Audio 1 (headless insert, no GTK UI). */
+		insert_track_fx (0);
+
 		_snap.session_ok = true;
 		_snap.meters_real = true;
 		_snap.waves_from_session = true;
 		refresh_region_flags ();
+		refresh_track_fx_snap ();
 		step ("ready");
 		return true;
 	} catch (SessionException& e) {
@@ -615,6 +624,8 @@ EngineHost::destroy_session ()
 	_impl->midi_synth_ok = false;
 	_impl->midi_synth_to_master = false;
 	_impl->midi_synth_name.clear ();
+	_impl->track_fx_ok = false;
+	_impl->track_fx_name.clear ();
 	_impl->selected_track = -1;
 	_impl->selected_region.reset ();
 	if (_impl->session) {
@@ -2502,6 +2513,8 @@ namespace {
 
 /* Bundled ACE Reasonable Synth (libs/plugins/reasonablesynth.lv2). */
 static const char* kReasonableSynthUri = "https://community.ardour.org/node/7596";
+/* Bundled ACE Reverb (libs/plugins/a-reverb.lv2) — audio-track FX, no cairo. */
+static const char* kAceReverbUri = "urn:ardour:a-reverb";
 
 } // namespace
 
@@ -2545,6 +2558,58 @@ find_reasonable_synth_info ()
 	} catch (...) {
 	}
 	return PluginInfoPtr ();
+}
+
+static PluginInfoPtr
+find_ace_reverb_info ()
+{
+	try {
+		const PluginInfoList& plugs = PluginManager::instance ().lv2_plugin_info ();
+		for (PluginInfoList::const_iterator i = plugs.begin (); i != plugs.end (); ++i) {
+			if (!*i) {
+				continue;
+			}
+			if ((*i)->unique_id == kAceReverbUri
+			    || (*i)->name.find ("ACE Reverb") != std::string::npos
+			    || (*i)->name.find ("a-reverb") != std::string::npos) {
+				return *i;
+			}
+		}
+	} catch (...) {
+	}
+	return PluginInfoPtr ();
+}
+
+static bool
+track_has_ace_reverb (std::shared_ptr<Route> route, std::string* out_name)
+{
+	if (!route) {
+		return false;
+	}
+	bool found = false;
+	std::string name;
+	route->foreach_processor ([&] (std::weak_ptr<Processor> wp) {
+		if (found) {
+			return;
+		}
+		std::shared_ptr<Processor> p = wp.lock ();
+		std::shared_ptr<PluginInsert> pi = std::dynamic_pointer_cast<PluginInsert> (p);
+		if (!pi || !pi->plugin ()) {
+			return;
+		}
+		std::string uid = pi->plugin ()->unique_id ();
+		std::string pname = pi->name ();
+		if (uid == kAceReverbUri
+		    || pname.find ("ACE Reverb") != std::string::npos
+		    || pname.find ("a-reverb") != std::string::npos) {
+			found = true;
+			name = pname.empty () ? "ACE Reverb" : pname;
+		}
+	});
+	if (found && out_name) {
+		*out_name = name;
+	}
+	return found;
 }
 
 void
@@ -2836,6 +2901,128 @@ EngineHost::attach_midi_synth ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: attach_midi_synth: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+void
+EngineHost::refresh_track_fx_snap ()
+{
+	_snap.track_fx_ok = _impl && _impl->track_fx_ok;
+	_snap.track_fx_name = (_impl && !_impl->track_fx_name.empty ())
+	                          ? utf8_to_wide (_impl->track_fx_name)
+	                          : std::wstring ();
+	if (!_impl || _impl->tracks.empty () || !_impl->tracks[0]) {
+		return;
+	}
+	std::string name;
+	if (track_has_ace_reverb (_impl->tracks[0], &name)) {
+		_impl->track_fx_ok = true;
+		_impl->track_fx_name = name;
+		_snap.track_fx_ok = true;
+		_snap.track_fx_name = utf8_to_wide (name);
+	}
+}
+
+bool
+EngineHost::insert_track_fx (int track)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"insert FX: no audio track";
+		return false;
+	}
+	std::shared_ptr<AudioTrack> at = _impl->tracks[track];
+	std::string existing;
+	if (track_has_ace_reverb (at, &existing)) {
+		_impl->track_fx_ok = true;
+		_impl->track_fx_name = existing;
+		refresh_track_fx_snap ();
+		return true;
+	}
+
+	ensure_plugins_scanned ();
+	try {
+		PluginInfoPtr info = find_ace_reverb_info ();
+		if (!info) {
+			_snap.detail = L"ACE Reverb not found (check ARDOUR_DLL_PATH/LV2)";
+			std::fprintf (stderr, "airdour_win_shell: ACE Reverb LV2 missing\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		PluginPtr plugin = info->load (*_impl->session);
+		if (!plugin) {
+			_snap.detail = L"ACE Reverb load failed";
+			return false;
+		}
+
+		std::shared_ptr<PluginInsert> pi (
+		    new PluginInsert (*_impl->session, *at, plugin));
+		pi->set_strict_io (true);
+		if (at->add_processor (pi, PreFader) != 0) {
+			_snap.detail = L"ACE Reverb add_processor failed";
+			return false;
+		}
+
+		_impl->track_fx_ok = true;
+		_impl->track_fx_name = info->name.empty () ? "ACE Reverb" : info->name;
+		refresh_track_fx_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: FX \"%s\" on Audio %d (pre-fader)\n",
+		              _impl->track_fx_name.c_str (), track + 1);
+		std::fflush (stderr);
+		_snap.detail = L"ACE Reverb on Audio 1";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: insert_track_fx: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_plugin_insert ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-plugin failed — no Session";
+		return false;
+	}
+	try {
+		if (_impl->tracks.empty ()) {
+			collect_tracks ();
+		}
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-plugin FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!insert_track_fx (0) || !_snap.track_fx_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-plugin FAILED (insert)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::string verified;
+		if (!track_has_ace_reverb (_impl->tracks[0], &verified)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-plugin FAILED (not on route)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-plugin ok (fx=%s track=Audio 1 on_route=1)\n",
+		              verified.c_str ());
+		std::fflush (stderr);
+		_snap.detail = L"smoke-plugin ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-plugin exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -3394,6 +3581,7 @@ EngineHost::refresh_snapshot ()
 			refresh_selection_snap ();
 			refresh_locations_snap ();
 			refresh_midi_snap ();
+			refresh_track_fx_snap ();
 		} else {
 			_snap.waves_from_session = false;
 			_snap.session_record_armed = false;
@@ -3483,6 +3671,7 @@ EngineHost::EngineHost ()
 	_snap.midi_synth_ok = false;
 	_snap.midi_synth_to_master = false;
 	_snap.midi_out_connected = false;
+	_snap.track_fx_ok = false;
 	_snap.midi_activity = 0.f;
 	_snap.midi_device_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMidiDevices; ++i) {
@@ -3502,6 +3691,7 @@ EngineHost::EngineHost ()
 	_snap.midi_option.clear ();
 	_snap.midi_synth_name.clear ();
 	_snap.midi_out_name.clear ();
+	_snap.track_fx_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -3825,6 +4015,24 @@ bool
 EngineHost::attach_midi_synth ()
 {
 	return false;
+}
+
+bool
+EngineHost::insert_track_fx (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::smoke_plugin_insert ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_track_fx_snap ()
+{
 }
 
 bool

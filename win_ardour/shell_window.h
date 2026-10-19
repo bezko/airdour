@@ -58,6 +58,7 @@ public:
 	                    bool smoke_loop = false,
 	                    bool smoke_midi = false,
 	                    bool smoke_midi_edit = false,
+	                    bool smoke_plugin = false,
 	                    const std::string& open_session_path = std::string ());
 	int  run_message_loop (unsigned timeout_secs);
 
@@ -119,6 +120,7 @@ private:
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
 	void sync_mixer_arm_from_engine ();
+	void sync_mixer_fx_from_engine ();
 	void sync_transport_loop_from_engine ();
 	void apply_shared_view (int source_lane);
 	void reset_shared_view ();
@@ -133,6 +135,7 @@ private:
 	int  hit_editor_lane (float x, float y) const;
 	int  hit_mixer_fader (float x, float y) const;
 	int  hit_mixer_arm (float x, float y) const;
+	int  hit_mixer_fx (float x, float y) const;
 	void client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const;
 	bool on_mouse_wheel (WPARAM wparam, LPARAM lparam);
 	bool on_mouse_down (LPARAM lparam);
@@ -163,6 +166,7 @@ private:
 
 	SmokeRecordPhase _smoke_record;
 	DWORD            _smoke_record_start_ms;
+	bool             _smoke_failed; /* any --smoke-* reported FAILED */
 
 	D2D1_RECT_F _brand_bar;
 	D2D1_RECT_F _transport_bounds;

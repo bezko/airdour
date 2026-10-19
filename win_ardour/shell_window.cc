@@ -106,6 +106,7 @@ ShellWindow::ShellWindow ()
 	, _last_tick_ms (0)
 	, _smoke_record (SmokeRecordPhase::Off)
 	, _smoke_record_start_ms (0)
+	, _smoke_failed (false)
 	, _brand_bar ()
 	, _transport_bounds ()
 	, _editor_pane ()
@@ -174,6 +175,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_loop,
                             bool smoke_midi,
                             bool smoke_midi_edit,
+                            bool smoke_plugin,
                             const std::string& open_session_path)
 {
 	if (!_engine.is_linked ()) {
@@ -269,6 +271,20 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		_engine.ensure_midi_region ();
 	}
 
+	if (ok && smoke_plugin && _engine.snapshot ().session_ok) {
+		if (_engine.smoke_plugin_insert ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-plugin ok\n");
+		} else {
+			std::fprintf (stderr, "airdour_win_shell: smoke-plugin FAILED\n");
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_plugin) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-plugin FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_record && _engine.snapshot ().session_ok) {
 		_smoke_record = SmokeRecordPhase::NeedArm;
 		std::fprintf (stderr, "airdour_win_shell: smoke-record scheduled (arm → ~1.2s take)\n");
@@ -280,6 +296,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_mixer_arm_from_engine ();
+	sync_mixer_fx_from_engine ();
 	sync_transport_loop_from_engine ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
@@ -309,6 +326,18 @@ ShellWindow::sync_mixer_arm_from_engine ()
 	}
 	_transport.set_record_armed (_engine_snap.session_record_armed);
 	_transport.set_recording (_engine_snap.session_recording);
+}
+
+void
+ShellWindow::sync_mixer_fx_from_engine ()
+{
+	for (int i = 0; i < kTracks; ++i) {
+		if (i == 0 && _engine_snap.track_fx_ok && !_engine_snap.track_fx_name.empty ()) {
+			_mixers[i].set_fx_label (_engine_snap.track_fx_name.c_str ());
+		} else {
+			_mixers[i].set_fx_label (nullptr);
+		}
+	}
 }
 
 void
@@ -1164,6 +1193,17 @@ ShellWindow::hit_mixer_arm (float x, float y) const
 }
 
 int
+ShellWindow::hit_mixer_fx (float x, float y) const
+{
+	for (int i = 0; i < kTracks; ++i) {
+		if (_mixers[i].hit_fx (x, y)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int
 ShellWindow::hit_mixer_fader (float x, float y) const
 {
 	for (int i = 0; i < kTracks; ++i) {
@@ -1288,6 +1328,21 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_arm_from_engine ();
+			}
+		}
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	int fxi = hit_mixer_fx (x, y);
+	if (fxi >= 0) {
+		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
+			if (_engine.insert_track_fx (fxi)) {
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_fx_from_engine ();
+			} else {
+				_engine_snap = _engine.snapshot ();
 			}
 		}
 		InvalidateRect (_hwnd, nullptr, FALSE);
@@ -1560,6 +1615,7 @@ ShellWindow::on_tick ()
 		_mixers[i].set_meter_peak (peak);
 		_mixers[i].meter_tick (dt);
 	}
+	sync_mixer_fx_from_engine ();
 
 	if (_timeout_secs > 0 && (now - _start_tick) >= (_timeout_secs * 1000u)) {
 		PostQuitMessage (0);
@@ -1830,11 +1886,17 @@ ShellWindow::draw_mixer_pane ()
 	                             r.left + inset + 70.f * _dpi_scale, r.top + 30.f * _dpi_scale),
 	                _brush_brand);
 
-	const wchar_t* hint = _engine_snap.meters_real
-		? L"Meters: Session PeakMeter"
-		: (_transport_playing
-			? L"Meters: play stub (no Session)"
-			: L"Meters idle until Play  ·  drag faders");
+	wchar_t hint[160];
+	if (_engine_snap.track_fx_ok && !_engine_snap.track_fx_name.empty ()) {
+		_snwprintf_s (hint, _TRUNCATE, L"Meters: PeakMeter  ·  Audio 1 FX: %s",
+		              _engine_snap.track_fx_name.c_str ());
+	} else if (_engine_snap.meters_real) {
+		wcsncpy_s (hint, L"Meters: Session PeakMeter  ·  click + FX on strips", _TRUNCATE);
+	} else if (_transport_playing) {
+		wcsncpy_s (hint, L"Meters: play stub (no Session)", _TRUNCATE);
+	} else {
+		wcsncpy_s (hint, L"Meters idle until Play  ·  drag faders", _TRUNCATE);
+	}
 	_rt->DrawTextW (hint, (UINT32)wcslen (hint), _fmt_meta,
 	                D2D1::RectF (r.left + inset + 70.f * _dpi_scale, r.top + 10.f * _dpi_scale,
 	                             r.right - inset, r.top + 30.f * _dpi_scale),
@@ -1927,10 +1989,11 @@ ShellWindow::run_message_loop (unsigned timeout_secs)
 	 * Unattended --timeout smoke must leave immediately without joins.
 	 * ExitProcess (not TerminateProcess) so CRT flushes redirected stderr. */
 	if (timeout_secs > 0) {
-		std::fwprintf (stderr, L"airdour_win_shell: timeout smoke — ExitProcess(0)\n");
+		const unsigned exit_code = _smoke_failed ? 1u : 0u;
+		std::fwprintf (stderr, L"airdour_win_shell: timeout smoke — ExitProcess(%u)\n", exit_code);
 		std::fflush (stderr);
 		std::fflush (stdout);
-		ExitProcess (0);
+		ExitProcess (exit_code);
 	}
 
 	_engine.stop ();

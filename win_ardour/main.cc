@@ -7,7 +7,8 @@
  *   airdour_win_shell.exe [--timeout N] [--backend Dummy|WASAPI] [--no-engine]
  *                         [--smoke-import] [--smoke-record] [--smoke-save-load]
  *                         [--smoke-export] [--smoke-undo] [--smoke-loop]
- *                         [--smoke-midi] [--smoke-midi-edit] [--session DIR]
+ *                         [--smoke-midi] [--smoke-midi-edit] [--smoke-plugin]
+ *                         [--session DIR]
  */
 
 #include "shell_window.h"
@@ -90,6 +91,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_loop = parse_flag (argc, argv, L"--smoke-loop");
 	bool smoke_midi = parse_flag (argc, argv, L"--smoke-midi");
 	bool smoke_midi_edit = parse_flag (argc, argv, L"--smoke-midi-edit");
+	bool smoke_plugin = parse_flag (argc, argv, L"--smoke-plugin");
 	std::string session_path = parse_session_path (argc, argv);
 	HINSTANCE instance = GetModuleHandleW (nullptr);
 
@@ -113,7 +115,7 @@ wmain (int argc, wchar_t** argv)
 		if (shell.attach_engine (backend, timeout, smoke_import, smoke_record,
 		                         smoke_save_load, smoke_export, smoke_undo,
 		                         smoke_loop, smoke_midi, smoke_midi_edit,
-		                         session_path)) {
+		                         smoke_plugin, session_path)) {
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", backend.c_str ());
 		} else {
 			std::fwprintf (stderr, L"airdour_win_shell: engine not attached (ok for UI-only / CI)\n");
