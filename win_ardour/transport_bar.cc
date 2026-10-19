@@ -87,6 +87,7 @@ TransportBar::TransportBar ()
 	, _spectrum_enabled (false)
 	, _correlation_enabled (false)
 	, _loudness_enabled (false)
+	, _dsp_load_pct (0.f)
 	, _tempo_bpm (120.f)
 	, _shuttle_norm (0.f)
 	, _bbt_bars (1)
@@ -506,10 +507,17 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_open_btn, L"Open", false);
 	draw_btn (_export_btn, L"Export", false);
 
-	wchar_t clock[160];
+	wchar_t clock[192];
 	int m = (int)(playhead_sec / 60.f);
 	float s = playhead_sec - (float)m * 60.f;
 	int bpm_i = (int)(_tempo_bpm + 0.5f);
+	float dsp = _dsp_load_pct;
+	if (dsp < 0.f) {
+		dsp = 0.f;
+	}
+	if (dsp > 100.f) {
+		dsp = 100.f;
+	}
 	const wchar_t* mode = L"−/+ tempo";
 	if (_recording) {
 		mode = L"RECORDING";
@@ -527,21 +535,48 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 		mode = L"shuttle";
 	}
 
+	/* Leave room on the right for a compact DSP load bar. */
+	const float meter_w = 72.f * dpi_scale;
+	const float meter_gap = 10.f * dpi_scale;
+	float clock_left = _export_btn.right + 8.f * dpi_scale;
+	float clock_right = _bounds.right - 8.f * dpi_scale - meter_w - meter_gap;
+
 	_snwprintf_s (clock, _TRUNCATE,
-	              L"%02d:%05.2f  ·  %d|%d|%03d  ·  %02d:%02d:%02d:%02d  ·  %d BPM  ·  %s",
+	              L"%02d:%05.2f  ·  %d|%d|%03d  ·  %02d:%02d:%02d:%02d  ·  %d BPM  ·  DSP %.0f%%  ·  %s",
 	              m, s,
 	              _bbt_bars, _bbt_beats, _bbt_ticks,
 	              _tc_hours, _tc_minutes, _tc_seconds, _tc_frames,
-	              bpm_i, mode);
+	              bpm_i, dsp, mode);
 
-	float clock_left = _export_btn.right + 8.f * dpi_scale;
 	DWRITE_TEXT_ALIGNMENT ta = fmt->GetTextAlignment ();
 	DWRITE_PARAGRAPH_ALIGNMENT pa = fmt->GetParagraphAlignment ();
 	fmt->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
 	fmt->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 	rt->DrawTextW (clock, (UINT32)wcslen (clock), fmt,
-	               D2D1::RectF (clock_left, _bounds.top, _bounds.right - 8.f * dpi_scale, _bounds.bottom),
+	               D2D1::RectF (clock_left, _bounds.top, clock_right, _bounds.bottom),
 	               body);
+
+	/* Compact DSP bar (callback load from WASAPI / AudioEngine). */
+	{
+		float mid_y = (_bounds.top + _bounds.bottom) * 0.5f;
+		float bh = 10.f * dpi_scale;
+		D2D1_RECT_F track = D2D1::RectF (_bounds.right - 8.f * dpi_scale - meter_w,
+		                                 mid_y - bh * 0.5f,
+		                                 _bounds.right - 8.f * dpi_scale,
+		                                 mid_y + bh * 0.5f);
+		rt->FillRectangle (track, edge);
+		float fill_w = meter_w * (dsp / 100.f);
+		if (fill_w > 1.f) {
+			D2D1_RECT_F fill = D2D1::RectF (track.left, track.top,
+			                                track.left + fill_w, track.bottom);
+			rt->FillRectangle (fill, dsp >= 85.f ? accent : brand);
+		}
+		wchar_t dsp_lab[16];
+		_snwprintf_s (dsp_lab, _TRUNCATE, L"%.0f%%", dsp);
+		fmt->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
+		rt->DrawTextW (dsp_lab, (UINT32)wcslen (dsp_lab), fmt, track, body);
+	}
+
 	fmt->SetTextAlignment (ta);
 	fmt->SetParagraphAlignment (pa);
 }

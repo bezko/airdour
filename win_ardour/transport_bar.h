@@ -149,6 +149,10 @@ public:
 	void set_loudness_enabled (bool on) { _loudness_enabled = on; }
 	bool loudness_enabled () const { return _loudness_enabled; }
 
+	/** Audio callback DSP load 0..100 (WASAPI / AudioEngine). */
+	void set_dsp_load_pct (float pct) { _dsp_load_pct = pct; }
+	float dsp_load_pct () const { return _dsp_load_pct; }
+
 	void set_clock_bbt (int bars, int beats, int ticks)
 	{
 		_bbt_bars = bars;
@@ -263,6 +267,7 @@ private:
 	bool        _spectrum_enabled;
 	bool        _correlation_enabled;
 	bool        _loudness_enabled;
+	float       _dsp_load_pct;
 	float       _tempo_bpm;
 	float       _shuttle_norm;
 	int         _bbt_bars;

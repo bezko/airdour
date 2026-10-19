@@ -987,6 +987,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 	_transport.set_midi_arp_enabled (_engine_snap.midi_arp_enabled);
 	_transport.set_midi_arp_mode (_engine_snap.midi_arp_mode);
+	_transport.set_dsp_load_pct (_engine_snap.dsp_load_pct);
 	sync_scale_to_transport ();
 	layout_panes ();
 	apply_loop_to_lanes ();
@@ -5366,6 +5367,7 @@ ShellWindow::on_tick ()
 		_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 		_transport.set_midi_arp_enabled (_engine_snap.midi_arp_enabled);
 		_transport.set_midi_arp_mode (_engine_snap.midi_arp_mode);
+		_transport.set_dsp_load_pct (_engine_snap.dsp_load_pct);
 		sync_scale_to_transport ();
 		_transport.set_spectrum_enabled (_engine_snap.spectrum_enabled);
 		_transport.set_correlation_enabled (_engine_snap.correlation_enabled);
@@ -6265,29 +6267,66 @@ ShellWindow::on_paint ()
 		                    _fmt_brand, _fmt_meta, _dpi_scale, _pulse);
 	}
 
-	wchar_t status[384];
+	wchar_t status[512];
+	float dsp = _engine_snap.dsp_load_pct;
+	if (dsp < 0.f) {
+		dsp = 0.f;
+	}
+	if (dsp > 100.f) {
+		dsp = 100.f;
+	}
 	if (_engine_snap.running) {
 		_snwprintf_s (status, _TRUNCATE,
-		              L"Engine  %s  ·  %u Hz  ·  t=%.1fs  ·  %s  ·  %s",
+		              L"Engine  %s  ·  %u Hz  ·  period %u  ·  DSP %.1f%%  ·  cb %lluµs avg  ·  xruns %llu  ·  %s",
 		              _engine_snap.backend.c_str (),
 		              _engine_snap.sample_rate,
-		              _playhead_sec,
-		              _engine_snap.meters_real ? L"PeakMeter" : L"stub meters",
+		              _engine_snap.period_frames,
+		              dsp,
+		              (unsigned long long)_engine_snap.callback_avg_us,
+		              (unsigned long long)_engine_snap.xrun_count,
 		              _engine_snap.detail.c_str ());
 	} else if (_engine_snap.available) {
 		_snwprintf_s (status, _TRUNCATE,
-		              L"Engine idle  ·  %d tracks  ·  %s",
-		              kTracks, _engine_snap.detail.c_str ());
+		              L"Engine idle  ·  DSP %.1f%%  ·  %d tracks  ·  %s",
+		              dsp, kTracks, _engine_snap.detail.c_str ());
 	} else {
 		_snwprintf_s (status, _TRUNCATE,
 		              L"UI shell  ·  %d tracks  ·  %s",
 		              kTracks, _engine_snap.detail.c_str ());
 	}
 
+	const float meter_w = 96.f * _dpi_scale;
+	const float text_right = _status_bar.right - 20.f * _dpi_scale - meter_w - 12.f * _dpi_scale;
 	_rt->DrawTextW (status, (UINT32)wcslen (status), _fmt_meta,
 	                D2D1::RectF (_status_bar.left + 20.f * _dpi_scale, _status_bar.top,
-	                             _status_bar.right - 20.f * _dpi_scale, _status_bar.bottom),
+	                             text_right, _status_bar.bottom),
 	                _brush_body);
+
+	/* Status-bar DSP meter (same load % as transport; UI-rate from poll). */
+	if (_engine_snap.available) {
+		float mid_y = (_status_bar.top + _status_bar.bottom) * 0.5f;
+		float bh = 12.f * _dpi_scale;
+		D2D1_RECT_F track = D2D1::RectF (_status_bar.right - 20.f * _dpi_scale - meter_w,
+		                                 mid_y - bh * 0.5f,
+		                                 _status_bar.right - 20.f * _dpi_scale,
+		                                 mid_y + bh * 0.5f);
+		_rt->FillRectangle (track, _brush_pane_edge);
+		float fill_w = meter_w * (dsp / 100.f);
+		if (fill_w > 1.f) {
+			D2D1_RECT_F fill = D2D1::RectF (track.left, track.top,
+			                                track.left + fill_w, track.bottom);
+			_rt->FillRectangle (fill, dsp >= 85.f ? _brush_accent : _brush_brand);
+		}
+		wchar_t dsp_lab[24];
+		_snwprintf_s (dsp_lab, _TRUNCATE, L"DSP %.0f%%", dsp);
+		DWRITE_TEXT_ALIGNMENT ta = _fmt_meta->GetTextAlignment ();
+		DWRITE_PARAGRAPH_ALIGNMENT pa = _fmt_meta->GetParagraphAlignment ();
+		_fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
+		_fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+		_rt->DrawTextW (dsp_lab, (UINT32)wcslen (dsp_lab), _fmt_meta, track, _brush_body);
+		_fmt_meta->SetTextAlignment (ta);
+		_fmt_meta->SetParagraphAlignment (pa);
+	}
 
 	HRESULT hr = _rt->EndDraw ();
 	if (hr == D2DERR_RECREATE_TARGET) {
