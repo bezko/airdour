@@ -77,7 +77,8 @@ public:
 	                    bool smoke_punch = false,
 	                    bool smoke_tempo = false,
 	                    bool smoke_click = false,
-	                    bool smoke_tracks = false);
+	                    bool smoke_tracks = false,
+	                    bool smoke_rename = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -98,7 +99,9 @@ private:
 		TrimEnd, /* drag selected region right edge */
 		RegionMovePending, /* click on selection body; may become move */
 		RegionMove, /* drag selected region body */
-		MidiDraw /* click/drag on MIDI lane to create a note */
+		MidiDraw, /* click/drag on MIDI lane to create a note */
+		TrackReorderPending, /* mixer label click; may become reorder drag */
+		TrackReorder /* drag mixer strip label to reorder */
 	};
 
 	static constexpr uint8_t kMidiPitchLo = 48; /* C3 */
@@ -117,7 +120,7 @@ private:
 	struct EditorLane {
 		WaveStrip   strip;
 		D2D1_RECT_F bounds;
-		wchar_t     label[24];
+		wchar_t     label[32];
 	};
 
 	static LRESULT CALLBACK wnd_proc (HWND, UINT, WPARAM, LPARAM);
@@ -159,10 +162,14 @@ private:
 	void do_add_audio_track ();
 	void do_add_midi_track ();
 	void do_remove_track ();
+	void do_move_audio_track (int delta);
+	void prompt_rename_track (int audio_index, bool midi);
+	void do_rename_focused_track ();
 	int  n_audio_lanes () const;
 	int  n_mixer_strips () const;
 	int  midi_mixer_index () const;
 	void sync_track_labels_from_engine ();
+	void sync_mixer_gains_from_engine ();
 	void draw_editor_grid ();
 	void draw_punch_overlay ();
 	void do_add_marker_at_playhead ();
@@ -195,6 +202,8 @@ private:
 	int  hit_mixer_meter (float x, float y) const;
 	int  hit_mixer_fx (float x, float y) const;
 	int  hit_mixer_fx_param (float x, float y) const;
+	int  hit_mixer_label (float x, float y) const;
+	int  hit_editor_lane_label (float x, float y) const;
 	void client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const;
 	bool on_mouse_wheel (WPARAM wparam, LPARAM lparam);
 	bool on_mouse_down (LPARAM lparam);
@@ -213,6 +222,7 @@ private:
 	unsigned _timeout_secs;
 	DragMode _drag;
 	int _drag_index;
+	int _focus_audio_track; /* last mixer/editor label click for rename/reorder */
 	float _pan_last_x;
 	float _pan_down_x;
 	float _pan_down_y;

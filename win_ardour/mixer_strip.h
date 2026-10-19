@@ -75,6 +75,7 @@ public:
 	LevelMeter& meter () { return _meter; }
 
 	bool hit_fader (float x, float y) const;
+	bool hit_label (float x, float y) const;
 	bool hit_arm (float x, float y) const;
 	bool hit_mute (float x, float y) const;
 	bool hit_solo (float x, float y) const;
@@ -97,6 +98,7 @@ private:
 	wchar_t     _label[32];
 	wchar_t     _fx_label[40];
 	D2D1_RECT_F _strip;
+	D2D1_RECT_F _label_rc;
 	D2D1_RECT_F _track;
 	D2D1_RECT_F _arm_btn;
 	D2D1_RECT_F _mute_btn;

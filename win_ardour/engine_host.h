@@ -119,6 +119,10 @@ struct EngineSnapshot {
 	bool         click_enabled; /* RC Config clicking — audible metronome */
 	int          audio_track_count; /* Session audio tracks (1..kMeters) */
 	int          midi_track_count; /* 0 or 1 in this shell */
+	static constexpr int kTrackNameLen = 32;
+	wchar_t      track_name[kMeters][kTrackNameLen]; /* Session Route names */
+	wchar_t      midi_track_name[kTrackNameLen];
+	float        track_gain[kMeters]; /* Route gain_control mirror after reorder */
 	float        transport_sec;
 	std::wstring detail;
 };
@@ -423,6 +427,23 @@ public:
 	 * For --smoke-tracks.
 	 */
 	bool smoke_tracks ();
+
+	/** Rename Session Track (fails if rec-armed or empty name). */
+	bool set_track_name (int track, const std::string& name);
+	bool set_midi_track_name (const std::string& name);
+	/**
+	 * Swap presentation_order with neighbour (delta −1 = up, +1 = down).
+	 * collect_tracks re-sorts so Editor/Mixer follow Session order.
+	 */
+	bool move_audio_track (int index, int delta);
+	bool move_audio_track_up (int index) { return move_audio_track (index, -1); }
+	bool move_audio_track_down (int index) { return move_audio_track (index, +1); }
+
+	/**
+	 * Rename Audio 0 → Kick; swap 0↔1; verify names/order; restore.
+	 * For --smoke-rename.
+	 */
+	bool smoke_rename ();
 
 	/** Ensure a Session MidiTrack exists (creates one if needed). */
 	bool ensure_midi_track ();

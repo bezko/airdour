@@ -122,6 +122,32 @@ utf8_to_wide (const std::string& s)
 }
 
 std::string
+wide_to_utf8 (const std::wstring& s)
+{
+	if (s.empty ()) {
+		return std::string ();
+	}
+	int n = WideCharToMultiByte (CP_UTF8, 0, s.c_str (), (int)s.size (), nullptr, 0, nullptr, nullptr);
+	if (n <= 0) {
+		return std::string ();
+	}
+	std::string out ((size_t)n, '\0');
+	WideCharToMultiByte (CP_UTF8, 0, s.c_str (), (int)s.size (), &out[0], n, nullptr, nullptr);
+	return out;
+}
+
+void
+copy_name_to_snap (wchar_t* dest, size_t dest_chars, const std::string& utf8)
+{
+	std::wstring w = utf8_to_wide (utf8);
+	if (w.empty ()) {
+		wcsncpy_s (dest, dest_chars, L"?", _TRUNCATE);
+	} else {
+		wcsncpy_s (dest, dest_chars, w.c_str (), _TRUNCATE);
+	}
+}
+
+std::string
 resolve_backend_name (const std::string& requested)
 {
 	if (requested.empty () || requested == "Dummy" || requested == "dummy") {
@@ -379,7 +405,10 @@ EngineHost::EngineHost ()
 		_snap.track_pan[i] = 0.5f;
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
+		_snap.track_gain[i] = _track_gain[i];
+		_snap.track_name[i][0] = L'\0';
 	}
+	_snap.midi_track_name[0] = L'\0';
 	_snap.aux_bus_ok = false;
 	_snap.midi_muted = false;
 	_snap.midi_soloed = false;
@@ -776,6 +805,12 @@ EngineHost::collect_tracks ()
 	_impl->tracks.clear ();
 	_impl->aux_bus.reset ();
 	_snap.audio_track_count = 0;
+	_snap.midi_track_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_name[i][0] = L'\0';
+		_snap.track_gain[i] = _track_gain[i];
+	}
+	_snap.midi_track_name[0] = L'\0';
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -784,19 +819,47 @@ EngineHost::collect_tracks ()
 		if (!routes) {
 			return;
 		}
+		std::vector<std::shared_ptr<AudioTrack> > audio;
 		for (RouteList::const_iterator it = routes->begin (); it != routes->end (); ++it) {
 			std::shared_ptr<AudioTrack> at = std::dynamic_pointer_cast<AudioTrack> (*it);
-			if (!at) {
-				continue;
+			if (at) {
+				audio.push_back (at);
 			}
-			_impl->tracks.push_back (at);
-			if (_impl->tracks.size () >= (size_t)EngineSnapshot::kMeters) {
-				break;
+		}
+		std::sort (audio.begin (), audio.end (),
+		           [] (const std::shared_ptr<AudioTrack>& a,
+		               const std::shared_ptr<AudioTrack>& b) {
+			           if (!a) {
+				           return false;
+			           }
+			           if (!b) {
+				           return true;
+			           }
+			           return a->presentation_info ().order ()
+			                  < b->presentation_info ().order ();
+		           });
+		for (size_t i = 0; i < audio.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			_impl->tracks.push_back (audio[i]);
+			copy_name_to_snap (_snap.track_name[i], EngineSnapshot::kTrackNameLen,
+			                   audio[i]->name ());
+			if (audio[i]->gain_control ()) {
+				_snap.track_gain[i] = (float)audio[i]->gain_control ()->get_value ();
+				_track_gain[i] = _snap.track_gain[i];
 			}
 		}
 		_snap.audio_track_count = (int)_impl->tracks.size ();
-		/* Rebind primary MIDI track if Session still has one. */
-		if (!_impl->midi_track) {
+		/* Prefer existing midi_track if still in Session; else first MidiTrack. */
+		bool midi_alive = false;
+		if (_impl->midi_track) {
+			for (RouteList::const_iterator it = routes->begin (); it != routes->end (); ++it) {
+				if (*it == _impl->midi_track) {
+					midi_alive = true;
+					break;
+				}
+			}
+		}
+		if (!midi_alive) {
+			_impl->midi_track.reset ();
 			for (RouteList::const_iterator it = routes->begin (); it != routes->end (); ++it) {
 				std::shared_ptr<MidiTrack> mt = std::dynamic_pointer_cast<MidiTrack> (*it);
 				if (mt) {
@@ -806,6 +869,10 @@ EngineHost::collect_tracks ()
 			}
 		}
 		_snap.midi_track_count = _impl->midi_track ? 1 : 0;
+		if (_impl->midi_track) {
+			copy_name_to_snap (_snap.midi_track_name, EngineSnapshot::kTrackNameLen,
+			                   _impl->midi_track->name ());
+		}
 		std::shared_ptr<RouteList const> all = _impl->session->get_routes ();
 		if (all) {
 			for (RouteList::const_iterator it = all->begin (); it != all->end (); ++it) {
@@ -4686,6 +4753,229 @@ EngineHost::smoke_tracks ()
 }
 
 bool
+EngineHost::set_track_name (int track, const std::string& name)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	collect_tracks ();
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"rename — bad index";
+		return false;
+	}
+	if (name.empty ()) {
+		_snap.detail = L"rename — empty name";
+		return false;
+	}
+	try {
+		std::shared_ptr<Track> t = std::dynamic_pointer_cast<Track> (_impl->tracks[track]);
+		if (!t) {
+			_snap.detail = L"rename — not a Track";
+			return false;
+		}
+		if (!t->set_name (name)) {
+			_snap.detail = L"rename failed (rec-armed?)";
+			std::fprintf (stderr, "airdour_win_shell: set_track_name[%d] failed\n", track);
+			std::fflush (stderr);
+			return false;
+		}
+		collect_tracks ();
+		_snap.detail = L"track renamed";
+		std::fprintf (stderr, "airdour_win_shell: rename audio[%d] → %s\n",
+		              track, wide_to_utf8 (_snap.track_name[track]).c_str ());
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: set_track_name: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"rename failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"rename failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::set_midi_track_name (const std::string& name)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (!_impl->midi_track) {
+		_snap.detail = L"rename MIDI — none";
+		return false;
+	}
+	if (name.empty ()) {
+		_snap.detail = L"rename — empty name";
+		return false;
+	}
+	try {
+		std::shared_ptr<Track> t = std::dynamic_pointer_cast<Track> (_impl->midi_track);
+		if (!t || !t->set_name (name)) {
+			_snap.detail = L"rename MIDI failed (rec-armed?)";
+			return false;
+		}
+		collect_tracks ();
+		_snap.detail = L"MIDI renamed";
+		std::fprintf (stderr, "airdour_win_shell: rename MIDI → %s\n",
+		              wide_to_utf8 (_snap.midi_track_name).c_str ());
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: set_midi_track_name: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"rename MIDI failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"rename MIDI failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::move_audio_track (int index, int delta)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	collect_tracks ();
+	const int n = (int)_impl->tracks.size ();
+	if (n < 2) {
+		_snap.detail = L"reorder — need ≥2 audio";
+		return false;
+	}
+	const int other = index + delta;
+	if (index < 0 || index >= n || other < 0 || other >= n
+	    || !_impl->tracks[index] || !_impl->tracks[other]) {
+		_snap.detail = L"reorder — edge / bad index";
+		return false;
+	}
+	try {
+		std::shared_ptr<AudioTrack> a = _impl->tracks[index];
+		std::shared_ptr<AudioTrack> b = _impl->tracks[other];
+		PresentationInfo::order_t oa = a->presentation_info ().order ();
+		PresentationInfo::order_t ob = b->presentation_info ().order ();
+		{
+			PresentationInfo::ChangeSuspender cs;
+			a->set_presentation_order (ob);
+			b->set_presentation_order (oa);
+		}
+		/* Mirror UI gain cache with the swapped Session order. */
+		if (index < EngineSnapshot::kMeters && other < EngineSnapshot::kMeters) {
+			float tmp = _track_gain[index];
+			_track_gain[index] = _track_gain[other];
+			_track_gain[other] = tmp;
+			if (index == 0 || other == 0) {
+				_gain = _track_gain[0];
+				_snap.gain = _gain;
+			}
+		}
+		if (_snap.selection_track == index) {
+			_snap.selection_track = other;
+			_impl->selected_track = other;
+		} else if (_snap.selection_track == other) {
+			_snap.selection_track = index;
+			_impl->selected_track = index;
+		}
+		collect_tracks ();
+		/* Prefer Session gain_control as source of truth after reorder. */
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			if (_impl->tracks[i] && _impl->tracks[i]->gain_control ()) {
+				_track_gain[i] = (float)_impl->tracks[i]->gain_control ()->get_value ();
+			}
+		}
+		_gain = _track_gain[0];
+		_snap.gain = _gain;
+		refresh_region_flags ();
+		refresh_mute_solo_flags ();
+		refresh_pan_flags ();
+		refresh_send_flags ();
+		refresh_selection_snap ();
+		_snap.detail = L"tracks reordered";
+		std::fprintf (stderr, "airdour_win_shell: move audio[%d] %+d → [%d]\n",
+		              index, delta, other);
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: move_audio_track: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"reorder failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"reorder failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_rename ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-rename failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_snap.audio_track_count < 2) {
+			if (!add_audio_track () || _snap.audio_track_count < 2) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-rename FAILED (need ≥2 audio)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		const std::string name0 = wide_to_utf8 (_snap.track_name[0]);
+		const std::string name1 = wide_to_utf8 (_snap.track_name[1]);
+		if (!set_track_name (0, "Kick")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-rename FAILED (rename Kick)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const std::string after = wide_to_utf8 (_snap.track_name[0]);
+		if (after.find ("Kick") == std::string::npos) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-rename FAILED (name=%s)\n",
+			              after.c_str ());
+			std::fflush (stderr);
+			return false;
+		}
+		if (!move_audio_track (0, +1)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-rename FAILED (swap down)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const std::string at1 = wide_to_utf8 (_snap.track_name[1]);
+		if (at1.find ("Kick") == std::string::npos) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-rename FAILED (Kick not at [1]=%s)\n",
+			              at1.c_str ());
+			std::fflush (stderr);
+			return false;
+		}
+		if (!move_audio_track (1, -1)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-rename FAILED (swap up)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_name (0, name0.empty () ? "Audio1" : name0)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-rename FAILED (restore name)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		(void)name1;
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-rename ok (Kick rename + reorder + restore)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-rename ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-rename exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::smoke_tempo ()
 {
 	if (!_impl || !_impl->session) {
@@ -6702,7 +6992,10 @@ EngineHost::EngineHost ()
 		_snap.track_armed[i] = false;
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
+		_snap.track_gain[i] = _track_gain[i];
+		_snap.track_name[i][0] = L'\0';
 	}
+	_snap.midi_track_name[0] = L'\0';
 	_snap.aux_bus_ok = false;
 	_snap.available = false;
 	_snap.running = false;
@@ -7539,6 +7832,35 @@ EngineHost::remove_midi_track ()
 
 bool
 EngineHost::smoke_tracks ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_track_name (int track, const std::string& name)
+{
+	(void)track;
+	(void)name;
+	return false;
+}
+
+bool
+EngineHost::set_midi_track_name (const std::string& name)
+{
+	(void)name;
+	return false;
+}
+
+bool
+EngineHost::move_audio_track (int index, int delta)
+{
+	(void)index;
+	(void)delta;
+	return false;
+}
+
+bool
+EngineHost::smoke_rename ()
 {
 	return false;
 }

@@ -98,6 +98,7 @@ ShellWindow::ShellWindow ()
 	, _timeout_secs (0)
 	, _drag (DragMode::None)
 	, _drag_index (-1)
+	, _focus_audio_track (0)
 	, _pan_last_x (0.f)
 	, _pan_down_x (0.f)
 	, _pan_down_y (0.f)
@@ -207,7 +208,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_punch,
                             bool smoke_tempo,
                             bool smoke_click,
-                            bool smoke_tracks)
+                            bool smoke_tracks,
+                            bool smoke_rename)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -461,6 +463,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_rename && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_rename ()) {
+			_smoke_failed = true;
+		} else {
+			sync_track_labels_from_engine ();
+			sync_mixer_gains_from_engine ();
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_rename) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-rename FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -559,18 +576,41 @@ ShellWindow::sync_track_labels_from_engine ()
 {
 	const int na = n_audio_lanes ();
 	for (int i = 0; i < kTracksMax; ++i) {
-		wchar_t lab[24];
-		_snwprintf_s (lab, _TRUNCATE, L"Audio %d", i + 1);
+		wchar_t lab[32];
+		if (i < na && _engine_snap.track_name[i][0] != L'\0') {
+			wcsncpy_s (lab, _engine_snap.track_name[i], _TRUNCATE);
+		} else {
+			_snwprintf_s (lab, _TRUNCATE, L"Audio %d", i + 1);
+		}
 		wcsncpy_s (_lanes[i].label, lab, _TRUNCATE);
 		_mixers[i].set_label (lab);
 		_mixers[i].set_midi_strip (false);
 	}
 	const int mi = midi_mixer_index ();
 	if (mi >= 0 && mi < kMixerStripsMax) {
-		_mixers[mi].set_label (L"MIDI 1");
+		if (_engine_snap.midi_track_name[0] != L'\0') {
+			_mixers[mi].set_label (_engine_snap.midi_track_name);
+		} else {
+			_mixers[mi].set_label (L"MIDI 1");
+		}
 		_mixers[mi].set_midi_strip (true);
 	}
-	(void)na;
+	if (na > 0 && _engine_snap.track_name[0][0] != L'\0') {
+		wchar_t auto_lab[48];
+		_snwprintf_s (auto_lab, _TRUNCATE, L"Gain · %s", _engine_snap.track_name[0]);
+		_auto_lane.set_label (auto_lab);
+	} else {
+		_auto_lane.set_label (L"Gain · Audio 1");
+	}
+}
+
+void
+ShellWindow::sync_mixer_gains_from_engine ()
+{
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
+		_mixers[i].set_gain (_engine_snap.track_gain[i]);
+	}
 }
 
 void
@@ -627,7 +667,13 @@ ShellWindow::sync_mixer_send_from_engine ()
 void
 ShellWindow::refresh_automation_lane ()
 {
-	_auto_lane.set_label (L"Gain · Audio 1");
+	if (_engine_snap.track_name[0][0] != L'\0') {
+		wchar_t auto_lab[48];
+		_snwprintf_s (auto_lab, _TRUNCATE, L"Gain · %s", _engine_snap.track_name[0]);
+		_auto_lane.set_label (auto_lab);
+	} else {
+		_auto_lane.set_label (L"Gain · Audio 1");
+	}
 	float view0 = _lanes[0].strip.view_start_sec ();
 	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
 	float curve[AutomationLane::kMaxColumns];
@@ -1088,6 +1134,7 @@ ShellWindow::do_add_audio_track ()
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_track_labels_from_engine ();
+	sync_mixer_gains_from_engine ();
 	sync_mixer_arm_from_engine ();
 	sync_mixer_mute_solo_from_engine ();
 	sync_mixer_pan_from_engine ();
@@ -1127,12 +1174,239 @@ ShellWindow::do_remove_track ()
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_track_labels_from_engine ();
+	sync_mixer_gains_from_engine ();
 	sync_mixer_arm_from_engine ();
 	sync_mixer_mute_solo_from_engine ();
 	sync_mixer_pan_from_engine ();
 	sync_mixer_send_from_engine ();
 	layout_panes ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_move_audio_track (int delta)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	int idx = _focus_audio_track;
+	if (_engine_snap.has_selection && _engine_snap.selection_track >= 0
+	    && _engine_snap.selection_track < n_audio_lanes ()) {
+		idx = _engine_snap.selection_track;
+	}
+	if (idx < 0 || idx >= n_audio_lanes ()) {
+		idx = 0;
+	}
+	if (!_engine.move_audio_track (idx, delta)) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_focus_audio_track = idx + delta;
+	if (_focus_audio_track < 0) {
+		_focus_audio_track = 0;
+	}
+	if (_focus_audio_track >= n_audio_lanes ()) {
+		_focus_audio_track = n_audio_lanes () - 1;
+	}
+	sync_track_labels_from_engine ();
+	sync_mixer_gains_from_engine ();
+	sync_mixer_arm_from_engine ();
+	sync_mixer_mute_solo_from_engine ();
+	sync_mixer_pan_from_engine ();
+	sync_mixer_send_from_engine ();
+	apply_region_selection_to_lanes ();
+	layout_panes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+namespace {
+
+struct RenameDlgCtx {
+	HWND    edit;
+	wchar_t name[32];
+	bool    done;
+	bool    ok;
+};
+
+LRESULT CALLBACK
+rename_wnd_proc (HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+	RenameDlgCtx* ctx = reinterpret_cast<RenameDlgCtx*> (
+		GetWindowLongPtrW (hwnd, GWLP_USERDATA));
+	switch (msg) {
+	case WM_CREATE: {
+		CREATESTRUCTW* cs = reinterpret_cast<CREATESTRUCTW*> (lparam);
+		ctx = reinterpret_cast<RenameDlgCtx*> (cs->lpCreateParams);
+		SetWindowLongPtrW (hwnd, GWLP_USERDATA, (LONG_PTR)ctx);
+		ctx->edit = CreateWindowExW (
+			WS_EX_CLIENTEDGE, L"EDIT", ctx->name,
+			WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+			12, 12, 260, 24, hwnd, (HMENU)1001, cs->hInstance, nullptr);
+		CreateWindowW (L"BUTTON", L"OK",
+		               WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+		               80, 48, 72, 26, hwnd, (HMENU)IDOK, cs->hInstance, nullptr);
+		CreateWindowW (L"BUTTON", L"Cancel",
+		               WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+		               164, 48, 72, 26, hwnd, (HMENU)IDCANCEL, cs->hInstance, nullptr);
+		if (ctx->edit) {
+			SendMessageW (ctx->edit, EM_SETSEL, 0, -1);
+			SetFocus (ctx->edit);
+		}
+		return 0;
+	}
+	case WM_COMMAND:
+		if (LOWORD (wparam) == IDOK && ctx) {
+			GetWindowTextW (ctx->edit, ctx->name, 32);
+			ctx->ok = (ctx->name[0] != L'\0');
+			ctx->done = true;
+			DestroyWindow (hwnd);
+			return 0;
+		}
+		if (LOWORD (wparam) == IDCANCEL && ctx) {
+			ctx->ok = false;
+			ctx->done = true;
+			DestroyWindow (hwnd);
+			return 0;
+		}
+		break;
+	case WM_CLOSE:
+		if (ctx) {
+			ctx->ok = false;
+			ctx->done = true;
+		}
+		DestroyWindow (hwnd);
+		return 0;
+	default:
+		break;
+	}
+	return DefWindowProcW (hwnd, msg, wparam, lparam);
+}
+
+bool
+run_rename_dialog (HWND parent, wchar_t* name, size_t name_chars)
+{
+	if (!name || name_chars < 2) {
+		return false;
+	}
+	static const wchar_t* kCls = L"AirdourRenameDlg";
+	static bool registered = false;
+	HINSTANCE inst = GetModuleHandleW (nullptr);
+	if (!registered) {
+		WNDCLASSEXW wc = {};
+		wc.cbSize = sizeof (wc);
+		wc.lpfnWndProc = rename_wnd_proc;
+		wc.hInstance = inst;
+		wc.hCursor = LoadCursorW (nullptr, IDC_ARROW);
+		wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+		wc.lpszClassName = kCls;
+		if (!RegisterClassExW (&wc) && GetLastError () != ERROR_CLASS_ALREADY_EXISTS) {
+			return false;
+		}
+		registered = true;
+	}
+
+	RenameDlgCtx ctx = {};
+	wcsncpy_s (ctx.name, name, _TRUNCATE);
+	ctx.done = false;
+	ctx.ok = false;
+
+	RECT pr = {};
+	if (parent) {
+		GetWindowRect (parent, &pr);
+	}
+	int wx = pr.left + 80;
+	int wy = pr.top + 120;
+	HWND dlg = CreateWindowExW (
+		WS_EX_DLGMODALFRAME, kCls, L"Rename track — Airdour",
+		WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+		wx, wy, 300, 120, parent, nullptr, inst, &ctx);
+	if (!dlg) {
+		return false;
+	}
+	if (parent) {
+		EnableWindow (parent, FALSE);
+	}
+	MSG msg;
+	while (!ctx.done && GetMessageW (&msg, nullptr, 0, 0) > 0) {
+		if (!IsDialogMessageW (dlg, &msg)) {
+			TranslateMessage (&msg);
+			DispatchMessageW (&msg);
+		}
+	}
+	if (parent) {
+		EnableWindow (parent, TRUE);
+		SetForegroundWindow (parent);
+	}
+	if (!ctx.ok) {
+		return false;
+	}
+	wcsncpy_s (name, name_chars, ctx.name, _TRUNCATE);
+	return name[0] != L'\0';
+}
+
+} // namespace
+
+void
+ShellWindow::prompt_rename_track (int audio_index, bool midi)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	wchar_t name[32];
+	if (midi) {
+		if (_engine_snap.midi_track_name[0]) {
+			wcsncpy_s (name, _engine_snap.midi_track_name, _TRUNCATE);
+		} else {
+			wcsncpy_s (name, L"MIDI 1", _TRUNCATE);
+		}
+	} else {
+		if (audio_index < 0 || audio_index >= n_audio_lanes ()) {
+			return;
+		}
+		if (_engine_snap.track_name[audio_index][0]) {
+			wcsncpy_s (name, _engine_snap.track_name[audio_index], _TRUNCATE);
+		} else {
+			_snwprintf_s (name, _TRUNCATE, L"Audio %d", audio_index + 1);
+		}
+	}
+	if (!run_rename_dialog (_hwnd, name, 32)) {
+		return;
+	}
+	char utf8[128];
+	WideCharToMultiByte (CP_UTF8, 0, name, -1, utf8, sizeof (utf8), nullptr, nullptr);
+	bool ok = false;
+	if (midi) {
+		ok = _engine.set_midi_track_name (utf8);
+	} else {
+		ok = _engine.set_track_name (audio_index, utf8);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_track_labels_from_engine ();
+	if (!ok) {
+		MessageBoxW (_hwnd, L"Could not rename track (empty name or rec-armed).",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_rename_focused_track ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	int idx = _focus_audio_track;
+	if (_engine_snap.has_selection && _engine_snap.selection_track >= 0) {
+		idx = _engine_snap.selection_track;
+	}
+	if (idx < 0 || idx >= n_audio_lanes ()) {
+		idx = 0;
+	}
+	prompt_rename_track (idx, false);
 }
 
 void
@@ -1689,6 +1963,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			prompt_open_session ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')) {
 			prompt_export_wav ();
+		} else if (wparam == VK_F2) {
+			do_rename_focused_track ();
+		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_UP) {
+			do_move_audio_track (-1);
+		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_DOWN) {
+			do_move_audio_track (+1);
 		}
 		return 0;
 	case WM_MOUSEWHEEL:
@@ -1701,6 +1981,28 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			return 0;
 		}
 		break;
+	case WM_LBUTTONDBLCLK: {
+		float x, y;
+		client_from_lparam (lparam, &x, &y);
+		int lab = hit_mixer_label (x, y);
+		if (lab >= 0) {
+			const int mi = midi_mixer_index ();
+			if (lab == mi) {
+				prompt_rename_track (0, true);
+			} else if (lab < n_audio_lanes ()) {
+				_focus_audio_track = lab;
+				prompt_rename_track (lab, false);
+			}
+			return 0;
+		}
+		int ed = hit_editor_lane_label (x, y);
+		if (ed >= 0) {
+			_focus_audio_track = ed;
+			prompt_rename_track (ed, false);
+			return 0;
+		}
+		break;
+	}
 	case WM_MOUSEMOVE:
 		if (on_mouse_move (lparam)) {
 			return 0;
@@ -1873,6 +2175,42 @@ ShellWindow::hit_mixer_fx (float x, float y) const
 }
 
 int
+ShellWindow::hit_mixer_label (float x, float y) const
+{
+	const int n = n_mixer_strips ();
+	for (int i = 0; i < n; ++i) {
+		if (_mixers[i].hit_label (x, y)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int
+ShellWindow::hit_editor_lane_label (float x, float y) const
+{
+	const int n = n_audio_lanes ();
+	float inset = 12.f * _dpi_scale;
+	for (int i = 0; i < n; ++i) {
+		const D2D1_RECT_F& lb = _lanes[i].bounds;
+		if (lb.right <= lb.left) {
+			continue;
+		}
+		float label_bot = lb.bottom;
+		if (i == 0 && _auto_lane_bounds.bottom > label_bot) {
+			label_bot = _auto_lane_bounds.bottom;
+		}
+		D2D1_RECT_F label_rc = D2D1::RectF (
+			_editor_pane.left + inset, lb.top, lb.left - 4.f * _dpi_scale, label_bot);
+		if (x >= label_rc.left && x <= label_rc.right
+		    && y >= label_rc.top && y <= label_rc.bottom) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int
 ShellWindow::hit_mixer_fx_param (float x, float y) const
 {
 	const int na = n_audio_lanes ();
@@ -2013,6 +2351,14 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		do_remove_track ();
 		return true;
 	}
+	if (th == TransportHit::TrackUp) {
+		do_move_audio_track (-1);
+		return true;
+	}
+	if (th == TransportHit::TrackDown) {
+		do_move_audio_track (+1);
+		return true;
+	}
 
 	if (hit_editor_ruler (x, y) && _engine.is_linked () && _engine_snap.session_ok) {
 		float time_sec = _lanes[0].strip.time_at_x (_editor_ruler, x);
@@ -2045,6 +2391,31 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_pan_last_x = x;
 		SetCapture (_hwnd);
 		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	int lab = hit_mixer_label (x, y);
+	if (lab >= 0) {
+		const int mi = midi_mixer_index ();
+		if (lab == mi) {
+			/* Double-click rename is handled in WM_LBUTTONDBLCLK. */
+			return true;
+		}
+		if (lab < n_audio_lanes ()) {
+			_focus_audio_track = lab;
+			_drag = DragMode::TrackReorderPending;
+			_drag_index = lab;
+			_pan_down_x = x;
+			_pan_down_y = y;
+			_pan_last_x = x;
+			SetCapture (_hwnd);
+			return true;
+		}
+	}
+
+	int ed_lab = hit_editor_lane_label (x, y);
+	if (ed_lab >= 0) {
+		_focus_audio_track = ed_lab;
 		return true;
 	}
 
@@ -2397,6 +2768,23 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 		return true;
 	}
 
+	if (_drag == DragMode::TrackReorderPending && _drag_index >= 0) {
+		float dx = x - _pan_down_x;
+		float dy = y - _pan_down_y;
+		float thresh = 6.f * _dpi_scale;
+		if ((dx * dx + dy * dy) >= (thresh * thresh)) {
+			_drag = DragMode::TrackReorder;
+			SetCursor (LoadCursorW (nullptr, IDC_SIZENS));
+		}
+		return true;
+	}
+
+	if (_drag == DragMode::TrackReorder && _drag_index >= 0) {
+		_pan_last_x = x;
+		_pan_down_y = y; /* reuse as last y for visual only */
+		return true;
+	}
+
 	if (_drag == DragMode::WavePending && _drag_index >= 0 && _drag_index < kTracks) {
 		float dx = x - _pan_down_x;
 		float dy = y - _pan_down_y;
@@ -2463,6 +2851,56 @@ ShellWindow::on_mouse_up ()
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
 			apply_region_selection_to_lanes ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+	}
+	if (_drag == DragMode::TrackReorderPending) {
+		/* Click without drag — keep focus; F2 renames. */
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+	if (_drag == DragMode::TrackReorder && _drag_index >= 0
+	    && _engine.is_linked () && _engine_snap.session_ok) {
+		float drop_x = _pan_last_x;
+		float drop_y = _pan_down_y;
+		POINT pt;
+		if (GetCursorPos (&pt) && ScreenToClient (_hwnd, &pt)) {
+			drop_x = (float)pt.x;
+			drop_y = (float)pt.y;
+		}
+		int from = _drag_index;
+		int to = hit_mixer_label (drop_x, drop_y);
+		if (to < 0) {
+			/* Fall back to strip bounds under cursor. */
+			const int na = n_audio_lanes ();
+			for (int i = 0; i < na; ++i) {
+				const D2D1_RECT_F& b = _mixers[i].bounds ();
+				if (drop_x >= b.left && drop_x <= b.right
+				    && drop_y >= b.top && drop_y <= b.bottom) {
+					to = i;
+					break;
+				}
+			}
+		}
+		if (to >= 0 && to < n_audio_lanes () && to != from) {
+			int step = (to > from) ? +1 : -1;
+			int cur = from;
+			while (cur != to) {
+				if (!_engine.move_audio_track (cur, step)) {
+					break;
+				}
+				cur += step;
+			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			_focus_audio_track = cur;
+			sync_track_labels_from_engine ();
+			sync_mixer_gains_from_engine ();
+			sync_mixer_arm_from_engine ();
+			sync_mixer_mute_solo_from_engine ();
+			sync_mixer_pan_from_engine ();
+			sync_mixer_send_from_engine ();
+			apply_region_selection_to_lanes ();
+			layout_panes ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		}
 	}
@@ -2904,7 +3342,9 @@ ShellWindow::draw_midi_lane ()
 	float inset = 12.f * _dpi_scale;
 	D2D1_RECT_F label_rc = D2D1::RectF (
 		_editor_pane.left + inset, r.top, r.left - 4.f * _dpi_scale, r.bottom);
-	_rt->DrawTextW (L"MIDI 1", 6, _fmt_meta, label_rc, _brush_midi);
+	const wchar_t* midi_lab = (_engine_snap.midi_track_name[0] != L'\0')
+		? _engine_snap.midi_track_name : L"MIDI 1";
+	_rt->DrawTextW (midi_lab, (UINT32)wcslen (midi_lab), _fmt_meta, label_rc, _brush_midi);
 
 	_rt->FillRectangle (r, _brush_pane_edge);
 	_rt->DrawRectangle (r, _brush_midi, 1.f);

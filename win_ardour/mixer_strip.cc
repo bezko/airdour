@@ -21,6 +21,7 @@ contains (const D2D1_RECT_F& r, float x, float y)
 
 MixerStrip::MixerStrip ()
 	: _strip ()
+	, _label_rc ()
 	, _track ()
 	, _arm_btn ()
 	, _mute_btn ()
@@ -91,6 +92,8 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 	_strip = strip_bounds;
 
 	float pad = 8.f * dpi_scale;
+	_label_rc = D2D1::RectF (
+		_strip.left, _strip.top, _strip.right, _strip.top + 26.f * dpi_scale);
 	float y = _strip.top + 28.f * dpi_scale;
 	float arm_h = 22.f * dpi_scale;
 	float ms_h = 22.f * dpi_scale;
@@ -176,6 +179,12 @@ bool
 MixerStrip::hit_meter (float x, float y) const
 {
 	return _meter.hit (x, y);
+}
+
+bool
+MixerStrip::hit_label (float x, float y) const
+{
+	return contains (_label_rc, x, y);
 }
 
 bool
@@ -343,10 +352,7 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 
 	DWRITE_TEXT_ALIGNMENT ta = fmt_title->GetTextAlignment ();
 	fmt_title->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-	rt->DrawTextW (_label, (UINT32)wcslen (_label), fmt_title,
-	               D2D1::RectF (_strip.left, _strip.top + 4.f * dpi_scale,
-	                            _strip.right, _strip.top + 26.f * dpi_scale),
-	               brand);
+	rt->DrawTextW (_label, (UINT32)wcslen (_label), fmt_title, _label_rc, brand);
 	fmt_title->SetTextAlignment (ta);
 
 	DWRITE_TEXT_ALIGNMENT ta_m = fmt_meta->GetTextAlignment ();
