@@ -101,6 +101,16 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 UI thread: init / set_backend / start / stop / paint.  
 Backend realtime thread: audio only. Do not call D2D from the process callback.
 
+## Portable zip (no source tree)
+
+From a tree that already built the Engine shell + waf libs + ACE LV2:
+
+```bat
+powershell -File tools\win-native\ci\Package-WinShell-Portable.ps1 -RepoRoot %CD% -OutDir dist -Version local -Mode Engine
+```
+
+Unzip `dist\airdour-*-win64-shell.zip` anywhere and run `run-airdour.bat`. See `tools/win-native/ci/` and the release-pipeline docs for GHA UiOnly vs Engine.
+
 ## Constraints
 
 WASAPI **shared** only. No ASIO, no GTK2, no exclusive mode.

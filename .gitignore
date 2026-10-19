@@ -159,3 +159,7 @@ waf3-*
 /build-win64-logs/
 /tools/win-native/vcpkg_installed/
 
+
+# Local release packaging output
+/dist/
+

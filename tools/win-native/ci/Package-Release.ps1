@@ -1,9 +1,14 @@
 # Packages the staged Windows release zip for GitHub Releases.
+# Always builds the CI spine zip (wasapi_io smoke + sources).
+# Also builds a portable win_shell zip when airdour_win_shell.exe is available
+# (UiOnly on GHA; Engine when waf libs exist on a laptop agent).
 param(
     [Parameter(Mandatory = $true)][string]$RepoRoot,
     [Parameter(Mandatory = $true)][string]$OutDir,
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$BuildDir = "",
+    [string]$ShellExe = "",
+    [string]$WafLibsDir = "",
     [string]$GitSha = "unknown",
     [string]$GitRef = "unknown"
 )
@@ -69,4 +74,34 @@ try {
     Pop-Location
 }
 Write-Host "Created $zipPath"
+
+# Portable win_shell zip (best available: Engine on laptop, UiOnly on GHA)
+$shellZip = $null
+try {
+    $packShell = Join-Path $RepoRoot "tools\win-native\ci\Package-WinShell-Portable.ps1"
+    $shellArgs = @{
+        RepoRoot = $RepoRoot
+        OutDir   = $OutDir
+        Version  = $Version
+        GitSha   = $GitSha
+        GitRef   = $GitRef
+    }
+    if ($ShellExe) { $shellArgs.ShellExe = $ShellExe }
+    elseif ($BuildDir) {
+        foreach ($c in @(
+            (Join-Path $BuildDir "artifacts\Release\airdour_win_shell.exe"),
+            (Join-Path $BuildDir "artifacts\Debug\airdour_win_shell.exe")
+        )) {
+            if (Test-Path $c) { $shellArgs.ShellExe = $c; break }
+        }
+    }
+    if ($WafLibsDir) { $shellArgs.WafLibsDir = $WafLibsDir }
+    & $packShell @shellArgs | Out-Null
+    $shellZip = Get-ChildItem -Path $OutDir -Filter "airdour-$Version-win64-shell*.zip" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+} catch {
+    Write-Warning "Portable win_shell zip skipped: $($_.Exception.Message)"
+}
+
 Write-Output $zipPath
+if ($shellZip) { Write-Output $shellZip }
