@@ -196,6 +196,8 @@ private:
 	void draw_midi_cc_lane ();
 	void refresh_midi_cc_lane ();
 	void write_midi_cc_at (float x, float y);
+	void cycle_midi_cc_controller ();
+	const wchar_t* midi_cc_label () const;
 	void draw_mixer_pane ();
 	void draw_help_overlay ();
 	void toggle_help ();
@@ -425,4 +427,5 @@ private:
 	RecoveryPanel  _recovery;
 	float          _auto_last_write_sec;
 	float          _midi_cc_last_write_sec;
+	int            _midi_cc_number; /* 7 volume / 1 mod / 11 expr */
 };

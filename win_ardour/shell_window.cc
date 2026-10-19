@@ -154,6 +154,7 @@ ShellWindow::ShellWindow ()
 	, _engine_snap ()
 	, _auto_last_write_sec (-1.f)
 	, _midi_cc_last_write_sec (-1.f)
+	, _midi_cc_number (7)
 {
 	enable_dpi_awareness ();
 	_engine_snap = _engine.snapshot ();
@@ -1269,18 +1270,50 @@ ShellWindow::draw_automation_lane ()
 	                 _brush_pane_edge, _brush_playhead, _fmt_meta, _dpi_scale);
 }
 
+const wchar_t*
+ShellWindow::midi_cc_label () const
+{
+	switch (_midi_cc_number) {
+	case 1:
+		return L"CC1 · Mod";
+	case 11:
+		return L"CC11 · Expr";
+	default:
+		return L"CC7 · Volume";
+	}
+}
+
+void
+ShellWindow::cycle_midi_cc_controller ()
+{
+	if (_midi_cc_number == 7) {
+		_midi_cc_number = 1;
+	} else if (_midi_cc_number == 1) {
+		_midi_cc_number = 11;
+	} else {
+		_midi_cc_number = 7;
+	}
+	_midi_cc_last_write_sec = -1.f;
+	if (_engine.is_linked () && _engine_snap.session_ok) {
+		_engine.ensure_midi_cc_automation (_midi_cc_number);
+	}
+	refresh_midi_cc_lane ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 void
 ShellWindow::refresh_midi_cc_lane ()
 {
-	_midi_cc_lane.set_label (L"CC7 · Volume");
+	_midi_cc_lane.set_label (midi_cc_label ());
 	float view0 = _lanes[0].strip.view_start_sec ();
 	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
 	float curve[AutomationLane::kMaxColumns];
 	size_t n = AutomationLane::kMaxColumns;
 	if (_engine.is_linked () && _engine_snap.session_ok) {
-		_engine.fill_midi_cc_automation_curve (view0, span, curve, n);
+		_engine.fill_midi_cc_automation_curve (
+			view0, span, curve, n, _midi_cc_number);
 	} else {
-		const float def = 100.f / 127.f;
+		const float def = (_midi_cc_number == 7) ? (100.f / 127.f) : 0.f;
 		for (size_t i = 0; i < n; ++i) {
 			curve[i] = def;
 		}
@@ -1292,7 +1325,8 @@ ShellWindow::refresh_midi_cc_lane ()
 	int npt = 0;
 	if (_engine.is_linked () && _engine_snap.session_ok) {
 		npt = _engine.fill_midi_cc_automation_points (
-			view0, span, px, py, (int)AutomationLane::kMaxPoints);
+			view0, span, px, py, (int)AutomationLane::kMaxPoints,
+			_midi_cc_number);
 	}
 	_midi_cc_lane.set_points (px, py, (size_t)std::max (0, npt));
 	_midi_cc_lane.set_playhead_norm (_lanes[0].strip.playhead_norm ());
@@ -1310,7 +1344,7 @@ ShellWindow::write_midi_cc_at (float x, float y)
 	    && std::fabs (time_sec - _midi_cc_last_write_sec) < 0.035f) {
 		return;
 	}
-	if (_engine.write_midi_cc_automation (time_sec, value)) {
+	if (_engine.write_midi_cc_automation (time_sec, value, _midi_cc_number)) {
 		_midi_cc_last_write_sec = time_sec;
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
@@ -3497,6 +3531,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else {
 				do_toggle_midi_scale ();
 			}
+		} else if (wparam == VK_F8) {
+			/* F8 — cycle MIDI CC lane controller Volume→Mod→Expr. */
+			cycle_midi_cc_controller ();
 		} else if (_engine_snap.midi_step_enabled
 		           && !(GetKeyState (VK_CONTROL) & 0x8000)
 		           && !(GetKeyState (VK_MENU) & 0x8000)
@@ -4868,7 +4905,7 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_drag = DragMode::MidiCcWrite;
 		_drag_index = 0;
 		_midi_cc_last_write_sec = -1.f;
-		_engine.ensure_midi_cc_automation ();
+		_engine.ensure_midi_cc_automation (_midi_cc_number);
 		write_midi_cc_at (x, y);
 		SetCapture (_hwnd);
 		SetCursor (LoadCursorW (nullptr, IDC_CROSS));
@@ -6192,6 +6229,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F5 / Chd", L"MIDI chord Off→Maj→Min · multi-key latch" },
 		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
+		{ L"F8", L"MIDI CC lane · cycle CC7 Vol → CC1 Mod → CC11 Expr" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
