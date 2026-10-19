@@ -182,6 +182,7 @@ struct EngineSnapshot {
 	bool         midi_soloed;
 	bool         snap_enabled; /* Editor snap-to-grid */
 	bool         midi_step_enabled; /* Step-record: keys/click place at playhead */
+	int          midi_chord_quality; /* 0=off 1=maj (R+4+7) 2=min (R+3+7) */
 	int          snap_density; /* 0=bar 1=beat 2=1/2 3=1/4 */
 	int          grid_line_count; /* visible grid lines for Editor draw */
 	static constexpr int kMaxGridLines = 96;
@@ -1050,11 +1051,22 @@ public:
 	bool midi_step_enabled () const;
 	bool toggle_midi_step_enabled ();
 	/**
-	 * Place a note at the transport playhead (length = snap grid unit) and
-	 * advance playhead by one grid step. Works whether or not step UI is on
-	 * (smoke / scripting). WinMME hardware note-on is not polled here.
+	 * Chord quality for step/click: 0=off (single pitch), 1=major triad,
+	 * 2=minor triad. Cycle via UI / F5. Honest: only maj/min triads — no
+	 * 7ths, inversions, or scale-aware voicings.
 	 */
-	bool step_input_midi_note (uint8_t pitch, uint8_t velocity = 100);
+	void set_midi_chord_quality (int quality);
+	int  midi_chord_quality () const;
+	int  cycle_midi_chord_quality ();
+	/**
+	 * Place a note (or maj/min triad when chord quality ≠ off) at the
+	 * transport playhead (length ≈ snap grid unit × 0.9). When advance is
+	 * true, move playhead one grid step after placing. advance=false supports
+	 * multi-key latch (place several pitches at the same time, advance later).
+	 * WinMME hardware note-on is not polled here.
+	 */
+	bool step_input_midi_note (uint8_t pitch, uint8_t velocity = 100,
+	                           bool advance = true);
 	/** Advance (or retreat) playhead by one snap grid step without a note. */
 	bool step_advance (int steps = 1);
 
@@ -1113,6 +1125,12 @@ public:
 	 * For --smoke-midi-step.
 	 */
 	bool smoke_midi_step ();
+
+	/**
+	 * Maj triad @0, min triad @beat, Off multi-place without mid-advance.
+	 * For --smoke-midi-chord.
+	 */
+	bool smoke_midi_chord ();
 
 	std::string session_dir () const;
 	std::string last_export_path () const;

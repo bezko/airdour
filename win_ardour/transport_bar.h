@@ -51,6 +51,7 @@ enum class TransportHit {
 	MidiLenDown,
 	MidiHumanize,
 	MidiStep,
+	MidiChord,
 	CountIn,
 	Click,
 	TempoDown,
@@ -103,6 +104,10 @@ public:
 
 	void set_midi_step_enabled (bool on) { _midi_step_enabled = on; }
 	bool midi_step_enabled () const { return _midi_step_enabled; }
+
+	/** 0=off 1=maj 2=min — Chord button label + lit when ≠0. */
+	void set_midi_chord_quality (int q) { _midi_chord_quality = q; }
+	int  midi_chord_quality () const { return _midi_chord_quality; }
 
 	void set_freeze_active (bool on) { _freeze_active = on; }
 	bool freeze_active () const { return _freeze_active; }
@@ -198,6 +203,7 @@ private:
 	D2D1_RECT_F _midi_len_dn_btn;
 	D2D1_RECT_F _midi_humanize_btn;
 	D2D1_RECT_F _midi_step_btn;
+	D2D1_RECT_F _midi_chord_btn;
 	D2D1_RECT_F _count_btn;
 	D2D1_RECT_F _click_btn;
 	D2D1_RECT_F _tempo_dn_btn;
@@ -226,6 +232,7 @@ private:
 	bool        _punch_enabled;
 	bool        _snap_enabled;
 	bool        _midi_step_enabled;
+	int         _midi_chord_quality;
 	bool        _freeze_active;
 	bool        _count_in_enabled;
 	bool        _click_enabled;

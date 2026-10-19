@@ -108,6 +108,7 @@ ShellWindow::ShellWindow ()
 	, _midi_vel_drag (100)
 	, _midi_trim_start_sec (0.f)
 	, _midi_trim_end_sec (0.f)
+	, _step_piano_held_count (0)
 	, _transport_playing (false)
 	, _playhead_sec (0.f)
 	, _last_tick_ms (0)
@@ -175,6 +176,9 @@ ShellWindow::ShellWindow ()
 	_mixers[3].set_label (L"MIDI 1");
 	_mixers[3].set_gain (0.85f);
 	_mixers[3].set_midi_strip (true);
+	for (int i = 0; i < 128; ++i) {
+		_step_piano_held[i] = false;
+	}
 }
 
 ShellWindow::~ShellWindow ()
@@ -246,7 +250,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_length,
                             bool smoke_midi_clipboard,
                             bool smoke_midi_humanize,
-                            bool smoke_midi_step)
+                            bool smoke_midi_step,
+                            bool smoke_midi_chord)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -397,6 +402,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_step) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-step FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi_chord && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_chord ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_chord) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-chord FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -950,6 +964,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	sync_recent_from_engine ();
 	_transport.set_snap_enabled (_engine_snap.snap_enabled);
 	_transport.set_midi_step_enabled (_engine_snap.midi_step_enabled);
+	_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 	layout_panes ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
@@ -2582,6 +2597,7 @@ ShellWindow::do_toggle_snap ()
 	_engine_snap = _engine.snapshot ();
 	_transport.set_snap_enabled (_engine_snap.snap_enabled);
 	_transport.set_midi_step_enabled (_engine_snap.midi_step_enabled);
+	_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 	if (_engine_snap.snap_enabled) {
 		_engine.refresh_grid_lines (
 			_lanes[0].strip.view_start_sec (),
@@ -2704,22 +2720,86 @@ ShellWindow::do_toggle_midi_step ()
 	_engine.toggle_midi_step_enabled ();
 	_engine_snap = _engine.snapshot ();
 	_transport.set_midi_step_enabled (_engine_snap.midi_step_enabled);
+	_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
+	if (!_engine_snap.midi_step_enabled) {
+		clear_step_piano_held ();
+	}
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
-ShellWindow::do_step_input_pitch (uint8_t pitch)
+ShellWindow::do_cycle_midi_chord ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	_engine.cycle_midi_chord_quality ();
+	_engine_snap = _engine.snapshot ();
+	_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::clear_step_piano_held ()
+{
+	for (int i = 0; i < 128; ++i) {
+		_step_piano_held[i] = false;
+	}
+	_step_piano_held_count = 0;
+}
+
+void
+ShellWindow::do_step_input_pitch (uint8_t pitch, bool advance)
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
 	}
-	if (_engine.step_input_midi_note (pitch, 100)) {
+	if (_engine.step_input_midi_note (pitch, 100, advance)) {
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 		_playhead_sec = _engine_snap.transport_sec;
 		sync_transport_clock_from_engine ();
 	}
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_step_piano_key_down (uint8_t pitch)
+{
+	if (pitch > 127) {
+		return;
+	}
+	if (_step_piano_held[pitch]) {
+		return; /* ignore WM_KEYDOWN autorepeat */
+	}
+	_step_piano_held[pitch] = true;
+	++_step_piano_held_count;
+	/* Place without advancing; advance on last key-up (multi-key chord). */
+	do_step_input_pitch (pitch, false);
+}
+
+void
+ShellWindow::do_step_piano_key_up (uint8_t pitch)
+{
+	if (pitch > 127 || !_step_piano_held[pitch]) {
+		return;
+	}
+	_step_piano_held[pitch] = false;
+	if (_step_piano_held_count > 0) {
+		--_step_piano_held_count;
+	}
+	if (_step_piano_held_count > 0) {
+		return;
+	}
+	/* Last piano key released → advance one grid step. */
+	if (_engine.is_linked () && _engine_snap.session_ok) {
+		_engine.step_advance (1);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_playhead_sec = _engine_snap.transport_sec;
+		sync_transport_clock_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
 }
 
 int
@@ -2763,6 +2843,7 @@ ShellWindow::do_cycle_snap_density ()
 	_engine_snap = _engine.snapshot ();
 	_transport.set_snap_enabled (_engine_snap.snap_enabled);
 	_transport.set_midi_step_enabled (_engine_snap.midi_step_enabled);
+	_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
@@ -3124,6 +3205,15 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 	case WM_TIMER:
 		on_tick ();
 		return 0;
+	case WM_KEYUP:
+		if (_engine_snap.midi_step_enabled
+		    && !(GetKeyState (VK_CONTROL) & 0x8000)
+		    && !(GetKeyState (VK_MENU) & 0x8000)
+		    && step_piano_pitch_for_key (wparam) >= 0) {
+			do_step_piano_key_up ((uint8_t)step_piano_pitch_for_key (wparam));
+			return 0;
+		}
+		break;
 	case WM_KEYDOWN:
 		if (_about.splash_visible ()) {
 			/* Any key dismisses splash (smokes use --no-splash / --timeout). */
@@ -3182,12 +3272,16 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (wparam == VK_F4) {
 			/* F4 — toggle MIDI step-record. */
 			do_toggle_midi_step ();
+		} else if (wparam == VK_F5) {
+			/* F5 — cycle MIDI chord quality Off → Maj → Min. */
+			do_cycle_midi_chord ();
 		} else if (_engine_snap.midi_step_enabled
 		           && !(GetKeyState (VK_CONTROL) & 0x8000)
 		           && !(GetKeyState (VK_MENU) & 0x8000)
 		           && (wparam == VK_LEFT || wparam == VK_RIGHT)) {
 			/* Step mode: ←/→ = rest back/forward one grid. */
 			if (_engine.is_linked () && _engine_snap.session_ok) {
+				clear_step_piano_held ();
 				_engine.step_advance (wparam == VK_RIGHT ? 1 : -1);
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
@@ -3199,7 +3293,7 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && !(GetKeyState (VK_CONTROL) & 0x8000)
 		           && !(GetKeyState (VK_MENU) & 0x8000)
 		           && step_piano_pitch_for_key (wparam) >= 0) {
-			do_step_input_pitch ((uint8_t)step_piano_pitch_for_key (wparam));
+			do_step_piano_key_down ((uint8_t)step_piano_pitch_for_key (wparam));
 		} else if (wparam == VK_LEFT) {
 			float step = (GetKeyState (VK_SHIFT) & 0x8000) ? 0.5f : 0.15f;
 			do_scroll_editor (-step);
@@ -4014,6 +4108,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::MidiStep) {
 		do_toggle_midi_step ();
+		return true;
+	}
+	if (th == TransportHit::MidiChord) {
+		do_cycle_midi_chord ();
 		return true;
 	}
 	if (th == TransportHit::CountIn) {
@@ -5107,6 +5205,7 @@ ShellWindow::on_tick ()
 		refresh_automation_lane ();
 		_transport.set_snap_enabled (_engine_snap.snap_enabled);
 		_transport.set_midi_step_enabled (_engine_snap.midi_step_enabled);
+		_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 		_transport.set_spectrum_enabled (_engine_snap.spectrum_enabled);
 		_transport.set_correlation_enabled (_engine_snap.correlation_enabled);
 		_transport.set_loudness_enabled (_engine_snap.loudness_enabled);
@@ -5824,6 +5923,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+C / X / V", L"MIDI note copy · cut · paste (at playhead)" },
 		{ L"H / Shift+H", L"MIDI humanize · 2× strength (Hum)" },
 		{ L"F4 / Step", L"MIDI step-record · Z/Q piano · ←→ rest" },
+		{ L"F5 / Chd", L"MIDI chord Off→Maj→Min · multi-key latch" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },

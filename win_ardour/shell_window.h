@@ -121,7 +121,8 @@ public:
 	                    bool smoke_midi_length = false,
 	                    bool smoke_midi_clipboard = false,
 	                    bool smoke_midi_humanize = false,
-	                    bool smoke_midi_step = false);
+	                    bool smoke_midi_step = false,
+	                    bool smoke_midi_chord = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -235,7 +236,11 @@ private:
 	void do_paste_midi_notes ();
 	void do_humanize_midi_notes (float strength = 1.f);
 	void do_toggle_midi_step ();
-	void do_step_input_pitch (uint8_t pitch);
+	void do_cycle_midi_chord ();
+	void do_step_input_pitch (uint8_t pitch, bool advance = true);
+	void do_step_piano_key_down (uint8_t pitch);
+	void do_step_piano_key_up (uint8_t pitch);
+	void clear_step_piano_held ();
 	/** Map computer key → MIDI pitch when step-record is on; −1 if not a piano key. */
 	int  step_piano_pitch_for_key (WPARAM wparam) const;
 	void do_toggle_loop ();
@@ -337,6 +342,8 @@ private:
 	int     _midi_vel_drag; /* live preview 1..127 while MidiVelocity drag */
 	float   _midi_trim_start_sec; /* live preview while MidiTrim* drag */
 	float   _midi_trim_end_sec;
+	bool    _step_piano_held[128]; /* multi-key latch while step-record on */
+	int     _step_piano_held_count;
 
 	bool  _transport_playing;
 	float _playhead_sec;

@@ -625,6 +625,7 @@ EngineHost::EngineHost ()
 	_snap.midi_soloed = false;
 	_snap.snap_enabled = false;
 	_snap.midi_step_enabled = false;
+	_snap.midi_chord_quality = 0;
 	_snap.snap_density = 1; /* beat */
 	_snap.grid_line_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
@@ -15397,6 +15398,42 @@ EngineHost::toggle_midi_step_enabled ()
 	return _snap.midi_step_enabled;
 }
 
+void
+EngineHost::set_midi_chord_quality (int quality)
+{
+	if (quality < 0) {
+		quality = 0;
+	}
+	if (quality > 2) {
+		quality = 2;
+	}
+	_snap.midi_chord_quality = quality;
+	if (quality == 1) {
+		_snap.detail = L"MIDI chord Maj";
+	} else if (quality == 2) {
+		_snap.detail = L"MIDI chord Min";
+	} else {
+		_snap.detail = L"MIDI chord Off";
+	}
+}
+
+int
+EngineHost::midi_chord_quality () const
+{
+	return _snap.midi_chord_quality;
+}
+
+int
+EngineHost::cycle_midi_chord_quality ()
+{
+	int q = _snap.midi_chord_quality + 1;
+	if (q > 2) {
+		q = 0;
+	}
+	set_midi_chord_quality (q);
+	return _snap.midi_chord_quality;
+}
+
 bool
 EngineHost::step_advance (int steps)
 {
@@ -15420,7 +15457,7 @@ EngineHost::step_advance (int steps)
 }
 
 bool
-EngineHost::step_input_midi_note (uint8_t pitch, uint8_t velocity)
+EngineHost::step_input_midi_note (uint8_t pitch, uint8_t velocity, bool advance)
 {
 	if (pitch > 127) {
 		pitch = 127;
@@ -15455,22 +15492,49 @@ EngineHost::step_input_midi_note (uint8_t pitch, uint8_t velocity)
 		_snap.detail = L"step: no MIDI region";
 		return false;
 	}
-	if (!add_midi_note (pitch, start, len, velocity)) {
-		_snap.detail = L"step: add note failed";
-		return false;
+
+	/* Expand root → triad when chord quality is Maj/Min. */
+	uint8_t pitches[3];
+	int n = 1;
+	pitches[0] = pitch;
+	const int q = _snap.midi_chord_quality;
+	if (q == 1) {
+		if ((int)pitch + 4 <= 127) {
+			pitches[n++] = (uint8_t)(pitch + 4);
+		}
+		if ((int)pitch + 7 <= 127) {
+			pitches[n++] = (uint8_t)(pitch + 7);
+		}
+	} else if (q == 2) {
+		if ((int)pitch + 3 <= 127) {
+			pitches[n++] = (uint8_t)(pitch + 3);
+		}
+		if ((int)pitch + 7 <= 127) {
+			pitches[n++] = (uint8_t)(pitch + 7);
+		}
+	}
+
+	for (int i = 0; i < n; ++i) {
+		if (!add_midi_note (pitches[i], start, len, velocity)) {
+			_snap.detail = L"step: add note failed";
+			return false;
+		}
 	}
 	refresh_midi_notes_snap ();
-	/* Advance one grid step from the note start (not from pre-snap transport). */
-	float next = start + unit;
-	const bool snap_was = _snap.snap_enabled;
-	set_snap_enabled (true);
-	locate_to (next, false, 0.f);
-	set_snap_enabled (snap_was);
+
+	if (advance) {
+		float next = start + unit;
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (true);
+		locate_to (next, false, 0.f);
+		set_snap_enabled (snap_was);
+	}
 	std::fprintf (stderr,
-	              "airdour_win_shell: step note p=%u t=%.3f len=%.3f → %.3f\n",
-	              (unsigned)pitch, start, len, _snap.transport_sec);
+	              "airdour_win_shell: step note root=%u n=%d q=%d t=%.3f len=%.3f adv=%d → %.3f\n",
+	              (unsigned)pitch, n, q, start, len, advance ? 1 : 0,
+	              _snap.transport_sec);
 	std::fflush (stderr);
-	_snap.detail = L"MIDI step note";
+	_snap.detail = (n > 1) ? L"MIDI step chord" : L"MIDI step note";
 	return true;
 }
 
@@ -15626,6 +15690,184 @@ EngineHost::smoke_midi_step ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-step exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_chord ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-chord failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-chord FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-chord FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for chord smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-chord FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		const bool snap_was = _snap.snap_enabled;
+		const int dens_was = _snap.snap_density;
+		const int chord_was = _snap.midi_chord_quality;
+		set_snap_density (1);
+		set_snap_enabled (false);
+		set_midi_step_enabled (true);
+
+		auto fail = [&] (const char* why) {
+			set_midi_chord_quality (chord_was);
+			set_midi_step_enabled (false);
+			set_snap_enabled (snap_was);
+			set_snap_density (dens_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-chord FAILED (%s)\n", why);
+			std::fflush (stderr);
+			return false;
+		};
+
+		if (!locate_to (0.f, false, 0.f)) {
+			return fail ("locate 0");
+		}
+		float unit = snap_unit_sec ();
+
+		/* Maj triad at t=0 from root 60 → 60,64,67; advance once. */
+		set_midi_chord_quality (0);
+		if (cycle_midi_chord_quality () != 1) {
+			return fail ("cycle→maj");
+		}
+		if (midi_chord_quality () != 1) {
+			return fail ("set maj");
+		}
+		if (!step_input_midi_note (60, 100, true)) {
+			return fail ("maj place");
+		}
+		refresh_midi_notes_snap ();
+		bool got60 = false, got64 = false, got67 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			if (n.start_sec < -0.05f || n.start_sec > 0.08f) {
+				continue;
+			}
+			if (n.pitch == 60) {
+				got60 = true;
+			}
+			if (n.pitch == 64) {
+				got64 = true;
+			}
+			if (n.pitch == 67) {
+				got67 = true;
+			}
+		}
+		if (!got60 || !got64 || !got67) {
+			return fail ("maj verify");
+		}
+		if (std::fabs (_snap.transport_sec - unit) > 0.08f) {
+			return fail ("maj advance");
+		}
+
+		/* Min triad at beat from root 60 → 60,63,67. */
+		set_midi_chord_quality (2);
+		if (!step_input_midi_note (60, 100, true)) {
+			return fail ("min place");
+		}
+		refresh_midi_notes_snap ();
+		bool m60 = false, m63 = false, m67 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			if (n.start_sec < unit - 0.08f || n.start_sec > unit + 0.08f) {
+				continue;
+			}
+			if (n.pitch == 60) {
+				m60 = true;
+			}
+			if (n.pitch == 63) {
+				m63 = true;
+			}
+			if (n.pitch == 67) {
+				m67 = true;
+			}
+		}
+		if (!m60 || !m63 || !m67) {
+			return fail ("min verify");
+		}
+
+		/* Off + multi-key latch: two pitches at same start, advance once after. */
+		set_midi_chord_quality (0);
+		float multi_t = _snap.transport_sec;
+		if (!step_input_midi_note (62, 100, false)) {
+			return fail ("multi D");
+		}
+		if (!step_input_midi_note (65, 100, false)) {
+			return fail ("multi F");
+		}
+		if (std::fabs (_snap.transport_sec - multi_t) > 0.05f) {
+			return fail ("multi no-advance");
+		}
+		if (!step_advance (1)) {
+			return fail ("multi advance");
+		}
+		refresh_midi_notes_snap ();
+		bool d_ok = false, f_ok = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			if (n.start_sec < multi_t - 0.08f || n.start_sec > multi_t + 0.08f) {
+				continue;
+			}
+			if (n.pitch == 62) {
+				d_ok = true;
+			}
+			if (n.pitch == 65) {
+				f_ok = true;
+			}
+		}
+		if (!d_ok || !f_ok) {
+			return fail ("multi verify");
+		}
+
+		set_midi_chord_quality (chord_was);
+		set_midi_step_enabled (false);
+		set_snap_enabled (snap_was);
+		set_snap_density (dens_was);
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-chord ok (notes=%d unit=%.3f)\n",
+		              _snap.midi_note_count, unit);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-chord ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-chord exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -15827,6 +16069,7 @@ EngineHost::EngineHost ()
 	_snap.selection_fade_out_sec = 0.f;
 	_snap.snap_enabled = false;
 	_snap.midi_step_enabled = false;
+	_snap.midi_chord_quality = 0;
 	_snap.snap_density = 1;
 	_snap.grid_line_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
@@ -18036,6 +18279,35 @@ EngineHost::toggle_midi_step_enabled ()
 	return false;
 }
 
+void
+EngineHost::set_midi_chord_quality (int quality)
+{
+	if (quality < 0) {
+		quality = 0;
+	}
+	if (quality > 2) {
+		quality = 2;
+	}
+	_snap.midi_chord_quality = quality;
+}
+
+int
+EngineHost::midi_chord_quality () const
+{
+	return _snap.midi_chord_quality;
+}
+
+int
+EngineHost::cycle_midi_chord_quality ()
+{
+	int q = _snap.midi_chord_quality + 1;
+	if (q > 2) {
+		q = 0;
+	}
+	set_midi_chord_quality (q);
+	return _snap.midi_chord_quality;
+}
+
 bool
 EngineHost::step_advance (int steps)
 {
@@ -18044,15 +18316,22 @@ EngineHost::step_advance (int steps)
 }
 
 bool
-EngineHost::step_input_midi_note (uint8_t pitch, uint8_t velocity)
+EngineHost::step_input_midi_note (uint8_t pitch, uint8_t velocity, bool advance)
 {
 	(void)pitch;
 	(void)velocity;
+	(void)advance;
 	return false;
 }
 
 bool
 EngineHost::smoke_midi_step ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_chord ()
 {
 	return false;
 }
