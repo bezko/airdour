@@ -412,6 +412,10 @@ EngineHost::EngineHost ()
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
 	_snap.loop_end_sec = 0.f;
+	_snap.punch_range_ok = false;
+	_snap.punch_enabled = false;
+	_snap.punch_start_sec = 0.f;
+	_snap.punch_end_sec = 0.f;
 	_snap.marker_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
@@ -744,6 +748,10 @@ EngineHost::destroy_session ()
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
 	_snap.loop_end_sec = 0.f;
+	_snap.punch_range_ok = false;
+	_snap.punch_enabled = false;
+	_snap.punch_start_sec = 0.f;
+	_snap.punch_end_sec = 0.f;
 	_snap.marker_count = 0;
 	_snap.session_path.clear ();
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
@@ -3907,6 +3915,10 @@ EngineHost::refresh_locations_snap ()
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
 	_snap.loop_end_sec = 0.f;
+	_snap.punch_range_ok = false;
+	_snap.punch_enabled = false;
+	_snap.punch_start_sec = 0.f;
+	_snap.punch_end_sec = 0.f;
 	_snap.marker_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
@@ -3934,6 +3946,14 @@ EngineHost::refresh_locations_snap ()
 			_snap.loop_start_sec = (float)loop->start_sample () / (float)sr;
 			_snap.loop_end_sec = (float)loop->end_sample () / (float)sr;
 		}
+		Location* punch = locs->auto_punch_location ();
+		if (punch && !punch->is_hidden () && punch->end_sample () > punch->start_sample ()) {
+			_snap.punch_range_ok = true;
+			_snap.punch_start_sec = (float)punch->start_sample () / (float)sr;
+			_snap.punch_end_sec = (float)punch->end_sample () / (float)sr;
+		}
+		_snap.punch_enabled = _impl->session->config.get_punch_in ()
+		                      || _impl->session->config.get_punch_out ();
 		const Locations::LocationList& list = locs->list ();
 		int n = 0;
 		for (Locations::LocationList::const_iterator it = list.begin ();
@@ -4074,6 +4094,240 @@ bool
 EngineHost::toggle_loop_play ()
 {
 	return set_loop_play (!_snap.loop_playing);
+}
+
+bool
+EngineHost::set_punch_range (float start_sec, float end_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	start_sec = snap_time (start_sec);
+	end_sec = snap_time (end_sec);
+	if (end_sec < start_sec) {
+		float t = start_sec;
+		start_sec = end_sec;
+		end_sec = t;
+	}
+	if (end_sec - start_sec < 0.05f) {
+		end_sec = start_sec + 1.f;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t start_s = (samplepos_t)std::llround ((double)start_sec * (double)sr);
+		samplepos_t end_s = (samplepos_t)std::llround ((double)end_sec * (double)sr);
+		if (end_s <= start_s) {
+			end_s = start_s + sr;
+		}
+
+		_impl->session->begin_reversible_command ("set auto punch range");
+		Location* punch = locs->auto_punch_location ();
+		if (!punch) {
+			Location* loc = new Location (
+				*_impl->session,
+				timepos_t (start_s),
+				timepos_t (end_s),
+				"Punch",
+				Location::IsAutoPunch);
+			XMLNode& before = locs->get_state ();
+			locs->add (loc, true);
+			_impl->session->set_auto_punch_location (loc);
+			XMLNode& after = locs->get_state ();
+			_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		} else {
+			XMLNode& before = punch->get_state ();
+			punch->set_hidden (false, 0);
+			punch->set (timepos_t (start_s), timepos_t (end_s));
+			XMLNode& after = punch->get_state ();
+			_impl->session->add_command (new MementoCommand<Location> (*punch, &before, &after));
+			/* Keep Session punch events wired to this location. */
+			_impl->session->set_auto_punch_location (punch);
+		}
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"punch range set";
+		std::fprintf (stderr, "airdour_win_shell: punch [%.2f..%.2f]s\n",
+		              _snap.punch_start_sec, _snap.punch_end_sec);
+		std::fflush (stderr);
+		return _snap.punch_range_ok;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: set_punch_range exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"punch set failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"punch set failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::set_punch_start (float start_sec)
+{
+	float end = _snap.punch_range_ok ? _snap.punch_end_sec : (start_sec + 2.f);
+	if (end <= start_sec + 0.05f) {
+		end = start_sec + 2.f;
+	}
+	return set_punch_range (start_sec, end);
+}
+
+bool
+EngineHost::set_punch_end (float end_sec)
+{
+	float start = _snap.punch_range_ok ? _snap.punch_start_sec : 0.f;
+	if (end_sec <= start + 0.05f) {
+		start = std::max (0.f, end_sec - 2.f);
+	}
+	return set_punch_range (start, end_sec);
+}
+
+bool
+EngineHost::copy_loop_to_punch ()
+{
+	if (!_snap.loop_active) {
+		_snap.detail = L"copy punch — no loop range";
+		return false;
+	}
+	return set_punch_range (_snap.loop_start_sec, _snap.loop_end_sec);
+}
+
+bool
+EngineHost::set_punch_enabled (bool enable)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		if (enable) {
+			if (!_snap.punch_range_ok) {
+				if (_snap.loop_active) {
+					if (!copy_loop_to_punch ()) {
+						return false;
+					}
+				} else {
+					float t = _snap.transport_sec;
+					if (t < 0.f) {
+						t = 0.f;
+					}
+					if (!set_punch_range (t, t + 2.f)) {
+						return false;
+					}
+				}
+			}
+			/* Loop-play can block punch via Session punch/loop constraint. */
+			if (_snap.loop_playing) {
+				set_loop_play (false);
+			}
+			_impl->session->config.set_punch_in (true);
+			_impl->session->config.set_punch_out (true);
+			_snap.detail = L"punch armed — record only inside range";
+		} else {
+			_impl->session->config.set_punch_in (false);
+			_impl->session->config.set_punch_out (false);
+			_snap.detail = L"punch off";
+		}
+		refresh_locations_snap ();
+		std::fprintf (stderr, "airdour_win_shell: punch %s (range=%d [%.2f..%.2f])\n",
+		              enable ? "on" : "off",
+		              _snap.punch_range_ok ? 1 : 0,
+		              _snap.punch_start_sec, _snap.punch_end_sec);
+		std::fflush (stderr);
+		return enable ? _snap.punch_enabled : !_snap.punch_enabled;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: punch enable exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"punch enable failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"punch enable failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_punch_enabled ()
+{
+	return set_punch_enabled (!_snap.punch_enabled);
+}
+
+bool
+EngineHost::smoke_punch ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-punch failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_punch_range (0.5f, 2.5f) || !_snap.punch_range_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch FAILED (set range)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (std::fabs (_snap.punch_start_sec - 0.5f) > 0.05f
+		    || std::fabs (_snap.punch_end_sec - 2.5f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch FAILED (range %.2f..%.2f)\n",
+			              _snap.punch_start_sec, _snap.punch_end_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_punch_enabled (true) || !_snap.punch_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch FAILED (enable)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_impl->session->config.get_punch_in ()
+		    || !_impl->session->config.get_punch_out ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch FAILED (config in/out)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_snap.punch_enabled || !_snap.punch_range_ok
+		    || !_impl->session->locations ()->auto_punch_location ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch FAILED (punch location)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Copy-from-loop path: set loop then copy. */
+		if (!set_loop_range (1.0f, 3.0f) || !copy_loop_to_punch ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch FAILED (copy loop)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (std::fabs (_snap.punch_start_sec - 1.0f) > 0.05f
+		    || std::fabs (_snap.punch_end_sec - 3.0f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch FAILED (copied %.2f..%.2f)\n",
+			              _snap.punch_start_sec, _snap.punch_end_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_punch_enabled (false) || _snap.punch_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch FAILED (disable)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch ok (range+enable+copy-loop+disable)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-punch ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-punch exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 bool
@@ -5977,6 +6231,10 @@ EngineHost::EngineHost ()
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
 	_snap.loop_end_sec = 0.f;
+	_snap.punch_range_ok = false;
+	_snap.punch_enabled = false;
+	_snap.punch_start_sec = 0.f;
+	_snap.punch_end_sec = 0.f;
 	_snap.marker_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
@@ -6637,6 +6895,53 @@ EngineHost::set_loop_play (bool enable)
 
 bool
 EngineHost::toggle_loop_play ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_punch_range (float start_sec, float end_sec)
+{
+	(void)start_sec;
+	(void)end_sec;
+	return false;
+}
+
+bool
+EngineHost::set_punch_start (float start_sec)
+{
+	(void)start_sec;
+	return false;
+}
+
+bool
+EngineHost::set_punch_end (float end_sec)
+{
+	(void)end_sec;
+	return false;
+}
+
+bool
+EngineHost::copy_loop_to_punch ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_punch_enabled (bool enable)
+{
+	(void)enable;
+	return false;
+}
+
+bool
+EngineHost::toggle_punch_enabled ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_punch ()
 {
 	return false;
 }

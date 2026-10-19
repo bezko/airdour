@@ -29,6 +29,7 @@ constexpr D2D1_COLOR_F kRms        = { 0.120f, 0.420f, 0.400f, 0.85f };
 constexpr D2D1_COLOR_F kPlayhead   = { 0.980f, 0.780f, 0.220f, 1.f };
 constexpr D2D1_COLOR_F kSelection  = { 0.350f, 0.780f, 0.920f, 1.f };
 constexpr D2D1_COLOR_F kLoop       = { 0.920f, 0.620f, 0.220f, 1.f };
+constexpr D2D1_COLOR_F kPunch      = { 0.880f, 0.320f, 0.280f, 1.f };
 constexpr D2D1_COLOR_F kMarker     = { 0.780f, 0.860f, 0.420f, 1.f };
 constexpr D2D1_COLOR_F kMidi       = { 0.720f, 0.480f, 0.920f, 1.f };
 constexpr D2D1_COLOR_F kMeterHot   = { 0.95f, 0.35f, 0.22f, 1.f };
@@ -130,6 +131,7 @@ ShellWindow::ShellWindow ()
 	, _brush_playhead (nullptr)
 	, _brush_selection (nullptr)
 	, _brush_loop (nullptr)
+	, _brush_punch (nullptr)
 	, _brush_marker (nullptr)
 	, _brush_midi (nullptr)
 	, _brush_meter_hot (nullptr)
@@ -193,7 +195,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_send,
                             bool smoke_automation,
                             bool smoke_edit,
-                            bool smoke_snap)
+                            bool smoke_snap,
+                            bool smoke_punch)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -394,6 +397,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_punch && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_punch ()) {
+			_smoke_failed = true;
+		} else {
+			sync_transport_punch_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_punch) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-punch FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -418,6 +434,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	sync_mixer_arm_from_engine ();
 	sync_mixer_fx_from_engine ();
 	sync_transport_loop_from_engine ();
+	sync_transport_punch_from_engine ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
 	if (autoplay) {
@@ -435,6 +452,12 @@ ShellWindow::sync_transport_loop_from_engine ()
 {
 	_transport.set_loop_active (_engine_snap.loop_active);
 	_transport.set_loop_playing (_engine_snap.loop_playing);
+}
+
+void
+ShellWindow::sync_transport_punch_from_engine ()
+{
+	_transport.set_punch_enabled (_engine_snap.punch_enabled);
 }
 
 void
@@ -892,6 +915,19 @@ ShellWindow::do_toggle_loop ()
 }
 
 void
+ShellWindow::do_toggle_punch ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.toggle_punch_enabled ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_transport_punch_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_add_marker_at_playhead ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -1109,6 +1145,7 @@ ShellWindow::discard_device_resources ()
 	if (_brush_meter_hot) { _brush_meter_hot->Release (); _brush_meter_hot = nullptr; }
 	if (_brush_midi) { _brush_midi->Release (); _brush_midi = nullptr; }
 	if (_brush_marker) { _brush_marker->Release (); _brush_marker = nullptr; }
+	if (_brush_punch) { _brush_punch->Release (); _brush_punch = nullptr; }
 	if (_brush_loop) { _brush_loop->Release (); _brush_loop = nullptr; }
 	if (_brush_selection) { _brush_selection->Release (); _brush_selection = nullptr; }
 	if (_brush_playhead) { _brush_playhead->Release (); _brush_playhead = nullptr; }
@@ -1156,6 +1193,7 @@ ShellWindow::ensure_device_resources ()
 	_rt->CreateSolidColorBrush (kPlayhead, &_brush_playhead);
 	_rt->CreateSolidColorBrush (kSelection, &_brush_selection);
 	_rt->CreateSolidColorBrush (kLoop, &_brush_loop);
+	_rt->CreateSolidColorBrush (kPunch, &_brush_punch);
 	_rt->CreateSolidColorBrush (kMarker, &_brush_marker);
 	_rt->CreateSolidColorBrush (kMidi, &_brush_midi);
 	_rt->CreateSolidColorBrush (kMeterHot, &_brush_meter_hot);
@@ -1174,7 +1212,7 @@ ShellWindow::ensure_device_resources ()
 
 	return _brush_brand && _brush_body && _brush_accent && _brush_pane
 	    && _brush_peak && _brush_rms && _brush_playhead && _brush_selection
-	    && _brush_loop && _brush_marker && _brush_midi && _brush_meter_hot && _brush_bg;
+	    && _brush_loop && _brush_punch && _brush_marker && _brush_midi && _brush_meter_hot && _brush_bg;
 }
 
 void
@@ -1348,22 +1386,40 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		} else if (wparam == 'L' || wparam == 'l') {
 			do_toggle_loop ();
+		} else if (wparam == 'P' || wparam == 'p') {
+			if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
+				do_toggle_punch ();
+			}
 		} else if (wparam == VK_OEM_4) { /* [ */
 			if (_engine.is_linked () && _engine_snap.session_ok) {
-				_engine.set_loop_start (_playhead_sec);
-				_engine.poll ();
-				_engine_snap = _engine.snapshot ();
-				sync_transport_loop_from_engine ();
-				apply_loop_to_lanes ();
+				if (GetKeyState (VK_SHIFT) & 0x8000) {
+					_engine.set_punch_start (_playhead_sec);
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_transport_punch_from_engine ();
+				} else {
+					_engine.set_loop_start (_playhead_sec);
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_transport_loop_from_engine ();
+					apply_loop_to_lanes ();
+				}
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			}
 		} else if (wparam == VK_OEM_6) { /* ] */
 			if (_engine.is_linked () && _engine_snap.session_ok) {
-				_engine.set_loop_end (_playhead_sec);
-				_engine.poll ();
-				_engine_snap = _engine.snapshot ();
-				sync_transport_loop_from_engine ();
-				apply_loop_to_lanes ();
+				if (GetKeyState (VK_SHIFT) & 0x8000) {
+					_engine.set_punch_end (_playhead_sec);
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_transport_punch_from_engine ();
+				} else {
+					_engine.set_loop_end (_playhead_sec);
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_transport_loop_from_engine ();
+					apply_loop_to_lanes ();
+				}
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			}
 		} else if (wparam == 'M' || wparam == 'm') {
@@ -1652,6 +1708,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::Loop) {
 		do_toggle_loop ();
+		return true;
+	}
+	if (th == TransportHit::Punch) {
+		do_toggle_punch ();
 		return true;
 	}
 	if (th == TransportHit::Mark) {
@@ -2208,6 +2268,7 @@ ShellWindow::on_tick ()
 		sync_mixer_pan_from_engine ();
 		sync_mixer_send_from_engine ();
 		sync_transport_loop_from_engine ();
+		sync_transport_punch_from_engine ();
 		apply_region_selection_to_lanes ();
 		apply_loop_to_lanes ();
 		refresh_automation_lane ();
@@ -2326,6 +2387,21 @@ ShellWindow::draw_editor_ruler ()
 		}
 	}
 
+	if (_engine_snap.punch_range_ok && _brush_punch) {
+		float n0 = (_engine_snap.punch_start_sec - view0) / span;
+		float n1 = (_engine_snap.punch_end_sec - view0) / span;
+		n0 = std::max (0.f, std::min (1.f, n0));
+		n1 = std::max (0.f, std::min (1.f, n1));
+		if (n1 > n0) {
+			float op = _engine_snap.punch_enabled ? 0.55f : 0.28f;
+			_brush_punch->SetOpacity (op);
+			_rt->FillRectangle (
+				D2D1::RectF (rr.left + n0 * w, rr.top, rr.left + n1 * w, rr.bottom),
+				_brush_punch);
+			_brush_punch->SetOpacity (1.f);
+		}
+	}
+
 	for (int i = 0; i < _engine_snap.marker_count; ++i) {
 		float n = (_engine_snap.markers[i].sec - view0) / span;
 		if (n < 0.f || n > 1.f) {
@@ -2354,6 +2430,38 @@ ShellWindow::draw_editor_ruler ()
 			D2D1::RectF (px - thick * 0.5f, rr.top, px + thick * 0.5f, rr.bottom),
 			_brush_playhead);
 	}
+}
+
+void
+ShellWindow::draw_punch_overlay ()
+{
+	if (!_engine_snap.punch_range_ok || !_brush_punch) {
+		return;
+	}
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float n0 = (_engine_snap.punch_start_sec - view0) / span;
+	float n1 = (_engine_snap.punch_end_sec - view0) / span;
+	n0 = std::max (0.f, std::min (1.f, n0));
+	n1 = std::max (0.f, std::min (1.f, n1));
+	if (n1 <= n0) {
+		return;
+	}
+	float op = _engine_snap.punch_enabled ? 0.22f : 0.10f;
+	_brush_punch->SetOpacity (op);
+	for (int i = 0; i < kTracks; ++i) {
+		const D2D1_RECT_F& lb = _lanes[i].bounds;
+		float w = lb.right - lb.left;
+		if (w < 4.f) {
+			continue;
+		}
+		float bot = (i == 0 && _auto_lane_bounds.bottom > lb.bottom)
+		            ? _auto_lane_bounds.bottom : lb.bottom;
+		_rt->FillRectangle (
+			D2D1::RectF (lb.left + n0 * w, lb.top, lb.left + n1 * w, bot),
+			_brush_punch);
+	}
+	_brush_punch->SetOpacity (1.f);
 }
 
 void
@@ -2495,6 +2603,7 @@ ShellWindow::draw_editor_pane ()
 
 	draw_automation_lane ();
 	draw_midi_lane ();
+	draw_punch_overlay ();
 	draw_editor_grid ();
 }
 

@@ -70,7 +70,8 @@ public:
 	                    bool smoke_send = false,
 	                    bool smoke_automation = false,
 	                    bool smoke_edit = false,
-	                    bool smoke_snap = false);
+	                    bool smoke_snap = false,
+	                    bool smoke_punch = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -145,7 +146,9 @@ private:
 	void do_toggle_snap ();
 	void do_cycle_snap_density ();
 	void do_toggle_loop ();
+	void do_toggle_punch ();
 	void draw_editor_grid ();
+	void draw_punch_overlay ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
 	void sync_mixer_arm_from_engine ();
@@ -154,6 +157,7 @@ private:
 	void sync_mixer_send_from_engine ();
 	void sync_mixer_fx_from_engine ();
 	void sync_transport_loop_from_engine ();
+	void sync_transport_punch_from_engine ();
 	void apply_shared_view (int source_lane);
 	void reset_shared_view ();
 	void apply_region_selection_to_lanes ();
@@ -229,6 +233,7 @@ private:
 	ID2D1SolidColorBrush*     _brush_playhead;
 	ID2D1SolidColorBrush*     _brush_selection;
 	ID2D1SolidColorBrush*     _brush_loop;
+	ID2D1SolidColorBrush*     _brush_punch;
 	ID2D1SolidColorBrush*     _brush_marker;
 	ID2D1SolidColorBrush*     _brush_midi;
 	ID2D1SolidColorBrush*     _brush_meter_hot;

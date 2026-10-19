@@ -58,6 +58,10 @@ struct EngineSnapshot {
 	bool         loop_playing; /* Session get_play_loop() */
 	float        loop_start_sec;
 	float        loop_end_sec;
+	bool         punch_range_ok; /* auto-punch Location exists with positive length */
+	bool         punch_enabled; /* Session punch-in and/or punch-out armed */
+	float        punch_start_sec;
+	float        punch_end_sec;
 	int          marker_count;
 	EngineMarkerSnap markers[kMaxMarkers];
 	bool         midi_ok; /* backend MIDI option active / ports present */
@@ -329,6 +333,19 @@ public:
 	bool set_loop_play (bool enable);
 	bool toggle_loop_play ();
 
+	/**
+	 * Create/update Session IsAutoPunch Location [start_sec, end_sec].
+	 * When enabling punch with no range, copies loop range if present.
+	 */
+	bool set_punch_range (float start_sec, float end_sec);
+	bool set_punch_start (float start_sec);
+	bool set_punch_end (float end_sec);
+	/** Copy current auto-loop range into punch (creates punch if needed). */
+	bool copy_loop_to_punch ();
+	/** Arm/disarm Session punch-in + punch-out (record only inside range). */
+	bool set_punch_enabled (bool enable);
+	bool toggle_punch_enabled ();
+
 	/** Add IsMark at time_sec (name auto if empty). */
 	bool add_marker_at (float time_sec, const std::string& name = std::string ());
 	/** Remove nearest IsMark within slop_sec of time_sec. */
@@ -341,6 +358,12 @@ public:
 	 * Does not enable loop-play (avoids forced roll during --timeout).
 	 */
 	bool smoke_loop_markers ();
+
+	/**
+	 * Set punch 0.5–2.5s, enable punch-in/out, verify snapshot; disable.
+	 * For --smoke-punch. Does not roll transport.
+	 */
+	bool smoke_punch ();
 
 	/** Ensure a Session MidiTrack exists (creates one if needed). */
 	bool ensure_midi_track ();

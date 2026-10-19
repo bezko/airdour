@@ -1,8 +1,8 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Direct2D transport: Play / Stop / Rec / Loop / Mark / Split / Fade / Snap /
- * Import / Save / Open / Export.
+ * Direct2D transport: Play / Stop / Rec / Loop / Punch / Mark / Split / Fade /
+ * Snap / Import / Save / Open / Export.
  */
 
 #pragma once
@@ -28,6 +28,7 @@ enum class TransportHit {
 	Open,
 	Export,
 	Loop,
+	Punch,
 	Mark,
 	Split,
 	Fade,
@@ -56,6 +57,9 @@ public:
 	void set_loop_active (bool on) { _loop_active = on; }
 	bool loop_active () const { return _loop_active; }
 
+	void set_punch_enabled (bool on) { _punch_enabled = on; }
+	bool punch_enabled () const { return _punch_enabled; }
+
 	void set_snap_enabled (bool on) { _snap_enabled = on; }
 	bool snap_enabled () const { return _snap_enabled; }
 
@@ -83,6 +87,7 @@ private:
 	D2D1_RECT_F _open_btn;
 	D2D1_RECT_F _export_btn;
 	D2D1_RECT_F _loop_btn;
+	D2D1_RECT_F _punch_btn;
 	D2D1_RECT_F _mark_btn;
 	D2D1_RECT_F _split_btn;
 	D2D1_RECT_F _fade_btn;
@@ -92,5 +97,6 @@ private:
 	bool        _record_armed;
 	bool        _loop_playing;
 	bool        _loop_active;
+	bool        _punch_enabled;
 	bool        _snap_enabled;
 };
