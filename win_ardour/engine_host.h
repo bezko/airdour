@@ -101,6 +101,12 @@ struct EngineSnapshot {
 	float        track_delay_feedback_pct; /* Feedback 0..100 % */
 	float        track_delay_time_norm; /* 0..1 UI (log) */
 	float        track_delay_feedback_norm; /* 0..1 UI */
+	bool         track_limiter_ok; /* ACE Limiter on Audio 5 (track 4) */
+	bool         track_limiter_bypassed;
+	float        track_limiter_ceiling_db; /* Ceiling −20..0 dB */
+	float        track_limiter_release_ms; /* Release 1..2000 ms */
+	float        track_limiter_ceiling_norm; /* 0..1 UI */
+	float        track_limiter_release_norm; /* 0..1 UI */
 	float        midi_activity; /* 0..1 decaying activity indicator */
 	int          midi_device_count;
 	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices];
@@ -115,6 +121,7 @@ struct EngineSnapshot {
 	std::wstring track_comp_name; /* e.g. ACE Compressor */
 	std::wstring track_eq_name; /* e.g. ACE EQ */
 	std::wstring track_delay_name; /* e.g. ACE Delay */
+	std::wstring track_limiter_name; /* e.g. ACE Limiter */
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
 	std::wstring export_path; /* last exported WAV (UTF-16 display) */
@@ -826,6 +833,19 @@ public:
 	bool set_track_delay_feedback_norm (int track, float norm_0_1);
 
 	/**
+	 * Insert ACE Limiter (bundled LV2, DSP-only) on an audio track pre-fader.
+	 * Default track 4 = Audio 5. Idempotent when already present.
+	 * D2D exposes Ceiling (−20..0 dB) + Release (1..2000 ms).
+	 */
+	bool insert_track_limiter (int track = 4);
+	bool toggle_track_limiter_bypass (int track = 4);
+	bool set_track_limiter_bypassed (int track, bool bypassed);
+	bool set_track_limiter_ceiling_db (int track, float db);
+	bool set_track_limiter_release_ms (int track, float ms);
+	bool set_track_limiter_ceiling_norm (int track, float norm_0_1);
+	bool set_track_limiter_release_norm (int track, float norm_0_1);
+
+	/**
 	 * Ensure ACE Reverb on Audio 1; verify on route; toggle bypass; set Blend.
 	 * For --smoke-plugin. Hardware not required.
 	 */
@@ -848,6 +868,12 @@ public:
 	 * For --smoke-delay.
 	 */
 	bool smoke_delay ();
+
+	/**
+	 * Insert ACE Limiter on Audio 5; set Ceiling / Release.
+	 * For --smoke-limiter.
+	 */
+	bool smoke_limiter ();
 
 	/**
 	 * Scan system VST3 dirs (+ VST3_PATH / AIRDOUR_SMOKE_VST3); list; optionally
@@ -945,6 +971,7 @@ private:
 	void refresh_track_comp_snap ();
 	void refresh_track_eq_snap ();
 	void refresh_track_delay_snap ();
+	void refresh_track_limiter_snap ();
 	bool ensure_plugins_scanned ();
 
 	bool        _started;
