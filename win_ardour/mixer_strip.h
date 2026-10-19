@@ -29,6 +29,9 @@ public:
 	void set_fx_label (const wchar_t* label);
 	void set_fx_bypassed (bool bypassed);
 	void set_fx_param (float value_0_1);
+	/** Second FX slider (e.g. Comp ratio); when false, only one param track. */
+	void set_fx_dual (bool dual);
+	void set_fx_param2 (float value_0_1);
 	void layout (const D2D1_RECT_F& strip_bounds, float dpi_scale);
 
 	void  set_gain (float g);
@@ -67,11 +70,15 @@ public:
 	/** True when strip has a non-empty FX label (insert/bypass is live). */
 	bool has_fx () const { return _fx_label[0] != L'\0'; }
 	bool fx_bypassed () const { return _fx_bypassed; }
+	bool fx_dual () const { return _fx_dual; }
 	float fx_param () const { return _fx_param; }
+	float fx_param2 () const { return _fx_param2; }
 	bool hit_fx (float x, float y) const;
 	bool hit_fx_param (float x, float y) const;
-	/** Map x into Blend 0..1; returns true if value changed. */
+	bool hit_fx_param2 (float x, float y) const;
+	/** Map x into param 0..1; returns true if value changed. */
 	bool drag_fx_param_to (float x);
+	bool drag_fx_param2_to (float x);
 
 	void        set_meter_peak (float peak, bool clipped = false);
 	void        meter_tick (float dt);
@@ -113,15 +120,18 @@ private:
 	D2D1_RECT_F _send_track;
 	D2D1_RECT_F _fx_btn;
 	D2D1_RECT_F _fx_param_track;
+	D2D1_RECT_F _fx_param_track2;
 	LevelMeter  _meter;
 	float       _gain;
 	float       _pan;
 	float       _send;
 	float       _fx_param;
+	float       _fx_param2;
 	bool        _armed;
 	bool        _muted;
 	bool        _soloed;
 	bool        _fx_bypassed;
+	bool        _fx_dual;
 	bool        _midi_strip;
 	bool        _in_group;
 	bool        _group_picked;

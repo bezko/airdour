@@ -41,6 +41,12 @@ if not exist "%WAF%\ardour\LV2\a-reverb.lv2\a-reverb.dll" (
     copy /Y "%WAF%\LV2\a-reverb.lv2\*" "%WAF%\ardour\LV2\a-reverb.lv2\" >nul
   )
 )
+if not exist "%WAF%\ardour\LV2\a-comp.lv2\a-comp.dll" (
+  if exist "%WAF%\LV2\a-comp.lv2\a-comp.dll" (
+    mkdir "%WAF%\ardour\LV2\a-comp.lv2" 2>nul
+    copy /Y "%WAF%\LV2\a-comp.lv2\*" "%WAF%\ardour\LV2\a-comp.lv2\" >nul
+  )
+)
 
 echo PATH includes Release waf libs. Launching:
 echo   %EXE% %*

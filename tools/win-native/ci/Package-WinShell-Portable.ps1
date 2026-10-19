@@ -187,7 +187,7 @@ if ($Mode -eq "Engine") {
 
     $lv2Root = Join-Path $stage "LV2"
     New-Item -ItemType Directory -Force -Path $lv2Root | Out-Null
-    foreach ($bundle in @("reasonablesynth.lv2", "a-reverb.lv2")) {
+    foreach ($bundle in @("reasonablesynth.lv2", "a-reverb.lv2", "a-comp.lv2")) {
         $candidates = @(
             (Join-Path $WafLibsDir ("ardour\LV2\" + $bundle)),
             (Join-Path $WafLibsDir ("LV2\" + $bundle))
@@ -298,7 +298,7 @@ airdour_win_shell.exe   Win32 + Direct2D/DirectWrite shell
 run-airdour.bat         Sets PATH / ARDOUR_DLL_PATH / ARDOUR_BACKEND_PATH
 backends\               Dummy + WASAPI backend DLLs (Engine mode)
 panners\                libardour panner plugins (Engine mode)
-LV2\                    ACE Reasonable Synth + ACE Reverb (Engine mode)
+LV2\                    ACE Reasonable Synth + Reverb + Compressor (Engine mode)
 *.dll                   waf + vcpkg (+ CRT redistributables)
 
 Honest limits

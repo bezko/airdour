@@ -439,8 +439,8 @@ _WINDOWS_ONLY_EXCLUDE = set([
         # Hardware surfaces link libgtkmm2ext / libytkmm / cairomm — not on D2D path.
         # control_protocol lives under libs/ctrl-interface (kept).
         'libs/surfaces',
-        # Cairo UI LV2 plugins — need cairo; headless graph skips them
-        'libs/plugins/a-comp.lv2',
+        # Cairo UI LV2 plugins — need cairo; headless graph skips them.
+        # a-comp is DSP-only (no Cairo) so it stays in the Windows-only build.
         'libs/plugins/a-exp.lv2',
         'libs/plugins/a-delay.lv2',
         'libs/plugins/a-eq.lv2',

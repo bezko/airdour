@@ -30,14 +30,17 @@ MixerStrip::MixerStrip ()
 	, _send_track ()
 	, _fx_btn ()
 	, _fx_param_track ()
+	, _fx_param_track2 ()
 	, _gain (0.85f)
 	, _pan (0.5f)
 	, _send (0.f)
 	, _fx_param (0.3f)
+	, _fx_param2 (0.16f)
 	, _armed (false)
 	, _muted (false)
 	, _soloed (false)
 	, _fx_bypassed (false)
+	, _fx_dual (false)
 	, _midi_strip (false)
 	, _in_group (false)
 	, _group_picked (false)
@@ -74,6 +77,18 @@ void
 MixerStrip::set_fx_param (float value_0_1)
 {
 	_fx_param = std::max (0.f, std::min (1.f, value_0_1));
+}
+
+void
+MixerStrip::set_fx_dual (bool dual)
+{
+	_fx_dual = dual;
+}
+
+void
+MixerStrip::set_fx_param2 (float value_0_1)
+{
+	_fx_param2 = std::max (0.f, std::min (1.f, value_0_1));
 }
 
 void
@@ -120,6 +135,7 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 	if (_midi_strip) {
 		_fx_btn = D2D1::RectF (0, 0, 0, 0);
 		_fx_param_track = D2D1::RectF (0, 0, 0, 0);
+		_fx_param_track2 = D2D1::RectF (0, 0, 0, 0);
 	} else {
 		float pan_h = 12.f * dpi_scale;
 		_pan_track = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + pan_h);
@@ -133,7 +149,10 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 		y = _fx_btn.bottom + 3.f * dpi_scale;
 		float param_h = 10.f * dpi_scale;
 		_fx_param_track = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + param_h);
-		y = _fx_param_track.bottom + 6.f * dpi_scale;
+		y = _fx_param_track.bottom + 3.f * dpi_scale;
+		/* Always reserve a second param track so Comp dual-sliders fit without re-layout. */
+		_fx_param_track2 = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + param_h);
+		y = _fx_param_track2.bottom + 6.f * dpi_scale;
 	}
 
 	float top = y;
@@ -315,6 +334,33 @@ MixerStrip::drag_fx_param_to (float x)
 }
 
 bool
+MixerStrip::hit_fx_param2 (float x, float y) const
+{
+	if (_midi_strip || !_fx_dual || _fx_label[0] == L'\0') {
+		return false;
+	}
+	float pad = 4.f;
+	return x >= _fx_param_track2.left - pad && x <= _fx_param_track2.right + pad
+	    && y >= _fx_param_track2.top - pad && y <= _fx_param_track2.bottom + pad;
+}
+
+bool
+MixerStrip::drag_fx_param2_to (float x)
+{
+	float w = _fx_param_track2.right - _fx_param_track2.left;
+	if (w < 1.f) {
+		return false;
+	}
+	float t = (x - _fx_param_track2.left) / w;
+	float v = std::max (0.f, std::min (1.f, t));
+	if (v == _fx_param2) {
+		return false;
+	}
+	_fx_param2 = v;
+	return true;
+}
+
+bool
 MixerStrip::drag_to (float y)
 {
 	float h = _track.bottom - _track.top;
@@ -468,6 +514,17 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 				D2D1::RectF (_fx_param_track.left, _fx_param_track.top, fill_r, _fx_param_track.bottom),
 				fill);
 			fill->SetOpacity (1.f);
+			if (_fx_dual) {
+				rt->FillRectangle (_fx_param_track2, edge);
+				float pw2 = _fx_param_track2.right - _fx_param_track2.left;
+				float fill_r2 = _fx_param_track2.left + pw2 * _fx_param2;
+				fill->SetOpacity (_fx_bypassed ? 0.35f : 0.55f);
+				rt->FillRectangle (
+					D2D1::RectF (_fx_param_track2.left, _fx_param_track2.top,
+					             fill_r2, _fx_param_track2.bottom),
+					fill);
+				fill->SetOpacity (1.f);
+			}
 		}
 	}
 

@@ -26,7 +26,7 @@ set "PATH=%VCPKG%\debug\bin;%VCPKG%\bin;%WAF%\pbd;%WAF%\temporal;%WAF%\midi++2;%
 set "ARDOUR_DLL_PATH=%WAF%\ardour"
 set "ARDOUR_BACKEND_PATH=%WAF%\backends\dummy;%WAF%\backends\wasapi"
 
-REM Bundled ACE LV2s: Reasonable Synth (MIDI) + Reverb (audio track FX).
+REM Bundled ACE LV2s: Reasonable Synth + Reverb + Compressor (audio FX).
 if not exist "%WAF%\ardour\LV2\reasonablesynth.lv2\reasonablesynth.dll" (
   if exist "%WAF%\LV2\reasonablesynth.lv2\reasonablesynth.dll" (
     mkdir "%WAF%\ardour\LV2\reasonablesynth.lv2" 2>nul
@@ -41,6 +41,12 @@ if not exist "%WAF%\ardour\LV2\a-reverb.lv2\a-reverb.dll" (
     copy /Y "%WAF%\LV2\a-reverb.lv2\a-reverb.dll" "%WAF%\ardour\LV2\a-reverb.lv2\" >nul
     if exist "%WAF%\LV2\a-reverb.lv2\manifest.ttl" copy /Y "%WAF%\LV2\a-reverb.lv2\manifest.ttl" "%WAF%\ardour\LV2\a-reverb.lv2\" >nul
     if exist "%WAF%\LV2\a-reverb.lv2\a-reverb.ttl" copy /Y "%WAF%\LV2\a-reverb.lv2\a-reverb.ttl" "%WAF%\ardour\LV2\a-reverb.lv2\" >nul
+  )
+)
+if not exist "%WAF%\ardour\LV2\a-comp.lv2\a-comp.dll" (
+  if exist "%WAF%\LV2\a-comp.lv2\a-comp.dll" (
+    mkdir "%WAF%\ardour\LV2\a-comp.lv2" 2>nul
+    copy /Y "%WAF%\LV2\a-comp.lv2\*" "%WAF%\ardour\LV2\a-comp.lv2\" >nul
   )
 )
 

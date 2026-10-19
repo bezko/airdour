@@ -79,6 +79,14 @@ struct EngineSnapshot {
 	bool         track_fx_ok; /* ACE effect inserted on Audio 1 (track 0) */
 	bool         track_fx_bypassed; /* Processor hard-bypass (inactive) */
 	float        track_fx_param; /* ACE Reverb Blend 0..1 */
+	bool         track_comp_ok; /* ACE Compressor on Audio 2 (track 1) */
+	bool         track_comp_bypassed;
+	float        track_comp_threshold_db; /* −60..0 dBFS */
+	float        track_comp_ratio; /* 1..20 */
+	float        track_comp_threshold_norm; /* 0..1 UI */
+	float        track_comp_ratio_norm; /* 0..1 UI */
+	bool         track_comp_sidechain; /* SC enabled + wired from src */
+	int          track_comp_sidechain_src; /* source track index, or −1 */
 	float        midi_activity; /* 0..1 decaying activity indicator */
 	int          midi_device_count;
 	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices];
@@ -90,6 +98,7 @@ struct EngineSnapshot {
 	std::wstring midi_out_name; /* connected playback port display name */
 	std::wstring track_fx_name; /* e.g. ACE Reverb on track 0 */
 	std::wstring track_fx_param_name; /* e.g. Blend */
+	std::wstring track_comp_name; /* e.g. ACE Compressor */
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
 	std::wstring export_path; /* last exported WAV (UTF-16 display) */
@@ -754,10 +763,35 @@ public:
 	float track_fx_param (int track = 0) const;
 
 	/**
+	 * Insert ACE Compressor (bundled LV2, DSP-only) on an audio track pre-fader.
+	 * Default track 1 = Audio 2. Idempotent when already present.
+	 */
+	bool insert_track_comp (int track = 1);
+	bool toggle_track_comp_bypass (int track = 1);
+	bool set_track_comp_bypassed (int track, bool bypassed);
+	/** Threshold dBFS (−60..0) or normalized 0..1 for D2D slider. */
+	bool set_track_comp_threshold_db (int track, float db);
+	bool set_track_comp_threshold_norm (int track, float norm_0_1);
+	/** Ratio 1..20 or normalized 0..1. */
+	bool set_track_comp_ratio (int track, float ratio);
+	bool set_track_comp_ratio_norm (int track, float norm_0_1);
+	/**
+	 * Optional sidechain: enable SC pin + connect src track output → comp SC in.
+	 * Falls back to SC off if pin/connect fails.
+	 */
+	bool set_track_comp_sidechain (int track, int src_track, bool enable);
+
+	/**
 	 * Ensure ACE Reverb on Audio 1; verify on route; toggle bypass; set Blend.
 	 * For --smoke-plugin. Hardware not required.
 	 */
 	bool smoke_plugin_insert ();
+
+	/**
+	 * Insert ACE Comp on Audio 2; set threshold/ratio; optional SC from Audio 1.
+	 * For --smoke-comp.
+	 */
+	bool smoke_comp ();
 
 	/**
 	 * Scan system VST3 dirs (+ VST3_PATH / AIRDOUR_SMOKE_VST3); list; optionally
@@ -852,6 +886,7 @@ private:
 	bool configure_backend_midi ();
 	void refresh_midi_notes_snap ();
 	void refresh_track_fx_snap ();
+	void refresh_track_comp_snap ();
 	bool ensure_plugins_scanned ();
 
 	bool        _started;

@@ -476,6 +476,14 @@ public:
 	float           track_fx_param; /* Blend 0..1 */
 	std::string     track_fx_name;
 	std::weak_ptr<PluginInsert> track_fx;
+	bool            track_comp_ok;
+	bool            track_comp_bypassed;
+	float           track_comp_threshold_db;
+	float           track_comp_ratio;
+	bool            track_comp_sidechain;
+	int             track_comp_sidechain_src;
+	std::string     track_comp_name;
+	std::weak_ptr<PluginInsert> track_comp;
 	bool            plugins_scanned;
 
 	Impl ()
@@ -494,6 +502,12 @@ public:
 		, track_fx_ok (false)
 		, track_fx_bypassed (false)
 		, track_fx_param (0.3f)
+		, track_comp_ok (false)
+		, track_comp_bypassed (false)
+		, track_comp_threshold_db (0.f)
+		, track_comp_ratio (4.f)
+		, track_comp_sidechain (false)
+		, track_comp_sidechain_src (-1)
 		, plugins_scanned (false)
 	{
 	}
@@ -621,6 +635,14 @@ EngineHost::EngineHost ()
 	_snap.track_fx_ok = false;
 	_snap.track_fx_bypassed = false;
 	_snap.track_fx_param = 0.3f;
+	_snap.track_comp_ok = false;
+	_snap.track_comp_bypassed = false;
+	_snap.track_comp_threshold_db = 0.f;
+	_snap.track_comp_ratio = 4.f;
+	_snap.track_comp_threshold_norm = 1.f;
+	_snap.track_comp_ratio_norm = (4.f - 1.f) / 19.f;
+	_snap.track_comp_sidechain = false;
+	_snap.track_comp_sidechain_src = -1;
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -648,6 +670,7 @@ EngineHost::EngineHost ()
 	_snap.midi_out_name.clear ();
 	_snap.track_fx_name.clear ();
 	_snap.track_fx_param_name = L"Blend";
+	_snap.track_comp_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -1667,6 +1690,10 @@ EngineHost::ensure_session ()
 
 		/* Best-effort ACE Reverb on Audio 1 (headless insert, no GTK UI). */
 		insert_track_fx (0);
+		/* Best-effort ACE Compressor on Audio 2 (threshold/ratio D2D). */
+		if (_impl->tracks.size () > 1) {
+			insert_track_comp (1);
+		}
 
 		step ("aux bus + sends");
 		ensure_aux_sends ();
@@ -1678,6 +1705,7 @@ EngineHost::ensure_session ()
 		_snap.waves_from_session = true;
 		refresh_region_flags ();
 		refresh_track_fx_snap ();
+		refresh_track_comp_snap ();
 		step ("ready");
 		return true;
 	} catch (SessionException& e) {
@@ -1729,6 +1757,14 @@ EngineHost::destroy_session ()
 	_impl->track_fx_param = 0.3f;
 	_impl->track_fx_name.clear ();
 	_impl->track_fx.reset ();
+	_impl->track_comp_ok = false;
+	_impl->track_comp_bypassed = false;
+	_impl->track_comp_threshold_db = 0.f;
+	_impl->track_comp_ratio = 4.f;
+	_impl->track_comp_sidechain = false;
+	_impl->track_comp_sidechain_src = -1;
+	_impl->track_comp_name.clear ();
+	_impl->track_comp.reset ();
 	_impl->selected_track = -1;
 	_impl->selected_region.reset ();
 	if (_impl->session) {
@@ -8750,6 +8786,39 @@ static const char* kReasonableSynthUri = "https://community.ardour.org/node/7596
 static const char* kAceReverbUri = "urn:ardour:a-reverb";
 /* LV2 control port index for Blend (wet mix); see a-reverb.ttl.in. */
 static const uint32_t kAceReverbBlendPort = 4;
+/* Bundled ACE Compressor (libs/plugins/a-comp.lv2) — DSP-only, no cairo. */
+static const char* kAceCompUri = "urn:ardour:a-comp";
+static const uint32_t kAceCompRatioPort = 3;
+static const uint32_t kAceCompThresholdPort = 4;
+static const uint32_t kAceCompSidechainPort = 9;
+
+static float
+comp_threshold_to_norm (float db)
+{
+	db = std::max (-60.f, std::min (0.f, db));
+	return (db - (-60.f)) / 60.f;
+}
+
+static float
+comp_norm_to_threshold (float n)
+{
+	n = std::max (0.f, std::min (1.f, n));
+	return -60.f + n * 60.f;
+}
+
+static float
+comp_ratio_to_norm (float ratio)
+{
+	ratio = std::max (1.f, std::min (20.f, ratio));
+	return (ratio - 1.f) / 19.f;
+}
+
+static float
+comp_norm_to_ratio (float n)
+{
+	n = std::max (0.f, std::min (1.f, n));
+	return 1.f + n * 19.f;
+}
 
 } // namespace
 
@@ -8926,6 +8995,36 @@ find_ace_reverb_info ()
 	return PluginInfoPtr ();
 }
 
+static PluginInfoPtr
+find_ace_comp_info ()
+{
+	try {
+		const PluginInfoList& plugs = PluginManager::instance ().lv2_plugin_info ();
+		for (PluginInfoList::const_iterator i = plugs.begin (); i != plugs.end (); ++i) {
+			if (!*i) {
+				continue;
+			}
+			if ((*i)->unique_id == kAceCompUri
+			    || (*i)->name.find ("ACE Compressor") != std::string::npos
+			    || (*i)->name.find ("a-comp") != std::string::npos) {
+				/* Prefer mono URI over stereo (#stereo). */
+				if ((*i)->unique_id.find ("#stereo") != std::string::npos) {
+					continue;
+				}
+				return *i;
+			}
+		}
+		/* Fallback: any ACE Compressor including stereo. */
+		for (PluginInfoList::const_iterator i = plugs.begin (); i != plugs.end (); ++i) {
+			if (*i && (*i)->name.find ("ACE Compressor") != std::string::npos) {
+				return *i;
+			}
+		}
+	} catch (...) {
+	}
+	return PluginInfoPtr ();
+}
+
 static std::shared_ptr<PluginInsert>
 find_ace_reverb_insert (std::shared_ptr<Route> route, std::string* out_name = nullptr)
 {
@@ -8960,6 +9059,36 @@ static bool
 track_has_ace_reverb (std::shared_ptr<Route> route, std::string* out_name)
 {
 	return (bool)find_ace_reverb_insert (route, out_name);
+}
+
+static std::shared_ptr<PluginInsert>
+find_ace_comp_insert (std::shared_ptr<Route> route, std::string* out_name = nullptr)
+{
+	std::shared_ptr<PluginInsert> found;
+	if (!route) {
+		return found;
+	}
+	route->foreach_processor ([&] (std::weak_ptr<Processor> wp) {
+		if (found) {
+			return;
+		}
+		std::shared_ptr<Processor> p = wp.lock ();
+		std::shared_ptr<PluginInsert> pi = std::dynamic_pointer_cast<PluginInsert> (p);
+		if (!pi || !pi->plugin ()) {
+			return;
+		}
+		std::string uid = pi->plugin ()->unique_id ();
+		std::string pname = pi->name ();
+		if (uid.find (kAceCompUri) == 0
+		    || pname.find ("ACE Compressor") != std::string::npos
+		    || pname.find ("a-comp") != std::string::npos) {
+			found = pi;
+			if (out_name) {
+				*out_name = pname.empty () ? "ACE Compressor" : pname;
+			}
+		}
+	});
+	return found;
 }
 
 void
@@ -9459,6 +9588,439 @@ EngineHost::track_fx_param (int track) const
 {
 	(void)track;
 	return _snap.track_fx_param;
+}
+
+void
+EngineHost::refresh_track_comp_snap ()
+{
+	_snap.track_comp_ok = false;
+	_snap.track_comp_bypassed = false;
+	_snap.track_comp_threshold_db = _impl ? _impl->track_comp_threshold_db : 0.f;
+	_snap.track_comp_ratio = _impl ? _impl->track_comp_ratio : 4.f;
+	_snap.track_comp_threshold_norm = comp_threshold_to_norm (_snap.track_comp_threshold_db);
+	_snap.track_comp_ratio_norm = comp_ratio_to_norm (_snap.track_comp_ratio);
+	_snap.track_comp_sidechain = _impl ? _impl->track_comp_sidechain : false;
+	_snap.track_comp_sidechain_src = _impl ? _impl->track_comp_sidechain_src : -1;
+	_snap.track_comp_name.clear ();
+	if (!_impl || _impl->tracks.size () < 2 || !_impl->tracks[1]) {
+		return;
+	}
+	std::string name;
+	std::shared_ptr<PluginInsert> pi = _impl->track_comp.lock ();
+	if (!pi) {
+		pi = find_ace_comp_insert (_impl->tracks[1], &name);
+		if (pi) {
+			_impl->track_comp = pi;
+		}
+	} else {
+		name = pi->name ().empty () ? "ACE Compressor" : pi->name ();
+	}
+	if (!pi) {
+		_impl->track_comp_ok = false;
+		return;
+	}
+	_impl->track_comp_ok = true;
+	_impl->track_comp_name = name.empty () ? "ACE Compressor" : name;
+	_impl->track_comp_bypassed = !pi->active ();
+	try {
+		std::shared_ptr<AutomationControl> thr = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceCompThresholdPort));
+		std::shared_ptr<AutomationControl> rat = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceCompRatioPort));
+		if (thr) {
+			_impl->track_comp_threshold_db = (float)thr->get_value ();
+		}
+		if (rat) {
+			_impl->track_comp_ratio = (float)rat->get_value ();
+		}
+		std::shared_ptr<AutomationControl> sc = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceCompSidechainPort));
+		if (sc) {
+			_impl->track_comp_sidechain = sc->get_value () > 0.5
+			                              && pi->has_sidechain ()
+			                              && pi->sidechain_input ()
+			                              && pi->sidechain_input ()->connected ();
+		}
+	} catch (...) {
+	}
+	_snap.track_comp_ok = true;
+	_snap.track_comp_bypassed = _impl->track_comp_bypassed;
+	_snap.track_comp_threshold_db = _impl->track_comp_threshold_db;
+	_snap.track_comp_ratio = _impl->track_comp_ratio;
+	_snap.track_comp_threshold_norm = comp_threshold_to_norm (_impl->track_comp_threshold_db);
+	_snap.track_comp_ratio_norm = comp_ratio_to_norm (_impl->track_comp_ratio);
+	_snap.track_comp_sidechain = _impl->track_comp_sidechain;
+	_snap.track_comp_sidechain_src = _impl->track_comp_sidechain_src;
+	_snap.track_comp_name = utf8_to_wide (_impl->track_comp_name);
+}
+
+bool
+EngineHost::insert_track_comp (int track)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"insert Comp: no audio track";
+		return false;
+	}
+	std::shared_ptr<AudioTrack> at = _impl->tracks[track];
+	std::string existing;
+	std::shared_ptr<PluginInsert> already = find_ace_comp_insert (at, &existing);
+	if (already) {
+		_impl->track_comp = already;
+		_impl->track_comp_ok = true;
+		_impl->track_comp_name = existing;
+		refresh_track_comp_snap ();
+		return true;
+	}
+
+	ensure_plugins_scanned ();
+	try {
+		PluginInfoPtr info = find_ace_comp_info ();
+		if (!info) {
+			_snap.detail = L"ACE Compressor not found (check ARDOUR_DLL_PATH/LV2)";
+			std::fprintf (stderr, "airdour_win_shell: ACE Compressor LV2 missing\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		PluginPtr plugin = info->load (*_impl->session);
+		if (!plugin) {
+			_snap.detail = L"ACE Compressor load failed";
+			return false;
+		}
+
+		std::shared_ptr<PluginInsert> pi (
+		    new PluginInsert (*_impl->session, *at, plugin));
+		pi->set_strict_io (true);
+		if (at->add_processor (pi, PreFader) != 0) {
+			_snap.detail = L"ACE Compressor add_processor failed";
+			return false;
+		}
+
+		_impl->track_comp = pi;
+		_impl->track_comp_ok = true;
+		_impl->track_comp_bypassed = !pi->active ();
+		_impl->track_comp_name = info->name.empty () ? "ACE Compressor" : info->name;
+		try {
+			std::shared_ptr<AutomationControl> thr = pi->automation_control (
+			    Evoral::Parameter (PluginAutomation, 0, kAceCompThresholdPort));
+			std::shared_ptr<AutomationControl> rat = pi->automation_control (
+			    Evoral::Parameter (PluginAutomation, 0, kAceCompRatioPort));
+			if (thr) {
+				_impl->track_comp_threshold_db = (float)thr->get_value ();
+			}
+			if (rat) {
+				_impl->track_comp_ratio = (float)rat->get_value ();
+			}
+		} catch (...) {
+		}
+		refresh_track_comp_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: Comp \"%s\" on Audio %d (pre-fader)\n",
+		              _impl->track_comp_name.c_str (), track + 1);
+		std::fflush (stderr);
+		_snap.detail = L"ACE Compressor on Audio 2";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: insert_track_comp: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_comp_bypassed (int track, bool bypassed)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_comp (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_comp.lock ();
+	if (!pi) {
+		pi = find_ace_comp_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_comp = pi;
+	}
+	try {
+		if (bypassed) {
+			pi->deactivate ();
+		} else {
+			pi->activate ();
+		}
+		_impl->track_comp_bypassed = !pi->active ();
+		refresh_track_comp_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_track_comp_bypass (int track)
+{
+	refresh_track_comp_snap ();
+	return set_track_comp_bypassed (track, !_snap.track_comp_bypassed);
+}
+
+bool
+EngineHost::set_track_comp_threshold_db (int track, float db)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_comp (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_comp.lock ();
+	if (!pi) {
+		pi = find_ace_comp_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_comp = pi;
+	}
+	db = std::max (-60.f, std::min (0.f, db));
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceCompThresholdPort));
+		if (!ac) {
+			_snap.detail = L"ACE Comp Threshold missing";
+			return false;
+		}
+		ac->set_value (db, Controllable::NoGroup);
+		_impl->track_comp_threshold_db = (float)ac->get_value ();
+		refresh_track_comp_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_comp_threshold_norm (int track, float norm_0_1)
+{
+	return set_track_comp_threshold_db (track, comp_norm_to_threshold (norm_0_1));
+}
+
+bool
+EngineHost::set_track_comp_ratio (int track, float ratio)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_comp (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_comp.lock ();
+	if (!pi) {
+		pi = find_ace_comp_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_comp = pi;
+	}
+	ratio = std::max (1.f, std::min (20.f, ratio));
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceCompRatioPort));
+		if (!ac) {
+			_snap.detail = L"ACE Comp Ratio missing";
+			return false;
+		}
+		ac->set_value (ratio, Controllable::NoGroup);
+		_impl->track_comp_ratio = (float)ac->get_value ();
+		refresh_track_comp_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_comp_ratio_norm (int track, float norm_0_1)
+{
+	return set_track_comp_ratio (track, comp_norm_to_ratio (norm_0_1));
+}
+
+bool
+EngineHost::set_track_comp_sidechain (int track, int src_track, bool enable)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_comp (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_comp.lock ();
+	if (!pi) {
+		pi = find_ace_comp_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_comp = pi;
+	}
+	std::shared_ptr<AudioTrack> at = _impl->tracks[track];
+	try {
+		if (!enable) {
+			std::shared_ptr<AutomationControl> sc = pi->automation_control (
+			    Evoral::Parameter (PluginAutomation, 0, kAceCompSidechainPort));
+			if (sc) {
+				sc->set_value (0.0, Controllable::NoGroup);
+			}
+			if (pi->has_sidechain ()) {
+				at->remove_sidechain (pi);
+			}
+			_impl->track_comp_sidechain = false;
+			_impl->track_comp_sidechain_src = -1;
+			refresh_track_comp_snap ();
+			std::fprintf (stderr, "airdour_win_shell: Comp SC off (track %d)\n", track);
+			std::fflush (stderr);
+			return true;
+		}
+
+		if (src_track < 0 || src_track >= (int)_impl->tracks.size ()
+		    || !_impl->tracks[src_track] || src_track == track) {
+			_snap.detail = L"Comp SC — bad source track";
+			return false;
+		}
+
+		if (!pi->has_sidechain ()) {
+			if (!at->add_sidechain (pi)) {
+				_snap.detail = L"Comp SC — add_sidechain failed";
+				std::fprintf (stderr, "airdour_win_shell: Comp add_sidechain failed\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+
+		std::shared_ptr<IO> sc_in = pi->sidechain_input ();
+		std::shared_ptr<IO> src_out = _impl->tracks[src_track]->output ();
+		if (!sc_in || !src_out || !sc_in->nth (0) || !src_out->nth (0)) {
+			_snap.detail = L"Comp SC — missing ports";
+			return false;
+		}
+		/* Disconnect existing then wire src audio out → SC in. */
+		try {
+			sc_in->disconnect ();
+		} catch (...) {
+		}
+		if (sc_in->connect (sc_in->nth (0), src_out->nth (0)->name ()) != 0) {
+			_snap.detail = L"Comp SC — connect failed";
+			std::fprintf (stderr, "airdour_win_shell: Comp SC connect failed\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::shared_ptr<AutomationControl> sc = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceCompSidechainPort));
+		if (sc) {
+			sc->set_value (1.0, Controllable::NoGroup);
+		}
+		_impl->track_comp_sidechain = true;
+		_impl->track_comp_sidechain_src = src_track;
+		refresh_track_comp_snap ();
+		std::fprintf (stderr, "airdour_win_shell: Comp SC Audio %d → Audio %d\n",
+		              src_track + 1, track + 1);
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: Comp SC exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"Comp SC exception";
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_comp ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-comp failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-comp FAILED (need Audio 2)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!insert_track_comp (1) || !_snap.track_comp_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-comp FAILED (insert)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::string verified;
+		if (!find_ace_comp_insert (_impl->tracks[1], &verified)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-comp FAILED (not on route)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!set_track_comp_bypassed (1, false) || _snap.track_comp_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-comp FAILED (bypass clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_comp_threshold_db (1, -18.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-comp FAILED (threshold)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_comp_threshold_db < -19.f || _snap.track_comp_threshold_db > -17.f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-comp FAILED (thr=%.1f)\n",
+			              _snap.track_comp_threshold_db);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_comp_ratio (1, 8.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-comp FAILED (ratio)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_comp_ratio < 7.5f || _snap.track_comp_ratio > 8.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-comp FAILED (ratio=%.2f)\n",
+			              _snap.track_comp_ratio);
+			std::fflush (stderr);
+			return false;
+		}
+
+		bool sc_ok = set_track_comp_sidechain (1, 0, true);
+		if (sc_ok && !_snap.track_comp_sidechain) {
+			sc_ok = false;
+		}
+		/* Sidechain is best-effort — still pass if threshold/ratio work. */
+		if (sc_ok) {
+			set_track_comp_sidechain (1, 0, false);
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-comp ok (fx=%s thr=%.1f ratio=%.1f sc=%d)\n",
+		              verified.c_str (), _snap.track_comp_threshold_db,
+		              _snap.track_comp_ratio, sc_ok ? 1 : 0);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-comp ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-comp exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 bool
@@ -10305,6 +10867,7 @@ EngineHost::refresh_snapshot ()
 			refresh_clock_snap ();
 			refresh_midi_snap ();
 			refresh_track_fx_snap ();
+			refresh_track_comp_snap ();
 		} else {
 			_snap.waves_from_session = false;
 			_snap.session_record_armed = false;
@@ -10469,6 +11032,14 @@ EngineHost::EngineHost ()
 	_snap.track_fx_ok = false;
 	_snap.track_fx_bypassed = false;
 	_snap.track_fx_param = 0.3f;
+	_snap.track_comp_ok = false;
+	_snap.track_comp_bypassed = false;
+	_snap.track_comp_threshold_db = 0.f;
+	_snap.track_comp_ratio = 4.f;
+	_snap.track_comp_threshold_norm = 1.f;
+	_snap.track_comp_ratio_norm = (4.f - 1.f) / 19.f;
+	_snap.track_comp_sidechain = false;
+	_snap.track_comp_sidechain_src = -1;
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -10496,6 +11067,7 @@ EngineHost::EngineHost ()
 	_snap.midi_out_name.clear ();
 	_snap.track_fx_name.clear ();
 	_snap.track_fx_param_name = L"Blend";
+	_snap.track_comp_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -11880,7 +12452,76 @@ EngineHost::track_fx_param (int track) const
 }
 
 bool
+EngineHost::insert_track_comp (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::toggle_track_comp_bypass (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::set_track_comp_bypassed (int track, bool bypassed)
+{
+	(void)track;
+	(void)bypassed;
+	return false;
+}
+
+bool
+EngineHost::set_track_comp_threshold_db (int track, float db)
+{
+	(void)track;
+	(void)db;
+	return false;
+}
+
+bool
+EngineHost::set_track_comp_threshold_norm (int track, float norm_0_1)
+{
+	(void)track;
+	(void)norm_0_1;
+	return false;
+}
+
+bool
+EngineHost::set_track_comp_ratio (int track, float ratio)
+{
+	(void)track;
+	(void)ratio;
+	return false;
+}
+
+bool
+EngineHost::set_track_comp_ratio_norm (int track, float norm_0_1)
+{
+	(void)track;
+	(void)norm_0_1;
+	return false;
+}
+
+bool
+EngineHost::set_track_comp_sidechain (int track, int src_track, bool enable)
+{
+	(void)track;
+	(void)src_track;
+	(void)enable;
+	return false;
+}
+
+bool
 EngineHost::smoke_plugin_insert ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_comp ()
 {
 	return false;
 }
@@ -11900,6 +12541,11 @@ EngineHost::smoke_perf (unsigned sample_secs)
 
 void
 EngineHost::refresh_track_fx_snap ()
+{
+}
+
+void
+EngineHost::refresh_track_comp_snap ()
 {
 }
 
