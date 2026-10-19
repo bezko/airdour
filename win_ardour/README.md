@@ -24,6 +24,22 @@ build-win64-gui\artifacts\Release\airdour_win_shell.exe --timeout 3 --no-engine
 
 ### With engine (laptop)
 
+### Release engine (laptop perf path)
+
+```bat
+tools\win-native\configure-waf-release.cmd
+tools\win-native\build-waf-release.cmd
+cmake -S cmake\win64 -B build-win64-gui-engine-rel -G "Visual Studio 17 2022" -A x64 ^
+  -DAIRDOUR_BUILD_WIN_SHELL=ON -DAIRDOUR_WIN_SHELL_WITH_ENGINE=ON ^
+  -DAIRDOUR_WAF_BUILD_DIR=%CD%\build-rel
+cmake --build build-win64-gui-engine-rel --config Release --target airdour_win_shell
+win_ardour\run-engine-shell-release.bat --timeout 6 --backend WASAPI --smoke-perf
+```
+
+Uses `build-rel/` (`/MD /O2`). Expect ~11% DSP / ~116 MB WS vs Debug ~60%+ / ~410 MB.
+
+### Debug engine (laptop)
+
 Requires existing waf MSVC build under `build/` (Debug `/MDd` libs), including **panner** DLLs:
 
 ```bat

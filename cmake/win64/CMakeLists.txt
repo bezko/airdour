@@ -239,9 +239,9 @@ if(AIRDOUR_BUILD_WIN_SHELL)
 
   set(_waf_ardour_lib "${AIRDOUR_WAF_BUILD_DIR}/libs/ardour/ardour.lib")
   if(AIRDOUR_WIN_SHELL_WITH_ENGINE AND EXISTS "${_waf_ardour_lib}")
-    # waf MSVC product libs on TUFNUTZ are /MDd — match Debug CRT.
+    # Match waf CRT: Debug build/ → /MDd; Release build-rel → /MD.
     set_property(TARGET airdour_win_shell PROPERTY
-      MSVC_RUNTIME_LIBRARY "MultiThreadedDebugDLL")
+      MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
     set(_vcpkg_prefix "${AIRDOUR_SRC_ROOT}/tools/win-native/vcpkg_installed/x64-windows")
     target_compile_definitions(airdour_win_shell PRIVATE
@@ -293,7 +293,7 @@ if(AIRDOUR_BUILD_WIN_SHELL)
       "${AIRDOUR_WAF_BUILD_DIR}/libs/midi++2"
       "${AIRDOUR_WAF_BUILD_DIR}/libs/evoral"
       "${AIRDOUR_WAF_BUILD_DIR}/libs/ctrl-interface/control_protocol"
-      "${_vcpkg_prefix}/debug/lib"
+      "$<$<CONFIG:Debug>:${_vcpkg_prefix}/debug/lib>"
       "${_vcpkg_prefix}/lib"
     )
     target_link_libraries(airdour_win_shell PRIVATE
@@ -303,6 +303,14 @@ if(AIRDOUR_BUILD_WIN_SHELL)
       midipp
       evoral
       ardourcp
+      # Headers instantiate PBD/XML templates that reference glib; Release needs
+      # an explicit import (Debug often pulled it via debug/lib order).
+      glib-2.0
+      glibmm-2.4
+      sigc-2.0
+      libxml2
+      "$<$<CONFIG:Debug>:pthreadVC3d>"
+      "$<$<NOT:$<CONFIG:Debug>>:pthreadVC3>"
     )
     # Side-by-side waf DLLs so Explorer / incomplete PATH still finds
     # ptformat.dll (and friends) — avoids "ptformat.dll was not found".

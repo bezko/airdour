@@ -853,10 +853,8 @@ WasapiBackend::main_process_thread (void* arg)
 bool
 WasapiBackend::run_one_cycle ()
 {
-	const int64_t cycle_us = PBD::get_microseconds ();
-	_cycle_timer.reset_start (cycle_us);
-	_dsp_load_calc.set_start_timestamp_us (cycle_us);
-
+	/* Wait outside the DSP window — including WaitForSingleObject would make
+	 * load look ~100% for every healthy shared-mode period. */
 	int w = _io.wait_for_period ();
 	if (w < 0) {
 		return false;
@@ -864,6 +862,10 @@ WasapiBackend::run_one_cycle ()
 	if (w == 0) {
 		return true; /* timeout — keep running */
 	}
+
+	const int64_t cycle_us = PBD::get_microseconds ();
+	_cycle_timer.reset_start (cycle_us);
+	_dsp_load_calc.set_start_timestamp_us (cycle_us);
 
 	float* cap = _interleaved_capture.empty () ? 0 : &_interleaved_capture[0];
 	float* play = _interleaved_playback.empty () ? 0 : &_interleaved_playback[0];
