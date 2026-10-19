@@ -185,7 +185,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             unsigned period_frames,
                             bool smoke_vst3,
                             bool smoke_mute_solo,
-                            bool smoke_pan)
+                            bool smoke_pan,
+                            bool smoke_send)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -336,6 +337,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_send && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_send ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_send_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_send) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -408,6 +422,14 @@ ShellWindow::sync_mixer_pan_from_engine ()
 		_mixers[i].set_pan (_engine_snap.track_pan[i]);
 	}
 	_transport.set_recording (_engine_snap.session_recording);
+}
+
+void
+ShellWindow::sync_mixer_send_from_engine ()
+{
+	for (int i = 0; i < kTracks; ++i) {
+		_mixers[i].set_send (_engine_snap.track_send[i]);
+	}
 }
 
 void
@@ -1313,6 +1335,17 @@ ShellWindow::hit_mixer_pan (float x, float y) const
 }
 
 int
+ShellWindow::hit_mixer_send (float x, float y) const
+{
+	for (int i = 0; i < kTracks; ++i) {
+		if (_mixers[i].hit_send (x, y)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int
 ShellWindow::hit_mixer_meter (float x, float y) const
 {
 	for (int i = 0; i < kMixerStrips; ++i) {
@@ -1524,6 +1557,22 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
+	int send_i = hit_mixer_send (x, y);
+	if (send_i >= 0) {
+		_drag = DragMode::Send;
+		_drag_index = send_i;
+		if (_mixers[send_i].drag_send_to (x)) {
+			_engine.set_track_send (send_i, _mixers[send_i].send ());
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_send_from_engine ();
+		}
+		SetCapture (_hwnd);
+		SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
 	/* Click meter → clear peak-hold clip latch (PeakMeter::reset_max). */
 	int meter_i = hit_mixer_meter (x, y);
 	if (meter_i >= 0 && _mixers[meter_i].meter_clipped ()) {
@@ -1664,6 +1713,17 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
 			sync_mixer_pan_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+		return true;
+	}
+
+	if (_drag == DragMode::Send && _drag_index >= 0 && _drag_index < kTracks) {
+		if (_mixers[_drag_index].drag_send_to (x)) {
+			_engine.set_track_send (_drag_index, _mixers[_drag_index].send ());
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_send_from_engine ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		}
 		return true;
@@ -1813,6 +1873,7 @@ ShellWindow::on_tick ()
 		sync_mixer_arm_from_engine ();
 		sync_mixer_mute_solo_from_engine ();
 		sync_mixer_pan_from_engine ();
+		sync_mixer_send_from_engine ();
 		sync_transport_loop_from_engine ();
 		apply_region_selection_to_lanes ();
 		apply_loop_to_lanes ();
@@ -1887,6 +1948,7 @@ ShellWindow::on_tick ()
 	sync_mixer_fx_from_engine ();
 	sync_mixer_mute_solo_from_engine ();
 	sync_mixer_pan_from_engine ();
+	sync_mixer_send_from_engine ();
 
 	if (_timeout_secs > 0 && (now - _start_tick) >= (_timeout_secs * 1000u)) {
 		PostQuitMessage (0);
@@ -2165,7 +2227,7 @@ ShellWindow::draw_mixer_pane ()
 		              _engine_snap.track_fx_bypassed ? L" BYP" : L"",
 		              _engine_snap.track_fx_param * 100.f);
 	} else if (_engine_snap.meters_real) {
-		wcsncpy_s (hint, L"PeakMeter  ·  hold/clip  ·  M/S  ·  pan", _TRUNCATE);
+		wcsncpy_s (hint, L"PeakMeter  ·  hold/clip  ·  M/S  ·  pan  ·  send", _TRUNCATE);
 	} else if (_transport_playing) {
 		wcsncpy_s (hint, L"Meters: play stub (no Session)", _TRUNCATE);
 	} else {

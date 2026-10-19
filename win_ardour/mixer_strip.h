@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Direct2D mixer track strip: arm + mute/solo + pan + FX + fader + meter (not GTK).
+ * Direct2D mixer track strip: arm + mute/solo + pan + send + FX + fader + meter (not GTK).
  */
 
 #pragma once
@@ -48,7 +48,13 @@ public:
 	bool  hit_pan (float x, float y) const;
 	bool  drag_pan_to (float x);
 
-	/** MIDI strip: hide rec-arm / FX / pan chrome; keep M/S + fader + meter. */
+	/** Aux send level 0..1 (gain coeff) to session Aux bus (audio strips only). */
+	void  set_send (float send_0_1);
+	float send () const { return _send; }
+	bool  hit_send (float x, float y) const;
+	bool  drag_send_to (float x);
+
+	/** MIDI strip: hide rec-arm / FX / pan / send chrome; keep M/S + fader + meter. */
 	void set_midi_strip (bool midi) { _midi_strip = midi; }
 	bool is_midi_strip () const { return _midi_strip; }
 
@@ -96,11 +102,13 @@ private:
 	D2D1_RECT_F _mute_btn;
 	D2D1_RECT_F _solo_btn;
 	D2D1_RECT_F _pan_track;
+	D2D1_RECT_F _send_track;
 	D2D1_RECT_F _fx_btn;
 	D2D1_RECT_F _fx_param_track;
 	LevelMeter  _meter;
 	float       _gain;
 	float       _pan;
+	float       _send;
 	float       _fx_param;
 	bool        _armed;
 	bool        _muted;

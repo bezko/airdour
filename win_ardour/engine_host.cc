@@ -39,6 +39,8 @@
 #include "ardour/region.h"
 #include "ardour/region_factory.h"
 #include "ardour/route.h"
+#include "ardour/internal_send.h"
+#include "ardour/send.h"
 #include "ardour/audio_backend.h"
 #include "ardour/chan_count.h"
 #include "ardour/location.h"
@@ -315,6 +317,7 @@ public:
 	samplecnt_t     play_origin_samples;
 	std::string     session_dir;
 	std::vector<std::shared_ptr<AudioTrack> > tracks;
+	std::shared_ptr<Route> aux_bus; /* Aux destination for mixer sends */
 	std::shared_ptr<MidiTrack> midi_track;
 	std::shared_ptr<MidiRegion> midi_region;
 	int             selected_track;
@@ -370,7 +373,10 @@ EngineHost::EngineHost ()
 		_snap.track_muted[i] = false;
 		_snap.track_soloed[i] = false;
 		_snap.track_pan[i] = 0.5f;
+		_snap.track_send[i] = 0.f;
+		_snap.track_send_ok[i] = false;
 	}
+	_snap.aux_bus_ok = false;
 	_snap.midi_muted = false;
 	_snap.midi_soloed = false;
 	_snap.available = true;
@@ -630,6 +636,9 @@ EngineHost::ensure_session ()
 		/* Best-effort ACE Reverb on Audio 1 (headless insert, no GTK UI). */
 		insert_track_fx (0);
 
+		step ("aux bus + sends");
+		ensure_aux_sends ();
+
 		_snap.session_ok = true;
 		_snap.meters_real = true;
 		_snap.waves_from_session = true;
@@ -671,6 +680,7 @@ EngineHost::destroy_session ()
 		return;
 	}
 	_impl->tracks.clear ();
+	_impl->aux_bus.reset ();
 	_impl->midi_track.reset ();
 	_impl->midi_region.reset ();
 	_impl->midi_activity = 0.f;
@@ -733,6 +743,7 @@ void
 EngineHost::collect_tracks ()
 {
 	_impl->tracks.clear ();
+	_impl->aux_bus.reset ();
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -749,6 +760,18 @@ EngineHost::collect_tracks ()
 			_impl->tracks.push_back (at);
 			if (_impl->tracks.size () >= (size_t)EngineSnapshot::kMeters) {
 				break;
+			}
+		}
+		std::shared_ptr<RouteList const> all = _impl->session->get_routes ();
+		if (all) {
+			for (RouteList::const_iterator it = all->begin (); it != all->end (); ++it) {
+				if (!*it || (*it)->is_master () || (*it)->is_monitor ()) {
+					continue;
+				}
+				if ((*it)->presentation_info ().flags () & PresentationInfo::AudioBus) {
+					_impl->aux_bus = *it;
+					break;
+				}
 			}
 		}
 	} catch (...) {
@@ -884,6 +907,8 @@ EngineHost::open_session (const std::string& session_dir, const std::string& sna
 				_impl->tracks[t]->gain_control ()->set_value (_track_gain[t], Controllable::NoGroup);
 			}
 		}
+
+		ensure_aux_sends ();
 
 		_snap.session_ok = true;
 		_snap.meters_real = true;
@@ -2046,6 +2071,188 @@ EngineHost::smoke_pan ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+void
+EngineHost::refresh_send_flags ()
+{
+	_snap.aux_bus_ok = false;
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_send[i] = 0.f;
+		_snap.track_send_ok[i] = false;
+	}
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	try {
+		_snap.aux_bus_ok = (_impl->aux_bus != nullptr);
+		if (!_impl->aux_bus) {
+			return;
+		}
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i >= (int)_impl->tracks.size () || !_impl->tracks[i]) {
+				continue;
+			}
+			std::shared_ptr<Send> send =
+				_impl->tracks[i]->internal_send_for (_impl->aux_bus);
+			if (!send || !send->gain_control ()) {
+				continue;
+			}
+			_snap.track_send_ok[i] = true;
+			float g = (float)send->gain_control ()->get_value ();
+			_snap.track_send[i] = std::max (0.f, std::min (1.f, g));
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::ensure_aux_sends ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (!_impl->aux_bus) {
+			RouteList buses = _impl->session->new_audio_route (
+				2, 2,
+				std::shared_ptr<RouteGroup> (),
+				1,
+				"Aux",
+				PresentationInfo::AudioBus,
+				PresentationInfo::max_order);
+			if (buses.empty ()) {
+				std::fprintf (stderr, "airdour_win_shell: Aux bus create failed\n");
+				std::fflush (stderr);
+				refresh_send_flags ();
+				return false;
+			}
+			_impl->aux_bus = buses.front ();
+			std::fprintf (stderr, "airdour_win_shell: Aux bus \"%s\" ready\n",
+			              _impl->aux_bus->name ().c_str ());
+			std::fflush (stderr);
+		}
+
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			std::shared_ptr<AudioTrack> track = _impl->tracks[i];
+			if (!track) {
+				continue;
+			}
+			std::shared_ptr<Send> existing = track->internal_send_for (_impl->aux_bus);
+			if (!existing) {
+				std::shared_ptr<Processor> before =
+					track->before_processor_for_placement (PostFader);
+				_impl->session->add_internal_send (_impl->aux_bus, before, track);
+				existing = track->internal_send_for (_impl->aux_bus);
+				if (existing && existing->gain_control ()) {
+					/* Start silent so Send is opt-in from the mixer. */
+					_impl->session->set_control (
+						existing->gain_control (), 0.0, Controllable::NoGroup);
+				}
+			}
+		}
+		refresh_send_flags ();
+		return _snap.aux_bus_ok && _snap.track_send_ok[0];
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: ensure_aux_sends: %s\n", e.what ());
+		std::fflush (stderr);
+		refresh_send_flags ();
+		return false;
+	} catch (...) {
+		refresh_send_flags ();
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_send (int track, float send_0_1)
+{
+	send_0_1 = std::max (0.f, std::min (1.f, send_0_1));
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (!ensure_aux_sends ()) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track] || !_impl->aux_bus) {
+		return false;
+	}
+	try {
+		std::shared_ptr<Send> send =
+			_impl->tracks[track]->internal_send_for (_impl->aux_bus);
+		if (!send || !send->gain_control ()) {
+			std::fprintf (stderr, "airdour_win_shell: send missing on Audio %d\n",
+			              track + 1);
+			std::fflush (stderr);
+			return false;
+		}
+		_impl->session->set_control (send->gain_control (), (double)send_0_1,
+		                             Controllable::NoGroup);
+		wait_until ([&] () {
+			refresh_send_flags ();
+			return std::fabs (_snap.track_send[track] - send_0_1) < 0.02f;
+		}, 300);
+		_snap.detail = L"track send set";
+		return std::fabs (_snap.track_send[track] - send_0_1) < 0.02f;
+	} catch (...) {
+		return false;
+	}
+}
+
+float
+EngineHost::track_send (int track) const
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return 0.f;
+	}
+	return _snap.track_send[track];
+}
+
+bool
+EngineHost::smoke_send ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-send failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_aux_sends () || !_snap.aux_bus_ok || !_snap.track_send_ok[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send FAILED (no Aux/send)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send (0, 0.0f) || _snap.track_send[0] > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send FAILED (0 got=%.3f)\n",
+			              _snap.track_send[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send (0, 0.75f)
+		    || _snap.track_send[0] < 0.70f || _snap.track_send[0] > 0.80f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send FAILED (0.75 got=%.3f)\n",
+			              _snap.track_send[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send (0, 0.25f)
+		    || _snap.track_send[0] < 0.20f || _snap.track_send[0] > 0.30f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send FAILED (0.25 got=%.3f)\n",
+			              _snap.track_send[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-send ok (Audio1 → Aux 0→0.75→0.25)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-send ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -4555,6 +4762,7 @@ EngineHost::refresh_snapshot ()
 			refresh_record_flags ();
 			refresh_mute_solo_flags ();
 			refresh_pan_flags ();
+			refresh_send_flags ();
 			refresh_history_flags ();
 			refresh_selection_snap ();
 			refresh_locations_snap ();
@@ -4619,7 +4827,10 @@ EngineHost::EngineHost ()
 		_snap.meter_clip[i] = false;
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
+		_snap.track_send[i] = 0.f;
+		_snap.track_send_ok[i] = false;
 	}
+	_snap.aux_bus_ok = false;
 	_snap.available = false;
 	_snap.running = false;
 	_snap.session_ok = false;
@@ -4925,6 +5136,38 @@ EngineHost::track_pan (int track) const
 
 bool
 EngineHost::smoke_pan ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_send_flags ()
+{
+}
+
+bool
+EngineHost::ensure_aux_sends ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_track_send (int track, float send_0_1)
+{
+	(void)track;
+	(void)send_0_1;
+	return false;
+}
+
+float
+EngineHost::track_send (int track) const
+{
+	(void)track;
+	return 0.f;
+}
+
+bool
+EngineHost::smoke_send ()
 {
 	return false;
 }

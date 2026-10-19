@@ -65,7 +65,8 @@ public:
 	                    unsigned period_frames = 0,
 	                    bool smoke_vst3 = false,
 	                    bool smoke_mute_solo = false,
-	                    bool smoke_pan = false);
+	                    bool smoke_pan = false,
+	                    bool smoke_send = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -78,6 +79,7 @@ private:
 		Fader,
 		FxParam, /* drag Mixer Blend slider */
 		Pan, /* drag Mixer pan azimuth */
+		Send, /* drag Mixer aux send level */
 		MidiDraw /* click/drag on MIDI lane to create a note */
 	};
 
@@ -130,6 +132,7 @@ private:
 	void sync_mixer_arm_from_engine ();
 	void sync_mixer_mute_solo_from_engine ();
 	void sync_mixer_pan_from_engine ();
+	void sync_mixer_send_from_engine ();
 	void sync_mixer_fx_from_engine ();
 	void sync_transport_loop_from_engine ();
 	void apply_shared_view (int source_lane);
@@ -148,6 +151,7 @@ private:
 	int  hit_mixer_mute (float x, float y) const;
 	int  hit_mixer_solo (float x, float y) const;
 	int  hit_mixer_pan (float x, float y) const;
+	int  hit_mixer_send (float x, float y) const;
 	int  hit_mixer_meter (float x, float y) const;
 	int  hit_mixer_fx (float x, float y) const;
 	int  hit_mixer_fx_param (float x, float y) const;

@@ -97,6 +97,9 @@ struct EngineSnapshot {
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
+	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
+	bool         track_send_ok[kMeters]; /* InternalSend present on track */
+	bool         aux_bus_ok; /* Session Aux audio bus exists */
 	bool         midi_muted;
 	bool         midi_soloed;
 	float        transport_sec;
@@ -165,6 +168,13 @@ public:
 
 	/** Pan L → C → R on Audio 1. For --smoke-pan. */
 	bool smoke_pan ();
+
+	/** Aux send level 0..1 (gain coeff) via InternalSend → Aux bus. */
+	bool  set_track_send (int track, float send_0_1);
+	float track_send (int track) const;
+
+	/** Send 0 → 0.75 → 0.25 on Audio 1. For --smoke-send. */
+	bool smoke_send ();
 
 	/** Clear PeakMeter max-peak / clip latch on Audio track (0..kMeters-1). */
 	bool clear_track_meter_clip (int track);
@@ -359,6 +369,8 @@ private:
 	void refresh_record_flags ();
 	void refresh_mute_solo_flags ();
 	void refresh_pan_flags ();
+	void refresh_send_flags ();
+	bool ensure_aux_sends ();
 	void refresh_history_flags ();
 	void refresh_selection_snap ();
 	void refresh_locations_snap ();

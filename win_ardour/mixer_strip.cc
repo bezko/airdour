@@ -26,10 +26,12 @@ MixerStrip::MixerStrip ()
 	, _mute_btn ()
 	, _solo_btn ()
 	, _pan_track ()
+	, _send_track ()
 	, _fx_btn ()
 	, _fx_param_track ()
 	, _gain (0.85f)
 	, _pan (0.5f)
+	, _send (0.f)
 	, _fx_param (0.3f)
 	, _armed (false)
 	, _muted (false)
@@ -78,6 +80,12 @@ MixerStrip::set_pan (float pan_0_1)
 }
 
 void
+MixerStrip::set_send (float send_0_1)
+{
+	_send = std::max (0.f, std::min (1.f, send_0_1));
+}
+
+void
 MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 {
 	_strip = strip_bounds;
@@ -91,6 +99,7 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 	if (_midi_strip) {
 		_arm_btn = D2D1::RectF (0, 0, 0, 0);
 		_pan_track = D2D1::RectF (0, 0, 0, 0);
+		_send_track = D2D1::RectF (0, 0, 0, 0);
 	} else {
 		_arm_btn = D2D1::RectF (
 			_strip.left + pad, y, _strip.right - pad, y + arm_h);
@@ -110,6 +119,10 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 		float pan_h = 12.f * dpi_scale;
 		_pan_track = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + pan_h);
 		y = _pan_track.bottom + gap;
+
+		float send_h = 10.f * dpi_scale;
+		_send_track = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + send_h);
+		y = _send_track.bottom + gap;
 
 		_fx_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + fx_h);
 		y = _fx_btn.bottom + 3.f * dpi_scale;
@@ -221,6 +234,36 @@ MixerStrip::drag_pan_to (float x)
 		return false;
 	}
 	_pan = v;
+	return true;
+}
+
+bool
+MixerStrip::hit_send (float x, float y) const
+{
+	if (_midi_strip) {
+		return false;
+	}
+	float pad = 4.f;
+	return x >= _send_track.left - pad && x <= _send_track.right + pad
+	    && y >= _send_track.top - pad && y <= _send_track.bottom + pad;
+}
+
+bool
+MixerStrip::drag_send_to (float x)
+{
+	if (_midi_strip) {
+		return false;
+	}
+	float w = _send_track.right - _send_track.left;
+	if (w < 1.f) {
+		return false;
+	}
+	float t = (x - _send_track.left) / w;
+	float v = std::max (0.f, std::min (1.f, t));
+	if (v == _send) {
+		return false;
+	}
+	_send = v;
 	return true;
 }
 
@@ -357,6 +400,18 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 			D2D1::Point2F (mid_x, _pan_track.bottom),
 			body, 1.f);
 
+		/* Aux send level → Aux bus */
+		rt->FillRectangle (_send_track, edge);
+		{
+			float sw = _send_track.right - _send_track.left;
+			float fill_r = _send_track.left + sw * _send;
+			accent->SetOpacity (0.65f);
+			rt->FillRectangle (
+				D2D1::RectF (_send_track.left, _send_track.top, fill_r, _send_track.bottom),
+				accent);
+			accent->SetOpacity (1.f);
+		}
+
 		const bool fx_on = _fx_label[0] != L'\0';
 		rt->FillRectangle (_fx_btn, edge);
 		if (fx_on) {
@@ -426,14 +481,15 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 			pan_txt = L"R";
 		}
 		if (_fx_label[0] != L'\0') {
-			_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  %s  ·  B %.0f%%",
-			              db_v, pan_txt, _fx_param * 100.f);
+			_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  %s  ·  Snd %.0f%%",
+			              db_v, pan_txt, _send * 100.f);
 		} else if (_muted) {
 			_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  %s  ·  MUTE", db_v, pan_txt);
 		} else if (_soloed) {
 			_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  %s  ·  SOLO", db_v, pan_txt);
 		} else {
-			_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  %s", db_v, pan_txt);
+			_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  %s  ·  Snd %.0f%%",
+			              db_v, pan_txt, _send * 100.f);
 		}
 	} else if (_muted && _soloed) {
 		_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  M+S", db_v);
