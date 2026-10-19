@@ -21,10 +21,20 @@ struct EngineMidiDeviceSnap {
 	bool    input; /* true = capture / in; false = playback / out (best-effort) */
 };
 
+struct EngineMidiNoteSnap {
+	int32_t id;
+	float   start_sec;
+	float   length_sec;
+	uint8_t pitch;
+	uint8_t velocity;
+	bool    selected;
+};
+
 struct EngineSnapshot {
 	static constexpr int kMeters = 3;
 	static constexpr int kMaxMarkers = 8;
 	static constexpr int kMaxMidiDevices = 16;
+	static constexpr int kMaxMidiNotes = 96;
 
 	bool         available; /* compiled with AIRDOUR_WIN_SHELL_WITH_ENGINE */
 	bool         running;
@@ -50,10 +60,16 @@ struct EngineSnapshot {
 	EngineMarkerSnap markers[kMaxMarkers];
 	bool         midi_ok; /* backend MIDI option active / ports present */
 	bool         midi_track_ok; /* Session has at least one MidiTrack */
+	bool         midi_region_ok; /* playlist has a MidiRegion for editing */
+	bool         midi_out_connected; /* track output → physical MIDI (e.g. GS) */
 	float        midi_activity; /* 0..1 decaying activity indicator */
 	int          midi_device_count;
 	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices];
+	int          midi_note_count;
+	EngineMidiNoteSnap midi_notes[kMaxMidiNotes];
+	int32_t      midi_selected_note_id; /* Evoral id, or -1 */
 	std::wstring midi_option; /* e.g. WinMME / Dummy loopback */
+	std::wstring midi_out_name; /* connected playback port display name */
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
 	std::wstring export_path; /* last exported WAV (UTF-16 display) */
@@ -186,7 +202,28 @@ public:
 	/** Ensure a Session MidiTrack exists (creates one if needed). */
 	bool ensure_midi_track ();
 
-	/** Refresh MIDI device list + option into snapshot (safe without hardware). */
+	/**
+	 * Ensure an empty MidiRegion on the MIDI track playlist (creates if needed).
+	 * length_sec is the region span starting at 0.
+	 */
+	bool ensure_midi_region (float length_sec = 32.f);
+
+	/**
+	 * Add a note into the Session MidiModel (persisted with the region).
+	 * Returns false if track/region/model unavailable or overlap policy rejects.
+	 */
+	bool add_midi_note (uint8_t pitch, float start_sec, float length_sec,
+	                    uint8_t velocity = 100);
+
+	/** Hit-test piano-roll; selects note under (time,pitch) if any. */
+	bool select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop = 0.f);
+	void clear_midi_note_selection ();
+	bool delete_selected_midi_note ();
+
+	/** Best-effort connect MidiTrack output to first physical MIDI playback port. */
+	bool connect_midi_output ();
+
+	/** Refresh MIDI device list + option + notes into snapshot (safe without hardware). */
 	void refresh_midi_snap ();
 
 	/**
@@ -194,6 +231,12 @@ public:
 	 * Hardware I/O not required. Loopback on Dummy when available.
 	 */
 	bool smoke_midi ();
+
+	/**
+	 * Ensure region, add notes, select+delete one, verify remaining notes in model.
+	 * Does not require audible soft-synth / GS hardware.
+	 */
+	bool smoke_midi_edit ();
 
 	std::string session_dir () const;
 	std::string last_export_path () const;
@@ -228,6 +271,7 @@ private:
 	void update_session_path_snap ();
 	bool compute_export_range (int64_t* start_sample, int64_t* end_sample) const;
 	bool configure_backend_midi ();
+	void refresh_midi_notes_snap ();
 
 	bool        _started;
 	std::string _backend_name;

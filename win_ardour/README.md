@@ -64,11 +64,11 @@ Engine builds also **copy** `ptformat.dll` / `ardour.dll` / … next to the exe 
 
 ## Session / PeakMeter / Editor / Record / Import / Save / Export / Undo / Loop / MIDI
 
-Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI 1** so mixer PeakMeters attach. Editor lanes read playlist peaks via `AudioRegion::read_peaks` — **empty tracks stay empty**. Mixer **R · arm**; transport **Rec** / **Loop** / **Mark** / **Import** / **Save** / **Open** / **Export**. **Export** bounces the master bus to a 16-bit WAV (ExportHandler, no GTK). **Ctrl+Z / Ctrl+Y** undo/redo; click a region to select; **Delete** removes it. **Loop** / **Mark** on the Editor ruler. **MIDI:** WASAPI uses real **WinMME** (not PortAudio); Dummy prefers loopback. Editor shows a piano-roll stub + device count. Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** then `ExitProcess(0)`.
+Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI 1** so mixer PeakMeters attach. Editor lanes read playlist peaks via `AudioRegion::read_peaks` — **empty tracks stay empty**. Mixer **R · arm**; transport **Rec** / **Loop** / **Mark** / **Import** / **Save** / **Open** / **Export**. **Export** bounces the master bus to a 16-bit WAV (ExportHandler, no GTK). **Ctrl+Z / Ctrl+Y** undo/redo; click a region to select; **Delete** removes it. **Loop** / **Mark** on the Editor ruler. **MIDI:** WASAPI uses real **WinMME** (not PortAudio); Dummy prefers loopback. Editor **piano-roll** (C3–B4): click/drag to draw notes, click to select, **Delete** removes; notes live in Session `MidiModel`. Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** then `ExitProcess(0)`.
 
 | Flag / env | Effect |
 |------------|--------|
-| (default) | Session + PeakMeter + MIDI track; arm/rec/import/save/export/undo/loop UI live |
+| (default) | Session + PeakMeter + MIDI track/region; arm/rec/import/save/export/undo/loop/piano-roll UI live |
 | `--smoke-import` | Write+import test WAV onto track 0 |
 | `--smoke-record` | Arm track 0, record ~1.2s, stop — region peaks |
 | `--smoke-save-load` | Import → `save_state` → reopen — peaks must return |
@@ -76,12 +76,16 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 | `--smoke-undo` | Import → undo (empty) → redo → undo again |
 | `--smoke-loop` | Set loop [0.5–2.5]s + add/remove markers |
 | `--smoke-midi` | Enumerate MIDI devices + ensure MIDI track |
+| `--smoke-midi-edit` | Add/select/delete Session MIDI notes (no hardware) |
 | `--session DIR` | Open existing session folder after engine start |
 | `AIRDOUR_WIN_SHELL_SESSION=0` | Skip Session; stub meters; empty lanes |
 | `AIRDOUR_WIN_SHELL_DEMO_TONES=1` | Opt-in sine regions at Session create (prefer Import) |
 | `ARDOUR_PANNER_PATH` | Extra search path if panners are not under `%ARDOUR_DLL_PATH%\panners` |
 
-**MIDI hardware note:** Live note capture needs a MIDI input (USB controller / loopMIDI). Stock Windows often only exposes **Microsoft GS Wavetable Synth** (output). Enumeration and Session MIDI tracks work without hardware.
+**MIDI hardware / playback notes:**
+- Live capture needs a MIDI **input** (USB controller / loopMIDI).
+- Stock Windows often only lists **Microsoft GS Wavetable Synth** (out). Enumeration + Session note edit work without hardware.
+- Hearing notes: Play connects the MIDI track to the first physical MIDI out when available (Dummy loopback ports work; GS may not appear as a Jack-style physical port even when enumerated — notes still persist in the Session). No in-graph soft-synth plugin yet; GS audio (if connected) goes through the Windows mixer, not WASAPI shared.
 
 **MSVC notes:**
 - `process_lock().trylock()` while already held deadlocks (SRWLOCK). `Delivery::configure_io` and related asserts are `#ifndef PLATFORM_WINDOWS`.

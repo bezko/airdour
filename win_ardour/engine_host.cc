@@ -29,6 +29,7 @@
 #include "ardour/export_timespan.h"
 #include "ardour/io.h"
 #include "ardour/meter.h"
+#include "ardour/track.h"
 #include "ardour/playlist.h"
 #include "ardour/session_directory.h"
 #include "ardour/presentation_info.h"
@@ -39,6 +40,9 @@
 #include "ardour/audio_backend.h"
 #include "ardour/chan_count.h"
 #include "ardour/location.h"
+#include "ardour/midi_model.h"
+#include "ardour/midi_region.h"
+#include "ardour/midi_source.h"
 #include "ardour/midi_track.h"
 #include "ardour/plugin.h"
 #include "ardour/session.h"
@@ -47,14 +51,18 @@
 #include "ardour/sndfilesource.h"
 #include "ardour/source_factory.h"
 #include "ardour/types.h"
+#include "evoral/Note.h"
 #include "pbd/compose.h"
 #include "pbd/controllable.h"
 #include "pbd/error.h"
 #include "pbd/event_loop.h"
 #include "pbd/failed_constructor.h"
 #include "pbd/memento_command.h"
+#include "pbd/mutex.h"
+#include "pbd/property_list.h"
 #include "pbd/rwlock.h"
 #include "pbd/xml++.h"
+#include "temporal/beats.h"
 #include "temporal/types.h"
 
 #ifdef interface
@@ -276,9 +284,13 @@ public:
 	std::string     session_dir;
 	std::vector<std::shared_ptr<AudioTrack> > tracks;
 	std::shared_ptr<MidiTrack> midi_track;
+	std::shared_ptr<MidiRegion> midi_region;
 	int             selected_track;
 	std::weak_ptr<Region> selected_region;
 	float           midi_activity;
+	Evoral::event_id_t selected_midi_note_id;
+	bool            midi_out_connected;
+	std::string     midi_out_port;
 
 	Impl ()
 		: engine (nullptr)
@@ -289,6 +301,8 @@ public:
 		, play_origin_samples (0)
 		, selected_track (-1)
 		, midi_activity (0.f)
+		, selected_midi_note_id (-1)
+		, midi_out_connected (false)
 	{
 	}
 };
@@ -332,13 +346,26 @@ EngineHost::EngineHost ()
 	}
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
+	_snap.midi_region_ok = false;
+	_snap.midi_out_connected = false;
 	_snap.midi_activity = 0.f;
 	_snap.midi_device_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMidiDevices; ++i) {
 		_snap.midi_devices[i].name[0] = L'\0';
 		_snap.midi_devices[i].input = false;
 	}
+	_snap.midi_note_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMaxMidiNotes; ++i) {
+		_snap.midi_notes[i].id = -1;
+		_snap.midi_notes[i].start_sec = 0.f;
+		_snap.midi_notes[i].length_sec = 0.f;
+		_snap.midi_notes[i].pitch = 0;
+		_snap.midi_notes[i].velocity = 0;
+		_snap.midi_notes[i].selected = false;
+	}
+	_snap.midi_selected_note_id = -1;
 	_snap.midi_option.clear ();
+	_snap.midi_out_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -567,7 +594,11 @@ EngineHost::destroy_session ()
 	}
 	_impl->tracks.clear ();
 	_impl->midi_track.reset ();
+	_impl->midi_region.reset ();
 	_impl->midi_activity = 0.f;
+	_impl->selected_midi_note_id = -1;
+	_impl->midi_out_connected = false;
+	_impl->midi_out_port.clear ();
 	_impl->selected_track = -1;
 	_impl->selected_region.reset ();
 	if (_impl->session) {
@@ -1209,6 +1240,10 @@ EngineHost::transport_play ()
 {
 	if (!_started && !start ()) {
 		return;
+	}
+	/* Best-effort GS / physical MIDI out for playback (after edits, not before). */
+	if (_impl && _impl->midi_track) {
+		connect_midi_output ();
 	}
 	_impl->transport_playing = true;
 	if (_impl->engine) {
@@ -2444,6 +2479,66 @@ EngineHost::configure_backend_midi ()
 }
 
 void
+EngineHost::refresh_midi_notes_snap ()
+{
+	_snap.midi_note_count = 0;
+	_snap.midi_region_ok = false;
+	_snap.midi_selected_note_id = _impl ? _impl->selected_midi_note_id : -1;
+	_snap.midi_out_connected = _impl && _impl->midi_out_connected;
+	_snap.midi_out_name = (_impl && !_impl->midi_out_port.empty ())
+	                          ? utf8_to_wide (_impl->midi_out_port)
+	                          : std::wstring ();
+	for (int i = 0; i < EngineSnapshot::kMaxMidiNotes; ++i) {
+		_snap.midi_notes[i].id = -1;
+		_snap.midi_notes[i].start_sec = 0.f;
+		_snap.midi_notes[i].length_sec = 0.f;
+		_snap.midi_notes[i].pitch = 0;
+		_snap.midi_notes[i].velocity = 0;
+		_snap.midi_notes[i].selected = false;
+	}
+	if (!_impl || !_impl->midi_region || !_impl->engine) {
+		return;
+	}
+	try {
+		std::shared_ptr<MidiModel> model = _impl->midi_region->model ();
+		if (!model) {
+			return;
+		}
+		_snap.midi_region_ok = true;
+		/* Map beats→seconds at a fixed 120 BPM to avoid TempoMap locks while
+		 * the process thread may be reading the same MidiModel. */
+		const double sec_per_beat = 60.0 / 120.0;
+		const MidiModel::Notes& notes = model->notes ();
+		int n = 0;
+		for (MidiModel::Notes::const_iterator it = notes.begin ();
+		     it != notes.end () && n < EngineSnapshot::kMaxMidiNotes; ++it) {
+			const std::shared_ptr<Evoral::Note<Temporal::Beats> >& note = *it;
+			if (!note) {
+				continue;
+			}
+			const double t_beats = Temporal::DoubleableBeats (note->time ()).to_double ();
+			const double l_beats = Temporal::DoubleableBeats (note->length ()).to_double ();
+			float start_sec = (float)(t_beats * sec_per_beat);
+			float len = (float)(l_beats * sec_per_beat);
+			if (len < 0.01f) {
+				len = 0.01f;
+			}
+			_snap.midi_notes[n].id = note->id ();
+			_snap.midi_notes[n].start_sec = start_sec;
+			_snap.midi_notes[n].length_sec = len;
+			_snap.midi_notes[n].pitch = note->note ();
+			_snap.midi_notes[n].velocity = note->velocity ();
+			_snap.midi_notes[n].selected =
+			    (_impl->selected_midi_note_id >= 0
+			     && note->id () == _impl->selected_midi_note_id);
+			++n;
+		}
+		_snap.midi_note_count = n;
+	} catch (...) {
+	}
+}
+
+void
 EngineHost::refresh_midi_snap ()
 {
 	_snap.midi_ok = false;
@@ -2455,11 +2550,13 @@ EngineHost::refresh_midi_snap ()
 		_snap.midi_devices[i].input = false;
 	}
 	if (!_impl || !_impl->engine) {
+		refresh_midi_notes_snap ();
 		return;
 	}
 	try {
 		std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
 		if (!be) {
+			refresh_midi_notes_snap ();
 			return;
 		}
 		_snap.midi_option = utf8_to_wide (be->midi_option ());
@@ -2507,7 +2604,80 @@ EngineHost::refresh_midi_snap ()
 			_snap.midi_activity = _impl->midi_activity;
 		}
 		_snap.midi_track_ok = (bool)_impl->midi_track;
+
+		/* Recover midi_region pointer from playlist if needed. */
+		if (_impl->midi_track && !_impl->midi_region) {
+			std::shared_ptr<Playlist> pl = _impl->midi_track->playlist ();
+			if (pl) {
+				pl->foreach_region ([&] (std::shared_ptr<Region> r) {
+					if (_impl->midi_region) {
+						return;
+					}
+					std::shared_ptr<MidiRegion> mr =
+					    std::dynamic_pointer_cast<MidiRegion> (r);
+					if (mr) {
+						_impl->midi_region = mr;
+					}
+				});
+			}
+		}
 	} catch (...) {
+	}
+	refresh_midi_notes_snap ();
+}
+
+bool
+EngineHost::connect_midi_output ()
+{
+	if (!_impl || !_impl->engine || !_impl->midi_track) {
+		return false;
+	}
+	if (_impl->midi_out_connected) {
+		_snap.midi_out_connected = true;
+		_snap.midi_out_name = utf8_to_wide (_impl->midi_out_port);
+		return true;
+	}
+	try {
+		std::vector<std::string> outs;
+		_impl->engine->get_physical_outputs (DataType::MIDI, outs);
+		if (outs.empty ()) {
+			_snap.detail = L"no physical MIDI outs (GS/softsynth not found)";
+			return false;
+		}
+		std::shared_ptr<IO> out_io = _impl->midi_track->output ();
+		if (!out_io || !out_io->nth (0)) {
+			return false;
+		}
+		/* Prefer a synth/wavetable port when several exist. */
+		std::string chosen = outs[0];
+		for (size_t i = 0; i < outs.size (); ++i) {
+			std::string lower = outs[i];
+			for (size_t c = 0; c < lower.size (); ++c) {
+				if (lower[c] >= 'A' && lower[c] <= 'Z') {
+					lower[c] = (char)(lower[c] - 'A' + 'a');
+				}
+			}
+			if (lower.find ("synth") != std::string::npos
+			    || lower.find ("wavetable") != std::string::npos
+			    || lower.find ("gs") != std::string::npos) {
+				chosen = outs[i];
+				break;
+			}
+		}
+		out_io->connect (out_io->nth (0), chosen);
+		_impl->midi_out_connected = true;
+		_impl->midi_out_port = chosen;
+		_snap.midi_out_connected = true;
+		_snap.midi_out_name = utf8_to_wide (chosen);
+		std::fprintf (stderr, "airdour_win_shell: MIDI out → %s\n", chosen.c_str ());
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: MIDI out connect failed: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
 	}
 }
 
@@ -2541,6 +2711,9 @@ EngineHost::ensure_midi_track ()
 			return false;
 		}
 		_impl->midi_track = created.front ();
+		/* Do not connect MIDI out here — process-thread ReaderLock on the
+		 * SMF source can deadlock UI WriterLock during note edits. Connect
+		 * from transport_play / after smoke-midi-edit instead. */
 		refresh_midi_snap ();
 		_snap.detail = L"MIDI track ready";
 		std::fprintf (stderr, "airdour_win_shell: created MIDI track \"%s\"\n",
@@ -2554,6 +2727,317 @@ EngineHost::ensure_midi_track ()
 		return false;
 	} catch (...) {
 		_snap.detail = L"MIDI track unknown failure";
+		return false;
+	}
+}
+
+bool
+EngineHost::ensure_midi_region (float length_sec)
+{
+	if (!ensure_midi_track () || !_impl || !_impl->session || !_impl->midi_track) {
+		return false;
+	}
+	if (_impl->midi_region) {
+		refresh_midi_notes_snap ();
+		return true;
+	}
+	try {
+		std::shared_ptr<Playlist> playlist = _impl->midi_track->playlist ();
+		if (!playlist) {
+			_snap.detail = L"MIDI playlist missing";
+			return false;
+		}
+		/* Reuse an existing region if playlist already has one. */
+		playlist->foreach_region ([&] (std::shared_ptr<Region> r) {
+			if (_impl->midi_region) {
+				return;
+			}
+			std::shared_ptr<MidiRegion> mr = std::dynamic_pointer_cast<MidiRegion> (r);
+			if (mr) {
+				_impl->midi_region = mr;
+			}
+		});
+		if (_impl->midi_region) {
+			refresh_midi_notes_snap ();
+			return true;
+		}
+
+		double sr = (double)_impl->engine->sample_rate ();
+		if (sr <= 0.0) {
+			sr = 48000.0;
+		}
+		if (length_sec < 1.f) {
+			length_sec = 32.f;
+		}
+		samplepos_t start_sample = 0;
+		samplepos_t end_sample = (samplepos_t)(length_sec * sr);
+		if (end_sample <= start_sample) {
+			end_sample = start_sample + (samplepos_t)sr;
+		}
+
+		std::shared_ptr<Track> track =
+		    std::dynamic_pointer_cast<Track> (_impl->midi_track);
+		std::shared_ptr<MidiSource> midi_src =
+		    _impl->session->create_midi_source_by_stealing_name (track);
+		if (!midi_src) {
+			_snap.detail = L"MIDI source create failed";
+			return false;
+		}
+
+		SourceList srcs;
+		srcs.push_back (std::dynamic_pointer_cast<Source> (midi_src));
+		const Temporal::timecnt_t source_start (Temporal::BeatTime);
+		const Temporal::timepos_t start_pos (start_sample);
+		const Temporal::timepos_t end_pos (end_sample);
+		const Temporal::timecnt_t region_length = start_pos.distance (end_pos);
+
+		PropertyList whole_file_props;
+		whole_file_props.add (Properties::start, source_start);
+		whole_file_props.add (Properties::length, region_length);
+		whole_file_props.add (Properties::automatic, true);
+		whole_file_props.add (Properties::whole_file, true);
+		whole_file_props.add (Properties::name, midi_src->name ());
+		whole_file_props.add (Properties::opaque,
+		                      _impl->session->config.get_draw_opaque_midi_regions ());
+
+		std::shared_ptr<Region> whole_file_region =
+		    RegionFactory::create (srcs, whole_file_props);
+		if (!whole_file_region) {
+			_snap.detail = L"MIDI whole-file region failed";
+			return false;
+		}
+
+		PropertyList playlist_region_props;
+		playlist_region_props.add (Properties::name, whole_file_region->name ());
+		std::shared_ptr<Region> region =
+		    RegionFactory::create (whole_file_region, playlist_region_props);
+		if (!region) {
+			_snap.detail = L"MIDI playlist region failed";
+			return false;
+		}
+
+		_impl->session->begin_reversible_command ("add midi region");
+		playlist->clear_changes ();
+		playlist->clear_owned_changes ();
+		region->set_position (start_pos);
+		playlist->add_region (region, start_pos, 1.0, false);
+		playlist->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		_impl->midi_region = std::dynamic_pointer_cast<MidiRegion> (region);
+		if (!_impl->midi_region) {
+			_snap.detail = L"MIDI region cast failed";
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		std::fprintf (stderr, "airdour_win_shell: MIDI region ready (%.1fs)\n", length_sec);
+		std::fflush (stderr);
+		_snap.detail = L"MIDI region ready";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: MIDI region exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"MIDI region exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"MIDI region unknown failure";
+		return false;
+	}
+}
+
+bool
+EngineHost::add_midi_note (uint8_t pitch, float start_sec, float length_sec, uint8_t velocity)
+{
+	if (!ensure_midi_region () || !_impl || !_impl->session || !_impl->midi_region) {
+		return false;
+	}
+	if (pitch > 127) {
+		pitch = 127;
+	}
+	if (velocity < 1) {
+		velocity = 100;
+	}
+	if (velocity > 127) {
+		velocity = 127;
+	}
+	if (length_sec < 0.05f) {
+		length_sec = 0.25f;
+	}
+	if (start_sec < 0.f) {
+		start_sec = 0.f;
+	}
+	try {
+		std::shared_ptr<MidiModel> model = _impl->midi_region->model ();
+		if (!model) {
+			return false;
+		}
+		/* Fixed 120 BPM: 1 beat = 0.5s. Avoids TempoMap during UI edits. */
+		const double beats_per_sec = 120.0 / 60.0;
+		Temporal::Beats start_beats =
+		    Temporal::Beats::from_double ((double)start_sec * beats_per_sec);
+		Temporal::Beats length_beats =
+		    Temporal::Beats::from_double ((double)length_sec * beats_per_sec);
+		if (length_beats < Temporal::Beats::one_tick ()) {
+			length_beats = Temporal::Beats::from_double (0.5);
+		}
+		if (start_beats < Temporal::Beats ()) {
+			start_beats = Temporal::Beats ();
+		}
+
+		std::shared_ptr<Evoral::Note<Temporal::Beats> > note (
+		    new Evoral::Note<Temporal::Beats> (
+		        0 /*channel*/,
+		        start_beats,
+		        length_beats,
+		        pitch,
+		        velocity));
+
+		MidiModel::NoteDiffCommand* cmd =
+		    model->new_note_diff_command ("add midi note");
+		cmd->add (note);
+		{
+			/* Serialize vs process-thread Source::ReaderLock (avoids WriterLock hang). */
+			PBD::Mutex::Lock lx (_impl->engine->process_lock ());
+			model->apply_diff_command_as_commit (*_impl->session, cmd);
+		}
+
+		std::shared_ptr<Evoral::Note<Temporal::Beats> > inserted =
+		    model->find_note (note->id ());
+		if (!inserted) {
+			/* Overlap policy may reject; still report failure. */
+			_snap.detail = L"MIDI note rejected (overlap)";
+			refresh_midi_notes_snap ();
+			return false;
+		}
+		_impl->selected_midi_note_id = inserted->id ();
+		_impl->midi_activity = 1.f;
+		refresh_midi_notes_snap ();
+		_snap.detail = L"MIDI note added";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: add_midi_note: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop)
+{
+	(void)pitch_slop;
+	refresh_midi_notes_snap ();
+	if (!_impl) {
+		return false;
+	}
+	int best = -1;
+	float best_dist = 1e9f;
+	for (int i = 0; i < _snap.midi_note_count; ++i) {
+		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+		if (n.pitch != pitch) {
+			continue;
+		}
+		float t0 = n.start_sec;
+		float t1 = n.start_sec + n.length_sec;
+		if (time_sec < t0 - 0.02f || time_sec > t1 + 0.02f) {
+			continue;
+		}
+		float mid = 0.5f * (t0 + t1);
+		float d = std::fabs (time_sec - mid);
+		if (d < best_dist) {
+			best_dist = d;
+			best = i;
+		}
+	}
+	if (best < 0) {
+		_impl->selected_midi_note_id = -1;
+		refresh_midi_notes_snap ();
+		return false;
+	}
+	_impl->selected_midi_note_id = _snap.midi_notes[best].id;
+	refresh_midi_notes_snap ();
+	return true;
+}
+
+void
+EngineHost::clear_midi_note_selection ()
+{
+	if (_impl) {
+		_impl->selected_midi_note_id = -1;
+	}
+	refresh_midi_notes_snap ();
+}
+
+bool
+EngineHost::delete_selected_midi_note ()
+{
+	if (!_impl || !_impl->session || !_impl->midi_region
+	    || _impl->selected_midi_note_id < 0) {
+		return false;
+	}
+	try {
+		/* Diff-command remove can WriterLock-deadlock against SMF readers on
+		 * this Windows path. Rebuild the region from remaining notes instead. */
+		refresh_midi_notes_snap ();
+		struct Kept {
+			uint8_t pitch;
+			uint8_t velocity;
+			float   start_sec;
+			float   length_sec;
+		};
+		std::vector<Kept> keep;
+		keep.reserve ((size_t)_snap.midi_note_count);
+		const int32_t doomed = _impl->selected_midi_note_id;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			if (n.id == doomed) {
+				continue;
+			}
+			Kept k;
+			k.pitch = n.pitch;
+			k.velocity = n.velocity;
+			k.start_sec = n.start_sec;
+			k.length_sec = n.length_sec;
+			keep.push_back (k);
+		}
+
+		std::shared_ptr<Playlist> playlist = _impl->midi_track
+		                                        ? _impl->midi_track->playlist ()
+		                                        : std::shared_ptr<Playlist> ();
+		if (!playlist) {
+			return false;
+		}
+		_impl->session->begin_reversible_command ("delete midi note");
+		playlist->clear_changes ();
+		playlist->clear_owned_changes ();
+		playlist->remove_region (_impl->midi_region);
+		playlist->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		_impl->midi_region.reset ();
+		_impl->selected_midi_note_id = -1;
+		if (!ensure_midi_region (32.f)) {
+			_snap.detail = L"MIDI note delete: region rebuild failed";
+			return false;
+		}
+		for (size_t i = 0; i < keep.size (); ++i) {
+			if (!add_midi_note (keep[i].pitch, keep[i].start_sec,
+			                    keep[i].length_sec, keep[i].velocity)) {
+				std::fprintf (stderr, "airdour_win_shell: re-add note %zu failed\n", i);
+				std::fflush (stderr);
+			}
+		}
+		_impl->selected_midi_note_id = -1;
+		refresh_midi_notes_snap ();
+		_snap.detail = L"MIDI note deleted";
+		std::fprintf (stderr, "airdour_win_shell: delete note via rebuild (kept=%zu)\n",
+		              keep.size ());
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		std::fprintf (stderr, "airdour_win_shell: delete note exception\n");
+		std::fflush (stderr);
 		return false;
 	}
 }
@@ -2584,16 +3068,105 @@ EngineHost::smoke_midi ()
 			std::fflush (stderr);
 			return false;
 		}
+		connect_midi_output (); /* best-effort; ok if none */
+		refresh_midi_snap ();
 
 		/* Dummy/WinMME path is ok even with 0 hardware devices (enumerate worked). */
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-midi ok (track=1 option=%ls devices=%d)\n",
-		              _snap.midi_option.c_str (), _snap.midi_device_count);
+		              "airdour_win_shell: smoke-midi ok (track=1 option=%ls devices=%d out=%ls)\n",
+		              _snap.midi_option.c_str (), _snap.midi_device_count,
+		              _snap.midi_out_connected ? _snap.midi_out_name.c_str () : L"(none)");
 		std::fflush (stderr);
 		_snap.detail = L"smoke-midi ok";
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_edit ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-edit failed — no Session";
+		return false;
+	}
+	try {
+		/* Enumerate + track only — do NOT connect MIDI out until after edits
+		 * (SMF WriterLock vs process ReaderLock deadlock under Dummy/WinMME). */
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Clear any leftover selection; add a small motif. */
+		clear_midi_note_selection ();
+		const int before = _snap.midi_note_count;
+		bool a = add_midi_note (60, 0.0f, 0.5f, 100); /* C4 */
+		bool b = add_midi_note (64, 0.5f, 0.5f, 100); /* E4 */
+		bool c = add_midi_note (67, 1.0f, 0.75f, 110); /* G4 */
+		refresh_midi_notes_snap ();
+		const int after_add = _snap.midi_note_count;
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-edit notes before=%d after_add=%d "
+		              "(a=%d b=%d c=%d) region=%d out=%d\n",
+		              before, after_add, a ? 1 : 0, b ? 1 : 0, c ? 1 : 0,
+		              _snap.midi_region_ok ? 1 : 0,
+		              _snap.midi_out_connected ? 1 : 0);
+		std::fflush (stderr);
+		if (after_add < before + 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Select middle note and delete it. */
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit selecting…\n");
+		std::fflush (stderr);
+		if (!select_midi_note_at (0.75f, 64)) {
+			/* Fallback: select first snap note. */
+			if (_snap.midi_note_count > 0) {
+				_impl->selected_midi_note_id = _snap.midi_notes[0].id;
+				refresh_midi_notes_snap ();
+			}
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit selected id=%d\n",
+		              (int)_impl->selected_midi_note_id);
+		std::fflush (stderr);
+		const int before_del = _snap.midi_note_count;
+		bool deleted = delete_selected_midi_note ();
+		refresh_midi_notes_snap ();
+		const int after_del = _snap.midi_note_count;
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-edit delete=%d count %d→%d\n",
+		              deleted ? 1 : 0, before_del, after_del);
+		std::fflush (stderr);
+		if (!deleted || after_del != before_del - 1 || after_del < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit FAILED (delete)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Connect playback outs only after edits (avoids SMF Reader/Writer deadlock). */
+		connect_midi_output ();
+		refresh_midi_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-edit ok (notes=%d out=%ls)\n",
+		              after_del,
+		              _snap.midi_out_connected ? _snap.midi_out_name.c_str () : L"(none)");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-edit ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -2715,13 +3288,26 @@ EngineHost::EngineHost ()
 	}
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
+	_snap.midi_region_ok = false;
+	_snap.midi_out_connected = false;
 	_snap.midi_activity = 0.f;
 	_snap.midi_device_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMidiDevices; ++i) {
 		_snap.midi_devices[i].name[0] = L'\0';
 		_snap.midi_devices[i].input = false;
 	}
+	_snap.midi_note_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMaxMidiNotes; ++i) {
+		_snap.midi_notes[i].id = -1;
+		_snap.midi_notes[i].start_sec = 0.f;
+		_snap.midi_notes[i].length_sec = 0.f;
+		_snap.midi_notes[i].pitch = 0;
+		_snap.midi_notes[i].velocity = 0;
+		_snap.midi_notes[i].selected = false;
+	}
+	_snap.midi_selected_note_id = -1;
 	_snap.midi_option.clear ();
+	_snap.midi_out_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -3041,6 +3627,54 @@ EngineHost::ensure_midi_track ()
 	return false;
 }
 
+bool
+EngineHost::ensure_midi_region (float length_sec)
+{
+	(void)length_sec;
+	return false;
+}
+
+bool
+EngineHost::add_midi_note (uint8_t pitch, float start_sec, float length_sec, uint8_t velocity)
+{
+	(void)pitch;
+	(void)start_sec;
+	(void)length_sec;
+	(void)velocity;
+	return false;
+}
+
+bool
+EngineHost::select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop)
+{
+	(void)time_sec;
+	(void)pitch;
+	(void)pitch_slop;
+	return false;
+}
+
+void
+EngineHost::clear_midi_note_selection ()
+{
+}
+
+bool
+EngineHost::delete_selected_midi_note ()
+{
+	return false;
+}
+
+bool
+EngineHost::connect_midi_output ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_midi_notes_snap ()
+{
+}
+
 void
 EngineHost::refresh_midi_snap ()
 {
@@ -3048,6 +3682,12 @@ EngineHost::refresh_midi_snap ()
 
 bool
 EngineHost::smoke_midi ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_edit ()
 {
 	return false;
 }

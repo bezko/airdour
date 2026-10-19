@@ -99,6 +99,8 @@ ShellWindow::ShellWindow ()
 	, _pan_last_x (0.f)
 	, _pan_down_x (0.f)
 	, _pan_down_y (0.f)
+	, _midi_draw_start_sec (0.f)
+	, _midi_draw_pitch (60)
 	, _transport_playing (false)
 	, _playhead_sec (0.f)
 	, _last_tick_ms (0)
@@ -171,6 +173,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_undo,
                             bool smoke_loop,
                             bool smoke_midi,
+                            bool smoke_midi_edit,
                             const std::string& open_session_path)
 {
 	if (!_engine.is_linked ()) {
@@ -246,7 +249,14 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_midi && _engine.snapshot ().session_ok) {
+	if (ok && smoke_midi_edit && _engine.snapshot ().session_ok) {
+		if (_engine.smoke_midi_edit ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit ok\n");
+		} else {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit FAILED\n");
+		}
+		std::fflush (stderr);
+	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
 		if (_engine.smoke_midi ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi ok\n");
 		} else {
@@ -254,8 +264,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		}
 		std::fflush (stderr);
 	} else if (ok && _engine.snapshot ().session_ok) {
-		/* Always scaffold a MIDI track so the Editor lane is live. */
+		/* Always scaffold a MIDI track + empty region so the piano-roll is live. */
 		_engine.ensure_midi_track ();
+		_engine.ensure_midi_region ();
 	}
 
 	if (ok && smoke_record && _engine.snapshot ().session_ok) {
@@ -694,6 +705,15 @@ ShellWindow::do_delete_selection ()
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
 	}
+	/* Prefer MIDI note selection when present. */
+	if (_engine_snap.midi_selected_note_id >= 0) {
+		if (_engine.delete_selected_midi_note ()) {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return;
+		}
+	}
 	if (!_engine.delete_selected_region ()) {
 		_engine_snap = _engine.snapshot ();
 		InvalidateRect (_hwnd, nullptr, FALSE);
@@ -877,7 +897,7 @@ ShellWindow::layout_panes ()
 	float wave_right = _editor_pane.right - inset;
 	_editor_ruler = D2D1::RectF (wave_left, _editor_pane.top + title_h,
 	                             wave_right, _editor_pane.top + title_h + ruler_h);
-	float midi_h = 48.f * _dpi_scale;
+	float midi_h = 96.f * _dpi_scale; /* ~24-key piano-roll */
 	float lanes_top = _editor_ruler.bottom + 4.f * _dpi_scale;
 	float lanes_bot = _editor_pane.bottom - inset - midi_h - lane_gap;
 	float lane_h = (lanes_bot - lanes_top - lane_gap * (kTracks - 1)) / (float)kTracks;
@@ -1081,6 +1101,45 @@ ShellWindow::hit_editor_ruler (float x, float y) const
 	return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 }
 
+bool
+ShellWindow::hit_midi_lane (float x, float y) const
+{
+	const D2D1_RECT_F& r = _midi_lane;
+	return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+
+uint8_t
+ShellWindow::midi_pitch_at_y (float y) const
+{
+	const D2D1_RECT_F& r = _midi_lane;
+	float h = r.bottom - r.top;
+	if (h <= 1.f) {
+		return 60;
+	}
+	float t = (y - r.top) / h;
+	if (t < 0.f) {
+		t = 0.f;
+	}
+	if (t > 0.999f) {
+		t = 0.999f;
+	}
+	/* Top of lane = high pitch (piano-roll convention). */
+	int row = (int)(t * (float)kMidiPitchRows);
+	if (row < 0) {
+		row = 0;
+	}
+	if (row >= kMidiPitchRows) {
+		row = kMidiPitchRows - 1;
+	}
+	return (uint8_t)(kMidiPitchHi - row);
+}
+
+float
+ShellWindow::midi_time_at_x (float x) const
+{
+	return _lanes[0].strip.time_at_x (_midi_lane, x);
+}
+
 int
 ShellWindow::hit_editor_lane (float x, float y) const
 {
@@ -1191,6 +1250,30 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 		_playhead_sec = _engine_snap.transport_sec;
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	if (hit_midi_lane (x, y) && _engine.is_linked () && _engine_snap.session_ok) {
+		_engine.ensure_midi_region ();
+		float time_sec = midi_time_at_x (x);
+		uint8_t pitch = midi_pitch_at_y (y);
+		if (_engine.select_midi_note_at (time_sec, pitch)) {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
+		/* Empty cell → start draw (finalize length on mouse-up). */
+		_engine.clear_midi_note_selection ();
+		_drag = DragMode::MidiDraw;
+		_drag_index = -1;
+		_midi_draw_start_sec = time_sec;
+		_midi_draw_pitch = pitch;
+		_pan_down_x = x;
+		_pan_down_y = y;
+		_pan_last_x = x;
+		SetCapture (_hwnd);
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
@@ -1306,12 +1389,36 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 		_pan_last_x = x;
 		return true;
 	}
+
+	if (_drag == DragMode::MidiDraw) {
+		_pan_last_x = x;
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
 	return false;
 }
 
 void
 ShellWindow::on_mouse_up ()
 {
+	if (_drag == DragMode::MidiDraw && _engine.is_linked () && _engine_snap.session_ok) {
+		float end_sec = midi_time_at_x (_pan_last_x);
+		float start = _midi_draw_start_sec;
+		float end = end_sec;
+		if (end < start) {
+			float tmp = start;
+			start = end;
+			end = tmp;
+		}
+		float len = end - start;
+		if (len < 0.12f) {
+			len = 0.25f; /* click without drag → quarter-ish note */
+		}
+		_engine.add_midi_note (_midi_draw_pitch, start, len, 100);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
 	if (_drag == DragMode::WavePending && _drag_index >= 0 && _drag_index < kTracks) {
 		int lane = _drag_index;
 		float time_sec = _lanes[lane].strip.time_at_x (_lanes[lane].bounds, _pan_down_x);
@@ -1625,50 +1732,86 @@ ShellWindow::draw_midi_lane ()
 	_rt->FillRectangle (r, _brush_pane_edge);
 	_rt->DrawRectangle (r, _brush_midi, 1.f);
 
-	/* Piano-roll stub: 12 key rows + activity bars. */
-	const int keys = 12;
+	const int keys = kMidiPitchRows;
 	float h = r.bottom - r.top;
-	float w = r.right - r.left;
 	float row_h = h / (float)keys;
 	for (int k = 0; k < keys; ++k) {
 		float y0 = r.top + (float)k * row_h;
-		bool black = (k == 1 || k == 3 || k == 5 || k == 8 || k == 10);
+		uint8_t pitch = (uint8_t)(kMidiPitchHi - k);
+		int pc = pitch % 12;
+		bool black = (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10);
 		_brush_body->SetOpacity (black ? 0.18f : 0.08f);
 		_rt->FillRectangle (D2D1::RectF (r.left, y0, r.right, y0 + row_h - 0.5f), _brush_body);
 		_brush_body->SetOpacity (1.f);
 	}
 
-	float act = _engine_snap.midi_activity;
-	if (act > 0.02f && _brush_midi) {
-		/* Fake note blips proportional to activity (no hardware required). */
-		int blips = 1 + (int)(act * 6.f);
-		for (int b = 0; b < blips; ++b) {
-			float nx = 0.12f + 0.12f * (float)b + 0.05f * _pulse;
-			float ky = (float)((b * 3 + 2) % keys);
-			float x0 = r.left + nx * w;
-			float x1 = x0 + (0.06f + 0.04f * act) * w;
-			float y0 = r.top + ky * row_h + 1.f;
-			float y1 = y0 + row_h - 2.f;
-			_brush_midi->SetOpacity (0.35f + 0.55f * act);
-			_rt->FillRectangle (D2D1::RectF (x0, y0, x1, y1), _brush_midi);
-			_brush_midi->SetOpacity (1.f);
+	/* Session MIDI notes (real MidiModel contents). */
+	for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
+		const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
+		if (n.pitch < kMidiPitchLo || n.pitch > kMidiPitchHi) {
+			continue;
+		}
+		float x0 = _lanes[0].strip.x_at_time (r, n.start_sec);
+		float x1 = _lanes[0].strip.x_at_time (r, n.start_sec + n.length_sec);
+		if (x1 < r.left || x0 > r.right) {
+			continue;
+		}
+		if (x1 - x0 < 2.f) {
+			x1 = x0 + 2.f;
+		}
+		int row = (int)(kMidiPitchHi - n.pitch);
+		float y0 = r.top + (float)row * row_h + 1.f;
+		float y1 = y0 + row_h - 2.f;
+		ID2D1SolidColorBrush* brush = n.selected ? _brush_accent : _brush_midi;
+		if (!brush) {
+			continue;
+		}
+		brush->SetOpacity (n.selected ? 0.95f : (0.45f + 0.4f * (n.velocity / 127.f)));
+		_rt->FillRectangle (D2D1::RectF (x0, y0, x1, y1), brush);
+		brush->SetOpacity (1.f);
+		if (n.selected && _brush_playhead) {
+			_rt->DrawRectangle (D2D1::RectF (x0, y0, x1, y1), _brush_playhead, 1.2f);
 		}
 	}
 
-	wchar_t midicap[120];
+	/* In-progress draw rubber-band. */
+	if (_drag == DragMode::MidiDraw && _brush_midi) {
+		float t0 = _midi_draw_start_sec;
+		float t1 = midi_time_at_x (_pan_last_x);
+		if (t1 < t0) {
+			float tmp = t0;
+			t0 = t1;
+			t1 = tmp;
+		}
+		if (t1 - t0 < 0.05f) {
+			t1 = t0 + 0.25f;
+		}
+		float x0 = _lanes[0].strip.x_at_time (r, t0);
+		float x1 = _lanes[0].strip.x_at_time (r, t1);
+		int row = (int)(kMidiPitchHi - _midi_draw_pitch);
+		float y0 = r.top + (float)row * row_h + 1.f;
+		float y1 = y0 + row_h - 2.f;
+		_brush_midi->SetOpacity (0.55f);
+		_rt->FillRectangle (D2D1::RectF (x0, y0, x1, y1), _brush_midi);
+		_brush_midi->SetOpacity (1.f);
+	}
+
+	wchar_t midicap[160];
 	if (_engine_snap.midi_track_ok) {
 		_snwprintf_s (midicap, _TRUNCATE,
-		              L"%ls  ·  %d device%s  ·  act %.0f%%",
+		              L"%ls  ·  %d note%s  ·  %d device%s%s",
 		              _engine_snap.midi_option.empty () ? L"MIDI" : _engine_snap.midi_option.c_str (),
+		              _engine_snap.midi_note_count,
+		              _engine_snap.midi_note_count == 1 ? L"" : L"s",
 		              _engine_snap.midi_device_count,
 		              _engine_snap.midi_device_count == 1 ? L"" : L"s",
-		              _engine_snap.midi_activity * 100.f);
+		              _engine_snap.midi_out_connected ? L"  ·  out" : L"");
 	} else {
 		_snwprintf_s (midicap, _TRUNCATE, L"no MIDI track");
 	}
 	_rt->DrawTextW (midicap, (UINT32)wcslen (midicap), _fmt_meta,
 	                D2D1::RectF (r.left + 6.f * _dpi_scale, r.top,
-	                             r.right - 4.f * _dpi_scale, r.bottom),
+	                             r.right - 4.f * _dpi_scale, r.top + 14.f * _dpi_scale),
 	                _brush_brand);
 }
 

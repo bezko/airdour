@@ -57,6 +57,7 @@ public:
 	                    bool smoke_undo = false,
 	                    bool smoke_loop = false,
 	                    bool smoke_midi = false,
+	                    bool smoke_midi_edit = false,
 	                    const std::string& open_session_path = std::string ());
 	int  run_message_loop (unsigned timeout_secs);
 
@@ -67,8 +68,13 @@ private:
 		None,
 		WavePending, /* click may become select or pan */
 		WavePan,
-		Fader
+		Fader,
+		MidiDraw /* click/drag on MIDI lane to create a note */
 	};
+
+	static constexpr uint8_t kMidiPitchLo = 48; /* C3 */
+	static constexpr uint8_t kMidiPitchHi = 71; /* B4 */
+	static constexpr int     kMidiPitchRows = (int)(kMidiPitchHi - kMidiPitchLo + 1);
 
 	enum class SmokeRecordPhase {
 		Off,
@@ -121,6 +127,9 @@ private:
 	void draw_editor_ruler ();
 	void draw_midi_lane ();
 	bool hit_editor_ruler (float x, float y) const;
+	bool hit_midi_lane (float x, float y) const;
+	uint8_t midi_pitch_at_y (float y) const;
+	float midi_time_at_x (float x) const;
 	int  hit_editor_lane (float x, float y) const;
 	int  hit_mixer_fader (float x, float y) const;
 	int  hit_mixer_arm (float x, float y) const;
@@ -145,6 +154,8 @@ private:
 	float _pan_last_x;
 	float _pan_down_x;
 	float _pan_down_y;
+	float _midi_draw_start_sec;
+	uint8_t _midi_draw_pitch;
 
 	bool  _transport_playing;
 	float _playhead_sec;
