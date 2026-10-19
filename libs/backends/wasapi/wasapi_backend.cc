@@ -145,7 +145,8 @@ WasapiBackend::set_mmcss_pro_audio (void** task_handle)
 	if (!PBD::MMCSS::set_thread_characteristics ("Pro Audio", &h)) {
 		return false;
 	}
-	PBD::MMCSS::set_thread_priority (h, PBD::MMCSS::AVRT_PRIORITY_NORMAL);
+	/* HIGH matches WinMME MIDI out; shared-mode callback needs headroom on laptops. */
+	PBD::MMCSS::set_thread_priority (h, PBD::MMCSS::AVRT_PRIORITY_HIGH);
 	*task_handle = (void*)h;
 	return true;
 }
@@ -169,7 +170,7 @@ WasapiBackend::WasapiBackend (AudioEngine& e, AudioBackendInfo& info)
 	, _input_device ("Default")
 	, _output_device ("Default")
 	, _samplerate (48000.f)
-	, _buffer_size (512)
+	, _buffer_size (480) /* ~10 ms @ 48 kHz shared — laptop product default */
 	, _systemic_input_latency (0)
 	, _systemic_output_latency (0)
 	, _midi_driver_option (winmme_driver_name)
@@ -181,6 +182,11 @@ WasapiBackend::WasapiBackend (AudioEngine& e, AudioBackendInfo& info)
 	, _measure_latency (false)
 	, _processed_samples (0)
 	, _dsp_load (0.f)
+	, _callback_last_us (0)
+	, _callback_max_us (0)
+	, _callback_sum_us (0)
+	, _callback_count (0)
+	, _xrun_count (0)
 	, _main_thread_running (false)
 {
 #ifdef _WIN32
@@ -894,8 +900,9 @@ WasapiBackend::run_one_cycle ()
 
 	process_outgoing_midi ();
 
-	if (play) {
-		memset (play, 0, _interleaved_playback.size () * sizeof (float));
+	/* Zero only this period's frames (not a larger scratch capacity). */
+	if (play && n_out > 0) {
+		memset (play, 0, (size_t)nframes * (size_t)n_out * sizeof (float));
 	}
 	i = 0;
 	for (std::vector<BackendPortPtr>::const_iterator it = _system_outputs.begin ();
@@ -908,14 +915,25 @@ WasapiBackend::run_one_cycle ()
 
 	int wr = _io.write_playback (play, _buffer_size);
 	if (wr == -2) {
+		++_xrun_count;
 		engine.Xrun ();
 	} else if (wr < 0) {
 		return false;
 	}
 
 	_processed_samples += nframes;
-	_dsp_load_calc.set_stop_timestamp_us (PBD::get_microseconds ());
+	const int64_t stop_us = PBD::get_microseconds ();
+	_dsp_load_calc.set_stop_timestamp_us (stop_us);
 	_dsp_load = _dsp_load_calc.get_dsp_load ();
+	const int64_t dur = stop_us - cycle_us;
+	if (dur >= 0) {
+		_callback_last_us = dur;
+		if ((uint64_t)dur > _callback_max_us) {
+			_callback_max_us = (uint64_t)dur;
+		}
+		_callback_sum_us += (uint64_t)dur;
+		++_callback_count;
+	}
 	return true;
 }
 
@@ -997,6 +1015,18 @@ float
 WasapiBackend::dsp_load () const
 {
 	return 100.f * _dsp_load;
+}
+
+void
+WasapiBackend::process_callback_stats (uint64_t& last_us, uint64_t& max_us,
+                                       uint64_t& avg_us, uint64_t& count,
+                                       uint64_t& xruns) const
+{
+	last_us = _callback_last_us;
+	max_us = _callback_max_us;
+	count = _callback_count;
+	avg_us = (count > 0) ? (_callback_sum_us / count) : 0;
+	xruns = _xrun_count;
 }
 
 size_t

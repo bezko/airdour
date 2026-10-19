@@ -83,6 +83,12 @@ struct EngineSnapshot {
 	std::wstring export_path; /* last exported WAV (UTF-16 display) */
 	uint32_t     sample_rate;
 	uint32_t     period_frames;
+	float        dsp_load_pct; /* 0..100 from AudioEngine */
+	uint64_t     callback_last_us;
+	uint64_t     callback_max_us;
+	uint64_t     callback_avg_us;
+	uint64_t     callback_count;
+	uint64_t     xrun_count; /* Session + backend underruns */
 	float        gain; /* track 0 stub/session gain */
 	float        meter_peak[kMeters]; /* linear 0..1 */
 	bool         track_has_regions[kMeters];
@@ -238,6 +244,12 @@ public:
 	 * For --smoke-plugin. Hardware not required.
 	 */
 	bool smoke_plugin_insert ();
+
+	/**
+	 * Sample WASAPI shared timing + working set while transport rolls briefly.
+	 * Prints a one-line PERF summary to stderr. For --smoke-perf.
+	 */
+	bool smoke_perf (unsigned sample_secs = 4);
 
 	/**
 	 * Ensure an empty MidiRegion on the MIDI track playlist (creates if needed).

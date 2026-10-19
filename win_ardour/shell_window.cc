@@ -176,6 +176,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi,
                             bool smoke_midi_edit,
                             bool smoke_plugin,
+                            bool smoke_perf,
                             const std::string& open_session_path)
 {
 	if (!_engine.is_linked ()) {
@@ -187,8 +188,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	/* Unattended --timeout: keep Session + PeakMeter (not stubs) but skip
 	 * auto-roll — rolling under Debug has intermittent AVs on Dummy/WASAPI
 	 * that prevent ExitProcess(0). Interactive runs still auto-play.
-	 * --smoke-record drives its own short roll; import/save-load need no roll. */
-	const bool autoplay = ok && (smoke_timeout_secs == 0) && !smoke_record;
+	 * --smoke-record / --smoke-perf drive their own short roll. */
+	const bool autoplay = ok && (smoke_timeout_secs == 0) && !smoke_record && !smoke_perf;
 
 	if (ok && !open_session_path.empty ()) {
 		if (_engine.open_session (open_session_path)) {
@@ -282,6 +283,17 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	} else if (smoke_plugin) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-plugin FAILED (no session)\n");
 		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_perf) {
+		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
+		if (secs > 12) {
+			secs = 12;
+		}
+		if (!_engine.smoke_perf (secs)) {
+			_smoke_failed = true;
+		}
 		std::fflush (stderr);
 	}
 
@@ -993,7 +1005,8 @@ ShellWindow::create (HINSTANCE instance, int show_cmd)
 	layout_panes ();
 	ShowWindow (_hwnd, show_cmd);
 	UpdateWindow (_hwnd);
-	SetTimer (_hwnd, 1, 16, nullptr);
+	/* 30 Hz UI clock — enough for meters; saves paint vs 60 Hz while playing. */
+	SetTimer (_hwnd, 1, 33, nullptr);
 	return true;
 }
 
@@ -1596,7 +1609,9 @@ ShellWindow::on_tick ()
 
 	/* Poll engine often enough for meters while playing. */
 	static DWORD last_poll = 0;
-	DWORD poll_ms = _transport_playing ? 33u : 250u;
+	static DWORD last_wave = 0;
+	const bool rolling = _transport_playing || _engine_snap.transport_rolling;
+	DWORD poll_ms = rolling ? 50u : 250u;
 	if (now - last_poll > poll_ms) {
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
@@ -1609,7 +1624,7 @@ ShellWindow::on_tick ()
 
 	tick_smoke_record (now);
 
-	if (_engine_snap.running && (_transport_playing || _engine_snap.transport_rolling)) {
+	if (_engine_snap.running && rolling) {
 		/* Prefer engine clock (Session transport_sample or processed_samples). */
 		_playhead_sec = _engine_snap.transport_sec;
 	} else if (_transport_playing) {
@@ -1627,26 +1642,36 @@ ShellWindow::on_tick ()
 	float wave_peaks[WaveStrip::kMaxColumns];
 	float wave_rms[WaveStrip::kMaxColumns];
 
+	/* Waveform peakfile refill is heavy — throttle while transport rolls. */
+	const bool refresh_waves = (!rolling && (now - last_wave > 200u))
+		|| (rolling && (now - last_wave > 250u))
+		|| (last_wave == 0);
+	if (refresh_waves) {
+		last_wave = now;
+	}
+
 	for (int i = 0; i < kTracks; ++i) {
 		wp.gain = _mixers[i].gain ();
 		_lanes[i].strip.update_view (wp);
 
-		bool has_regions = false;
-		size_t n = _lanes[i].strip.column_count ();
-		if (n > WaveStrip::kMaxColumns) {
-			n = WaveStrip::kMaxColumns;
-		}
-		if (_engine_snap.waves_from_session && n > 0) {
-			has_regions = _engine.fill_track_waveform (
-				i,
-				_lanes[i].strip.view_start_sec (),
-				_lanes[i].strip.view_span_sec (),
-				wave_peaks,
-				wave_rms,
-				n);
-			_lanes[i].strip.set_waveform (wave_peaks, wave_rms, n, has_regions);
-		} else {
-			_lanes[i].strip.set_waveform (nullptr, nullptr, 0, false);
+		if (refresh_waves) {
+			bool has_regions = false;
+			size_t n = _lanes[i].strip.column_count ();
+			if (n > WaveStrip::kMaxColumns) {
+				n = WaveStrip::kMaxColumns;
+			}
+			if (_engine_snap.waves_from_session && n > 0) {
+				has_regions = _engine.fill_track_waveform (
+					i,
+					_lanes[i].strip.view_start_sec (),
+					_lanes[i].strip.view_span_sec (),
+					wave_peaks,
+					wave_rms,
+					n);
+				_lanes[i].strip.set_waveform (wave_peaks, wave_rms, n, has_regions);
+			} else {
+				_lanes[i].strip.set_waveform (nullptr, nullptr, 0, false);
+			}
 		}
 
 		float peak = 0.f;

@@ -145,6 +145,9 @@ public:
 	std::string output_device_name () const;
 	float       sample_rate () const;
 	uint32_t    buffer_size () const;
+	void process_callback_stats (uint64_t& last_us, uint64_t& max_us,
+	                             uint64_t& avg_us, uint64_t& count,
+	                             uint64_t& xruns) const override;
 	bool        interleaved () const;
 	uint32_t    systemic_input_latency () const;
 	uint32_t    systemic_output_latency () const;
@@ -281,6 +284,11 @@ private:
 
 	float             _dsp_load;
 	DSPLoadCalculator _dsp_load_calc;
+	uint64_t          _callback_last_us;
+	uint64_t          _callback_max_us;
+	uint64_t          _callback_sum_us;
+	uint64_t          _callback_count;
+	uint64_t          _xrun_count;
 
 	pthread_t              _main_thread;
 	bool                   _main_thread_running;

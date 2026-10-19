@@ -81,8 +81,11 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <psapi.h>
 
 #include <shlobj.h>
+
+#pragma comment(lib, "psapi.lib")
 
 using namespace ARDOUR;
 using namespace PBD;
@@ -375,6 +378,12 @@ EngineHost::EngineHost ()
 	_snap.track_fx_bypassed = false;
 	_snap.track_fx_param = 0.3f;
 	_snap.midi_activity = 0.f;
+	_snap.dsp_load_pct = 0.f;
+	_snap.callback_last_us = 0;
+	_snap.callback_max_us = 0;
+	_snap.callback_avg_us = 0;
+	_snap.callback_count = 0;
+	_snap.xrun_count = 0;
 	_snap.midi_device_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMidiDevices; ++i) {
 		_snap.midi_devices[i].name[0] = L'\0';
@@ -1519,7 +1528,11 @@ EngineHost::fill_track_waveform (int track,
 			return has_any;
 		}
 
-		std::vector<PeakData> buf (n_columns);
+		/* Reuse scratch — avoid per-tick heap traffic on the UI thread. */
+		static thread_local std::vector<PeakData> buf;
+		if (buf.size () < n_columns) {
+			buf.resize (n_columns);
+		}
 		const double samples_per_col = (double)view_span / (double)n_columns;
 
 		for (RegionList::const_iterator it = touched->begin (); it != touched->end (); ++it) {
@@ -3132,6 +3145,99 @@ EngineHost::track_fx_param (int track) const
 }
 
 bool
+EngineHost::smoke_perf (unsigned sample_secs)
+{
+	if (!_impl || !_impl->engine || !_started) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-perf FAILED (no engine)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (sample_secs < 1) {
+		sample_secs = 1;
+	}
+	if (sample_secs > 30) {
+		sample_secs = 30;
+	}
+
+	/* Do not transport_play here — Debug Session roll during attach_engine has
+	 * intermittent AVs. WASAPI shared still runs process cycles while stopped. */
+	PROCESS_MEMORY_COUNTERS_EX pmc0;
+	std::memset (&pmc0, 0, sizeof (pmc0));
+	pmc0.cb = sizeof (pmc0);
+	GetProcessMemoryInfo (GetCurrentProcess (), (PROCESS_MEMORY_COUNTERS*)&pmc0, sizeof (pmc0));
+
+	const DWORD t0 = GetTickCount ();
+	float dsp_sum = 0.f;
+	float dsp_max = 0.f;
+	unsigned dsp_n = 0;
+	SIZE_T ws_peak = pmc0.WorkingSetSize;
+	uint64_t xruns0 = 0;
+
+	refresh_snapshot ();
+	xruns0 = _snap.xrun_count;
+	const uint32_t period0 = _snap.period_frames;
+	const uint32_t sr0 = _snap.sample_rate;
+
+	while ((GetTickCount () - t0) < sample_secs * 1000u) {
+		MSG msg;
+		while (PeekMessageW (&msg, nullptr, 0, 0, PM_REMOVE)) {
+			TranslateMessage (&msg);
+			DispatchMessageW (&msg);
+		}
+		Sleep (50);
+		refresh_snapshot ();
+		dsp_sum += _snap.dsp_load_pct;
+		if (_snap.dsp_load_pct > dsp_max) {
+			dsp_max = _snap.dsp_load_pct;
+		}
+		++dsp_n;
+		PROCESS_MEMORY_COUNTERS_EX pmc;
+		std::memset (&pmc, 0, sizeof (pmc));
+		pmc.cb = sizeof (pmc);
+		if (GetProcessMemoryInfo (GetCurrentProcess (), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof (pmc))) {
+			if (pmc.WorkingSetSize > ws_peak) {
+				ws_peak = pmc.WorkingSetSize;
+			}
+		}
+	}
+
+	refresh_snapshot ();
+
+	const double period_ms = (sr0 > 0 && period0 > 0)
+		? (1000.0 * (double)period0 / (double)sr0)
+		: 0.0;
+	const double period_us = period_ms * 1000.0;
+	const float dsp_avg = (dsp_n > 0) ? (dsp_sum / (float)dsp_n) : 0.f;
+	const uint64_t xruns = (_snap.xrun_count >= xruns0) ? (_snap.xrun_count - xruns0) : _snap.xrun_count;
+	const double headroom = (period_us > 0.0 && _snap.callback_max_us > 0)
+		? (100.0 * (1.0 - (double)_snap.callback_max_us / period_us))
+		: (100.0 - (double)dsp_max);
+
+	std::fprintf (stderr,
+	              "airdour_win_shell: PERF backend=%ls sr=%u period=%u (%.2f ms) "
+	              "cb_us last=%llu avg=%llu max=%llu / period_us=%.0f "
+	              "dsp_pct avg=%.1f max=%.1f headroom_pct≈%.1f xruns=%llu "
+	              "ws_peak_mb=%.1f cycles=%llu\n",
+	              _snap.backend.c_str (),
+	              (unsigned)sr0,
+	              (unsigned)period0,
+	              period_ms,
+	              (unsigned long long)_snap.callback_last_us,
+	              (unsigned long long)_snap.callback_avg_us,
+	              (unsigned long long)_snap.callback_max_us,
+	              period_us,
+	              dsp_avg,
+	              dsp_max,
+	              headroom,
+	              (unsigned long long)xruns,
+	              (double)ws_peak / (1024.0 * 1024.0),
+	              (unsigned long long)_snap.callback_count);
+	std::fflush (stderr);
+	_snap.detail = L"smoke-perf ok";
+	return true;
+}
+
+bool
 EngineHost::smoke_plugin_insert ()
 {
 	if (!_impl || !_impl->session) {
@@ -3743,6 +3849,22 @@ EngineHost::refresh_snapshot ()
 		_snap.backend = utf8_to_wide (_impl->engine->current_backend_name ());
 		_snap.sample_rate = (uint32_t)_impl->engine->sample_rate ();
 		_snap.period_frames = (uint32_t)_impl->engine->samples_per_cycle ();
+		_snap.dsp_load_pct = _impl->engine->get_dsp_load ();
+		_snap.callback_last_us = 0;
+		_snap.callback_max_us = 0;
+		_snap.callback_avg_us = 0;
+		_snap.callback_count = 0;
+		_snap.xrun_count = 0;
+		if (std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ()) {
+			uint64_t be_xruns = 0;
+			be->process_callback_stats (_snap.callback_last_us, _snap.callback_max_us,
+			                            _snap.callback_avg_us, _snap.callback_count,
+			                            be_xruns);
+			_snap.xrun_count = be_xruns;
+		}
+		if (_impl->session) {
+			_snap.xrun_count += (uint64_t)_impl->session->get_xrun_count ();
+		}
 		_snap.session_ok = (_impl->session != nullptr);
 
 		if (_impl->session) {
@@ -3853,6 +3975,12 @@ EngineHost::EngineHost ()
 	_snap.track_fx_bypassed = false;
 	_snap.track_fx_param = 0.3f;
 	_snap.midi_activity = 0.f;
+	_snap.dsp_load_pct = 0.f;
+	_snap.callback_last_us = 0;
+	_snap.callback_max_us = 0;
+	_snap.callback_avg_us = 0;
+	_snap.callback_count = 0;
+	_snap.xrun_count = 0;
 	_snap.midi_device_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMidiDevices; ++i) {
 		_snap.midi_devices[i].name[0] = L'\0';
@@ -4238,6 +4366,13 @@ EngineHost::track_fx_param (int track) const
 bool
 EngineHost::smoke_plugin_insert ()
 {
+	return false;
+}
+
+bool
+EngineHost::smoke_perf (unsigned sample_secs)
+{
+	(void)sample_secs;
 	return false;
 }
 

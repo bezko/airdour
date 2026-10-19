@@ -547,7 +547,14 @@ WasapiIO::open (const std::string& output_name_or_id,
 		ac3->Release ();
 	}
 
+	/* Prefer ~10 ms shared quantum (480 @ 48 kHz) for laptop stability. */
+	const uint32_t ten_ms = (uint32_t)std::lround ((double)_sample_rate * 0.010);
 	uint32_t period = frames_per_period ? frames_per_period : _default_period_frames;
+	if (frames_per_period == 0 || frames_per_period == 512) {
+		/* Migrate historical 512 default → device default or 10 ms. */
+		period = _default_period_frames ? _default_period_frames
+		                                : (ten_ms ? ten_ms : 480u);
+	}
 	/* Snap to quantum for stable shared-mode scheduling on cheap laptops. */
 	const uint32_t q = std::max (1u, _min_period_frames);
 	period = ((period + q / 2) / q) * q;

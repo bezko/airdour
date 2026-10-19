@@ -59,6 +59,7 @@ public:
 	                    bool smoke_midi = false,
 	                    bool smoke_midi_edit = false,
 	                    bool smoke_plugin = false,
+	                    bool smoke_perf = false,
 	                    const std::string& open_session_path = std::string ());
 	int  run_message_loop (unsigned timeout_secs);
 
