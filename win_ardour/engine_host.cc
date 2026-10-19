@@ -353,6 +353,7 @@ EngineHost::EngineHost ()
 		_snap.track_armed[i] = false;
 		_snap.track_muted[i] = false;
 		_snap.track_soloed[i] = false;
+		_snap.track_pan[i] = 0.5f;
 	}
 	_snap.midi_muted = false;
 	_snap.midi_soloed = false;
@@ -1889,6 +1890,125 @@ EngineHost::toggle_midi_soloed ()
 {
 	refresh_mute_solo_flags ();
 	return set_midi_soloed (!_snap.midi_soloed);
+}
+
+void
+EngineHost::refresh_pan_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_pan[i] = 0.5f;
+	}
+	if (!_impl) {
+		return;
+	}
+	try {
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]) {
+				std::shared_ptr<AutomationControl> pan =
+					_impl->tracks[i]->pan_azimuth_control ();
+				if (pan) {
+					_snap.track_pan[i] = (float)pan->get_value ();
+				}
+			}
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::set_track_pan (int track, float pan_0_1)
+{
+	pan_0_1 = std::max (0.f, std::min (1.f, pan_0_1));
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationControl> pan =
+			_impl->tracks[track]->pan_azimuth_control ();
+		if (!pan) {
+			std::fprintf (stderr, "airdour_win_shell: pan missing on Audio %d (panner?)\n",
+			              track + 1);
+			std::fflush (stderr);
+			return false;
+		}
+		_impl->session->set_control (pan, (double)pan_0_1, Controllable::NoGroup);
+		/* Pan is usually immediate; poll briefly for RT paths. */
+		wait_until ([&] () {
+			refresh_pan_flags ();
+			return std::fabs (_snap.track_pan[track] - pan_0_1) < 0.02f;
+		}, 300);
+		_snap.detail = L"track pan set";
+		return std::fabs (_snap.track_pan[track] - pan_0_1) < 0.02f;
+	} catch (...) {
+		return false;
+	}
+}
+
+float
+EngineHost::track_pan (int track) const
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return 0.5f;
+	}
+	return _snap.track_pan[track];
+}
+
+bool
+EngineHost::smoke_pan ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-pan failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pan FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_impl->tracks[0]->pan_azimuth_control ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-pan FAILED "
+			              "(no pan_azimuth — check panner DLLs)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!set_track_pan (0, 0.0f) || _snap.track_pan[0] > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pan FAILED (pan L got=%.3f)\n",
+			              _snap.track_pan[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_pan (0, 1.0f) || _snap.track_pan[0] < 0.95f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pan FAILED (pan R got=%.3f)\n",
+			              _snap.track_pan[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_pan (0, 0.5f)
+		    || _snap.track_pan[0] < 0.45f || _snap.track_pan[0] > 0.55f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pan FAILED (pan C got=%.3f)\n",
+			              _snap.track_pan[0]);
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr, "airdour_win_shell: smoke-pan ok (Audio1 L→R→C)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-pan ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-pan exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 bool
@@ -4392,6 +4512,7 @@ EngineHost::refresh_snapshot ()
 			refresh_region_flags ();
 			refresh_record_flags ();
 			refresh_mute_solo_flags ();
+			refresh_pan_flags ();
 			refresh_history_flags ();
 			refresh_selection_snap ();
 			refresh_locations_snap ();
@@ -4735,6 +4856,32 @@ EngineHost::toggle_midi_soloed ()
 
 bool
 EngineHost::smoke_mute_solo ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_pan_flags ()
+{
+}
+
+bool
+EngineHost::set_track_pan (int track, float pan_0_1)
+{
+	(void)track;
+	(void)pan_0_1;
+	return false;
+}
+
+float
+EngineHost::track_pan (int track) const
+{
+	(void)track;
+	return 0.5f;
+}
+
+bool
+EngineHost::smoke_pan ()
 {
 	return false;
 }

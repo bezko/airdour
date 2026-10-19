@@ -64,7 +64,8 @@ public:
 	                    const std::string& open_session_path = std::string (),
 	                    unsigned period_frames = 0,
 	                    bool smoke_vst3 = false,
-	                    bool smoke_mute_solo = false);
+	                    bool smoke_mute_solo = false,
+	                    bool smoke_pan = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -76,6 +77,7 @@ private:
 		WavePan,
 		Fader,
 		FxParam, /* drag Mixer Blend slider */
+		Pan, /* drag Mixer pan azimuth */
 		MidiDraw /* click/drag on MIDI lane to create a note */
 	};
 
@@ -127,6 +129,7 @@ private:
 	void do_remove_marker_at_playhead ();
 	void sync_mixer_arm_from_engine ();
 	void sync_mixer_mute_solo_from_engine ();
+	void sync_mixer_pan_from_engine ();
 	void sync_mixer_fx_from_engine ();
 	void sync_transport_loop_from_engine ();
 	void apply_shared_view (int source_lane);
@@ -144,6 +147,7 @@ private:
 	int  hit_mixer_arm (float x, float y) const;
 	int  hit_mixer_mute (float x, float y) const;
 	int  hit_mixer_solo (float x, float y) const;
+	int  hit_mixer_pan (float x, float y) const;
 	int  hit_mixer_fx (float x, float y) const;
 	int  hit_mixer_fx_param (float x, float y) const;
 	void client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const;

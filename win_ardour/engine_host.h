@@ -95,6 +95,7 @@ struct EngineSnapshot {
 	bool         track_armed[kMeters];
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
+	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	bool         midi_muted;
 	bool         midi_soloed;
 	float        transport_sec;
@@ -156,6 +157,13 @@ public:
 	 * Mute/solo Audio 1 + MIDI round-trip; clear. For --smoke-mute-solo.
 	 */
 	bool smoke_mute_solo ();
+
+	/** Pan azimuth 0=L … 0.5=C … 1=R via Route::pan_azimuth_control. */
+	bool  set_track_pan (int track, float pan_0_1);
+	float track_pan (int track) const;
+
+	/** Pan L → C → R on Audio 1. For --smoke-pan. */
+	bool smoke_pan ();
 
 	/** Session-level record enable (maybe_enable_record / disable_record). */
 	bool set_session_record (bool enable);
@@ -346,6 +354,7 @@ private:
 	void refresh_region_flags ();
 	void refresh_record_flags ();
 	void refresh_mute_solo_flags ();
+	void refresh_pan_flags ();
 	void refresh_history_flags ();
 	void refresh_selection_snap ();
 	void refresh_locations_snap ();
