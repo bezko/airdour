@@ -43,7 +43,9 @@ public:
 	/**
 	 * Open shared-mode render (+ optional capture).
 	 * Adopts the device mix format sample rate (shared-mode requirement).
-	 * Snaps frames_per_period to the shared engine quantum for laptop stability.
+	 * frames_per_period == 0 → Auto: try IAudioClient3 low periods (128/240/256…)
+	 * then fall back toward ~10 ms. Non-zero requests that period (snapped to quantum)
+	 * with the same fallback ladder on failure.
 	 */
 	int open (const std::string& output_name_or_id,
 	          const std::string& input_name_or_id,

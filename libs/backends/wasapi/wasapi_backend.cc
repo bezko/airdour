@@ -170,7 +170,7 @@ WasapiBackend::WasapiBackend (AudioEngine& e, AudioBackendInfo& info)
 	, _input_device ("Default")
 	, _output_device ("Default")
 	, _samplerate (48000.f)
-	, _buffer_size (480) /* ~10 ms @ 48 kHz shared — laptop product default */
+	, _buffer_size (0) /* 0 = Auto: try low shared periods, fall back toward ~10 ms */
 	, _systemic_input_latency (0)
 	, _systemic_output_latency (0)
 	, _midi_driver_option (winmme_driver_name)
@@ -321,7 +321,8 @@ WasapiBackend::set_sample_rate (float sr)
 int
 WasapiBackend::set_buffer_size (uint32_t frames)
 {
-	if (frames < 32) {
+	/* 0 keeps Auto period selection in WasapiIO::open. */
+	if (frames != 0 && frames < 32) {
 		return -1;
 	}
 	_buffer_size = frames;

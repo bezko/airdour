@@ -108,6 +108,9 @@ public:
 
 	void prepare (const std::string& backend_name);
 
+	/** Request WASAPI/Dummy period frames before start (0 = backend Auto). */
+	void set_period_frames (uint32_t frames);
+
 	/** Start backend + scaffold minimal Session (tracks + demo tones). */
 	bool start ();
 	bool start (const std::string& backend_name);
@@ -327,6 +330,7 @@ private:
 	bool        _started;
 	std::string _backend_name;
 	std::string _last_export_path;
+	uint32_t    _period_frames; /* 0 = Auto */
 	float       _gain;
 	float       _track_gain[EngineSnapshot::kMeters];
 	EngineSnapshot _snap;

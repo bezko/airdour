@@ -8,7 +8,7 @@
  *                         [--smoke-import] [--smoke-record] [--smoke-save-load]
  *                         [--smoke-export] [--smoke-undo] [--smoke-loop]
  *                         [--smoke-midi] [--smoke-midi-edit] [--smoke-plugin]
- *                         [--smoke-perf] [--session DIR]
+ *                         [--smoke-perf] [--period N] [--session DIR]
  */
 
 #include "shell_window.h"
@@ -66,6 +66,20 @@ parse_session_path (int argc, wchar_t** argv)
 	return std::string ();
 }
 
+static unsigned
+parse_period (int argc, wchar_t** argv)
+{
+	for (int i = 1; i < argc; ++i) {
+		if (wcscmp (argv[i], L"--period") == 0 && i + 1 < argc) {
+			return (unsigned)wcstoul (argv[i + 1], nullptr, 10);
+		}
+		if (wcsncmp (argv[i], L"--period=", 9) == 0) {
+			return (unsigned)wcstoul (argv[i] + 9, nullptr, 10);
+		}
+	}
+	return 0;
+}
+
 static bool
 parse_flag (int argc, wchar_t** argv, const wchar_t* name)
 {
@@ -82,6 +96,7 @@ wmain (int argc, wchar_t** argv)
 {
 	unsigned timeout = parse_timeout (argc, argv);
 	std::string backend = parse_backend (argc, argv);
+	unsigned period = parse_period (argc, argv);
 	bool no_engine = parse_flag (argc, argv, L"--no-engine");
 	bool smoke_import = parse_flag (argc, argv, L"--smoke-import");
 	bool smoke_record = parse_flag (argc, argv, L"--smoke-record");
@@ -120,7 +135,7 @@ wmain (int argc, wchar_t** argv)
 		if (shell.attach_engine (backend, timeout, smoke_import, smoke_record,
 		                         smoke_save_load, smoke_export, smoke_undo,
 		                         smoke_loop, smoke_midi, smoke_midi_edit,
-		                         smoke_plugin, smoke_perf, session_path)) {
+		                         smoke_plugin, smoke_perf, session_path, period)) {
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", backend.c_str ());
 		} else {
 			std::fwprintf (stderr, L"airdour_win_shell: engine not attached (ok for UI-only / CI)\n");

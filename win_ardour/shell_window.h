@@ -60,7 +60,8 @@ public:
 	                    bool smoke_midi_edit = false,
 	                    bool smoke_plugin = false,
 	                    bool smoke_perf = false,
-	                    const std::string& open_session_path = std::string ());
+	                    const std::string& open_session_path = std::string (),
+	                    unsigned period_frames = 0);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }

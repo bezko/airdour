@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -317,7 +318,7 @@ WasapiIO::recommended_buffer_sizes (std::vector<uint32_t>& sizes) const
 		q * 4,
 		q * 6,
 		q * 8,
-		256u, 512u, 1024u, 2048u
+		128u, 240u, 256u, 480u, 512u, 1024u, 2048u
 	};
 	for (unsigned i = 0; i < sizeof (candidates) / sizeof (candidates[0]); ++i) {
 		uint32_t v = candidates[i];
@@ -544,55 +545,140 @@ WasapiIO::open (const std::string& output_name_or_id,
 				_default_period_frames = default_period;
 			}
 		}
-		ac3->Release ();
 	}
 
-	/* Prefer ~10 ms shared quantum (480 @ 48 kHz) for laptop stability. */
 	const uint32_t ten_ms = (uint32_t)std::lround ((double)_sample_rate * 0.010);
-	uint32_t period = frames_per_period ? frames_per_period : _default_period_frames;
-	if (frames_per_period == 0 || frames_per_period == 512) {
-		/* Migrate historical 512 default → device default or 10 ms. */
-		period = _default_period_frames ? _default_period_frames
-		                                : (ten_ms ? ten_ms : 480u);
-	}
-	/* Snap to quantum for stable shared-mode scheduling on cheap laptops. */
 	const uint32_t q = std::max (1u, _min_period_frames);
-	period = ((period + q / 2) / q) * q;
-	if (period < q) {
-		period = q;
+	const bool explicit_period = (frames_per_period != 0 && frames_per_period != 512);
+
+	auto snap_period = [q] (uint32_t p) -> uint32_t {
+		if (p == 0) {
+			return q;
+		}
+		p = ((p + q / 2) / q) * q;
+		if (p < q) {
+			p = q;
+		}
+		if (p > 4096) {
+			p = (4096 / q) * q;
+			if (p < q) {
+				p = q;
+			}
+		}
+		return p;
+	};
+
+	/*
+	 * Build a try ladder. Explicit --period / set_buffer_size is tried first;
+	 * Auto prefers low shared periods then falls back toward ~10 ms.
+	 */
+	std::vector<uint32_t> try_periods;
+	auto push_unique = [&try_periods] (uint32_t p) {
+		if (p == 0) {
+			return;
+		}
+		if (std::find (try_periods.begin (), try_periods.end (), p) == try_periods.end ()) {
+			try_periods.push_back (p);
+		}
+	};
+
+	if (explicit_period) {
+		push_unique (snap_period (frames_per_period));
+	} else {
+		/* Product Auto ladder (lowest → fallback). 240 ≈ 5 ms @ 48 kHz. */
+		push_unique (snap_period (128));
+		push_unique (snap_period (240));
+		push_unique (snap_period (256));
+		push_unique (snap_period (_default_period_frames));
+		push_unique (snap_period (ten_ms ? ten_ms : 480u));
+		push_unique (snap_period (480));
 	}
-	/* Soft clamp: very small periods glitch on stock laptop mixers. */
-	if (period < 128) {
-		period = ((128 + q - 1) / q) * q;
-	}
-	if (period > 4096) {
-		period = (4096 / q) * q;
-	}
-	_period_frames = period;
+	/* Always keep a 10 ms safety net as last resort. */
+	push_unique (snap_period (ten_ms ? ten_ms : 480u));
+	push_unique (snap_period (480));
 
 	_com->render_event = CreateEvent (NULL, FALSE, FALSE, NULL);
 	if (!_com->render_event) {
+		if (ac3) {
+			ac3->Release ();
+		}
 		close ();
 		return -1;
 	}
 
-	/*
-	 * Shared mode + event callback. Buffer duration 0 → engine default.
-	 * AUTOCONVERTPCM helps when requesting rates near mix format on some stacks;
-	 * we still adopt mix sample rate above so conversion is usually a no-op.
-	 */
+	std::fprintf (stderr,
+	              "wasapi: shared engine fund=%u min=%u def=%u max=%u req=%u\n",
+	              (unsigned)fundamental,
+	              (unsigned)(min_period_f ? min_period_f : _min_period_frames),
+	              (unsigned)_default_period_frames,
+	              (unsigned)max_period_f,
+	              (unsigned)frames_per_period);
+	std::fflush (stderr);
+
 	DWORD stream_flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
-	hr = _com->render_client->Initialize (
-		AUDCLNT_SHAREMODE_SHARED,
-		stream_flags,
-		0, /* hnsBufferDuration: shared default */
-		0, /* hnsPeriodicity must be 0 in shared */
-		_com->render_mix,
-		NULL);
-	if (FAILED (hr)) {
-		close ();
-		return -1;
+	uint32_t period = try_periods.empty () ? snap_period (480) : try_periods.front ();
+	bool opened = false;
+
+	if (ac3) {
+		for (size_t i = 0; i < try_periods.size (); ++i) {
+			period = try_periods[i];
+			if (min_period_f && period < min_period_f) {
+				continue;
+			}
+			if (max_period_f && period > max_period_f) {
+				continue;
+			}
+			hr = ac3->InitializeSharedAudioStream (stream_flags, period, _com->render_mix, NULL);
+			if (SUCCEEDED (hr)) {
+				opened = true;
+				break;
+			}
+		}
 	}
+
+	if (!opened) {
+		/* Classic shared Initialize → device default event cadence. */
+		period = snap_period (_default_period_frames ? _default_period_frames
+		                                            : (ten_ms ? ten_ms : 480u));
+		hr = _com->render_client->Initialize (
+			AUDCLNT_SHAREMODE_SHARED,
+			stream_flags,
+			0, /* hnsBufferDuration: shared default */
+			0, /* hnsPeriodicity must be 0 in shared */
+			_com->render_mix,
+			NULL);
+		if (FAILED (hr)) {
+			if (ac3) {
+				ac3->Release ();
+			}
+			close ();
+			return -1;
+		}
+		opened = true;
+	}
+
+	/* Prefer the period the audio engine actually settled on. */
+	if (ac3) {
+		WAVEFORMATEX* cur_fmt = 0;
+		UINT32 cur_period = 0;
+		if (SUCCEEDED (ac3->GetCurrentSharedModeEnginePeriod (&cur_fmt, &cur_period)) && cur_period) {
+			period = cur_period;
+		}
+		if (cur_fmt) {
+			CoTaskMemFree (cur_fmt);
+		}
+		ac3->Release ();
+		ac3 = 0;
+	}
+	_period_frames = period;
+	std::fprintf (stderr,
+	              "wasapi: opened shared period=%u (%.2f ms @ %.0f Hz)\n",
+	              (unsigned)_period_frames,
+	              (_sample_rate > 0.f)
+	                      ? (1000.0 * (double)_period_frames / (double)_sample_rate)
+	                      : 0.0,
+	              (double)_sample_rate);
+	std::fflush (stderr);
 
 	hr = _com->render_client->SetEventHandle (_com->render_event);
 	if (FAILED (hr)) {
@@ -625,13 +711,23 @@ WasapiIO::open (const std::string& output_name_or_id,
 			 * If mix rates differ, skip capture for now (honest limitation).
 			 */
 			if (_com->capture_mix->nSamplesPerSec == _com->render_mix->nSamplesPerSec) {
-				hr = _com->capture_client->Initialize (
-					AUDCLNT_SHAREMODE_SHARED,
-					0, /* no separate event; pull on render tick */
-					0, 0,
-					_com->capture_mix,
-					NULL);
-				if (SUCCEEDED (hr)) {
+				IAudioClient3* cap3 = 0;
+				bool cap_ok = false;
+				if (SUCCEEDED (_com->capture_client->QueryInterface (__uuidof (IAudioClient3), (void**)&cap3)) && cap3) {
+					hr = cap3->InitializeSharedAudioStream (0, _period_frames, _com->capture_mix, NULL);
+					cap_ok = SUCCEEDED (hr);
+					cap3->Release ();
+				}
+				if (!cap_ok) {
+					hr = _com->capture_client->Initialize (
+						AUDCLNT_SHAREMODE_SHARED,
+						0, /* no separate event; pull on render tick */
+						0, 0,
+						_com->capture_mix,
+						NULL);
+					cap_ok = SUCCEEDED (hr);
+				}
+				if (cap_ok) {
 					hr = _com->capture_client->GetService (
 						__uuidof (IAudioCaptureClient), (void**)&_com->capture);
 					if (SUCCEEDED (hr) && _com->capture) {

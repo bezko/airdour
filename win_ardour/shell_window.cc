@@ -177,12 +177,18 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_edit,
                             bool smoke_plugin,
                             bool smoke_perf,
-                            const std::string& open_session_path)
+                            const std::string& open_session_path,
+                            unsigned period_frames)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
 		_engine_snap = _engine.snapshot ();
 		return false;
+	}
+	if (period_frames > 0) {
+		_engine.set_period_frames (period_frames);
+		std::fprintf (stderr, "airdour_win_shell: --period %u\n", period_frames);
+		std::fflush (stderr);
 	}
 	bool ok = _engine.start (backend_name);
 	/* Unattended --timeout: keep Session + PeakMeter (not stubs) but skip

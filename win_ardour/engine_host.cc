@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #ifdef AIRDOUR_WIN_SHELL_WITH_ENGINE
@@ -334,6 +335,7 @@ public:
 EngineHost::EngineHost ()
 	: _started (false)
 	, _backend_name ("Dummy")
+	, _period_frames (0)
 	, _gain (0.85f)
 	, _impl (new Impl)
 {
@@ -436,6 +438,12 @@ EngineHost::prepare (const std::string& backend_name)
 	}
 	_snap.backend = utf8_to_wide (resolve_backend_name (_backend_name));
 	_snap.detail = L"prepared — press Play to start";
+}
+
+void
+EngineHost::set_period_frames (uint32_t frames)
+{
+	_period_frames = frames;
 }
 
 bool
@@ -1265,6 +1273,14 @@ EngineHost::start ()
 	}
 
 	configure_backend_midi ();
+
+	if (_period_frames > 0) {
+		step (("set_buffer_size " + std::to_string (_period_frames)).c_str ());
+		if (_impl->engine->set_buffer_size (_period_frames) != 0) {
+			_snap.detail = L"set_buffer_size failed";
+			return false;
+		}
+	}
 
 	step ("engine->start");
 	if (_impl->engine->start () != 0) {
@@ -3932,6 +3948,7 @@ EngineHost::snapshot () const
 EngineHost::EngineHost ()
 	: _started (false)
 	, _backend_name ("Dummy")
+	, _period_frames (0)
 	, _gain (0.85f)
 {
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
@@ -4027,6 +4044,12 @@ EngineHost::prepare (const std::string& backend_name)
 		_backend_name = backend_name;
 	}
 	_snap.detail = L"engine support not compiled into this binary";
+}
+
+void
+EngineHost::set_period_frames (uint32_t frames)
+{
+	_period_frames = frames;
 }
 
 bool
