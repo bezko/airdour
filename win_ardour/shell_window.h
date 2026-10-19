@@ -148,6 +148,7 @@ private:
 	int  hit_mixer_mute (float x, float y) const;
 	int  hit_mixer_solo (float x, float y) const;
 	int  hit_mixer_pan (float x, float y) const;
+	int  hit_mixer_meter (float x, float y) const;
 	int  hit_mixer_fx (float x, float y) const;
 	int  hit_mixer_fx_param (float x, float y) const;
 	void client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const;

@@ -139,15 +139,30 @@ MixerStrip::set_gain (float g)
 }
 
 void
-MixerStrip::set_meter_peak (float peak)
+MixerStrip::set_meter_peak (float peak, bool clipped)
 {
 	_meter.set_peak (peak);
+	if (clipped) {
+		_meter.set_clipped (true);
+	}
 }
 
 void
 MixerStrip::meter_tick (float dt)
 {
 	_meter.tick (dt);
+}
+
+void
+MixerStrip::clear_meter_clip ()
+{
+	_meter.clear_clip ();
+}
+
+bool
+MixerStrip::hit_meter (float x, float y) const
+{
+	return _meter.hit (x, y);
 }
 
 bool

@@ -91,6 +91,7 @@ struct EngineSnapshot {
 	uint64_t     xrun_count; /* Session + backend underruns */
 	float        gain; /* track 0 stub/session gain */
 	float        meter_peak[kMeters]; /* linear 0..1 */
+	bool         meter_clip[kMeters]; /* ≥0 dBFS / PeakMeter MeterMaxPeak */
 	bool         track_has_regions[kMeters];
 	bool         track_armed[kMeters];
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
@@ -164,6 +165,9 @@ public:
 
 	/** Pan L → C → R on Audio 1. For --smoke-pan. */
 	bool smoke_pan ();
+
+	/** Clear PeakMeter max-peak / clip latch on Audio track (0..kMeters-1). */
+	bool clear_track_meter_clip (int track);
 
 	/** Session-level record enable (maybe_enable_record / disable_record). */
 	bool set_session_record (bool enable);

@@ -1313,6 +1313,17 @@ ShellWindow::hit_mixer_pan (float x, float y) const
 }
 
 int
+ShellWindow::hit_mixer_meter (float x, float y) const
+{
+	for (int i = 0; i < kMixerStrips; ++i) {
+		if (_mixers[i].hit_meter (x, y)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int
 ShellWindow::hit_mixer_fx (float x, float y) const
 {
 	for (int i = 0; i < kTracks; ++i) {
@@ -1509,6 +1520,20 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		}
 		SetCapture (_hwnd);
 		SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	/* Click meter → clear peak-hold clip latch (PeakMeter::reset_max). */
+	int meter_i = hit_mixer_meter (x, y);
+	if (meter_i >= 0 && _mixers[meter_i].meter_clipped ()) {
+		_mixers[meter_i].clear_meter_clip ();
+		if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
+		    && _engine.snapshot ().session_ok) {
+			_engine.clear_track_meter_clip (meter_i);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+		}
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
@@ -1847,15 +1872,17 @@ ShellWindow::on_tick ()
 		}
 
 		float peak = 0.f;
+		bool  clip = false;
 		if (_engine_snap.meters_real && i < EngineSnapshot::kMeters) {
 			peak = _engine_snap.meter_peak[i];
+			clip = _engine_snap.meter_clip[i];
 		} else {
 			peak = stub_meter_peak (i, dt);
 		}
-		_mixers[i].set_meter_peak (peak);
+		_mixers[i].set_meter_peak (peak, clip);
 		_mixers[i].meter_tick (dt);
 	}
-	_mixers[3].set_meter_peak (_engine_snap.midi_activity);
+	_mixers[3].set_meter_peak (_engine_snap.midi_activity, false);
 	_mixers[3].meter_tick (dt);
 	sync_mixer_fx_from_engine ();
 	sync_mixer_mute_solo_from_engine ();
@@ -2138,7 +2165,7 @@ ShellWindow::draw_mixer_pane ()
 		              _engine_snap.track_fx_bypassed ? L" BYP" : L"",
 		              _engine_snap.track_fx_param * 100.f);
 	} else if (_engine_snap.meters_real) {
-		wcsncpy_s (hint, L"PeakMeter  ·  M/S  ·  pan  ·  + FX", _TRUNCATE);
+		wcsncpy_s (hint, L"PeakMeter  ·  hold/clip  ·  M/S  ·  pan", _TRUNCATE);
 	} else if (_transport_playing) {
 		wcsncpy_s (hint, L"Meters: play stub (no Session)", _TRUNCATE);
 	} else {

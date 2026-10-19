@@ -61,8 +61,11 @@ public:
 	/** Map x into Blend 0..1; returns true if value changed. */
 	bool drag_fx_param_to (float x);
 
-	void        set_meter_peak (float peak);
+	void        set_meter_peak (float peak, bool clipped = false);
 	void        meter_tick (float dt);
+	void        clear_meter_clip ();
+	bool        meter_clipped () const { return _meter.clipped (); }
+	bool        hit_meter (float x, float y) const;
 	LevelMeter& meter () { return _meter; }
 
 	bool hit_fader (float x, float y) const;

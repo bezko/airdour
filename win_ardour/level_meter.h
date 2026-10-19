@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Direct2D peak meter. Stub-fed until Session PeakMeter is reachable.
+ * Direct2D peak meter with brief peak-hold and clip (≥0 dBFS) LED.
  */
 
 #pragma once
@@ -23,13 +23,20 @@ public:
 
 	void layout (const D2D1_RECT_F& bounds);
 
-	/** Push instantaneous peak 0..1 (UI thread). */
+	/** Push instantaneous peak 0..1 (UI thread). peak≥~1 → clip latch. */
 	void set_peak (float peak);
-	/** Decay toward silence when idle. */
+	/** Sticky clip from PeakMeter MeterMaxPeak / ≥0 dBFS. */
+	void set_clipped (bool clipped);
+	/** Clear clip LED (and forget latch). */
+	void clear_clip ();
+	/** Decay toward silence when idle; age peak-hold / clip hold. */
 	void tick (float dt_sec);
 
 	float level () const { return _level; }
 	float peak_hold () const { return _hold; }
+	bool  clipped () const { return _clipped; }
+
+	bool hit (float x, float y) const;
 
 	void draw (ID2D1RenderTarget* rt,
 	           ID2D1SolidColorBrush* fill,
@@ -44,5 +51,6 @@ private:
 	float       _level;
 	float       _hold;
 	float       _hold_age;
+	bool        _clipped;
+	float       _clip_age;
 };
-

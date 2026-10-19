@@ -145,6 +145,21 @@ peak_linear_from_meter (std::shared_ptr<PeakMeter> m)
 	return db_to_linear (db);
 }
 
+bool
+clip_from_meter (std::shared_ptr<PeakMeter> m)
+{
+	if (!m) {
+		return false;
+	}
+	/* Sticky max peak (until reset_max) — classic clip latch. */
+	float max_db = m->meter_level (0, MeterMaxPeak);
+	if (std::isfinite (max_db) && max_db >= 0.f) {
+		return true;
+	}
+	float peak_db = m->meter_level (0, MeterPeak);
+	return std::isfinite (peak_db) && peak_db >= 0.f;
+}
+
 std::string
 win_temp_dir ()
 {
@@ -349,6 +364,7 @@ EngineHost::EngineHost ()
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_track_gain[i] = (i == 0) ? 0.85f : (0.85f - 0.12f * (float)i);
 		_snap.meter_peak[i] = 0.f;
+		_snap.meter_clip[i] = false;
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
 		_snap.track_muted[i] = false;
@@ -1478,16 +1494,42 @@ EngineHost::read_meters ()
 		_snap.meters_real = true;
 		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 			float peak = 0.f;
+			bool  clip = false;
 			if (i < (int)_impl->tracks.size () && _impl->tracks[i]) {
 				std::shared_ptr<PeakMeter> pm = _impl->tracks[i]->peak_meter ();
 				if (pm) {
 					peak = peak_linear_from_meter (pm);
+					clip = clip_from_meter (pm);
 				}
 			}
 			_snap.meter_peak[i] = peak;
+			_snap.meter_clip[i] = clip;
 		}
 	} catch (...) {
 		_snap.meters_real = false;
+	}
+}
+
+bool
+EngineHost::clear_track_meter_clip (int track)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	try {
+		std::shared_ptr<PeakMeter> pm = _impl->tracks[track]->peak_meter ();
+		if (!pm) {
+			return false;
+		}
+		pm->reset_max ();
+		_snap.meter_clip[track] = false;
+		_snap.detail = L"meter clip cleared";
+		return true;
+	} catch (...) {
+		return false;
 	}
 }
 
@@ -4574,6 +4616,7 @@ EngineHost::EngineHost ()
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_track_gain[i] = 0.85f;
 		_snap.meter_peak[i] = 0.f;
+		_snap.meter_clip[i] = false;
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
 	}
@@ -4883,6 +4926,13 @@ EngineHost::track_pan (int track) const
 bool
 EngineHost::smoke_pan ()
 {
+	return false;
+}
+
+bool
+EngineHost::clear_track_meter_clip (int track)
+{
+	(void)track;
 	return false;
 }
 
