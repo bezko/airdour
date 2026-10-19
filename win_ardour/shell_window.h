@@ -81,7 +81,8 @@ public:
 	                    bool smoke_tracks = false,
 	                    bool smoke_rename = false,
 	                    bool smoke_group = false,
-	                    bool smoke_monitor = false);
+	                    bool smoke_monitor = false,
+	                    bool smoke_locate = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -104,7 +105,9 @@ private:
 		RegionMove, /* drag selected region body */
 		MidiDraw, /* click/drag on MIDI lane to create a note */
 		TrackReorderPending, /* mixer label click; may become reorder drag */
-		TrackReorder /* drag mixer strip label to reorder */
+		TrackReorder, /* drag mixer strip label to reorder */
+		RulerScrub, /* drag editor ruler → continuous locate */
+		Shuttle /* drag transport Scrub strip → varispeed */
 	};
 
 	static constexpr uint8_t kMidiPitchLo = 48; /* C3 */
@@ -192,6 +195,7 @@ private:
 	void sync_transport_loop_from_engine ();
 	void sync_transport_punch_from_engine ();
 	void sync_transport_tempo_from_engine ();
+	void sync_transport_clock_from_engine ();
 	void apply_shared_view (int source_lane);
 	void reset_shared_view ();
 	void apply_region_selection_to_lanes ();

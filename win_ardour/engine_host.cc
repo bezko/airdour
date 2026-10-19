@@ -84,7 +84,9 @@
 #include <glibmm/miscutils.h>
 #include "pbd/xml++.h"
 #include "temporal/beats.h"
+#include "temporal/bbt_time.h"
 #include "temporal/tempo.h"
+#include "temporal/time.h"
 #include "temporal/types.h"
 
 #ifdef interface
@@ -423,6 +425,14 @@ EngineHost::EngineHost ()
 	_snap.monitor_dim = false;
 	_snap.monitor_mono = false;
 	_snap.monitor_cut = false;
+	_snap.transport_speed = 0.f;
+	_snap.bbt_bars = 1;
+	_snap.bbt_beats = 1;
+	_snap.bbt_ticks = 0;
+	_snap.tc_hours = 0;
+	_snap.tc_minutes = 0;
+	_snap.tc_seconds = 0;
+	_snap.tc_frames = 0;
 	_snap.aux_bus_ok = false;
 	_snap.midi_muted = false;
 	_snap.midi_soloed = false;
@@ -5730,11 +5740,174 @@ EngineHost::locate_to (float time_sec, bool snap_to_marker, float slop_sec)
 		}
 		_impl->session->request_locate (sample, true, MustStop, TRS_UI);
 		_snap.transport_sec = time_sec;
+		_snap.transport_speed = 0.f;
+		refresh_clock_snap ();
 		_snap.detail = _snap.snap_enabled ? L"located (grid snap)"
 		              : (snap_to_marker ? L"located (snap mark)" : L"located");
 		return true;
 	} catch (...) {
 		_snap.detail = L"locate failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::scrub_to (float time_sec)
+{
+	/* Drag scrub: continuous locate, no mark snap (grid snap still applies). */
+	return locate_to (time_sec, false, 0.f);
+}
+
+void
+EngineHost::refresh_clock_snap ()
+{
+	_snap.bbt_bars = 1;
+	_snap.bbt_beats = 1;
+	_snap.bbt_ticks = 0;
+	_snap.tc_hours = 0;
+	_snap.tc_minutes = 0;
+	_snap.tc_seconds = 0;
+	_snap.tc_frames = 0;
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		samplepos_t sample = _impl->session->transport_sample ();
+		if (sr > 0 && _snap.transport_sec > 0.f) {
+			/* Prefer snap transport_sec when freshly located (event may lag). */
+			samplepos_t from_sec = (samplepos_t)std::llround ((double)_snap.transport_sec * (double)sr);
+			if (std::llabs ((long long)from_sec - (long long)sample) > (long long)(sr / 50)) {
+				sample = from_sec;
+			}
+		}
+		_snap.transport_speed = (float)_impl->session->actual_speed ();
+
+		Temporal::TempoMap::SharedPtr tm = Temporal::TempoMap::fetch ();
+		if (tm) {
+			Temporal::BBT_Argument bbt = tm->bbt_at (timepos_t (sample));
+			_snap.bbt_bars = (int)bbt.bars;
+			_snap.bbt_beats = (int)bbt.beats;
+			_snap.bbt_ticks = (int)bbt.ticks;
+		}
+
+		Timecode::Time tc;
+		_impl->session->timecode_time (sample, tc);
+		_snap.tc_hours = (int)tc.hours;
+		_snap.tc_minutes = (int)tc.minutes;
+		_snap.tc_seconds = (int)tc.seconds;
+		_snap.tc_frames = (int)tc.frames;
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::set_transport_speed (double speed)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		if (speed > 8.0) {
+			speed = 8.0;
+		}
+		if (speed < -8.0) {
+			speed = -8.0;
+		}
+		if (std::fabs (speed) < 1.0e-4) {
+			/* Do not request_transport_speed(0) — TransportFSM asserts speed≠0
+			 * on SetTransportSpeed; stop via request_stop like transport_stop. */
+			_impl->session->request_stop (false, false, TRS_UI);
+			refresh_clock_snap ();
+			/* Request is async — keep UI snap at the commanded speed. */
+			_snap.transport_speed = 0.f;
+			_snap.transport_rolling = false;
+			_snap.detail = L"shuttle stop";
+			return true;
+		}
+		_impl->session->request_transport_speed (speed, TRS_UI);
+		_impl->session->request_roll (TRS_UI);
+		refresh_clock_snap ();
+		_snap.transport_speed = (float)speed;
+		_snap.transport_rolling = true;
+		_snap.detail = L"shuttle";
+		return true;
+	} catch (...) {
+		_snap.detail = L"shuttle failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::stop_shuttle ()
+{
+	return set_transport_speed (0.0);
+}
+
+bool
+EngineHost::smoke_locate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-locate failed — no Session";
+		return false;
+	}
+	try {
+		/* Start from a known origin. */
+		if (!locate_to (0.f, false, 0.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (locate 0)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!locate_to (1.0f, false, 0.f)
+		    || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (locate 1.0 → %.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!scrub_to (2.5f) || std::fabs (_snap.transport_sec - 2.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (scrub 2.5 → %.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_clock_snap ();
+		if (_snap.bbt_bars < 1 || _snap.bbt_beats < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (BBT %d|%d|%d)\n",
+			              _snap.bbt_bars, _snap.bbt_beats, _snap.bbt_ticks);
+			std::fflush (stderr);
+			return false;
+		}
+		/* Shuttle forward briefly then stop — must not leave rolling. */
+		if (!set_transport_speed (2.0) || std::fabs (_snap.transport_speed - 2.f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (shuttle +2 → %.2f)\n",
+			              _snap.transport_speed);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!stop_shuttle () || std::fabs (_snap.transport_speed) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (shuttle stop)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Re-anchor after shuttle so --timeout stays quiet. */
+		locate_to (1.0f, false, 0.f);
+		stop_shuttle ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-locate ok (locate/scrub + BBT %d|%d|%d TC %02d:%02d:%02d:%02d)\n",
+		              _snap.bbt_bars, _snap.bbt_beats, _snap.bbt_ticks,
+		              _snap.tc_hours, _snap.tc_minutes, _snap.tc_seconds, _snap.tc_frames);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-locate ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-locate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
 		return false;
 	}
 }
@@ -7403,6 +7576,7 @@ EngineHost::refresh_snapshot ()
 			refresh_selection_snap ();
 			refresh_locations_snap ();
 			refresh_tempo_snap ();
+			refresh_clock_snap ();
 			refresh_midi_snap ();
 			refresh_track_fx_snap ();
 		} else {
@@ -7481,6 +7655,14 @@ EngineHost::EngineHost ()
 	_snap.monitor_dim = false;
 	_snap.monitor_mono = false;
 	_snap.monitor_cut = false;
+	_snap.transport_speed = 0.f;
+	_snap.bbt_bars = 1;
+	_snap.bbt_beats = 1;
+	_snap.bbt_ticks = 0;
+	_snap.tc_hours = 0;
+	_snap.tc_minutes = 0;
+	_snap.tc_seconds = 0;
+	_snap.tc_frames = 0;
 	_snap.aux_bus_ok = false;
 	_snap.available = false;
 	_snap.running = false;
@@ -8466,6 +8648,37 @@ EngineHost::locate_to (float time_sec, bool snap_to_marker, float slop_sec)
 	(void)time_sec;
 	(void)snap_to_marker;
 	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::scrub_to (float time_sec)
+{
+	(void)time_sec;
+	return false;
+}
+
+void
+EngineHost::refresh_clock_snap ()
+{
+}
+
+bool
+EngineHost::set_transport_speed (double speed)
+{
+	(void)speed;
+	return false;
+}
+
+bool
+EngineHost::stop_shuttle ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_locate ()
+{
 	return false;
 }
 

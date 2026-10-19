@@ -2,7 +2,8 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Direct2D transport: Play / Stop / Rec / Loop / Punch / Mark / Split / Fade /
- * Snap / Count / Click / Tempo± / Import / Save / Open / Export.
+ * Snap / Count / Click / Tempo± / Shuttle / Import / Save / Open / Export.
+ * Clock shows MM:SS + BBT + timecode + BPM.
  */
 
 #pragma once
@@ -42,7 +43,8 @@ enum class TransportHit {
 	RemoveTrack,
 	TrackUp,
 	TrackDown,
-	Group
+	Group,
+	Shuttle
 };
 
 class TransportBar
@@ -85,6 +87,28 @@ public:
 	void set_group_active (bool on) { _group_active = on; }
 	bool group_active () const { return _group_active; }
 
+	void set_clock_bbt (int bars, int beats, int ticks)
+	{
+		_bbt_bars = bars;
+		_bbt_beats = beats;
+		_bbt_ticks = ticks;
+	}
+
+	void set_clock_timecode (int h, int m, int s, int f)
+	{
+		_tc_hours = h;
+		_tc_minutes = m;
+		_tc_seconds = s;
+		_tc_frames = f;
+	}
+
+	/** Shuttle knob visual −1..+1 (0 = stopped / center). */
+	void set_shuttle_norm (float n) { _shuttle_norm = n; }
+	float shuttle_norm () const { return _shuttle_norm; }
+
+	/** Map pointer x on shuttle strip to speed −8..+8 (center deadzone). */
+	float shuttle_speed_at_x (float x) const;
+
 	TransportHit hit_test (float x, float y) const;
 
 	void draw (ID2D1RenderTarget* rt,
@@ -98,6 +122,7 @@ public:
 	           float dpi_scale) const;
 
 	const D2D1_RECT_F& bounds () const { return _bounds; }
+	const D2D1_RECT_F& shuttle_btn () const { return _shuttle_btn; }
 
 private:
 	D2D1_RECT_F _bounds;
@@ -124,6 +149,7 @@ private:
 	D2D1_RECT_F _track_up_btn;
 	D2D1_RECT_F _track_dn_btn;
 	D2D1_RECT_F _group_btn;
+	D2D1_RECT_F _shuttle_btn;
 	bool        _playing;
 	bool        _recording;
 	bool        _record_armed;
@@ -135,4 +161,12 @@ private:
 	bool        _click_enabled;
 	bool        _group_active;
 	float       _tempo_bpm;
+	float       _shuttle_norm;
+	int         _bbt_bars;
+	int         _bbt_beats;
+	int         _bbt_ticks;
+	int         _tc_hours;
+	int         _tc_minutes;
+	int         _tc_seconds;
+	int         _tc_frames;
 };

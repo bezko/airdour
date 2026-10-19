@@ -212,7 +212,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_tracks,
                             bool smoke_rename,
                             bool smoke_group,
-                            bool smoke_monitor)
+                            bool smoke_monitor,
+                            bool smoke_locate)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -511,6 +512,22 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_locate && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_locate ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			_playhead_sec = _engine_snap.transport_sec;
+			sync_transport_clock_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_locate) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -578,6 +595,28 @@ ShellWindow::sync_transport_tempo_from_engine ()
 	_transport.set_tempo_bpm (_engine_snap.tempo_bpm);
 	_transport.set_count_in_enabled (_engine_snap.count_in_enabled);
 	_transport.set_click_enabled (_engine_snap.click_enabled);
+}
+
+void
+ShellWindow::sync_transport_clock_from_engine ()
+{
+	_transport.set_clock_bbt (_engine_snap.bbt_bars, _engine_snap.bbt_beats, _engine_snap.bbt_ticks);
+	_transport.set_clock_timecode (_engine_snap.tc_hours, _engine_snap.tc_minutes,
+	                               _engine_snap.tc_seconds, _engine_snap.tc_frames);
+	float sn = 0.f;
+	if (std::fabs (_engine_snap.transport_speed) > 0.05f) {
+		/* Map ±8 → ±1 for thumb. */
+		sn = _engine_snap.transport_speed / 8.f;
+		if (sn > 1.f) {
+			sn = 1.f;
+		}
+		if (sn < -1.f) {
+			sn = -1.f;
+		}
+	}
+	if (_drag != DragMode::Shuttle) {
+		_transport.set_shuttle_norm (sn);
+	}
 }
 
 int
@@ -2540,6 +2579,33 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		do_apply_or_clear_group ();
 		return true;
 	}
+	if (th == TransportHit::Shuttle) {
+		_drag = DragMode::Shuttle;
+		_drag_index = -1;
+		_pan_down_x = x;
+		_pan_down_y = y;
+		_pan_last_x = x;
+		float speed = _transport.shuttle_speed_at_x (x);
+		float norm = 0.f;
+		float w = _transport.shuttle_btn ().right - _transport.shuttle_btn ().left;
+		if (w > 1.f) {
+			norm = ((x - _transport.shuttle_btn ().left) / w - 0.5f) * 2.f;
+			norm = std::max (-1.f, std::min (1.f, norm));
+		}
+		_transport.set_shuttle_norm (norm);
+		if (_engine.is_linked () && _engine_snap.session_ok) {
+			_engine.set_transport_speed ((double)speed);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			_playhead_sec = _engine_snap.transport_sec;
+			_transport_playing = _engine_snap.transport_rolling;
+			_transport.set_playing (_transport_playing);
+			sync_transport_clock_from_engine ();
+		}
+		SetCapture (_hwnd);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
 
 	MonitorHit mh = _monitor.hit_test (x, y);
 	if (mh == MonitorHit::Dim) {
@@ -2557,10 +2623,18 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	if (hit_editor_ruler (x, y) && _engine.is_linked () && _engine_snap.session_ok) {
 		float time_sec = _lanes[0].strip.time_at_x (_editor_ruler, x);
+		_drag = DragMode::RulerScrub;
+		_drag_index = -1;
+		_pan_down_x = x;
+		_pan_down_y = y;
+		_pan_last_x = x;
+		/* Click locate with mark snap; drag continues via scrub_to. */
 		_engine.locate_to (time_sec, true /* snap to marker */, 0.4f);
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 		_playhead_sec = _engine_snap.transport_sec;
+		sync_transport_clock_from_engine ();
+		SetCapture (_hwnd);
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
@@ -3015,6 +3089,41 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
+
+	if (_drag == DragMode::RulerScrub && _engine.is_linked () && _engine_snap.session_ok) {
+		_pan_last_x = x;
+		float time_sec = _lanes[0].strip.time_at_x (_editor_ruler, x);
+		_engine.scrub_to (time_sec);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_playhead_sec = _engine_snap.transport_sec;
+		sync_transport_clock_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	if (_drag == DragMode::Shuttle) {
+		_pan_last_x = x;
+		float speed = _transport.shuttle_speed_at_x (x);
+		float w = _transport.shuttle_btn ().right - _transport.shuttle_btn ().left;
+		float norm = 0.f;
+		if (w > 1.f) {
+			norm = ((x - _transport.shuttle_btn ().left) / w - 0.5f) * 2.f;
+			norm = std::max (-1.f, std::min (1.f, norm));
+		}
+		_transport.set_shuttle_norm (norm);
+		if (_engine.is_linked () && _engine_snap.session_ok) {
+			_engine.set_transport_speed ((double)speed);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			_playhead_sec = _engine_snap.transport_sec;
+			_transport_playing = _engine_snap.transport_rolling;
+			_transport.set_playing (_transport_playing);
+			sync_transport_clock_from_engine ();
+		}
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
 	return false;
 }
 
@@ -3106,6 +3215,21 @@ ShellWindow::on_mouse_up ()
 	if (_drag == DragMode::RegionMovePending) {
 		InvalidateRect (_hwnd, nullptr, FALSE);
 	}
+	if (_drag == DragMode::Shuttle && _engine.is_linked () && _engine_snap.session_ok) {
+		_engine.stop_shuttle ();
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_playhead_sec = _engine_snap.transport_sec;
+		_transport_playing = false;
+		_transport.set_playing (false);
+		_transport.set_shuttle_norm (0.f);
+		sync_transport_clock_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+	if (_drag == DragMode::RulerScrub) {
+		sync_transport_clock_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
 	if (_drag != DragMode::None) {
 		_drag = DragMode::None;
 		_drag_index = -1;
@@ -3185,6 +3309,7 @@ ShellWindow::on_tick ()
 		sync_transport_loop_from_engine ();
 		sync_transport_punch_from_engine ();
 		sync_transport_tempo_from_engine ();
+		sync_transport_clock_from_engine ();
 		apply_region_selection_to_lanes ();
 		apply_loop_to_lanes ();
 		refresh_automation_lane ();
@@ -3700,6 +3825,7 @@ ShellWindow::on_paint ()
 	                                 24.f * _dpi_scale + rule_w, rule_y + 2.f * _dpi_scale),
 	                    _brush_accent);
 
+	sync_transport_clock_from_engine ();
 	_transport.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
 	                 _brush_pane_edge, _fmt_pane, _playhead_sec, _dpi_scale);
 

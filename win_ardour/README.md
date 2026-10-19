@@ -96,6 +96,7 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 | `--smoke-plugin` | Insert ACE Reverb; toggle bypass; set Blend; verify on route |
 | `--smoke-vst3` | Scan system VST3 dirs (+ `VST3_PATH`); list; insert FX on Audio 2 if found |
 | `--smoke-mute-solo` | Mute/solo Audio 1 + MIDI (Session Route; RT settle) |
+| `--smoke-locate` | Locate/scrub ruler path + shuttle speed + BBT/timecode clock |
 | `--smoke-perf` | Sample WASAPI callback µs vs period, DSP %, xruns, working set (`--timeout` = window) |
 | `--session DIR` | Open existing session folder after engine start |
 | `AIRDOUR_WIN_SHELL_SESSION=0` | Skip Session; stub meters; empty lanes |

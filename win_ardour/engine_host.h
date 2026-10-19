@@ -136,6 +136,14 @@ struct EngineSnapshot {
 	bool         monitor_mono;
 	bool         monitor_cut; /* cut_all = monitor mute */
 	float        transport_sec;
+	float        transport_speed; /* Session actual_speed (−N..+N); 1 = play */
+	int          bbt_bars; /* TempoMap BBT at playhead (1-based) */
+	int          bbt_beats;
+	int          bbt_ticks;
+	int          tc_hours; /* Session timecode at playhead */
+	int          tc_minutes;
+	int          tc_seconds;
+	int          tc_frames;
 	std::wstring detail;
 };
 
@@ -398,6 +406,23 @@ public:
 	bool remove_marker_near (float time_sec, float slop_sec = 0.35f);
 	/** Locate transport to time_sec (optional snap to nearest mark within slop). */
 	bool locate_to (float time_sec, bool snap_to_marker = false, float slop_sec = 0.35f);
+	/**
+	 * Continuous scrub locate (no mark snap). Same Session request_locate path.
+	 * Used while dragging the editor ruler.
+	 */
+	bool scrub_to (float time_sec);
+	/**
+	 * Varispeed / shuttle via Session::request_transport_speed.
+	 * Non-zero speed also requests roll; 0 stops. Honest MMC shuttle path.
+	 */
+	bool set_transport_speed (double speed);
+	bool stop_shuttle ();
+
+	/**
+	 * Locate 1.0→2.5s; shuttle +2→0; verify BBT/TC clock fields.
+	 * For --smoke-locate. Does not leave transport rolling.
+	 */
+	bool smoke_locate ();
 
 	/**
 	 * Set loop 0.5–2.5s, add two marks, remove one; verify snapshot.
@@ -492,6 +517,9 @@ public:
 	 * Ensure monitor; dim→mono→cut on then off. For --smoke-monitor.
 	 */
 	bool smoke_monitor ();
+
+	/** Refresh BBT + timecode clock fields from Session transport. */
+	void refresh_clock_snap ();
 
 	/** Ensure a Session MidiTrack exists (creates one if needed). */
 	bool ensure_midi_track ();

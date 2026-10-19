@@ -4,6 +4,8 @@
 
 #include "transport_bar.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -42,6 +44,7 @@ TransportBar::TransportBar ()
 	, _track_up_btn ()
 	, _track_dn_btn ()
 	, _group_btn ()
+	, _shuttle_btn ()
 	, _playing (false)
 	, _recording (false)
 	, _record_armed (false)
@@ -53,6 +56,14 @@ TransportBar::TransportBar ()
 	, _click_enabled (false)
 	, _group_active (false)
 	, _tempo_bpm (120.f)
+	, _shuttle_norm (0.f)
+	, _bbt_bars (1)
+	, _bbt_beats (1)
+	, _bbt_ticks (0)
+	, _tc_hours (0)
+	, _tc_minutes (0)
+	, _tc_seconds (0)
+	, _tc_frames (0)
 {
 }
 
@@ -91,10 +102,30 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_track_up_btn, x, narrow);
 	place (_track_dn_btn, x, narrow);
 	place (_group_btn, x, narrow + 6.f * dpi_scale);
+	place (_shuttle_btn, x, btn_w * 2.2f);
 	place (_import_btn, x, btn_w * 1.15f);
 	place (_save_btn, x, btn_w);
 	place (_open_btn, x, btn_w);
 	place (_export_btn, x, btn_w * 1.2f);
+}
+
+float
+TransportBar::shuttle_speed_at_x (float x) const
+{
+	float w = _shuttle_btn.right - _shuttle_btn.left;
+	if (w < 1.f) {
+		return 0.f;
+	}
+	float t = (x - _shuttle_btn.left) / w; /* 0..1 */
+	t = std::max (0.f, std::min (1.f, t));
+	float n = (t - 0.5f) * 2.f; /* −1..+1 */
+	if (std::fabs (n) < 0.08f) {
+		return 0.f; /* center deadzone */
+	}
+	/* Ease toward extremes: |n|→speed up to ±8. */
+	float mag = std::fabs (n);
+	float speed = (mag * mag) * 8.f;
+	return (n < 0.f) ? -speed : speed;
 }
 
 TransportHit
@@ -156,6 +187,9 @@ TransportBar::hit_test (float x, float y) const
 	}
 	if (contains (_group_btn, x, y)) {
 		return TransportHit::Group;
+	}
+	if (contains (_shuttle_btn, x, y)) {
+		return TransportHit::Shuttle;
 	}
 	if (contains (_import_btn, x, y)) {
 		return TransportHit::Import;
@@ -224,31 +258,61 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_track_up_btn, L"▲", false);
 	draw_btn (_track_dn_btn, L"▼", false);
 	draw_btn (_group_btn, L"Grp", _group_active);
+
+	/* Shuttle strip: track + thumb. */
+	{
+		rt->FillRectangle (_shuttle_btn, edge);
+		float mid = (_shuttle_btn.left + _shuttle_btn.right) * 0.5f;
+		rt->DrawLine (D2D1::Point2F (mid, _shuttle_btn.top + 3.f * dpi_scale),
+		              D2D1::Point2F (mid, _shuttle_btn.bottom - 3.f * dpi_scale),
+		              brand, 1.f);
+		float thumb_n = std::max (-1.f, std::min (1.f, _shuttle_norm));
+		float tw = 8.f * dpi_scale;
+		float tx = mid + thumb_n * ((_shuttle_btn.right - _shuttle_btn.left) * 0.5f - tw);
+		D2D1_RECT_F thumb = D2D1::RectF (tx - tw * 0.5f, _shuttle_btn.top + 2.f * dpi_scale,
+		                                 tx + tw * 0.5f, _shuttle_btn.bottom - 2.f * dpi_scale);
+		rt->FillRectangle (thumb, std::fabs (thumb_n) > 0.05f ? accent : brand);
+		DWRITE_TEXT_ALIGNMENT ta = fmt->GetTextAlignment ();
+		DWRITE_PARAGRAPH_ALIGNMENT pa = fmt->GetParagraphAlignment ();
+		fmt->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
+		fmt->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+		rt->DrawTextW (L"Scrub", 5, fmt, _shuttle_btn, brand);
+		fmt->SetTextAlignment (ta);
+		fmt->SetParagraphAlignment (pa);
+	}
+
 	draw_btn (_import_btn, L"Import", false);
 	draw_btn (_save_btn, L"Save", false);
 	draw_btn (_open_btn, L"Open", false);
 	draw_btn (_export_btn, L"Export", false);
 
-	wchar_t clock[112];
+	wchar_t clock[160];
 	int m = (int)(playhead_sec / 60.f);
 	float s = playhead_sec - (float)m * 60.f;
 	int bpm_i = (int)(_tempo_bpm + 0.5f);
+	const wchar_t* mode = L"−/+ tempo";
 	if (_recording) {
-		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  %d BPM  ·  RECORDING", m, s, bpm_i);
+		mode = L"RECORDING";
 	} else if (_loop_playing) {
-		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  %d BPM  ·  LOOP", m, s, bpm_i);
+		mode = L"LOOP";
 	} else if (_count_in_enabled && _record_armed) {
-		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  %d BPM  ·  count-in", m, s, bpm_i);
+		mode = L"count-in";
 	} else if (_record_armed) {
-		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  %d BPM  ·  rec armed", m, s, bpm_i);
+		mode = L"rec armed";
 	} else if (_click_enabled) {
-		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  %d BPM  ·  click", m, s, bpm_i);
-	} else {
-		_snwprintf_s (clock, _TRUNCATE,
-		              _snap_enabled ? L"%02d:%05.2f  ·  %d BPM  ·  snap"
-		                            : L"%02d:%05.2f  ·  %d BPM  ·  −/+ tempo",
-		              m, s, bpm_i);
+		mode = L"click";
+	} else if (_snap_enabled) {
+		mode = L"snap";
+	} else if (std::fabs (_shuttle_norm) > 0.05f) {
+		mode = L"shuttle";
 	}
+
+	_snwprintf_s (clock, _TRUNCATE,
+	              L"%02d:%05.2f  ·  %d|%d|%03d  ·  %02d:%02d:%02d:%02d  ·  %d BPM  ·  %s",
+	              m, s,
+	              _bbt_bars, _bbt_beats, _bbt_ticks,
+	              _tc_hours, _tc_minutes, _tc_seconds, _tc_frames,
+	              bpm_i, mode);
 
 	float clock_left = _export_btn.right + 8.f * dpi_scale;
 	DWRITE_TEXT_ALIGNMENT ta = fmt->GetTextAlignment ();
