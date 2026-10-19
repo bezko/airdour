@@ -121,6 +121,16 @@ struct EngineSnapshot {
 	int          spectrum_track; /* source track index, or −1 when master */
 	float        spectrum_band[kSpectrumBands]; /* 0..1 display levels */
 	wchar_t      spectrum_label[32];
+	/* Phase correlation / goniometer (UI-rate L/R window; no RT alloc). */
+	static constexpr int kGonioPts = 64;
+	bool         correlation_enabled;
+	bool         correlation_ok;
+	bool         correlation_master; /* true = mix Audio 1..N L/R; false = selected */
+	int          correlation_track;
+	float        correlation; /* −1..+1 Pearson L/R */
+	float        gonio_x[kGonioPts]; /* L (−1..+1) */
+	float        gonio_y[kGonioPts]; /* R (−1..+1) */
+	wchar_t      correlation_label[32];
 	float        midi_activity; /* 0..1 decaying activity indicator */
 	int          midi_device_count;
 	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices];
@@ -916,6 +926,18 @@ public:
 	bool toggle_spectrum_master ();
 
 	/**
+	 * Enable phase correlation; verify mono (+1) and anti-phase (−1) synthetics.
+	 * For --smoke-correlation.
+	 */
+	bool smoke_correlation ();
+	/** Toggle UI-rate phase / goniometer (Phase / X). */
+	bool set_correlation_enabled (bool on);
+	bool toggle_correlation_enabled ();
+	bool correlation_enabled () const { return _snap.correlation_enabled; }
+	bool set_correlation_master (bool master);
+	bool toggle_correlation_master ();
+
+	/**
 	 * Scan system VST3 dirs (+ VST3_PATH / AIRDOUR_SMOKE_VST3); list; optionally
 	 * insert first usable audio FX on Audio 2. DSP-only (no GTK UI).
 	 * Scan-only with VST3=0 still returns true (proves path). For --smoke-vst3.
@@ -1014,6 +1036,7 @@ private:
 	void refresh_track_limiter_snap ();
 	void refresh_track_gate_snap ();
 	void refresh_spectrum_snap ();
+	void refresh_correlation_snap ();
 	bool ensure_plugins_scanned ();
 
 	bool        _started;

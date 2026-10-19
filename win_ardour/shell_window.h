@@ -30,6 +30,7 @@
 #include "recent_panel.h"
 #include "recovery_panel.h"
 #include "monitor_strip.h"
+#include "correlation_panel.h"
 #include "spectrum_panel.h"
 #include "transport_bar.h"
 #include "wave_strip.h"
@@ -110,7 +111,8 @@ public:
 	                    bool smoke_delay = false,
 	                    bool smoke_limiter = false,
 	                    bool smoke_gate = false,
-	                    bool smoke_spectrum = false);
+	                    bool smoke_spectrum = false,
+	                    bool smoke_correlation = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -356,8 +358,10 @@ private:
 	AutomationLane _auto_lane;
 	MixerStrip     _mixers[kMixerStrips];
 	MonitorStrip   _monitor;
-	SpectrumPanel  _spectrum;
-	D2D1_RECT_F    _spectrum_bounds;
+	SpectrumPanel     _spectrum;
+	D2D1_RECT_F       _spectrum_bounds;
+	CorrelationPanel  _correlation;
+	D2D1_RECT_F       _correlation_bounds;
 	HistoryPanel   _history;
 	PrefsPanel     _prefs;
 	AboutPanel     _about;

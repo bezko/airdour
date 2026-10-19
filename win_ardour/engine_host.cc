@@ -721,6 +721,16 @@ EngineHost::EngineHost ()
 		_snap.spectrum_band[si] = 0.f;
 	}
 	_snap.spectrum_label[0] = L'\0';
+	_snap.correlation_enabled = false;
+	_snap.correlation_ok = false;
+	_snap.correlation_master = false;
+	_snap.correlation_track = 0;
+	_snap.correlation = 0.f;
+	for (int gi = 0; gi < EngineSnapshot::kGonioPts; ++gi) {
+		_snap.gonio_x[gi] = 0.f;
+		_snap.gonio_y[gi] = 0.f;
+	}
+	_snap.correlation_label[0] = L'\0';
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -12095,6 +12105,285 @@ EngineHost::smoke_spectrum ()
 	}
 }
 
+
+static float
+stereo_correlation (const float* L, const float* R, uint32_t n)
+{
+	if (!L || !R || n < 8) {
+		return 0.f;
+	}
+	double sum_l = 0.0, sum_r = 0.0;
+	for (uint32_t i = 0; i < n; ++i) {
+		sum_l += (double)L[i];
+		sum_r += (double)R[i];
+	}
+	const double mean_l = sum_l / (double)n;
+	const double mean_r = sum_r / (double)n;
+	double num = 0.0, den_l = 0.0, den_r = 0.0;
+	for (uint32_t i = 0; i < n; ++i) {
+		double dl = (double)L[i] - mean_l;
+		double dr = (double)R[i] - mean_r;
+		num += dl * dr;
+		den_l += dl * dl;
+		den_r += dr * dr;
+	}
+	double den = std::sqrt (den_l * den_r);
+	if (den < 1.0e-20) {
+		return 0.f;
+	}
+	double r = num / den;
+	if (r > 1.0) {
+		r = 1.0;
+	}
+	if (r < -1.0) {
+		r = -1.0;
+	}
+	return (float)r;
+}
+
+void
+EngineHost::refresh_correlation_snap ()
+{
+	if (!_snap.correlation_enabled) {
+		_snap.correlation_ok = false;
+		return;
+	}
+	if (!_impl || !_impl->session) {
+		_snap.correlation_ok = false;
+		_snap.correlation *= 0.85f;
+		return;
+	}
+
+	static float left[kSpecFftN];
+	static float right[kSpecFftN];
+	static float mixdown[kSpecFftN];
+	static float gainbuf[kSpecFftN];
+	std::memset (left, 0, sizeof (left));
+	std::memset (right, 0, sizeof (right));
+
+	samplepos_t pos = _impl->session->transport_sample ();
+	if (pos < 0) {
+		pos = 0;
+	}
+
+	bool got = false;
+	try {
+		collect_tracks ();
+		if (_snap.correlation_master) {
+			_snap.correlation_track = -1;
+			wcsncpy_s (_snap.correlation_label, L"Master L/R", _TRUNCATE);
+			float scale = 1.f;
+			int ntr = (int)_impl->tracks.size ();
+			if (ntr > 1) {
+				scale = 1.f / std::sqrt ((float)ntr);
+			}
+			for (size_t t = 0; t < _impl->tracks.size (); ++t) {
+				std::shared_ptr<AudioTrack> at = _impl->tracks[t];
+				if (!at || !at->playlist ()) {
+					continue;
+				}
+				std::shared_ptr<AudioPlaylist> apl =
+				    std::dynamic_pointer_cast<AudioPlaylist> (at->playlist ());
+				if (!apl) {
+					continue;
+				}
+				static float dst_l[kSpecFftN];
+				static float dst_r[kSpecFftN];
+				std::memset (dst_l, 0, sizeof (dst_l));
+				std::memset (dst_r, 0, sizeof (dst_r));
+				std::memset (mixdown, 0, sizeof (mixdown));
+				std::memset (gainbuf, 0, sizeof (gainbuf));
+				apl->read (dst_l, mixdown, gainbuf,
+				           timepos_t (pos), timecnt_t ((samplecnt_t)kSpecFftN), 0);
+				std::memset (mixdown, 0, sizeof (mixdown));
+				std::memset (gainbuf, 0, sizeof (gainbuf));
+				apl->read (dst_r, mixdown, gainbuf,
+				           timepos_t (pos), timecnt_t ((samplecnt_t)kSpecFftN), 1);
+				/* Mono playlist: chan1 empty → copy L to R. */
+				float er = 0.f;
+				for (uint32_t i = 0; i < kSpecFftN; ++i) {
+					er += std::fabs (dst_r[i]);
+				}
+				if (er < 1.0e-6f) {
+					std::memcpy (dst_r, dst_l, sizeof (dst_r));
+				}
+				for (uint32_t i = 0; i < kSpecFftN; ++i) {
+					left[i] += dst_l[i] * scale;
+					right[i] += dst_r[i] * scale;
+				}
+				got = true;
+			}
+		} else {
+			int tr = _snap.selection_track;
+			if (tr < 0 || tr >= (int)_impl->tracks.size () || !_impl->tracks[tr]) {
+				tr = 0;
+			}
+			_snap.correlation_track = tr;
+			if (tr < EngineSnapshot::kMeters && _snap.track_name[tr][0]) {
+				wcsncpy_s (_snap.correlation_label, _snap.track_name[tr], _TRUNCATE);
+			} else {
+				wchar_t lab[32];
+				std::swprintf (lab, 32, L"Audio %d", tr + 1);
+				wcsncpy_s (_snap.correlation_label, lab, _TRUNCATE);
+			}
+			if (tr < (int)_impl->tracks.size () && _impl->tracks[tr]
+			    && _impl->tracks[tr]->playlist ()) {
+				std::shared_ptr<AudioPlaylist> apl =
+				    std::dynamic_pointer_cast<AudioPlaylist> (
+				        _impl->tracks[tr]->playlist ());
+				if (apl) {
+					std::memset (mixdown, 0, sizeof (mixdown));
+					std::memset (gainbuf, 0, sizeof (gainbuf));
+					apl->read (left, mixdown, gainbuf,
+					           timepos_t (pos), timecnt_t ((samplecnt_t)kSpecFftN), 0);
+					std::memset (mixdown, 0, sizeof (mixdown));
+					std::memset (gainbuf, 0, sizeof (gainbuf));
+					apl->read (right, mixdown, gainbuf,
+					           timepos_t (pos), timecnt_t ((samplecnt_t)kSpecFftN), 1);
+					float er = 0.f;
+					for (uint32_t i = 0; i < kSpecFftN; ++i) {
+						er += std::fabs (right[i]);
+					}
+					if (er < 1.0e-6f) {
+						std::memcpy (right, left, sizeof (right));
+					}
+					got = true;
+				}
+			}
+		}
+	} catch (...) {
+		got = false;
+	}
+
+	float r = stereo_correlation (left, right, kSpecFftN);
+	float energy = 0.f;
+	for (uint32_t i = 0; i < kSpecFftN; ++i) {
+		energy += std::fabs (left[i]) + std::fabs (right[i]);
+	}
+	if (!got || energy < 1.0e-5f) {
+		_snap.correlation *= 0.88f;
+		_snap.correlation_ok = got;
+		return;
+	}
+	_snap.correlation = _snap.correlation * 0.55f + r * 0.45f;
+
+	/* Decimate for goniometer dots. */
+	const uint32_t step = kSpecFftN / EngineSnapshot::kGonioPts;
+	float peak = 1.0e-6f;
+	for (uint32_t i = 0; i < kSpecFftN; ++i) {
+		peak = std::max (peak, std::fabs (left[i]));
+		peak = std::max (peak, std::fabs (right[i]));
+	}
+	const float inv = 1.f / peak;
+	for (int i = 0; i < EngineSnapshot::kGonioPts; ++i) {
+		uint32_t idx = (uint32_t)i * step;
+		if (idx >= kSpecFftN) {
+			idx = kSpecFftN - 1;
+		}
+		_snap.gonio_x[i] = std::max (-1.f, std::min (1.f, left[idx] * inv));
+		_snap.gonio_y[i] = std::max (-1.f, std::min (1.f, right[idx] * inv));
+	}
+	_snap.correlation_ok = true;
+}
+
+bool
+EngineHost::set_correlation_enabled (bool on)
+{
+	_snap.correlation_enabled = on;
+	if (!on) {
+		_snap.correlation_ok = false;
+		_snap.correlation = 0.f;
+		_snap.detail = L"phase meter off";
+		return true;
+	}
+	refresh_correlation_snap ();
+	_snap.detail = L"phase meter on";
+	return true;
+}
+
+bool
+EngineHost::toggle_correlation_enabled ()
+{
+	return set_correlation_enabled (!_snap.correlation_enabled);
+}
+
+bool
+EngineHost::set_correlation_master (bool master)
+{
+	_snap.correlation_master = master;
+	if (_snap.correlation_enabled) {
+		refresh_correlation_snap ();
+	}
+	return true;
+}
+
+bool
+EngineHost::toggle_correlation_master ()
+{
+	return set_correlation_master (!_snap.correlation_master);
+}
+
+bool
+EngineHost::smoke_correlation ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-correlation failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_correlation_enabled (true) || !_snap.correlation_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-correlation FAILED (enable)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		static float L[kSpecFftN];
+		static float R[kSpecFftN];
+		for (uint32_t i = 0; i < kSpecFftN; ++i) {
+			float s = 0.3f * std::sin (2.f * 3.14159265f * (float)i / 32.f);
+			L[i] = s;
+			R[i] = s;
+		}
+		float r_mono = stereo_correlation (L, R, kSpecFftN);
+		if (r_mono < 0.95f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-correlation FAILED (mono=%.3f)\n",
+			              r_mono);
+			std::fflush (stderr);
+			return false;
+		}
+		for (uint32_t i = 0; i < kSpecFftN; ++i) {
+			R[i] = -L[i];
+		}
+		float r_anti = stereo_correlation (L, R, kSpecFftN);
+		if (r_anti > -0.95f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-correlation FAILED (anti=%.3f)\n",
+			              r_anti);
+			std::fflush (stderr);
+			return false;
+		}
+
+		_snap.correlation = r_mono;
+		set_correlation_master (false);
+		refresh_correlation_snap ();
+		set_correlation_master (true);
+		refresh_correlation_snap ();
+		set_correlation_master (false);
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-correlation ok (mono=%.2f anti=%.2f)\n",
+		              r_mono, r_anti);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-correlation ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-correlation exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_perf (unsigned sample_secs)
 {
@@ -12945,6 +13234,7 @@ EngineHost::refresh_snapshot ()
 			refresh_track_limiter_snap ();
 			refresh_track_gate_snap ();
 			refresh_spectrum_snap ();
+			refresh_correlation_snap ();
 		} else {
 			_snap.waves_from_session = false;
 			_snap.session_record_armed = false;
@@ -13151,6 +13441,16 @@ EngineHost::EngineHost ()
 		_snap.spectrum_band[si] = 0.f;
 	}
 	_snap.spectrum_label[0] = L'\0';
+	_snap.correlation_enabled = false;
+	_snap.correlation_ok = false;
+	_snap.correlation_master = false;
+	_snap.correlation_track = 0;
+	_snap.correlation = 0.f;
+	for (int gi = 0; gi < EngineSnapshot::kGonioPts; ++gi) {
+		_snap.gonio_x[gi] = 0.f;
+		_snap.gonio_y[gi] = 0.f;
+	}
+	_snap.correlation_label[0] = L'\0';
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -14930,6 +15230,38 @@ EngineHost::toggle_spectrum_master ()
 }
 
 bool
+EngineHost::smoke_correlation ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_correlation_enabled (bool on)
+{
+	(void)on;
+	return false;
+}
+
+bool
+EngineHost::toggle_correlation_enabled ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_correlation_master (bool master)
+{
+	(void)master;
+	return false;
+}
+
+bool
+EngineHost::toggle_correlation_master ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_vst3 ()
 {
 	return false;
@@ -14974,6 +15306,11 @@ EngineHost::refresh_track_gate_snap ()
 
 void
 EngineHost::refresh_spectrum_snap ()
+{
+}
+
+void
+EngineHost::refresh_correlation_snap ()
 {
 }
 

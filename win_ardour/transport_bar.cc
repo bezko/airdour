@@ -52,6 +52,7 @@ TransportBar::TransportBar ()
 	, _prefs_btn ()
 	, _about_btn ()
 	, _spectrum_btn ()
+	, _phase_btn ()
 	, _playing (false)
 	, _recording (false)
 	, _record_armed (false)
@@ -64,6 +65,7 @@ TransportBar::TransportBar ()
 	, _click_enabled (false)
 	, _group_active (false)
 	, _spectrum_enabled (false)
+	, _correlation_enabled (false)
 	, _tempo_bpm (120.f)
 	, _shuttle_norm (0.f)
 	, _bbt_bars (1)
@@ -124,6 +126,7 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_fit_selection_btn, x, narrow + 4.f * dpi_scale);
 	place (_fit_regions_btn, x, narrow + 4.f * dpi_scale);
 	place (_spectrum_btn, x, btn_w);
+	place (_phase_btn, x, btn_w * 1.15f);
 	place (_help_btn, x, narrow);
 	place (_prefs_btn, x, btn_w * 1.1f);
 	place (_about_btn, x, btn_w * 1.15f);
@@ -251,6 +254,9 @@ TransportBar::hit_test (float x, float y) const
 	if (contains (_spectrum_btn, x, y)) {
 		return TransportHit::Spectrum;
 	}
+	if (contains (_phase_btn, x, y)) {
+		return TransportHit::Phase;
+	}
 	if (contains (_help_btn, x, y)) {
 		return TransportHit::Help;
 	}
@@ -362,6 +368,7 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_fit_selection_btn, L"Sel", false);
 	draw_btn (_fit_regions_btn, L"All", false);
 	draw_btn (_spectrum_btn, L"Spec", _spectrum_enabled);
+	draw_btn (_phase_btn, L"Phase", _correlation_enabled);
 	draw_btn (_help_btn, L"?", false);
 	draw_btn (_prefs_btn, L"Prefs", false);
 	draw_btn (_about_btn, L"About", false);
