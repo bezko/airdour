@@ -5147,6 +5147,120 @@ EngineHost::strip_silence_selected (float threshold_dbfs,
 	}
 }
 
+bool
+EngineHost::consolidate_range (int track, float start_sec, float end_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"consolidate — bad track";
+		return false;
+	}
+	if (!(end_sec > start_sec) || !std::isfinite (start_sec) || !std::isfinite (end_sec)) {
+		_snap.detail = L"consolidate — bad range";
+		return false;
+	}
+	if (start_sec < 0.f) {
+		start_sec = 0.f;
+	}
+	try {
+		std::shared_ptr<AudioTrack> at = _impl->tracks[track];
+		std::shared_ptr<Playlist> pl = at->playlist ();
+		if (!pl) {
+			_snap.detail = L"consolidate — no playlist";
+			return false;
+		}
+
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		samplepos_t start = (samplepos_t)std::llround ((double)start_sec * (double)sr);
+		samplepos_t end = (samplepos_t)std::llround ((double)end_sec * (double)sr);
+		if (end <= start) {
+			_snap.detail = L"consolidate — empty range";
+			return false;
+		}
+
+		int n0 = track_region_count (track);
+
+		InterThreadInfo itt;
+		itt.cancel = false;
+		itt.done = false;
+		/* No processing: tap before processors (nil endpoint) — GTK consolidate. */
+		std::shared_ptr<Region> bounced = at->bounce_range (
+			start, end, itt, std::shared_ptr<Processor> (), false, "Consolidated", true);
+		if (!bounced || itt.cancel) {
+			std::fprintf (stderr, "airdour_win_shell: consolidate bounce_range failed\n");
+			std::fflush (stderr);
+			_snap.detail = L"consolidate bounce failed";
+			return false;
+		}
+
+		PropertyList plist;
+		plist.add (Properties::whole_file, false);
+		std::shared_ptr<Region> copy = RegionFactory::create (bounced, plist);
+		if (!copy) {
+			_snap.detail = L"consolidate — region copy failed";
+			return false;
+		}
+
+		timepos_t t0 (start);
+		timepos_t t1 (end);
+
+		_impl->session->begin_reversible_command ("consolidate");
+		pl->clear_changes ();
+		pl->clear_owned_changes ();
+
+		std::list<TimelineRange> ranges;
+		ranges.push_back (TimelineRange (t0, t1, 0));
+		pl->cut (ranges);
+		pl->add_region (copy, t0);
+
+		std::vector<Command*> cmds;
+		pl->rdiff (cmds);
+		_impl->session->add_commands (cmds);
+		_impl->session->add_command (new StatefulDiffCommand (pl));
+		_impl->session->commit_reversible_command ();
+
+		_impl->selected_track = track;
+		_impl->selected_region = copy;
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+
+		int n1 = track_region_count (track);
+		std::fprintf (stderr,
+		              "airdour_win_shell: consolidate ok (track %d [%.3f..%.3f]s "
+		              "regions %d→%d)\n",
+		              track, start_sec, end_sec, n0, n1);
+		std::fflush (stderr);
+		_snap.detail = L"consolidate — peaks refresh";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: consolidate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"consolidate exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"consolidate failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::consolidate_selected ()
+{
+	if (!_snap.has_selection || _snap.selection_track < 0) {
+		_snap.detail = L"consolidate — select a region";
+		return false;
+	}
+	return consolidate_range (_snap.selection_track,
+	                          _snap.selection_start_sec,
+	                          _snap.selection_end_sec);
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -5936,6 +6050,96 @@ EngineHost::smoke_strip_silence ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-strip-silence exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_consolidate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-consolidate failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-consolidate FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 1.0f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-consolidate FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		int n0 = track_region_count (0);
+		if (n0 < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-consolidate FAILED (n0=%d)\n", n0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!split_at (0.5f, 0)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-consolidate FAILED (split)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		int n1 = track_region_count (0);
+		if (n1 < n0 + 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-consolidate FAILED (split regions %d→%d)\n",
+			              n0, n1);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		/* Bounce range covering both halves → one consolidated region. */
+		if (!consolidate_range (0, 0.f, 1.0f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-consolidate FAILED (consolidate)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		int n2 = track_region_count (0);
+		if (n2 != 1) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-consolidate FAILED (regions %d→%d→%d want 1)\n",
+			              n0, n1, n2);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!_snap.has_selection) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-consolidate FAILED (no selection)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float len = _snap.selection_end_sec - _snap.selection_start_sec;
+		if (len < 0.85f || len > 1.15f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-consolidate FAILED (len=%.3f)\n",
+			              len);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-consolidate ok (regions %d→%d→%d len=%.2f)\n",
+		              n0, n1, n2, len);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-consolidate ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-consolidate exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -10743,6 +10947,21 @@ EngineHost::strip_silence_selected (float threshold_dbfs,
 	return false;
 }
 
+bool
+EngineHost::consolidate_range (int track, float start_sec, float end_sec)
+{
+	(void)track;
+	(void)start_sec;
+	(void)end_sec;
+	return false;
+}
+
+bool
+EngineHost::consolidate_selected ()
+{
+	return false;
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -10838,6 +11057,12 @@ EngineHost::smoke_normalize ()
 
 bool
 EngineHost::smoke_strip_silence ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_consolidate ()
 {
 	return false;
 }

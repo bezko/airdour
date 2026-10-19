@@ -226,7 +226,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_pitch,
                             bool smoke_reverse,
                             bool smoke_normalize,
-                            bool smoke_strip_silence)
+                            bool smoke_strip_silence,
+                            bool smoke_consolidate)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -479,6 +480,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_strip_silence) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-strip-silence FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_consolidate && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_consolidate ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_consolidate) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-consolidate FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2261,6 +2275,23 @@ ShellWindow::do_strip_silence_selection ()
 }
 
 void
+ShellWindow::do_consolidate_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.consolidate_selected ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::do_toggle_snap ()
 {
 	if (!_engine.is_linked ()) {
@@ -2757,6 +2788,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'I' || wparam == 'i')) {
 			/* I = strip silence on selection (−40 dBFS threshold). */
 			do_strip_silence_selection ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'B' || wparam == 'b')) {
+			/* B = consolidate / bounce selection in place. */
+			do_consolidate_selection ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'G' || wparam == 'g')) {
 			if (GetKeyState (VK_SHIFT) & 0x8000) {
 				do_cycle_snap_density ();
@@ -3225,6 +3259,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::StripSilence) {
 		do_strip_silence_selection ();
+		return true;
+	}
+	if (th == TransportHit::Consolidate) {
+		do_consolidate_selection ();
 		return true;
 	}
 	if (th == TransportHit::Snap) {
@@ -4680,6 +4718,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"V", L"Reverse selected audio region" },
 		{ L"N", L"Normalize selection to −1 dBFS" },
 		{ L"I", L"Strip silence (−40 dBFS threshold)" },
+		{ L"B", L"Consolidate / bounce selection in place" },
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },

@@ -444,6 +444,15 @@ public:
 	                             float min_silence_sec = 0.05f,
 	                             float fade_sec = 0.005f);
 
+	/**
+	 * Consolidate (bounce in place) a track time range to one new region.
+	 * Track::bounce_range (no processing) → cut range → add discrete copy.
+	 */
+	bool consolidate_range (int track, float start_sec, float end_sec);
+
+	/** Consolidate selected region extent (selection_start..end) in place. */
+	bool consolidate_selected ();
+
 	/** Snap-to-grid: TempoMap beat/bar (fallback fixed 120 BPM). */
 	void set_snap_enabled (bool on);
 	bool snap_enabled () const;
@@ -517,6 +526,12 @@ public:
 	 * For --smoke-strip-silence.
 	 */
 	bool smoke_strip_silence ();
+
+	/**
+	 * Import → split → consolidate range covering both → 1 region.
+	 * For --smoke-consolidate.
+	 */
+	bool smoke_consolidate ();
 
 	/**
 	 * Enable beat snap; verify 1.1s → ~1.0s; density bar; off → identity.
