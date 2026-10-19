@@ -125,6 +125,7 @@ ShellWindow::ShellWindow ()
 	, _editor_ruler ()
 	, _midi_lane ()
 	, _auto_lane_bounds ()
+	, _midi_cc_lane_bounds ()
 	, _mixer_pane ()
 	, _status_bar ()
 	, _d2d_factory (nullptr)
@@ -152,6 +153,7 @@ ShellWindow::ShellWindow ()
 	, _pulse (0.f)
 	, _engine_snap ()
 	, _auto_last_write_sec (-1.f)
+	, _midi_cc_last_write_sec (-1.f)
 {
 	enable_dpi_awareness ();
 	_engine_snap = _engine.snapshot ();
@@ -254,7 +256,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_step,
                             bool smoke_midi_chord,
                             bool smoke_midi_arp,
-                            bool smoke_midi_scale)
+                            bool smoke_midi_scale,
+                            bool smoke_midi_cc)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -432,6 +435,17 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_scale) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-scale FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi_cc && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_cc ()) {
+			_smoke_failed = true;
+		} else {
+			refresh_midi_cc_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_cc) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -1253,6 +1267,65 @@ ShellWindow::draw_automation_lane ()
 	}
 	_auto_lane.draw (_rt, _auto_lane_bounds, _brush_accent, _brush_body,
 	                 _brush_pane_edge, _brush_playhead, _fmt_meta, _dpi_scale);
+}
+
+void
+ShellWindow::refresh_midi_cc_lane ()
+{
+	_midi_cc_lane.set_label (L"CC7 · Volume");
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float curve[AutomationLane::kMaxColumns];
+	size_t n = AutomationLane::kMaxColumns;
+	if (_engine.is_linked () && _engine_snap.session_ok) {
+		_engine.fill_midi_cc_automation_curve (view0, span, curve, n);
+	} else {
+		const float def = 100.f / 127.f;
+		for (size_t i = 0; i < n; ++i) {
+			curve[i] = def;
+		}
+	}
+	_midi_cc_lane.set_curve (curve, n);
+
+	float px[AutomationLane::kMaxPoints];
+	float py[AutomationLane::kMaxPoints];
+	int npt = 0;
+	if (_engine.is_linked () && _engine_snap.session_ok) {
+		npt = _engine.fill_midi_cc_automation_points (
+			view0, span, px, py, (int)AutomationLane::kMaxPoints);
+	}
+	_midi_cc_lane.set_points (px, py, (size_t)std::max (0, npt));
+	_midi_cc_lane.set_playhead_norm (_lanes[0].strip.playhead_norm ());
+}
+
+void
+ShellWindow::write_midi_cc_at (float x, float y)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	float time_sec = _lanes[0].strip.time_at_x (_midi_cc_lane_bounds, x);
+	float value = _midi_cc_lane.value_at_y (_midi_cc_lane_bounds, y);
+	if (_drag == DragMode::MidiCcWrite && _midi_cc_last_write_sec >= 0.f
+	    && std::fabs (time_sec - _midi_cc_last_write_sec) < 0.035f) {
+		return;
+	}
+	if (_engine.write_midi_cc_automation (time_sec, value)) {
+		_midi_cc_last_write_sec = time_sec;
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		refresh_midi_cc_lane ();
+	}
+}
+
+void
+ShellWindow::draw_midi_cc_lane ()
+{
+	if (_midi_cc_lane_bounds.right <= _midi_cc_lane_bounds.left) {
+		return;
+	}
+	_midi_cc_lane.draw (_rt, _midi_cc_lane_bounds, _brush_midi, _brush_body,
+	                    _brush_pane_edge, _brush_playhead, _fmt_meta, _dpi_scale);
 }
 
 void
@@ -3149,6 +3222,7 @@ ShellWindow::layout_panes ()
 	_editor_ruler = D2D1::RectF (wave_left, _editor_pane.top + title_h,
 	                             wave_right, _editor_pane.top + title_h + ruler_h);
 	float midi_h = 118.f * _dpi_scale; /* piano-roll + velocity lane */
+	float midi_cc_h = 40.f * _dpi_scale; /* CC7 automation under MIDI */
 	const bool show_spec = _engine_snap.spectrum_enabled;
 	const bool show_phase = _engine_snap.correlation_enabled;
 	const bool show_lufs = _engine_snap.loudness_enabled;
@@ -3156,6 +3230,7 @@ ShellWindow::layout_panes ()
 	float meter_h = (meter_n > 0) ? (72.f * _dpi_scale) : 0.f;
 	float lanes_top = _editor_ruler.bottom + 4.f * _dpi_scale;
 	float lanes_bot = _editor_pane.bottom - inset - midi_h - lane_gap
+	                  - midi_cc_h - lane_gap
 	                  - (meter_h > 0.f ? (meter_h + lane_gap) : 0.f);
 	const int n_lanes = std::max (1, n_audio_lanes ());
 	float lane_h = (lanes_bot - lanes_top - lane_gap * (float)(n_lanes - 1)) / (float)n_lanes;
@@ -3164,6 +3239,7 @@ ShellWindow::layout_panes ()
 		_lanes[i].bounds = D2D1::RectF ();
 	}
 	_auto_lane_bounds = D2D1::RectF ();
+	_midi_cc_lane_bounds = D2D1::RectF ();
 	for (int i = 0; i < n_lanes; ++i) {
 		float y0 = lanes_top + (float)i * (lane_h + lane_gap);
 		if (i == 0) {
@@ -3184,6 +3260,9 @@ ShellWindow::layout_panes ()
 	}
 	_midi_lane = D2D1::RectF (wave_left, lanes_bot + lane_gap, wave_right,
 	                          lanes_bot + lane_gap + midi_h);
+	_midi_cc_lane_bounds = D2D1::RectF (
+		wave_left, _midi_lane.bottom + 3.f * _dpi_scale, wave_right,
+		_midi_lane.bottom + 3.f * _dpi_scale + midi_cc_h);
 	_spectrum_bounds = D2D1::RectF ();
 	_correlation_bounds = D2D1::RectF ();
 	_loudness_bounds = D2D1::RectF ();
@@ -3191,7 +3270,7 @@ ShellWindow::layout_panes ()
 	_correlation.set_visible (false);
 	_loudness.set_visible (false);
 	if (meter_h > 0.f && meter_n > 0) {
-		float meter_top = _midi_lane.bottom + lane_gap;
+		float meter_top = _midi_cc_lane_bounds.bottom + lane_gap;
 		float meter_bot = meter_top + meter_h;
 		float gap_m = 6.f * _dpi_scale;
 		float span = wave_right - wave_left - gap_m * (float)(meter_n - 1);
@@ -3998,7 +4077,8 @@ ShellWindow::on_mouse_wheel (WPARAM wparam, LPARAM lparam)
 	float x = (float)pt.x;
 	float y = (float)pt.y;
 	int lane = hit_editor_lane (x, y);
-	bool over_editor = (lane >= 0) || hit_editor_ruler (x, y) || hit_midi_lane (x, y);
+	bool over_editor = (lane >= 0) || hit_editor_ruler (x, y) || hit_midi_lane (x, y)
+	                   || _midi_cc_lane.hit (_midi_cc_lane_bounds, x, y);
 	if (!over_editor) {
 		return false;
 	}
@@ -4783,6 +4863,19 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
+	if (_midi_cc_lane.hit (_midi_cc_lane_bounds, x, y)
+	    && _engine.is_linked () && _engine_snap.session_ok) {
+		_drag = DragMode::MidiCcWrite;
+		_drag_index = 0;
+		_midi_cc_last_write_sec = -1.f;
+		_engine.ensure_midi_cc_automation ();
+		write_midi_cc_at (x, y);
+		SetCapture (_hwnd);
+		SetCursor (LoadCursorW (nullptr, IDC_CROSS));
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
 	int lane = hit_editor_lane (x, y);
 	if (lane >= 0) {
 		const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
@@ -4966,6 +5059,12 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 
 	if (_drag == DragMode::AutoWrite) {
 		write_automation_at (x, y);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	if (_drag == DragMode::MidiCcWrite) {
+		write_midi_cc_at (x, y);
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
@@ -5364,6 +5463,7 @@ ShellWindow::on_tick ()
 		apply_region_selection_to_lanes ();
 		apply_loop_to_lanes ();
 		refresh_automation_lane ();
+		refresh_midi_cc_lane ();
 		_transport.set_snap_enabled (_engine_snap.snap_enabled);
 		_transport.set_midi_step_enabled (_engine_snap.midi_step_enabled);
 		_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
@@ -5712,6 +5812,7 @@ ShellWindow::draw_editor_pane ()
 
 	draw_automation_lane ();
 	draw_midi_lane ();
+	draw_midi_cc_lane ();
 	draw_punch_overlay ();
 	draw_editor_grid ();
 }

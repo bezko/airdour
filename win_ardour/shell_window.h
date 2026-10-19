@@ -124,7 +124,8 @@ public:
 	                    bool smoke_midi_step = false,
 	                    bool smoke_midi_chord = false,
 	                    bool smoke_midi_arp = false,
-	                    bool smoke_midi_scale = false);
+	                    bool smoke_midi_scale = false,
+	                    bool smoke_midi_cc = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -141,6 +142,7 @@ private:
 		Pan, /* drag Mixer pan azimuth */
 		Send, /* drag Mixer aux send level */
 		AutoWrite, /* click/drag Editor automation lane */
+		MidiCcWrite, /* click/drag MIDI CC7 automation lane */
 		FadeIn, /* drag selection fade-in handle */
 		FadeOut, /* drag selection fade-out handle */
 		TrimFront, /* drag selected region left edge */
@@ -191,6 +193,9 @@ private:
 	void draw_automation_lane ();
 	void refresh_automation_lane ();
 	void write_automation_at (float x, float y);
+	void draw_midi_cc_lane ();
+	void refresh_midi_cc_lane ();
+	void write_midi_cc_at (float x, float y);
 	void draw_mixer_pane ();
 	void draw_help_overlay ();
 	void toggle_help ();
@@ -371,6 +376,7 @@ private:
 	D2D1_RECT_F _editor_ruler;
 	D2D1_RECT_F _midi_lane;
 	D2D1_RECT_F _auto_lane_bounds;
+	D2D1_RECT_F _midi_cc_lane_bounds;
 	D2D1_RECT_F _mixer_pane;
 	D2D1_RECT_F _status_bar;
 
@@ -403,6 +409,7 @@ private:
 	TransportBar   _transport;
 	EditorLane     _lanes[kTracks];
 	AutomationLane _auto_lane;
+	AutomationLane _midi_cc_lane;
 	MixerStrip     _mixers[kMixerStrips];
 	MonitorStrip   _monitor;
 	SpectrumPanel     _spectrum;
@@ -417,4 +424,5 @@ private:
 	RecentPanel    _recent;
 	RecoveryPanel  _recovery;
 	float          _auto_last_write_sec;
+	float          _midi_cc_last_write_sec;
 };

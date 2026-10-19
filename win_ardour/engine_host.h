@@ -397,6 +397,31 @@ public:
 	/** Clear → 3 points → Play. For --smoke-automation. */
 	bool smoke_automation ();
 
+	/**
+	 * MidiModel CC AutomationList (region automation, BeatTime). Default CC7
+	 * (volume) on channel 0. Values stored 0..127; API uses 0..1 for the D2D lane.
+	 */
+	static constexpr int kMidiCcVolume = 7;
+	bool ensure_midi_cc_automation (int cc = kMidiCcVolume, int channel = 0);
+	bool write_midi_cc_automation (float time_sec, float value_0_1,
+	                               int cc = kMidiCcVolume, int channel = 0);
+	bool clear_midi_cc_automation (int cc = kMidiCcVolume, int channel = 0);
+	bool fill_midi_cc_automation_curve (float view_start_sec,
+	                                    float view_span_sec,
+	                                    float* y_0_1,
+	                                    size_t n,
+	                                    int cc = kMidiCcVolume,
+	                                    int channel = 0);
+	int  fill_midi_cc_automation_points (float view_start_sec,
+	                                     float view_span_sec,
+	                                     float* x_norm,
+	                                     float* y_0_1,
+	                                     int max_n,
+	                                     int cc = kMidiCcVolume,
+	                                     int channel = 0);
+	/** Clear → 3 CC7 points → Play. For --smoke-midi-cc. */
+	bool smoke_midi_cc ();
+
 	/** Clear PeakMeter max-peak / clip latch on Audio track (0..kMeters-1). */
 	bool clear_track_meter_clip (int track);
 
@@ -1187,6 +1212,8 @@ public:
 	 * For --smoke-midi-scale.
 	 */
 	bool smoke_midi_scale ();
+
+	/* smoke_midi_cc declared with MIDI CC automation APIs above. */
 
 	std::string session_dir () const;
 	std::string last_export_path () const;
