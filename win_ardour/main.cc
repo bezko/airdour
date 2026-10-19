@@ -137,6 +137,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_recovery = parse_flag (argc, argv, L"--smoke-recovery");
 	bool smoke_stretch = parse_flag (argc, argv, L"--smoke-stretch");
 	bool smoke_pitch = parse_flag (argc, argv, L"--smoke-pitch");
+	bool smoke_reverse = parse_flag (argc, argv, L"--smoke-reverse");
 	bool smoke_perf = parse_flag (argc, argv, L"--smoke-perf");
 	bool no_splash = parse_flag (argc, argv, L"--no-splash");
 	std::string session_path = parse_session_path (argc, argv);
@@ -181,7 +182,7 @@ wmain (int argc, wchar_t** argv)
 		                         smoke_rename, smoke_group, smoke_monitor,
 		                         smoke_locate, smoke_zoom, smoke_history,
 		                         smoke_prefs, smoke_recent, smoke_recovery,
-		                         smoke_stretch, smoke_pitch)) {
+		                         smoke_stretch, smoke_pitch, smoke_reverse)) {
 			const char* be = backend.empty () ? "(prefs/Dummy)" : backend.c_str ();
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", be);
 		} else {

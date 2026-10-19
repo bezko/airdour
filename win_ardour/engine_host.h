@@ -422,6 +422,12 @@ public:
 	 */
 	bool pitch_shift_selected (float semitones = 1.f);
 
+	/**
+	 * Reverse selected AudioRegion via Session Reverse Filter.
+	 * Duration/position held; peaks refresh after playlist replace.
+	 */
+	bool reverse_selected ();
+
 	/** Snap-to-grid: TempoMap beat/bar (fallback fixed 120 BPM). */
 	void set_snap_enabled (bool on);
 	bool snap_enabled () const;
@@ -477,6 +483,12 @@ public:
 	 * For --smoke-pitch.
 	 */
 	bool smoke_pitch ();
+
+	/**
+	 * Import tone → select → reverse; verify duration held.
+	 * For --smoke-reverse.
+	 */
+	bool smoke_reverse ();
 
 	/**
 	 * Enable beat snap; verify 1.1s → ~1.0s; density bar; off → identity.

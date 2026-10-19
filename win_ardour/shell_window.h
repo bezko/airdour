@@ -98,7 +98,8 @@ public:
 	                    bool smoke_recent = false,
 	                    bool smoke_recovery = false,
 	                    bool smoke_stretch = false,
-	                    bool smoke_pitch = false);
+	                    bool smoke_pitch = false,
+	                    bool smoke_reverse = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -190,6 +191,7 @@ private:
 	void do_apply_crossfade ();
 	void do_stretch_selection (float time_ratio = 1.5f);
 	void do_pitch_shift_selection (float semitones = 1.f);
+	void do_reverse_selection ();
 	void do_toggle_snap ();
 	void do_cycle_snap_density ();
 	void do_toggle_loop ();

@@ -68,6 +68,7 @@
 #include "ardour/sndfilesource.h"
 #include "ardour/source_factory.h"
 #include "ardour/pitch.h"
+#include "ardour/reverse.h"
 #include "ardour/stretch.h"
 #include "ardour/timefx_request.h"
 #include "ardour/types.h"
@@ -4790,6 +4791,80 @@ EngineHost::pitch_shift_selected (float semitones)
 	}
 }
 
+bool
+EngineHost::reverse_selected ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (!ar) {
+		_snap.detail = L"reverse — select an audio region";
+		return false;
+	}
+	try {
+		std::shared_ptr<Playlist> pl = ar->playlist ();
+		if (!pl) {
+			_snap.detail = L"reverse — no playlist";
+			return false;
+		}
+
+		samplecnt_t old_len = ar->length_samples ();
+		timepos_t pos = ar->position ();
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		float pos_sec = (float)ar->position_sample () / (float)sr;
+		int track = _impl->selected_track;
+
+		Reverse rev (*_impl->session);
+		if (ar->apply (rev, nullptr) != 0 || rev.results.empty ()) {
+			std::fprintf (stderr, "airdour_win_shell: Reverse filter failed\n");
+			std::fflush (stderr);
+			_snap.detail = L"reverse failed";
+			return false;
+		}
+
+		std::shared_ptr<Region> neu = rev.results.front ();
+		_impl->session->begin_reversible_command ("reverse region");
+		pl->clear_changes ();
+		pl->clear_owned_changes ();
+		pl->replace_region (ar, neu, pos);
+		pl->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		if (track < 0 || !select_region_at (track, pos_sec + 0.01f)) {
+			_impl->selected_region = neu;
+			refresh_selection_snap ();
+		}
+		refresh_region_flags ();
+		refresh_history_flags ();
+
+		samplecnt_t new_len = 0;
+		if (std::shared_ptr<Region> sel = _impl->selected_region.lock ()) {
+			new_len = sel->length_samples ();
+		} else {
+			new_len = neu->length_samples ();
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: reverse ok (samples %lld→%lld)\n",
+		              (long long)old_len, (long long)new_len);
+		std::fflush (stderr);
+		_snap.detail = L"reverse region — peaks refresh";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: reverse exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"reverse exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"reverse failed";
+		return false;
+	}
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -5337,6 +5412,76 @@ EngineHost::smoke_pitch ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pitch exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_reverse ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-reverse failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-reverse FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 330.f, 0.8f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-reverse FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-reverse FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float len0 = _snap.selection_end_sec - _snap.selection_start_sec;
+		float start0 = _snap.selection_start_sec;
+		if (len0 < 0.5f || len0 > 1.2f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-reverse FAILED (len0=%.3f)\n",
+			              len0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!reverse_selected ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-reverse FAILED (reverse)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float len1 = _snap.selection_end_sec - _snap.selection_start_sec;
+		float start1 = _snap.selection_start_sec;
+		if (std::fabs (len1 - len0) > 0.05f || std::fabs (start1 - start0) > 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-reverse FAILED (start/len %.3f/%.3f→%.3f/%.3f)\n",
+			              start0, len0, start1, len1);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-reverse ok (start=%.3f len=%.3f held)\n",
+		              start1, len1);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-reverse ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-reverse exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -10120,6 +10265,12 @@ EngineHost::pitch_shift_selected (float semitones)
 	return false;
 }
 
+bool
+EngineHost::reverse_selected ()
+{
+	return false;
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -10197,6 +10348,12 @@ EngineHost::smoke_stretch ()
 
 bool
 EngineHost::smoke_pitch ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_reverse ()
 {
 	return false;
 }

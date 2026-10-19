@@ -223,7 +223,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_recent,
                             bool smoke_recovery,
                             bool smoke_stretch,
-                            bool smoke_pitch)
+                            bool smoke_pitch,
+                            bool smoke_reverse)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -437,6 +438,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_pitch) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pitch FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_reverse && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_reverse ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_reverse) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-reverse FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2168,6 +2182,23 @@ ShellWindow::do_pitch_shift_selection (float semitones)
 }
 
 void
+ShellWindow::do_reverse_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.reverse_selected ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::do_toggle_snap ()
 {
 	if (!_engine.is_linked ()) {
@@ -2655,6 +2686,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'R' || wparam == 'r')) {
 			/* R = pitch +1 st; Shift+R = −1 st (duration held). */
 			do_pitch_shift_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? -1.f : 1.f);
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'V' || wparam == 'v')) {
+			/* V = reverse selected audio region. */
+			do_reverse_selection ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'G' || wparam == 'g')) {
 			if (GetKeyState (VK_SHIFT) & 0x8000) {
 				do_cycle_snap_density ();
@@ -3111,6 +3145,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::PitchDown) {
 		do_pitch_shift_selection (-1.f);
+		return true;
+	}
+	if (th == TransportHit::Reverse) {
+		do_reverse_selection ();
 		return true;
 	}
 	if (th == TransportHit::Snap) {
@@ -4563,6 +4601,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
+		{ L"V", L"Reverse selected audio region" },
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
