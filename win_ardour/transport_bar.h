@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Direct2D transport: Play / Stop / Rec / Loop / Punch / Mark / Split / Fade /
- * Stretch / Pitch± / Reverse / Norm / Sil / Cons / Snap / Count / Click / Tempo± / Shuttle / Import / Save / Open / Export.
+ * Stretch / Pitch± / Reverse / Norm / Sil / Cons / Frz / Snap / Count / Click / Tempo± / Shuttle / Import / Save / Open / Export.
  * Clock shows MM:SS + BBT + timecode + BPM.
  */
 
@@ -40,6 +40,7 @@ enum class TransportHit {
 	Normalize,
 	StripSilence,
 	Consolidate,
+	Freeze,
 	Snap,
 	CountIn,
 	Click,
@@ -87,6 +88,9 @@ public:
 
 	void set_snap_enabled (bool on) { _snap_enabled = on; }
 	bool snap_enabled () const { return _snap_enabled; }
+
+	void set_freeze_active (bool on) { _freeze_active = on; }
+	bool freeze_active () const { return _freeze_active; }
 
 	void set_count_in_enabled (bool on) { _count_in_enabled = on; }
 	bool count_in_enabled () const { return _count_in_enabled; }
@@ -159,6 +163,7 @@ private:
 	D2D1_RECT_F _normalize_btn;
 	D2D1_RECT_F _strip_silence_btn;
 	D2D1_RECT_F _consolidate_btn;
+	D2D1_RECT_F _freeze_btn;
 	D2D1_RECT_F _snap_btn;
 	D2D1_RECT_F _count_btn;
 	D2D1_RECT_F _click_btn;
@@ -184,6 +189,7 @@ private:
 	bool        _loop_active;
 	bool        _punch_enabled;
 	bool        _snap_enabled;
+	bool        _freeze_active;
 	bool        _count_in_enabled;
 	bool        _click_enabled;
 	bool        _group_active;

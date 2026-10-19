@@ -106,6 +106,7 @@ struct EngineSnapshot {
 	bool         meter_clip[kMeters]; /* ≥0 dBFS / PeakMeter MeterMaxPeak */
 	bool         track_has_regions[kMeters];
 	bool         track_armed[kMeters];
+	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
@@ -453,6 +454,17 @@ public:
 	/** Consolidate selected region extent (selection_start..end) in place. */
 	bool consolidate_selected ();
 
+	/**
+	 * Freeze audio track: bounce session range with FX → frozen playlist,
+	 * deactivate freezable processors (AudioTrack::freeze_me).
+	 */
+	bool freeze_track (int track);
+	/** Restore pre-freeze playlist + processor state (AudioTrack::unfreeze). */
+	bool unfreeze_track (int track);
+	/** Freeze if thawed; unfreeze if Frozen. */
+	bool toggle_freeze_track (int track);
+	bool track_is_frozen (int track) const;
+
 	/** Snap-to-grid: TempoMap beat/bar (fallback fixed 120 BPM). */
 	void set_snap_enabled (bool on);
 	bool snap_enabled () const;
@@ -532,6 +544,12 @@ public:
 	 * For --smoke-consolidate.
 	 */
 	bool smoke_consolidate ();
+
+	/**
+	 * Import → freeze track 0 → Frozen + frozen playlist → unfreeze.
+	 * For --smoke-freeze.
+	 */
+	bool smoke_freeze ();
 
 	/**
 	 * Enable beat snap; verify 1.1s → ~1.0s; density bar; off → identity.
@@ -815,8 +833,10 @@ private:
 	void destroy_session ();
 	void read_meters ();
 	void refresh_region_flags ();
+	void refresh_freeze_flags ();
 	void refresh_record_flags ();
 	void refresh_mute_solo_flags ();
+	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_send_flags ();
 	void refresh_group_flags ();

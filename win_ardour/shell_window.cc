@@ -227,7 +227,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_reverse,
                             bool smoke_normalize,
                             bool smoke_strip_silence,
-                            bool smoke_consolidate)
+                            bool smoke_consolidate,
+                            bool smoke_freeze)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -497,6 +498,20 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_freeze && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_freeze ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+			sync_transport_freeze_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_freeze) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-freeze FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_snap && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_snap ()) {
 			_smoke_failed = true;
@@ -739,6 +754,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	sync_transport_loop_from_engine ();
 	sync_transport_punch_from_engine ();
 	sync_transport_tempo_from_engine ();
+	sync_transport_freeze_from_engine ();
 	sync_track_labels_from_engine ();
 	sync_mixer_gains_from_engine ();
 	sync_mixer_group_from_engine ();
@@ -2292,6 +2308,38 @@ ShellWindow::do_consolidate_selection ()
 }
 
 void
+ShellWindow::sync_transport_freeze_from_engine ()
+{
+	int track = _engine_snap.has_selection ? _engine_snap.selection_track
+	                                       : _focus_audio_track;
+	bool frozen = false;
+	if (track >= 0 && track < EngineSnapshot::kMeters) {
+		frozen = _engine_snap.track_frozen[track];
+	}
+	_transport.set_freeze_active (frozen);
+}
+
+void
+ShellWindow::do_toggle_freeze_track ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	int track = _engine_snap.has_selection ? _engine_snap.selection_track
+	                                       : _focus_audio_track;
+	if (track < 0) {
+		track = 0;
+	}
+	if (_engine.toggle_freeze_track (track)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		sync_transport_freeze_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::do_toggle_snap ()
 {
 	if (!_engine.is_linked ()) {
@@ -2791,6 +2839,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'B' || wparam == 'b')) {
 			/* B = consolidate / bounce selection in place. */
 			do_consolidate_selection ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Z' || wparam == 'z')) {
+			/* Z = freeze / unfreeze focused (or selected) audio track. */
+			do_toggle_freeze_track ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'G' || wparam == 'g')) {
 			if (GetKeyState (VK_SHIFT) & 0x8000) {
 				do_cycle_snap_density ();
@@ -3263,6 +3314,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::Consolidate) {
 		do_consolidate_selection ();
+		return true;
+	}
+	if (th == TransportHit::Freeze) {
+		do_toggle_freeze_track ();
 		return true;
 	}
 	if (th == TransportHit::Snap) {
@@ -4081,6 +4136,7 @@ ShellWindow::on_tick ()
 		sync_transport_loop_from_engine ();
 		sync_transport_punch_from_engine ();
 		sync_transport_tempo_from_engine ();
+		sync_transport_freeze_from_engine ();
 		sync_transport_clock_from_engine ();
 		sync_history_from_engine ();
 		apply_region_selection_to_lanes ();
@@ -4719,6 +4775,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"N", L"Normalize selection to −1 dBFS" },
 		{ L"I", L"Strip silence (−40 dBFS threshold)" },
 		{ L"B", L"Consolidate / bounce selection in place" },
+		{ L"Z", L"Freeze / unfreeze focused audio track" },
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },

@@ -521,6 +521,7 @@ EngineHost::EngineHost ()
 		_snap.meter_clip[i] = false;
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
+		_snap.track_frozen[i] = false;
 		_snap.track_muted[i] = false;
 		_snap.track_soloed[i] = false;
 		_snap.track_pan[i] = 0.5f;
@@ -1782,6 +1783,7 @@ EngineHost::destroy_session ()
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
+		_snap.track_frozen[i] = false;
 	}
 }
 
@@ -2701,6 +2703,28 @@ EngineHost::refresh_region_flags ()
 			}
 			std::shared_ptr<RegionList> regions = pl->region_list ();
 			_snap.track_has_regions[i] = (regions && !regions->empty ());
+		}
+	} catch (...) {
+	}
+	refresh_freeze_flags ();
+}
+
+void
+EngineHost::refresh_freeze_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_frozen[i] = false;
+	}
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	try {
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i >= (int)_impl->tracks.size () || !_impl->tracks[i]) {
+				continue;
+			}
+			_snap.track_frozen[i] =
+				(_impl->tracks[i]->freeze_state () == Track::Frozen);
 		}
 	} catch (...) {
 	}
@@ -5261,6 +5285,212 @@ EngineHost::consolidate_selected ()
 	                          _snap.selection_end_sec);
 }
 
+bool
+EngineHost::ensure_freeze_session_range (int track)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			sr = 48000;
+		}
+
+		samplepos_t min_s = 0;
+		samplepos_t max_e = (samplepos_t)sr; /* at least 1s */
+		std::shared_ptr<Playlist> pl = _impl->tracks[track]->playlist ();
+		if (pl) {
+			std::shared_ptr<RegionList> regions = pl->region_list ();
+			if (regions) {
+				for (RegionList::const_iterator it = regions->begin ();
+				     it != regions->end (); ++it) {
+					if (!*it) {
+						continue;
+					}
+					samplepos_t rs = (*it)->position ().samples ();
+					samplepos_t re = (*it)->end_position ().samples ();
+					if (re > rs && re > max_e) {
+						max_e = re;
+					}
+					if (rs < min_s) {
+						min_s = rs;
+					}
+				}
+			}
+		}
+		/* Pad end so freeze bounce has room past last region. */
+		max_e += (samplepos_t)sr;
+
+		samplepos_t cur_s = _impl->session->current_start_sample ();
+		samplepos_t cur_e = _impl->session->current_end_sample ();
+		if (cur_e > cur_s && cur_s <= min_s && cur_e >= max_e) {
+			return true;
+		}
+		if (cur_s < min_s) {
+			min_s = cur_s;
+		}
+		if (cur_e > max_e) {
+			max_e = cur_e;
+		}
+		if (max_e <= min_s) {
+			max_e = min_s + (samplepos_t)sr;
+		}
+		_impl->session->set_session_extents (timepos_t (min_s), timepos_t (max_e));
+		return _impl->session->current_end_sample () > _impl->session->current_start_sample ();
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::freeze_track (int track)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"freeze — bad track";
+		return false;
+	}
+	try {
+		std::shared_ptr<AudioTrack> at = _impl->tracks[track];
+		if (at->freeze_state () == Track::Frozen) {
+			refresh_freeze_flags ();
+			_snap.detail = L"freeze — already frozen";
+			return true;
+		}
+		if (!at->bounceable (at->main_outs (), true)) {
+			_snap.detail = L"freeze — track not bounceable";
+			return false;
+		}
+		if (!ensure_freeze_session_range (track)) {
+			_snap.detail = L"freeze — session range";
+			return false;
+		}
+
+		/* GTK freeze_route: stop transport before bounce. */
+		try {
+			_impl->session->request_stop (false, false, TRS_UI);
+		} catch (...) {
+		}
+		for (int i = 0; i < 20; ++i) {
+			if (_impl->session->transport_stopped ()) {
+				break;
+			}
+			Sleep (5);
+		}
+
+		InterThreadInfo itt;
+		itt.cancel = false;
+		itt.done = false;
+		at->freeze_me (itt);
+		if (itt.cancel || at->freeze_state () != Track::Frozen) {
+			std::fprintf (stderr, "airdour_win_shell: freeze_me failed (state=%d cancel=%d)\n",
+			              (int)at->freeze_state (), itt.cancel ? 1 : 0);
+			std::fflush (stderr);
+			_snap.detail = L"freeze failed";
+			return false;
+		}
+
+		_impl->selected_track = -1;
+		_impl->selected_region.reset ();
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_track_fx_snap ();
+		refresh_history_flags ();
+
+		std::fprintf (stderr, "airdour_win_shell: freeze ok (track %d frozen=%d)\n",
+		              track, _snap.track_frozen[track] ? 1 : 0);
+		std::fflush (stderr);
+		_snap.detail = L"freeze — peaks refresh";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: freeze exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"freeze exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"freeze failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::unfreeze_track (int track)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"unfreeze — bad track";
+		return false;
+	}
+	try {
+		std::shared_ptr<AudioTrack> at = _impl->tracks[track];
+		if (at->freeze_state () != Track::Frozen) {
+			refresh_freeze_flags ();
+			_snap.detail = L"unfreeze — not frozen";
+			return true;
+		}
+
+		try {
+			_impl->session->request_stop (false, false, TRS_UI);
+		} catch (...) {
+		}
+
+		at->unfreeze ();
+		if (at->freeze_state () == Track::Frozen) {
+			_snap.detail = L"unfreeze failed";
+			return false;
+		}
+
+		_impl->selected_track = -1;
+		_impl->selected_region.reset ();
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_track_fx_snap ();
+		refresh_history_flags ();
+
+		std::fprintf (stderr, "airdour_win_shell: unfreeze ok (track %d)\n", track);
+		std::fflush (stderr);
+		_snap.detail = L"unfreeze — peaks refresh";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: unfreeze exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"unfreeze exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"unfreeze failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_freeze_track (int track)
+{
+	if (track_is_frozen (track)) {
+		return unfreeze_track (track);
+	}
+	return freeze_track (track);
+}
+
+bool
+EngineHost::track_is_frozen (int track) const
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	return _snap.track_frozen[track];
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -6140,6 +6370,92 @@ EngineHost::smoke_consolidate ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-consolidate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_freeze ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-freeze failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-freeze FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 1.0f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-freeze FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		int n0 = track_region_count (0);
+		if (n0 < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-freeze FAILED (n0=%d)\n", n0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		refresh_freeze_flags ();
+		if (_snap.track_frozen[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-freeze FAILED (already frozen)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!freeze_track (0) || !_snap.track_frozen[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-freeze FAILED (freeze)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		int n1 = track_region_count (0);
+		if (n1 < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-freeze FAILED (frozen regions=%d)\n", n1);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::shared_ptr<Playlist> pl = _impl->tracks[0]->playlist ();
+		if (!pl || !pl->frozen ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-freeze FAILED (playlist not frozen)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!unfreeze_track (0) || _snap.track_frozen[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-freeze FAILED (unfreeze)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		int n2 = track_region_count (0);
+		if (n2 < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-freeze FAILED (thawed regions=%d)\n", n2);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-freeze ok (regions %d→%d→%d frozen→thawed)\n",
+		              n0, n1, n2);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-freeze ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-freeze exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -10003,6 +10319,7 @@ EngineHost::refresh_snapshot ()
 			for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 				_snap.track_has_regions[i] = false;
 				_snap.track_armed[i] = false;
+				_snap.track_frozen[i] = false;
 			}
 			/* Closest honest engine path without Session: AudioEngine sample clock. */
 			_snap.transport_rolling = _impl->transport_playing;
@@ -10057,6 +10374,7 @@ EngineHost::EngineHost ()
 		_snap.meter_clip[i] = false;
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
+		_snap.track_frozen[i] = false;
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
 		_snap.track_gain[i] = _track_gain[i];
@@ -10518,6 +10836,11 @@ EngineHost::refresh_region_flags ()
 }
 
 void
+EngineHost::refresh_freeze_flags ()
+{
+}
+
+void
 EngineHost::refresh_record_flags ()
 {
 }
@@ -10525,6 +10848,13 @@ EngineHost::refresh_record_flags ()
 void
 EngineHost::refresh_mute_solo_flags ()
 {
+}
+
+bool
+EngineHost::ensure_freeze_session_range (int track)
+{
+	(void)track;
+	return false;
 }
 
 bool
@@ -10962,6 +11292,34 @@ EngineHost::consolidate_selected ()
 	return false;
 }
 
+bool
+EngineHost::freeze_track (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::unfreeze_track (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::toggle_freeze_track (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::track_is_frozen (int track) const
+{
+	(void)track;
+	return false;
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -11063,6 +11421,12 @@ EngineHost::smoke_strip_silence ()
 
 bool
 EngineHost::smoke_consolidate ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_freeze ()
 {
 	return false;
 }

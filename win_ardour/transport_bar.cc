@@ -58,6 +58,7 @@ TransportBar::TransportBar ()
 	, _loop_active (false)
 	, _punch_enabled (false)
 	, _snap_enabled (false)
+	, _freeze_active (false)
 	, _count_in_enabled (false)
 	, _click_enabled (false)
 	, _group_active (false)
@@ -104,6 +105,7 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_normalize_btn, x, btn_w);
 	place (_strip_silence_btn, x, btn_w);
 	place (_consolidate_btn, x, btn_w);
+	place (_freeze_btn, x, btn_w);
 	place (_snap_btn, x, btn_w);
 	place (_count_btn, x, btn_w);
 	place (_click_btn, x, btn_w);
@@ -194,6 +196,9 @@ TransportBar::hit_test (float x, float y) const
 	}
 	if (contains (_consolidate_btn, x, y)) {
 		return TransportHit::Consolidate;
+	}
+	if (contains (_freeze_btn, x, y)) {
+		return TransportHit::Freeze;
 	}
 	if (contains (_snap_btn, x, y)) {
 		return TransportHit::Snap;
@@ -312,6 +317,7 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_normalize_btn, L"Norm", false);
 	draw_btn (_strip_silence_btn, L"Sil", false);
 	draw_btn (_consolidate_btn, L"Cons", false);
+	draw_btn (_freeze_btn, L"Frz", _freeze_active);
 	draw_btn (_snap_btn, L"Snap", _snap_enabled);
 	draw_btn (_count_btn, L"Count", _count_in_enabled);
 	draw_btn (_click_btn, L"Click", _click_enabled);
