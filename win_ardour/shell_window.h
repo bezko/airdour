@@ -96,7 +96,8 @@ public:
 	                    bool smoke_history = false,
 	                    bool smoke_prefs = false,
 	                    bool smoke_recent = false,
-	                    bool smoke_recovery = false);
+	                    bool smoke_recovery = false,
+	                    bool smoke_stretch = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -186,6 +187,7 @@ private:
 	void do_delete_selection ();
 	void do_split_at_playhead ();
 	void do_apply_crossfade ();
+	void do_stretch_selection (float time_ratio = 1.5f);
 	void do_toggle_snap ();
 	void do_cycle_snap_density ();
 	void do_toggle_loop ();

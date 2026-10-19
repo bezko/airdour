@@ -67,7 +67,10 @@
 #include "ardour/audiofilesource.h"
 #include "ardour/sndfilesource.h"
 #include "ardour/source_factory.h"
+#include "ardour/stretch.h"
+#include "ardour/timefx_request.h"
 #include "ardour/types.h"
+#include "pbd/progress.h"
 #include "evoral/Note.h"
 #include "evoral/Parameter.h"
 #include "pbd/compose.h"
@@ -4488,6 +4491,199 @@ EngineHost::move_selected_to (float time_sec)
 	}
 }
 
+namespace {
+
+struct ShellProgress : public Progress {
+	void set_overall_progress (float) override {}
+};
+
+Temporal::ratio_t
+stretch_ratio_from_float (float r)
+{
+	if (!(r > 0.f) || !std::isfinite (r)) {
+		r = 1.f;
+	}
+	if (std::fabs (r - 1.5f) < 0.01f) {
+		return Temporal::ratio_t (3, 2);
+	}
+	if (std::fabs (r - 0.75f) < 0.01f) {
+		return Temporal::ratio_t (3, 4);
+	}
+	if (std::fabs (r - 1.f) < 0.001f) {
+		return Temporal::ratio_t (1, 1);
+	}
+	int64_t num = (int64_t)std::llround ((double)r * 1000.0);
+	if (num < 1) {
+		num = 1;
+	}
+	return Temporal::ratio_t (num, 1000);
+}
+
+/** Interim: change region length without resampling (pitch unchanged; content truncates/extends). */
+bool
+scale_selected_region_length (Session& session,
+                              std::shared_ptr<Region> region,
+                              float time_ratio,
+                              std::wstring& detail)
+{
+	if (!region || !(time_ratio > 0.f) || !std::isfinite (time_ratio)) {
+		detail = L"scale — bad ratio";
+		return false;
+	}
+	if (std::fabs (time_ratio - 1.f) < 0.001f) {
+		detail = L"scale — no-op";
+		return true;
+	}
+	samplecnt_t old_len = region->length_samples ();
+	samplecnt_t new_len = (samplecnt_t)std::llround ((double)old_len * (double)time_ratio);
+	if (new_len < 1) {
+		new_len = 1;
+	}
+	std::shared_ptr<Playlist> pl = region->playlist ();
+	session.begin_reversible_command ("scale region");
+	if (pl) {
+		pl->clear_changes ();
+		pl->clear_owned_changes ();
+		pl->freeze ();
+	}
+	region->clear_changes ();
+	region->set_length (timecnt_t (new_len, region->position ()));
+	if (pl) {
+		std::vector<Command*> cmds;
+		pl->rdiff (cmds);
+		session.add_commands (cmds);
+		pl->thaw ();
+	} else {
+		session.add_command (new StatefulDiffCommand (region));
+	}
+	session.commit_reversible_command ();
+	detail = L"scale region (interim, no pitch) — peaks refresh";
+	return true;
+}
+
+} /* namespace */
+
+bool
+EngineHost::stretch_selected (float time_ratio)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (!ar) {
+		_snap.detail = L"stretch — select an audio region";
+		return false;
+	}
+	if (!(time_ratio > 0.f) || !std::isfinite (time_ratio)) {
+		_snap.detail = L"stretch — bad ratio";
+		return false;
+	}
+	if (std::fabs (time_ratio - 1.f) < 0.001f) {
+		_snap.detail = L"stretch — no-op";
+		return true;
+	}
+	try {
+		std::shared_ptr<Playlist> pl = ar->playlist ();
+		if (!pl) {
+			_snap.detail = L"stretch — no playlist";
+			return false;
+		}
+
+		samplecnt_t old_len = ar->length_samples ();
+		Temporal::ratio_t frac = stretch_ratio_from_float (time_ratio);
+
+#ifdef HAVE_RUBBERBAND
+		TimeFXRequest req;
+		req.algorithm = TimeFXRequest::Rubberband;
+		req.time_fraction = frac;
+		req.pitch_fraction = 1.0f;
+		req.opts = 0;
+		req.cancel = false;
+		req.done = false;
+
+		ShellProgress progress;
+		RBStretch fx (*_impl->session, req);
+		if (fx.run (ar, &progress) != 0 || fx.results.empty ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: RBStretch failed — falling back to scale/slip\n");
+			std::fflush (stderr);
+			std::wstring d;
+			if (!scale_selected_region_length (*_impl->session, ar, time_ratio, d)) {
+				_snap.detail = L"stretch failed";
+				return false;
+			}
+			refresh_region_flags ();
+			refresh_selection_snap ();
+			refresh_history_flags ();
+			_snap.detail = d;
+			return true;
+		}
+
+		std::shared_ptr<Region> neu = fx.results.front ();
+		/* replace_region clones whole_file results — keep position for re-select. */
+		timepos_t pos = ar->position ();
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		float pos_sec = (float)ar->position_sample () / (float)sr;
+		int track = _impl->selected_track;
+
+		_impl->session->begin_reversible_command ("time stretch");
+		pl->clear_changes ();
+		pl->clear_owned_changes ();
+		pl->replace_region (ar, neu, pos);
+		pl->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		/* Select the playlist-owned clone (neu may be whole_file / not on PL). */
+		if (track < 0 || !select_region_at (track, pos_sec + 0.01f)) {
+			_impl->selected_region = neu;
+			refresh_selection_snap ();
+		}
+		refresh_region_flags ();
+		refresh_history_flags ();
+
+		samplecnt_t new_len = 0;
+		if (std::shared_ptr<Region> sel = _impl->selected_region.lock ()) {
+			new_len = sel->length_samples ();
+		} else {
+			new_len = neu->length_samples ();
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: stretch ok (RB %.3fx samples %lld→%lld)\n",
+		              time_ratio, (long long)old_len, (long long)new_len);
+		std::fflush (stderr);
+		_snap.detail = L"time stretch (RubberBand) — peaks refresh";
+		return true;
+#else
+		(void)frac;
+		std::wstring d;
+		if (!scale_selected_region_length (*_impl->session, ar, time_ratio, d)) {
+			_snap.detail = L"stretch failed";
+			return false;
+		}
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+		_snap.detail = d;
+		std::fprintf (stderr,
+		              "airdour_win_shell: stretch via scale/slip interim (no HAVE_RUBBERBAND)\n");
+		std::fflush (stderr);
+		return true;
+#endif
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: stretch exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"stretch exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"stretch failed";
+		return false;
+	}
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -4779,26 +4975,33 @@ EngineHost::smoke_edit ()
 		return false;
 	}
 	try {
+		/* Prefs may enable snap — absolute trim/move times must not quantize. */
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
 		collect_tracks ();
 		if (_impl->tracks.empty () || !_impl->tracks[0]) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (no Audio 1)\n");
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		if (!import_test_tone (0, 220.f, 3.f)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (import)\n");
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		int n0 = track_region_count (0);
 		if (n0 < 1) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (no regions after import)\n");
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		if (!split_at (1.0f, 0)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (split)\n");
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		int n1 = track_region_count (0);
@@ -4806,28 +5009,33 @@ EngineHost::smoke_edit ()
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (regions %d→%d)\n",
 			              n0, n1);
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		if (!select_region_at (0, 0.5f)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (select left)\n");
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		if (!apply_selected_crossfade (0.08f)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (crossfade)\n");
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		if (_snap.selection_fade_out_sec < 0.05f) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (fade_out=%.3f)\n",
 			              _snap.selection_fade_out_sec);
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		/* Left region was [0..1]; trim end to 0.75s then front to 0.15s. */
 		if (!trim_selected_end_to (0.75f)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (trim end)\n");
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		float len1 = _snap.selection_end_sec - _snap.selection_start_sec;
@@ -4835,29 +5043,34 @@ EngineHost::smoke_edit ()
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (trim end len=%.3f)\n",
 			              len1);
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		if (!trim_selected_front_to (0.15f)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (trim front)\n");
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		if (_snap.selection_start_sec < 0.10f || _snap.selection_start_sec > 0.20f) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (trim front start=%.3f)\n",
 			              _snap.selection_start_sec);
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		float len2 = _snap.selection_end_sec - _snap.selection_start_sec;
 		if (!move_selected_to (0.40f)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (move)\n");
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		if (_snap.selection_start_sec < 0.35f || _snap.selection_start_sec > 0.45f) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (move start=%.3f)\n",
 			              _snap.selection_start_sec);
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		float len3 = _snap.selection_end_sec - _snap.selection_start_sec;
@@ -4865,6 +5078,7 @@ EngineHost::smoke_edit ()
 			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (move changed len %.3f→%.3f)\n",
 			              len2, len3);
 			std::fflush (stderr);
+			set_snap_enabled (snap_was);
 			return false;
 		}
 		std::fprintf (stderr,
@@ -4874,9 +5088,80 @@ EngineHost::smoke_edit ()
 		              _snap.selection_start_sec, len3);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-edit ok";
+		set_snap_enabled (snap_was);
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-edit exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_stretch ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-stretch failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-stretch FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		/* Short tone keeps RubberBand offline stretch snappy for CI/smokes. */
+		if (!import_test_tone (0, 440.f, 0.8f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-stretch FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-stretch FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float len0 = _snap.selection_end_sec - _snap.selection_start_sec;
+		if (len0 < 0.5f || len0 > 1.2f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-stretch FAILED (len0=%.3f)\n",
+			              len0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!stretch_selected (1.5f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-stretch FAILED (stretch)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float len1 = _snap.selection_end_sec - _snap.selection_start_sec;
+		/* Allow generous tolerance: RB length + scale interim both ~1.5×. */
+		if (len1 < len0 * 1.25f || len1 > len0 * 1.85f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-stretch FAILED (len %.3f→%.3f)\n",
+			              len0, len1);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-stretch ok (len %.3f→%.3f ratio≈%.2f)\n",
+		              len0, len1, len1 / len0);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-stretch ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-stretch exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -9646,6 +9931,13 @@ EngineHost::move_selected_to (float time_sec)
 	return false;
 }
 
+bool
+EngineHost::stretch_selected (float time_ratio)
+{
+	(void)time_ratio;
+	return false;
+}
+
 void
 EngineHost::set_snap_enabled (bool on)
 {
@@ -9711,6 +10003,12 @@ EngineHost::track_region_count (int track) const
 
 bool
 EngineHost::smoke_edit ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_stretch ()
 {
 	return false;
 }

@@ -408,6 +408,14 @@ public:
 	/** Move selected region so its start is at time_sec (Region::set_position). */
 	bool move_selected_to (float time_sec);
 
+	/**
+	 * Time-stretch selected AudioRegion by time_ratio (pitch unchanged).
+	 * Prefer Session RBStretch (RubberBand). If RB unavailable, falls back to
+	 * region scale (set_length) — length change without resampling.
+	 * Default 1.5; use e.g. 0.75 to compress. Peaks refresh via region flags.
+	 */
+	bool stretch_selected (float time_ratio = 1.5f);
+
 	/** Snap-to-grid: TempoMap beat/bar (fallback fixed 120 BPM). */
 	void set_snap_enabled (bool on);
 	bool snap_enabled () const;
@@ -451,6 +459,12 @@ public:
 	 * For --smoke-edit.
 	 */
 	bool smoke_edit ();
+
+	/**
+	 * Import tone → select → stretch 1.5×; verify length ~1.5× source.
+	 * For --smoke-stretch.
+	 */
+	bool smoke_stretch ();
 
 	/**
 	 * Enable beat snap; verify 1.1s → ~1.0s; density bar; off → identity.
