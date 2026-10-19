@@ -52,6 +52,7 @@ enum class TransportHit {
 	MidiHumanize,
 	MidiStep,
 	MidiChord,
+	MidiArp,
 	CountIn,
 	Click,
 	TempoDown,
@@ -108,6 +109,12 @@ public:
 	/** 0=off 1=maj 2=min — Chord button label + lit when ≠0. */
 	void set_midi_chord_quality (int q) { _midi_chord_quality = q; }
 	int  midi_chord_quality () const { return _midi_chord_quality; }
+
+	/** Arp: lit when enabled; label Up/Dn/UD from mode. */
+	void set_midi_arp_enabled (bool on) { _midi_arp_enabled = on; }
+	bool midi_arp_enabled () const { return _midi_arp_enabled; }
+	void set_midi_arp_mode (int mode) { _midi_arp_mode = mode; }
+	int  midi_arp_mode () const { return _midi_arp_mode; }
 
 	void set_freeze_active (bool on) { _freeze_active = on; }
 	bool freeze_active () const { return _freeze_active; }
@@ -204,6 +211,7 @@ private:
 	D2D1_RECT_F _midi_humanize_btn;
 	D2D1_RECT_F _midi_step_btn;
 	D2D1_RECT_F _midi_chord_btn;
+	D2D1_RECT_F _midi_arp_btn;
 	D2D1_RECT_F _count_btn;
 	D2D1_RECT_F _click_btn;
 	D2D1_RECT_F _tempo_dn_btn;
@@ -233,6 +241,8 @@ private:
 	bool        _snap_enabled;
 	bool        _midi_step_enabled;
 	int         _midi_chord_quality;
+	bool        _midi_arp_enabled;
+	int         _midi_arp_mode;
 	bool        _freeze_active;
 	bool        _count_in_enabled;
 	bool        _click_enabled;

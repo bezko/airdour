@@ -251,7 +251,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_clipboard,
                             bool smoke_midi_humanize,
                             bool smoke_midi_step,
-                            bool smoke_midi_chord)
+                            bool smoke_midi_chord,
+                            bool smoke_midi_arp)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -411,6 +412,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_chord) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-chord FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi_arp && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_arp ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_arp) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -965,6 +975,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	_transport.set_snap_enabled (_engine_snap.snap_enabled);
 	_transport.set_midi_step_enabled (_engine_snap.midi_step_enabled);
 	_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
+	_transport.set_midi_arp_enabled (_engine_snap.midi_arp_enabled);
+	_transport.set_midi_arp_mode (_engine_snap.midi_arp_mode);
 	layout_panes ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
@@ -2740,12 +2752,61 @@ ShellWindow::do_cycle_midi_chord ()
 }
 
 void
+ShellWindow::do_toggle_midi_arp ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	_engine.toggle_midi_arp_enabled ();
+	_engine_snap = _engine.snapshot ();
+	_transport.set_midi_arp_enabled (_engine_snap.midi_arp_enabled);
+	_transport.set_midi_arp_mode (_engine_snap.midi_arp_mode);
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_cycle_midi_arp_mode ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	_engine.cycle_midi_arp_mode ();
+	_engine_snap = _engine.snapshot ();
+	_transport.set_midi_arp_enabled (_engine_snap.midi_arp_enabled);
+	_transport.set_midi_arp_mode (_engine_snap.midi_arp_mode);
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::sync_arp_held_from_step_keys ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_step_piano_held_count <= 0) {
+		_engine.clear_midi_arp_held_pitches ();
+		return;
+	}
+	uint8_t buf[16];
+	int n = 0;
+	for (int p = 0; p < 128 && n < 16; ++p) {
+		if (_step_piano_held[p]) {
+			buf[n++] = (uint8_t)p;
+		}
+	}
+	_engine.set_midi_arp_held_pitches (buf, n);
+}
+
+void
 ShellWindow::clear_step_piano_held ()
 {
 	for (int i = 0; i < 128; ++i) {
 		_step_piano_held[i] = false;
 	}
 	_step_piano_held_count = 0;
+	if (_engine.is_linked ()) {
+		_engine.clear_midi_arp_held_pitches ();
+	}
 }
 
 void
@@ -2774,6 +2835,7 @@ ShellWindow::do_step_piano_key_down (uint8_t pitch)
 	}
 	_step_piano_held[pitch] = true;
 	++_step_piano_held_count;
+	sync_arp_held_from_step_keys ();
 	/* Place without advancing; advance on last key-up (multi-key chord). */
 	do_step_input_pitch (pitch, false);
 }
@@ -2788,6 +2850,7 @@ ShellWindow::do_step_piano_key_up (uint8_t pitch)
 	if (_step_piano_held_count > 0) {
 		--_step_piano_held_count;
 	}
+	sync_arp_held_from_step_keys ();
 	if (_step_piano_held_count > 0) {
 		return;
 	}
@@ -3275,6 +3338,13 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (wparam == VK_F5) {
 			/* F5 — cycle MIDI chord quality Off → Maj → Min. */
 			do_cycle_midi_chord ();
+		} else if (wparam == VK_F6) {
+			/* F6 — toggle arp; Shift+F6 cycle Up/Down/UpDown. */
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
+				do_cycle_midi_arp_mode ();
+			} else {
+				do_toggle_midi_arp ();
+			}
 		} else if (_engine_snap.midi_step_enabled
 		           && !(GetKeyState (VK_CONTROL) & 0x8000)
 		           && !(GetKeyState (VK_MENU) & 0x8000)
@@ -4112,6 +4182,14 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::MidiChord) {
 		do_cycle_midi_chord ();
+		return true;
+	}
+	if (th == TransportHit::MidiArp) {
+		if (GetKeyState (VK_SHIFT) & 0x8000) {
+			do_cycle_midi_arp_mode ();
+		} else {
+			do_toggle_midi_arp ();
+		}
 		return true;
 	}
 	if (th == TransportHit::CountIn) {
@@ -5206,6 +5284,8 @@ ShellWindow::on_tick ()
 		_transport.set_snap_enabled (_engine_snap.snap_enabled);
 		_transport.set_midi_step_enabled (_engine_snap.midi_step_enabled);
 		_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
+		_transport.set_midi_arp_enabled (_engine_snap.midi_arp_enabled);
+		_transport.set_midi_arp_mode (_engine_snap.midi_arp_mode);
 		_transport.set_spectrum_enabled (_engine_snap.spectrum_enabled);
 		_transport.set_correlation_enabled (_engine_snap.correlation_enabled);
 		_transport.set_loudness_enabled (_engine_snap.loudness_enabled);
@@ -5924,6 +6004,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"H / Shift+H", L"MIDI humanize · 2× strength (Hum)" },
 		{ L"F4 / Step", L"MIDI step-record · Z/Q piano · ←→ rest" },
 		{ L"F5 / Chd", L"MIDI chord Off→Maj→Min · multi-key latch" },
+		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },

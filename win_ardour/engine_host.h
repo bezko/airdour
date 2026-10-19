@@ -183,6 +183,9 @@ struct EngineSnapshot {
 	bool         snap_enabled; /* Editor snap-to-grid */
 	bool         midi_step_enabled; /* Step-record: keys/click place at playhead */
 	int          midi_chord_quality; /* 0=off 1=maj (R+4+7) 2=min (R+3+7) */
+	bool         midi_arp_enabled; /* live arpeggiator into MidiTrack synth */
+	int          midi_arp_mode; /* 0=up 1=down 2=up-down */
+	int          midi_arp_pitch; /* currently sounding pitch, or −1 */
 	int          snap_density; /* 0=bar 1=beat 2=1/2 3=1/4 */
 	int          grid_line_count; /* visible grid lines for Editor draw */
 	static constexpr int kMaxGridLines = 96;
@@ -1132,6 +1135,33 @@ public:
 	 */
 	bool smoke_midi_chord ();
 
+	/**
+	 * Live arpeggiator: injects note-on/off into MidiTrack (Reasonable Synth)
+	 * at snap-grid rate while transport rolls. Pitch source: shell-held keys,
+	 * else notes sharing selected start (chord cluster), else notes under
+	 * playhead, else region pitches / default triad. Modes: Up / Down / UpDown.
+	 */
+	void set_midi_arp_enabled (bool on);
+	bool midi_arp_enabled () const;
+	bool toggle_midi_arp_enabled ();
+	void set_midi_arp_mode (int mode); /* 0=up 1=down 2=up-down */
+	int  midi_arp_mode () const;
+	int  cycle_midi_arp_mode ();
+	/** Optional held pitches from computer-key chord (cleared when count=0). */
+	void set_midi_arp_held_pitches (const uint8_t* pitches, int count);
+	void clear_midi_arp_held_pitches ();
+	/**
+	 * Advance one arp step (force=true ignores transport/grid). Used by poll
+	 * and --smoke-midi-arp.
+	 */
+	bool tick_arpeggiator (bool force = false);
+
+	/**
+	 * Build chord pitches, arp Up then Down sequences via forced ticks.
+	 * For --smoke-midi-arp.
+	 */
+	bool smoke_midi_arp ();
+
 	std::string session_dir () const;
 	std::string last_export_path () const;
 
@@ -1175,6 +1205,10 @@ private:
 	bool compute_export_range (int64_t* start_sample, int64_t* end_sample) const;
 	bool configure_backend_midi ();
 	void refresh_midi_notes_snap ();
+	void rebuild_arp_pitches ();
+	int  arp_pitch_at_step (int step) const;
+	bool midi_immediate_note (uint8_t status, uint8_t pitch, uint8_t velocity);
+	void arp_silence ();
 	void refresh_track_fx_snap ();
 	void refresh_track_comp_snap ();
 	void refresh_track_eq_snap ();
@@ -1223,6 +1257,17 @@ private:
 		float   length_sec;
 	};
 	std::vector<MidiClipNote> _midi_clipboard;
+
+	static constexpr int kMaxArpPitches = 16;
+	bool    _arp_enabled;
+	int     _arp_mode; /* 0=up 1=down 2=up-down */
+	int     _arp_step;
+	int     _arp_last_grid;
+	int     _arp_sounding; /* −1 = silent */
+	uint8_t _arp_pitches[kMaxArpPitches];
+	int     _arp_pitch_count;
+	uint8_t _arp_held[kMaxArpPitches];
+	int     _arp_held_count;
 
 #ifdef AIRDOUR_WIN_SHELL_WITH_ENGINE
 	class Impl;

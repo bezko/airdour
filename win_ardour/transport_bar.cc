@@ -44,6 +44,7 @@ TransportBar::TransportBar ()
 	, _midi_humanize_btn ()
 	, _midi_step_btn ()
 	, _midi_chord_btn ()
+	, _midi_arp_btn ()
 	, _count_btn ()
 	, _click_btn ()
 	, _tempo_dn_btn ()
@@ -73,6 +74,8 @@ TransportBar::TransportBar ()
 	, _snap_enabled (false)
 	, _midi_step_enabled (false)
 	, _midi_chord_quality (0)
+	, _midi_arp_enabled (false)
+	, _midi_arp_mode (0)
 	, _freeze_active (false)
 	, _count_in_enabled (false)
 	, _click_enabled (false)
@@ -135,6 +138,7 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_midi_humanize_btn, x, btn_w);
 	place (_midi_step_btn, x, btn_w);
 	place (_midi_chord_btn, x, btn_w);
+	place (_midi_arp_btn, x, btn_w);
 	place (_count_btn, x, btn_w);
 	place (_click_btn, x, btn_w);
 	place (_tempo_dn_btn, x, narrow);
@@ -263,6 +267,9 @@ TransportBar::hit_test (float x, float y) const
 	}
 	if (contains (_midi_chord_btn, x, y)) {
 		return TransportHit::MidiChord;
+	}
+	if (contains (_midi_arp_btn, x, y)) {
+		return TransportHit::MidiArp;
 	}
 	if (contains (_count_btn, x, y)) {
 		return TransportHit::CountIn;
@@ -406,6 +413,19 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 			chord_lab = L"Min";
 		}
 		draw_btn (_midi_chord_btn, chord_lab, _midi_chord_quality != 0);
+	}
+	{
+		const wchar_t* arp_lab = L"Arp";
+		if (_midi_arp_enabled) {
+			if (_midi_arp_mode == 1) {
+				arp_lab = L"Dn";
+			} else if (_midi_arp_mode == 2) {
+				arp_lab = L"UD";
+			} else {
+				arp_lab = L"Up";
+			}
+		}
+		draw_btn (_midi_arp_btn, arp_lab, _midi_arp_enabled);
 	}
 	draw_btn (_count_btn, L"Count", _count_in_enabled);
 	draw_btn (_click_btn, L"Click", _click_enabled);

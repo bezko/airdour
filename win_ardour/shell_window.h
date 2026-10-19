@@ -122,7 +122,8 @@ public:
 	                    bool smoke_midi_clipboard = false,
 	                    bool smoke_midi_humanize = false,
 	                    bool smoke_midi_step = false,
-	                    bool smoke_midi_chord = false);
+	                    bool smoke_midi_chord = false,
+	                    bool smoke_midi_arp = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -237,6 +238,9 @@ private:
 	void do_humanize_midi_notes (float strength = 1.f);
 	void do_toggle_midi_step ();
 	void do_cycle_midi_chord ();
+	void do_toggle_midi_arp ();
+	void do_cycle_midi_arp_mode ();
+	void sync_arp_held_from_step_keys ();
 	void do_step_input_pitch (uint8_t pitch, bool advance = true);
 	void do_step_piano_key_down (uint8_t pitch);
 	void do_step_piano_key_up (uint8_t pitch);

@@ -573,8 +573,19 @@ EngineHost::EngineHost ()
 	, _recovery_last_open_ft (0)
 	, _recovery_dirty (false)
 	, _gain (0.85f)
+	, _arp_enabled (false)
+	, _arp_mode (0)
+	, _arp_step (0)
+	, _arp_last_grid (-1)
+	, _arp_sounding (-1)
+	, _arp_pitch_count (0)
+	, _arp_held_count (0)
 	, _impl (new Impl)
 {
+	for (int i = 0; i < kMaxArpPitches; ++i) {
+		_arp_pitches[i] = 0;
+		_arp_held[i] = 0;
+	}
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_track_gain[i] = (i == 0) ? 0.85f : (0.85f - 0.12f * (float)i);
 		_snap.meter_peak[i] = 0.f;
@@ -626,6 +637,9 @@ EngineHost::EngineHost ()
 	_snap.snap_enabled = false;
 	_snap.midi_step_enabled = false;
 	_snap.midi_chord_quality = 0;
+	_snap.midi_arp_enabled = false;
+	_snap.midi_arp_mode = 0;
+	_snap.midi_arp_pitch = -1;
 	_snap.snap_density = 1; /* beat */
 	_snap.grid_line_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
@@ -15875,6 +15889,477 @@ EngineHost::smoke_midi_chord ()
 	}
 }
 
+void
+EngineHost::set_midi_arp_enabled (bool on)
+{
+	if (!on && _arp_enabled) {
+		arp_silence ();
+	}
+	_arp_enabled = on;
+	_snap.midi_arp_enabled = on;
+	if (on) {
+		_arp_step = 0;
+		_arp_last_grid = -1;
+		rebuild_arp_pitches ();
+		_snap.detail = L"MIDI arp on";
+	} else {
+		_snap.detail = L"MIDI arp off";
+	}
+}
+
+bool
+EngineHost::midi_arp_enabled () const
+{
+	return _arp_enabled;
+}
+
+bool
+EngineHost::toggle_midi_arp_enabled ()
+{
+	set_midi_arp_enabled (!_arp_enabled);
+	return _arp_enabled;
+}
+
+void
+EngineHost::set_midi_arp_mode (int mode)
+{
+	if (mode < 0) {
+		mode = 0;
+	}
+	if (mode > 2) {
+		mode = 2;
+	}
+	_arp_mode = mode;
+	_snap.midi_arp_mode = mode;
+	_arp_step = 0;
+	_arp_last_grid = -1;
+	if (mode == 1) {
+		_snap.detail = L"MIDI arp Down";
+	} else if (mode == 2) {
+		_snap.detail = L"MIDI arp UpDown";
+	} else {
+		_snap.detail = L"MIDI arp Up";
+	}
+}
+
+int
+EngineHost::midi_arp_mode () const
+{
+	return _arp_mode;
+}
+
+int
+EngineHost::cycle_midi_arp_mode ()
+{
+	int m = _arp_mode + 1;
+	if (m > 2) {
+		m = 0;
+	}
+	set_midi_arp_mode (m);
+	return _arp_mode;
+}
+
+void
+EngineHost::set_midi_arp_held_pitches (const uint8_t* pitches, int count)
+{
+	_arp_held_count = 0;
+	if (!pitches || count <= 0) {
+		return;
+	}
+	if (count > kMaxArpPitches) {
+		count = kMaxArpPitches;
+	}
+	for (int i = 0; i < count; ++i) {
+		uint8_t p = pitches[i];
+		if (p > 127) {
+			p = 127;
+		}
+		bool dup = false;
+		for (int j = 0; j < _arp_held_count; ++j) {
+			if (_arp_held[j] == p) {
+				dup = true;
+				break;
+			}
+		}
+		if (!dup) {
+			_arp_held[_arp_held_count++] = p;
+		}
+	}
+	std::sort (_arp_held, _arp_held + _arp_held_count);
+}
+
+void
+EngineHost::clear_midi_arp_held_pitches ()
+{
+	_arp_held_count = 0;
+}
+
+void
+EngineHost::arp_silence ()
+{
+	if (_arp_sounding >= 0) {
+		midi_immediate_note (0x80, (uint8_t)_arp_sounding, 0);
+		_arp_sounding = -1;
+		_snap.midi_arp_pitch = -1;
+	}
+}
+
+bool
+EngineHost::midi_immediate_note (uint8_t status, uint8_t pitch, uint8_t velocity)
+{
+	if (!_impl || !_impl->midi_track) {
+		return false;
+	}
+	if (pitch > 127) {
+		pitch = 127;
+	}
+	if (velocity > 127) {
+		velocity = 127;
+	}
+	uint8_t ev[3] = { (uint8_t)(status & 0xf0), pitch, velocity };
+	try {
+		return _impl->midi_track->write_immediate_event (Evoral::MIDI_EVENT, 3, ev);
+	} catch (...) {
+		return false;
+	}
+}
+
+int
+EngineHost::arp_pitch_at_step (int step) const
+{
+	const int n = _arp_pitch_count;
+	if (n <= 0) {
+		return -1;
+	}
+	if (n == 1) {
+		return (int)_arp_pitches[0];
+	}
+	if (_arp_mode == 0) {
+		return (int)_arp_pitches[step % n];
+	}
+	if (_arp_mode == 1) {
+		return (int)_arp_pitches[(n - 1) - (step % n)];
+	}
+	/* Up-down (exclude duplicate ends). */
+	const int period = 2 * (n - 1);
+	int k = step % period;
+	if (k < 0) {
+		k += period;
+	}
+	if (k < n) {
+		return (int)_arp_pitches[k];
+	}
+	return (int)_arp_pitches[period - k];
+}
+
+void
+EngineHost::rebuild_arp_pitches ()
+{
+	_arp_pitch_count = 0;
+	auto push_unique = [&] (uint8_t p) {
+		if (p > 127) {
+			p = 127;
+		}
+		for (int i = 0; i < _arp_pitch_count; ++i) {
+			if (_arp_pitches[i] == p) {
+				return;
+			}
+		}
+		if (_arp_pitch_count < kMaxArpPitches) {
+			_arp_pitches[_arp_pitch_count++] = p;
+		}
+	};
+
+	/* 1) Shell-held computer-key chord. */
+	if (_arp_held_count > 0) {
+		for (int i = 0; i < _arp_held_count; ++i) {
+			push_unique (_arp_held[i]);
+		}
+	}
+
+	/* 2) Chord cluster around selected note start. */
+	if (_arp_pitch_count == 0 && _snap.midi_note_count > 0) {
+		int sel = -1;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				sel = i;
+				break;
+			}
+		}
+		if (sel >= 0) {
+			const float t0 = _snap.midi_notes[sel].start_sec;
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				if (std::fabs (_snap.midi_notes[i].start_sec - t0) <= 0.04f) {
+					push_unique (_snap.midi_notes[i].pitch);
+				}
+			}
+		}
+	}
+
+	/* 3) Notes under playhead. */
+	if (_arp_pitch_count == 0 && _snap.midi_note_count > 0) {
+		const float t = _snap.transport_sec;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			if (t >= n.start_sec - 0.01f && t < n.start_sec + n.length_sec + 0.01f) {
+				push_unique (n.pitch);
+			}
+		}
+	}
+
+	/* 4) All unique region pitches (capped). */
+	if (_arp_pitch_count == 0 && _snap.midi_note_count > 0) {
+		for (int i = 0; i < _snap.midi_note_count && _arp_pitch_count < 8; ++i) {
+			push_unique (_snap.midi_notes[i].pitch);
+		}
+	}
+
+	/* 5) Chord-quality expand single root, else default Cmaj. */
+	if (_arp_pitch_count == 1 && _snap.midi_chord_quality != 0) {
+		const uint8_t root = _arp_pitches[0];
+		_arp_pitch_count = 0;
+		push_unique (root);
+		if (_snap.midi_chord_quality == 1) {
+			if ((int)root + 4 <= 127) {
+				push_unique ((uint8_t)(root + 4));
+			}
+			if ((int)root + 7 <= 127) {
+				push_unique ((uint8_t)(root + 7));
+			}
+		} else if (_snap.midi_chord_quality == 2) {
+			if ((int)root + 3 <= 127) {
+				push_unique ((uint8_t)(root + 3));
+			}
+			if ((int)root + 7 <= 127) {
+				push_unique ((uint8_t)(root + 7));
+			}
+		}
+	}
+	if (_arp_pitch_count == 0) {
+		push_unique (60);
+		push_unique (64);
+		push_unique (67);
+	}
+	std::sort (_arp_pitches, _arp_pitches + _arp_pitch_count);
+}
+
+bool
+EngineHost::tick_arpeggiator (bool force)
+{
+	_snap.midi_arp_enabled = _arp_enabled;
+	_snap.midi_arp_mode = _arp_mode;
+
+	if (!_arp_enabled) {
+		arp_silence ();
+		return false;
+	}
+	if (!force && !_snap.transport_rolling) {
+		arp_silence ();
+		_arp_last_grid = -1;
+		return false;
+	}
+
+	rebuild_arp_pitches ();
+	if (_arp_pitch_count <= 0) {
+		arp_silence ();
+		return false;
+	}
+
+	float unit = snap_unit_sec ();
+	if (unit < 0.05f) {
+		unit = 0.05f;
+	}
+
+	int grid = _arp_last_grid;
+	if (force) {
+		grid = _arp_last_grid + 1;
+		if (_arp_last_grid < 0) {
+			grid = 0;
+		}
+	} else {
+		float t = _snap.transport_sec;
+		if (t < 0.f) {
+			t = 0.f;
+		}
+		grid = (int)std::floor ((double)t / (double)unit + 1e-6);
+	}
+	if (grid == _arp_last_grid && !force) {
+		_snap.midi_arp_pitch = _arp_sounding;
+		return true;
+	}
+	_arp_last_grid = grid;
+	if (!force) {
+		_arp_step = grid;
+	} else {
+		_arp_step = grid;
+	}
+
+	const int pitch = arp_pitch_at_step (_arp_step);
+	if (pitch < 0) {
+		arp_silence ();
+		return false;
+	}
+
+	if (_arp_sounding >= 0 && _arp_sounding != pitch) {
+		midi_immediate_note (0x80, (uint8_t)_arp_sounding, 0);
+	} else if (_arp_sounding >= 0 && _arp_sounding == pitch) {
+		/* Retrigger same pitch for rhythmic pulse. */
+		midi_immediate_note (0x80, (uint8_t)_arp_sounding, 0);
+	}
+	const bool ok = midi_immediate_note (0x90, (uint8_t)pitch, 100);
+	_arp_sounding = pitch;
+	_snap.midi_arp_pitch = pitch;
+	if (_impl) {
+		_impl->midi_activity = 1.f;
+	}
+	return ok;
+}
+
+bool
+EngineHost::smoke_midi_arp ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-arp failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for arp smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		attach_midi_synth ();
+		set_snap_density (1);
+		set_snap_enabled (false);
+		clear_midi_arp_held_pitches ();
+
+		if (!add_midi_note (60, 0.0f, 2.0f, 100)
+		    || !add_midi_note (64, 0.0f, 2.0f, 100)
+		    || !add_midi_note (67, 0.0f, 2.0f, 100)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (add chord)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		/* Select middle note so cluster at t=0 is the arp source. */
+		if (!select_midi_note_at (0.1f, 64)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (select)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		set_midi_arp_mode (0);
+		set_midi_arp_enabled (true);
+		if (!midi_arp_enabled ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (enable)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		int got_up[3] = { -1, -1, -1 };
+		for (int i = 0; i < 3; ++i) {
+			if (!tick_arpeggiator (true)) {
+				set_midi_arp_enabled (false);
+				std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (up tick %d)\n", i);
+				std::fflush (stderr);
+				return false;
+			}
+			got_up[i] = _snap.midi_arp_pitch;
+		}
+		if (got_up[0] != 60 || got_up[1] != 64 || got_up[2] != 67) {
+			set_midi_arp_enabled (false);
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-arp FAILED (up got %d %d %d)\n",
+			              got_up[0], got_up[1], got_up[2]);
+			std::fflush (stderr);
+			return false;
+		}
+
+		set_midi_arp_mode (1);
+		int got_dn[3] = { -1, -1, -1 };
+		for (int i = 0; i < 3; ++i) {
+			if (!tick_arpeggiator (true)) {
+				set_midi_arp_enabled (false);
+				std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (dn tick %d)\n", i);
+				std::fflush (stderr);
+				return false;
+			}
+			got_dn[i] = _snap.midi_arp_pitch;
+		}
+		if (got_dn[0] != 67 || got_dn[1] != 64 || got_dn[2] != 60) {
+			set_midi_arp_enabled (false);
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-arp FAILED (dn got %d %d %d)\n",
+			              got_dn[0], got_dn[1], got_dn[2]);
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* UpDown: 60,64,67,64 */
+		set_midi_arp_mode (2);
+		int got_ud[4] = { -1, -1, -1, -1 };
+		for (int i = 0; i < 4; ++i) {
+			if (!tick_arpeggiator (true)) {
+				set_midi_arp_enabled (false);
+				std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (ud tick %d)\n", i);
+				std::fflush (stderr);
+				return false;
+			}
+			got_ud[i] = _snap.midi_arp_pitch;
+		}
+		if (got_ud[0] != 60 || got_ud[1] != 64 || got_ud[2] != 67 || got_ud[3] != 64) {
+			set_midi_arp_enabled (false);
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-arp FAILED (ud got %d %d %d %d)\n",
+			              got_ud[0], got_ud[1], got_ud[2], got_ud[3]);
+			std::fflush (stderr);
+			return false;
+		}
+
+		set_midi_arp_enabled (false);
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-arp ok (up/dn/ud pitches verified)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-arp ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 
 void
 EngineHost::refresh_snapshot ()
@@ -15975,6 +16460,7 @@ void
 EngineHost::poll ()
 {
 	refresh_snapshot ();
+	tick_arpeggiator (false);
 }
 
 EngineSnapshot
@@ -15999,7 +16485,18 @@ EngineHost::EngineHost ()
 	, _recovery_last_open_ft (0)
 	, _recovery_dirty (false)
 	, _gain (0.85f)
+	, _arp_enabled (false)
+	, _arp_mode (0)
+	, _arp_step (0)
+	, _arp_last_grid (-1)
+	, _arp_sounding (-1)
+	, _arp_pitch_count (0)
+	, _arp_held_count (0)
 {
+	for (int i = 0; i < kMaxArpPitches; ++i) {
+		_arp_pitches[i] = 0;
+		_arp_held[i] = 0;
+	}
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_track_gain[i] = 0.85f;
 		_snap.meter_peak[i] = 0.f;
@@ -16043,6 +16540,9 @@ EngineHost::EngineHost ()
 		_snap.recent_path[i][0] = L'\0';
 	}
 	_snap.aux_bus_ok = false;
+	_snap.midi_arp_enabled = false;
+	_snap.midi_arp_mode = 0;
+	_snap.midi_arp_pitch = -1;
 	_snap.available = false;
 	_snap.running = false;
 	_snap.session_ok = false;
@@ -16070,6 +16570,9 @@ EngineHost::EngineHost ()
 	_snap.snap_enabled = false;
 	_snap.midi_step_enabled = false;
 	_snap.midi_chord_quality = 0;
+	_snap.midi_arp_enabled = false;
+	_snap.midi_arp_mode = 0;
+	_snap.midi_arp_pitch = -1;
 	_snap.snap_density = 1;
 	_snap.grid_line_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
@@ -18332,6 +18835,113 @@ EngineHost::smoke_midi_step ()
 
 bool
 EngineHost::smoke_midi_chord ()
+{
+	return false;
+}
+
+void
+EngineHost::set_midi_arp_enabled (bool on)
+{
+	_arp_enabled = on;
+	_snap.midi_arp_enabled = on;
+	if (!on) {
+		_arp_sounding = -1;
+		_snap.midi_arp_pitch = -1;
+	}
+}
+
+bool
+EngineHost::midi_arp_enabled () const
+{
+	return false;
+}
+
+bool
+EngineHost::toggle_midi_arp_enabled ()
+{
+	return false;
+}
+
+void
+EngineHost::set_midi_arp_mode (int mode)
+{
+	if (mode < 0) {
+		mode = 0;
+	}
+	if (mode > 2) {
+		mode = 2;
+	}
+	_arp_mode = mode;
+	_snap.midi_arp_mode = mode;
+}
+
+int
+EngineHost::midi_arp_mode () const
+{
+	return _arp_mode;
+}
+
+int
+EngineHost::cycle_midi_arp_mode ()
+{
+	int m = _arp_mode + 1;
+	if (m > 2) {
+		m = 0;
+	}
+	set_midi_arp_mode (m);
+	return _arp_mode;
+}
+
+void
+EngineHost::set_midi_arp_held_pitches (const uint8_t* pitches, int count)
+{
+	(void)pitches;
+	(void)count;
+}
+
+void
+EngineHost::clear_midi_arp_held_pitches ()
+{
+	_arp_held_count = 0;
+}
+
+void
+EngineHost::rebuild_arp_pitches ()
+{
+}
+
+int
+EngineHost::arp_pitch_at_step (int step) const
+{
+	(void)step;
+	return -1;
+}
+
+bool
+EngineHost::midi_immediate_note (uint8_t status, uint8_t pitch, uint8_t velocity)
+{
+	(void)status;
+	(void)pitch;
+	(void)velocity;
+	return false;
+}
+
+void
+EngineHost::arp_silence ()
+{
+	_arp_sounding = -1;
+	_snap.midi_arp_pitch = -1;
+}
+
+bool
+EngineHost::tick_arpeggiator (bool force)
+{
+	(void)force;
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_arp ()
 {
 	return false;
 }
