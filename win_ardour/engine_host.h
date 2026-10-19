@@ -95,6 +95,12 @@ struct EngineSnapshot {
 	float        track_eq_gain_l_norm; /* 0..1 UI (0.5 = 0 dB) */
 	float        track_eq_gain_m_norm;
 	float        track_eq_gain_h_norm;
+	bool         track_delay_ok; /* ACE Delay on Audio 4 (track 3) */
+	bool         track_delay_bypassed;
+	float        track_delay_time_ms; /* Time 1..8000 ms */
+	float        track_delay_feedback_pct; /* Feedback 0..100 % */
+	float        track_delay_time_norm; /* 0..1 UI (log) */
+	float        track_delay_feedback_norm; /* 0..1 UI */
 	float        midi_activity; /* 0..1 decaying activity indicator */
 	int          midi_device_count;
 	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices];
@@ -108,6 +114,7 @@ struct EngineSnapshot {
 	std::wstring track_fx_param_name; /* e.g. Blend */
 	std::wstring track_comp_name; /* e.g. ACE Compressor */
 	std::wstring track_eq_name; /* e.g. ACE EQ */
+	std::wstring track_delay_name; /* e.g. ACE Delay */
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
 	std::wstring export_path; /* last exported WAV (UTF-16 display) */
@@ -806,6 +813,19 @@ public:
 	bool set_track_eq_gain_h_norm (int track, float norm_0_1);
 
 	/**
+	 * Insert ACE Delay (bundled LV2, DSP-only) on an audio track pre-fader.
+	 * Default track 3 = Audio 4. Idempotent when already present.
+	 * D2D exposes Time (1..8000 ms) + Feedback (0..100 %).
+	 */
+	bool insert_track_delay (int track = 3);
+	bool toggle_track_delay_bypass (int track = 3);
+	bool set_track_delay_bypassed (int track, bool bypassed);
+	bool set_track_delay_time_ms (int track, float ms);
+	bool set_track_delay_feedback_pct (int track, float pct);
+	bool set_track_delay_time_norm (int track, float norm_0_1);
+	bool set_track_delay_feedback_norm (int track, float norm_0_1);
+
+	/**
 	 * Ensure ACE Reverb on Audio 1; verify on route; toggle bypass; set Blend.
 	 * For --smoke-plugin. Hardware not required.
 	 */
@@ -822,6 +842,12 @@ public:
 	 * For --smoke-eq.
 	 */
 	bool smoke_eq ();
+
+	/**
+	 * Insert ACE Delay on Audio 4; set Time / Feedback.
+	 * For --smoke-delay.
+	 */
+	bool smoke_delay ();
 
 	/**
 	 * Scan system VST3 dirs (+ VST3_PATH / AIRDOUR_SMOKE_VST3); list; optionally
@@ -918,6 +944,7 @@ private:
 	void refresh_track_fx_snap ();
 	void refresh_track_comp_snap ();
 	void refresh_track_eq_snap ();
+	void refresh_track_delay_snap ();
 	bool ensure_plugins_scanned ();
 
 	bool        _started;

@@ -491,6 +491,12 @@ public:
 	float           track_eq_gain_h_db;
 	std::string     track_eq_name;
 	std::weak_ptr<PluginInsert> track_eq;
+	bool            track_delay_ok;
+	bool            track_delay_bypassed;
+	float           track_delay_time_ms;
+	float           track_delay_feedback_pct;
+	std::string     track_delay_name;
+	std::weak_ptr<PluginInsert> track_delay;
 	bool            plugins_scanned;
 
 	Impl ()
@@ -520,6 +526,10 @@ public:
 		, track_eq_gain_l_db (0.f)
 		, track_eq_gain_m_db (0.f)
 		, track_eq_gain_h_db (0.f)
+		, track_delay_ok (false)
+		, track_delay_bypassed (false)
+		, track_delay_time_ms (160.f)
+		, track_delay_feedback_pct (20.f)
 		, plugins_scanned (false)
 	{
 	}
@@ -663,6 +673,12 @@ EngineHost::EngineHost ()
 	_snap.track_eq_gain_l_norm = 0.5f;
 	_snap.track_eq_gain_m_norm = 0.5f;
 	_snap.track_eq_gain_h_norm = 0.5f;
+	_snap.track_delay_ok = false;
+	_snap.track_delay_bypassed = false;
+	_snap.track_delay_time_ms = 160.f;
+	_snap.track_delay_feedback_pct = 20.f;
+	_snap.track_delay_time_norm = std::log (160.f) / std::log (8000.f);
+	_snap.track_delay_feedback_norm = 0.2f;
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -692,6 +708,7 @@ EngineHost::EngineHost ()
 	_snap.track_fx_param_name = L"Blend";
 	_snap.track_comp_name.clear ();
 	_snap.track_eq_name.clear ();
+	_snap.track_delay_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -1627,11 +1644,11 @@ EngineHost::ensure_session ()
 		const char* tone_flag = std::getenv ("AIRDOUR_WIN_SHELL_DEMO_TONES");
 		const bool want_tones = (tone_flag && tone_flag[0] == '1');
 
-		step ("new_audio_track x3");
+		step ("new_audio_track x4");
 		AudioTrackList created = _impl->session->new_audio_track (
 			1, 2,
 			std::shared_ptr<RouteGroup> (),
-			3u /* default Audio 1–3; add more via UI */,
+			4u /* default Audio 1–4 (Reverb/Comp/EQ/Delay); add more via UI */,
 			"Audio",
 			PresentationInfo::max_order);
 
@@ -1699,14 +1716,14 @@ EngineHost::ensure_session ()
 					track->gain_control ()->set_value (_track_gain[t], Controllable::NoGroup);
 				}
 			}
-			_snap.detail = L"Session + PeakMeter — demo tones on Audio 1–3";
+			_snap.detail = L"Session + PeakMeter — demo tones on Audio 1–4";
 		} else {
 			for (size_t t = 0; t < _impl->tracks.size (); ++t) {
 				if (_impl->tracks[t] && _impl->tracks[t]->gain_control ()) {
 					_impl->tracks[t]->gain_control ()->set_value (_track_gain[t], Controllable::NoGroup);
 				}
 			}
-			_snap.detail = L"Session + PeakMeter — empty Audio 1–3 (no demo tones)";
+			_snap.detail = L"Session + PeakMeter — empty Audio 1–4 (no demo tones)";
 		}
 
 		/* Best-effort ACE Reverb on Audio 1 (headless insert, no GTK UI). */
@@ -1718,6 +1735,10 @@ EngineHost::ensure_session ()
 		/* Best-effort ACE EQ on Audio 3 (Gain L / Gain 2 / Gain H D2D). */
 		if (_impl->tracks.size () > 2) {
 			insert_track_eq (2);
+		}
+		/* Best-effort ACE Delay on Audio 4 (Time / Feedback D2D). */
+		if (_impl->tracks.size () > 3) {
+			insert_track_delay (3);
 		}
 
 		step ("aux bus + sends");
@@ -1732,6 +1753,7 @@ EngineHost::ensure_session ()
 		refresh_track_fx_snap ();
 		refresh_track_comp_snap ();
 		refresh_track_eq_snap ();
+		refresh_track_delay_snap ();
 		step ("ready");
 		return true;
 	} catch (SessionException& e) {
@@ -1798,6 +1820,12 @@ EngineHost::destroy_session ()
 	_impl->track_eq_gain_h_db = 0.f;
 	_impl->track_eq_name.clear ();
 	_impl->track_eq.reset ();
+	_impl->track_delay_ok = false;
+	_impl->track_delay_bypassed = false;
+	_impl->track_delay_time_ms = 160.f;
+	_impl->track_delay_feedback_pct = 20.f;
+	_impl->track_delay_name.clear ();
+	_impl->track_delay.reset ();
 	_impl->selected_track = -1;
 	_impl->selected_region.reset ();
 	if (_impl->session) {
@@ -8829,6 +8857,10 @@ static const char* kAceEqUri = "urn:ardour:a-eq";
 static const uint32_t kAceEqGainLPort = 1; /* Gain L */
 static const uint32_t kAceEqGain2Port = 6; /* Gain 2 (mid) */
 static const uint32_t kAceEqGainHPort = 15; /* Gain H */
+/* Bundled ACE Delay (libs/plugins/a-delay.lv2) — DSP-only, no cairo. */
+static const char* kAceDelayUri = "urn:ardour:a-delay";
+static const uint32_t kAceDelayTimePort = 5; /* Time ms */
+static const uint32_t kAceDelayFeedbackPort = 8; /* Feedback % */
 
 static float
 comp_threshold_to_norm (float db)
@@ -8870,6 +8902,35 @@ eq_norm_to_gain (float n)
 {
 	n = std::max (0.f, std::min (1.f, n));
 	return -20.f + n * 40.f;
+}
+
+/* Time port is logarithmic (1..8000 ms). */
+static float
+delay_time_to_norm (float ms)
+{
+	ms = std::max (1.f, std::min (8000.f, ms));
+	return std::log (ms) / std::log (8000.f);
+}
+
+static float
+delay_norm_to_time (float n)
+{
+	n = std::max (0.f, std::min (1.f, n));
+	return std::pow (8000.f, n);
+}
+
+static float
+delay_feedback_to_norm (float pct)
+{
+	pct = std::max (0.f, std::min (100.f, pct));
+	return pct / 100.f;
+}
+
+static float
+delay_norm_to_feedback (float n)
+{
+	n = std::max (0.f, std::min (1.f, n));
+	return n * 100.f;
 }
 
 } // namespace
@@ -9097,6 +9158,26 @@ find_ace_eq_info ()
 	return PluginInfoPtr ();
 }
 
+static PluginInfoPtr
+find_ace_delay_info ()
+{
+	try {
+		const PluginInfoList& plugs = PluginManager::instance ().lv2_plugin_info ();
+		for (PluginInfoList::const_iterator i = plugs.begin (); i != plugs.end (); ++i) {
+			if (!*i) {
+				continue;
+			}
+			if ((*i)->unique_id == kAceDelayUri
+			    || (*i)->name.find ("ACE Delay") != std::string::npos
+			    || (*i)->name.find ("a-delay") != std::string::npos) {
+				return *i;
+			}
+		}
+	} catch (...) {
+	}
+	return PluginInfoPtr ();
+}
+
 static std::shared_ptr<PluginInsert>
 find_ace_reverb_insert (std::shared_ptr<Route> route, std::string* out_name = nullptr)
 {
@@ -9187,6 +9268,36 @@ find_ace_eq_insert (std::shared_ptr<Route> route, std::string* out_name = nullpt
 			found = pi;
 			if (out_name) {
 				*out_name = pname.empty () ? "ACE EQ" : pname;
+			}
+		}
+	});
+	return found;
+}
+
+static std::shared_ptr<PluginInsert>
+find_ace_delay_insert (std::shared_ptr<Route> route, std::string* out_name = nullptr)
+{
+	std::shared_ptr<PluginInsert> found;
+	if (!route) {
+		return found;
+	}
+	route->foreach_processor ([&] (std::weak_ptr<Processor> wp) {
+		if (found) {
+			return;
+		}
+		std::shared_ptr<Processor> p = wp.lock ();
+		std::shared_ptr<PluginInsert> pi = std::dynamic_pointer_cast<PluginInsert> (p);
+		if (!pi || !pi->plugin ()) {
+			return;
+		}
+		std::string uid = pi->plugin ()->unique_id ();
+		std::string pname = pi->name ();
+		if (uid.find (kAceDelayUri) == 0
+		    || pname.find ("ACE Delay") != std::string::npos
+		    || pname.find ("a-delay") != std::string::npos) {
+			found = pi;
+			if (out_name) {
+				*out_name = pname.empty () ? "ACE Delay" : pname;
 			}
 		}
 	});
@@ -10508,6 +10619,324 @@ EngineHost::smoke_eq ()
 	}
 }
 
+void
+EngineHost::refresh_track_delay_snap ()
+{
+	_snap.track_delay_ok = false;
+	_snap.track_delay_bypassed = false;
+	_snap.track_delay_time_ms = _impl ? _impl->track_delay_time_ms : 160.f;
+	_snap.track_delay_feedback_pct = _impl ? _impl->track_delay_feedback_pct : 20.f;
+	_snap.track_delay_time_norm = delay_time_to_norm (_snap.track_delay_time_ms);
+	_snap.track_delay_feedback_norm = delay_feedback_to_norm (_snap.track_delay_feedback_pct);
+	_snap.track_delay_name.clear ();
+	if (!_impl || _impl->tracks.size () < 4 || !_impl->tracks[3]) {
+		return;
+	}
+	std::string name;
+	std::shared_ptr<PluginInsert> pi = _impl->track_delay.lock ();
+	if (!pi) {
+		pi = find_ace_delay_insert (_impl->tracks[3], &name);
+		if (pi) {
+			_impl->track_delay = pi;
+		}
+	} else {
+		name = pi->name ().empty () ? "ACE Delay" : pi->name ();
+	}
+	if (!pi) {
+		_impl->track_delay_ok = false;
+		return;
+	}
+	_impl->track_delay_ok = true;
+	_impl->track_delay_name = name.empty () ? "ACE Delay" : name;
+	_impl->track_delay_bypassed = !pi->active ();
+	try {
+		std::shared_ptr<AutomationControl> tm = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceDelayTimePort));
+		std::shared_ptr<AutomationControl> fb = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceDelayFeedbackPort));
+		if (tm) {
+			_impl->track_delay_time_ms = (float)tm->get_value ();
+		}
+		if (fb) {
+			_impl->track_delay_feedback_pct = (float)fb->get_value ();
+		}
+	} catch (...) {
+	}
+	_snap.track_delay_ok = true;
+	_snap.track_delay_bypassed = _impl->track_delay_bypassed;
+	_snap.track_delay_time_ms = _impl->track_delay_time_ms;
+	_snap.track_delay_feedback_pct = _impl->track_delay_feedback_pct;
+	_snap.track_delay_time_norm = delay_time_to_norm (_impl->track_delay_time_ms);
+	_snap.track_delay_feedback_norm = delay_feedback_to_norm (_impl->track_delay_feedback_pct);
+	_snap.track_delay_name = utf8_to_wide (_impl->track_delay_name);
+}
+
+bool
+EngineHost::insert_track_delay (int track)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"insert Delay: no audio track";
+		return false;
+	}
+	std::shared_ptr<AudioTrack> at = _impl->tracks[track];
+	std::string existing;
+	std::shared_ptr<PluginInsert> already = find_ace_delay_insert (at, &existing);
+	if (already) {
+		_impl->track_delay = already;
+		_impl->track_delay_ok = true;
+		_impl->track_delay_name = existing;
+		refresh_track_delay_snap ();
+		return true;
+	}
+
+	ensure_plugins_scanned ();
+	try {
+		PluginInfoPtr info = find_ace_delay_info ();
+		if (!info) {
+			_snap.detail = L"ACE Delay not found (check ARDOUR_DLL_PATH/LV2)";
+			std::fprintf (stderr, "airdour_win_shell: ACE Delay LV2 missing\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		PluginPtr plugin = info->load (*_impl->session);
+		if (!plugin) {
+			_snap.detail = L"ACE Delay load failed";
+			return false;
+		}
+
+		std::shared_ptr<PluginInsert> pi (
+		    new PluginInsert (*_impl->session, *at, plugin));
+		pi->set_strict_io (true);
+		if (at->add_processor (pi, PreFader) != 0) {
+			_snap.detail = L"ACE Delay add_processor failed";
+			return false;
+		}
+
+		_impl->track_delay = pi;
+		_impl->track_delay_ok = true;
+		_impl->track_delay_bypassed = !pi->active ();
+		_impl->track_delay_name = info->name.empty () ? "ACE Delay" : info->name;
+		try {
+			std::shared_ptr<AutomationControl> tm = pi->automation_control (
+			    Evoral::Parameter (PluginAutomation, 0, kAceDelayTimePort));
+			std::shared_ptr<AutomationControl> fb = pi->automation_control (
+			    Evoral::Parameter (PluginAutomation, 0, kAceDelayFeedbackPort));
+			if (tm) {
+				_impl->track_delay_time_ms = (float)tm->get_value ();
+			}
+			if (fb) {
+				_impl->track_delay_feedback_pct = (float)fb->get_value ();
+			}
+		} catch (...) {
+		}
+		refresh_track_delay_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: Delay \"%s\" on Audio %d (pre-fader)\n",
+		              _impl->track_delay_name.c_str (), track + 1);
+		std::fflush (stderr);
+		_snap.detail = L"ACE Delay on Audio 4";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: insert_track_delay: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_delay_bypassed (int track, bool bypassed)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_delay (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_delay.lock ();
+	if (!pi) {
+		pi = find_ace_delay_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_delay = pi;
+	}
+	try {
+		if (bypassed) {
+			pi->deactivate ();
+		} else {
+			pi->activate ();
+		}
+		_impl->track_delay_bypassed = !pi->active ();
+		refresh_track_delay_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_track_delay_bypass (int track)
+{
+	refresh_track_delay_snap ();
+	return set_track_delay_bypassed (track, !_snap.track_delay_bypassed);
+}
+
+bool
+EngineHost::set_track_delay_time_ms (int track, float ms)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_delay (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_delay.lock ();
+	if (!pi) {
+		pi = find_ace_delay_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_delay = pi;
+	}
+	ms = std::max (1.f, std::min (8000.f, ms));
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceDelayTimePort));
+		if (!ac) {
+			_snap.detail = L"ACE Delay Time missing";
+			return false;
+		}
+		ac->set_value (ms, Controllable::NoGroup);
+		_impl->track_delay_time_ms = (float)ac->get_value ();
+		refresh_track_delay_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_delay_feedback_pct (int track, float pct)
+{
+	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (!insert_track_delay (track)) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->track_delay.lock ();
+	if (!pi) {
+		pi = find_ace_delay_insert (_impl->tracks[track]);
+		if (!pi) {
+			return false;
+		}
+		_impl->track_delay = pi;
+	}
+	pct = std::max (0.f, std::min (100.f, pct));
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceDelayFeedbackPort));
+		if (!ac) {
+			_snap.detail = L"ACE Delay Feedback missing";
+			return false;
+		}
+		ac->set_value (pct, Controllable::NoGroup);
+		_impl->track_delay_feedback_pct = (float)ac->get_value ();
+		refresh_track_delay_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_delay_time_norm (int track, float norm_0_1)
+{
+	return set_track_delay_time_ms (track, delay_norm_to_time (norm_0_1));
+}
+
+bool
+EngineHost::set_track_delay_feedback_norm (int track, float norm_0_1)
+{
+	return set_track_delay_feedback_pct (track, delay_norm_to_feedback (norm_0_1));
+}
+
+bool
+EngineHost::smoke_delay ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-delay failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.size () < 4 || !_impl->tracks[3]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-delay FAILED (need Audio 4)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!insert_track_delay (3) || !_snap.track_delay_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-delay FAILED (insert)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::string verified;
+		if (!find_ace_delay_insert (_impl->tracks[3], &verified)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-delay FAILED (not on route)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!set_track_delay_bypassed (3, false) || _snap.track_delay_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-delay FAILED (bypass clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_delay_time_ms (3, 250.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-delay FAILED (Time)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_delay_time_ms < 240.f || _snap.track_delay_time_ms > 260.f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-delay FAILED (time=%.1f)\n",
+			              _snap.track_delay_time_ms);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_delay_feedback_pct (3, 35.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-delay FAILED (Feedback)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_delay_feedback_pct < 30.f || _snap.track_delay_feedback_pct > 40.f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-delay FAILED (fb=%.1f)\n",
+			              _snap.track_delay_feedback_pct);
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-delay ok (fx=%s time=%.0fms fb=%.0f%%)\n",
+		              verified.c_str (), _snap.track_delay_time_ms,
+		              _snap.track_delay_feedback_pct);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-delay ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-delay exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_perf (unsigned sample_secs)
 {
@@ -11354,6 +11783,7 @@ EngineHost::refresh_snapshot ()
 			refresh_track_fx_snap ();
 			refresh_track_comp_snap ();
 			refresh_track_eq_snap ();
+			refresh_track_delay_snap ();
 		} else {
 			_snap.waves_from_session = false;
 			_snap.session_record_armed = false;
@@ -11534,6 +11964,12 @@ EngineHost::EngineHost ()
 	_snap.track_eq_gain_l_norm = 0.5f;
 	_snap.track_eq_gain_m_norm = 0.5f;
 	_snap.track_eq_gain_h_norm = 0.5f;
+	_snap.track_delay_ok = false;
+	_snap.track_delay_bypassed = false;
+	_snap.track_delay_time_ms = 160.f;
+	_snap.track_delay_feedback_pct = 20.f;
+	_snap.track_delay_time_norm = std::log (160.f) / std::log (8000.f);
+	_snap.track_delay_feedback_norm = 0.2f;
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -11563,6 +11999,7 @@ EngineHost::EngineHost ()
 	_snap.track_fx_param_name = L"Blend";
 	_snap.track_comp_name.clear ();
 	_snap.track_eq_name.clear ();
+	_snap.track_delay_name.clear ();
 	_snap.sample_rate = 0;
 	_snap.period_frames = 0;
 	_snap.gain = _gain;
@@ -13098,6 +13535,66 @@ EngineHost::smoke_eq ()
 }
 
 bool
+EngineHost::insert_track_delay (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::toggle_track_delay_bypass (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::set_track_delay_bypassed (int track, bool bypassed)
+{
+	(void)track;
+	(void)bypassed;
+	return false;
+}
+
+bool
+EngineHost::set_track_delay_time_ms (int track, float ms)
+{
+	(void)track;
+	(void)ms;
+	return false;
+}
+
+bool
+EngineHost::set_track_delay_feedback_pct (int track, float pct)
+{
+	(void)track;
+	(void)pct;
+	return false;
+}
+
+bool
+EngineHost::set_track_delay_time_norm (int track, float norm_0_1)
+{
+	(void)track;
+	(void)norm_0_1;
+	return false;
+}
+
+bool
+EngineHost::set_track_delay_feedback_norm (int track, float norm_0_1)
+{
+	(void)track;
+	(void)norm_0_1;
+	return false;
+}
+
+bool
+EngineHost::smoke_delay ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_vst3 ()
 {
 	return false;
@@ -13122,6 +13619,11 @@ EngineHost::refresh_track_comp_snap ()
 
 void
 EngineHost::refresh_track_eq_snap ()
+{
+}
+
+void
+EngineHost::refresh_track_delay_snap ()
 {
 }
 

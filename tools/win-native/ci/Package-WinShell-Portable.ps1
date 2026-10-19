@@ -187,7 +187,7 @@ if ($Mode -eq "Engine") {
 
     $lv2Root = Join-Path $stage "LV2"
     New-Item -ItemType Directory -Force -Path $lv2Root | Out-Null
-    foreach ($bundle in @("reasonablesynth.lv2", "a-reverb.lv2", "a-comp.lv2", "a-eq.lv2")) {
+    foreach ($bundle in @("reasonablesynth.lv2", "a-reverb.lv2", "a-comp.lv2", "a-eq.lv2", "a-delay.lv2")) {
         $candidates = @(
             (Join-Path $WafLibsDir ("ardour\LV2\" + $bundle)),
             (Join-Path $WafLibsDir ("LV2\" + $bundle))

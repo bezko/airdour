@@ -230,7 +230,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_consolidate,
                             bool smoke_freeze,
                             bool smoke_comp,
-                            bool smoke_eq)
+                            bool smoke_eq,
+                            bool smoke_delay)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -368,6 +369,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_eq) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-eq FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_delay && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_delay ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_fx_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_delay) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-delay FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1088,6 +1102,13 @@ ShellWindow::sync_mixer_fx_from_engine ()
 			_mixers[i].set_fx_param (_engine_snap.track_eq_gain_l_norm);
 			_mixers[i].set_fx_param2 (_engine_snap.track_eq_gain_m_norm);
 			_mixers[i].set_fx_param3 (_engine_snap.track_eq_gain_h_norm);
+		} else if (i == 3 && _engine_snap.track_delay_ok
+		           && !_engine_snap.track_delay_name.empty ()) {
+			_mixers[i].set_fx_label (_engine_snap.track_delay_name.c_str ());
+			_mixers[i].set_fx_bypassed (_engine_snap.track_delay_bypassed);
+			_mixers[i].set_fx_param_count (2);
+			_mixers[i].set_fx_param (_engine_snap.track_delay_time_norm);
+			_mixers[i].set_fx_param2 (_engine_snap.track_delay_feedback_norm);
 		} else {
 			_mixers[i].set_fx_label (nullptr);
 			_mixers[i].set_fx_bypassed (false);
@@ -3701,7 +3722,9 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_drag = DragMode::FxParam2;
 		_drag_index = fxpi2;
 		if (_mixers[fxpi2].drag_fx_param2_to (x)) {
-			if (fxpi2 == 2 && _engine_snap.track_eq_ok) {
+			if (fxpi2 == 3 && _engine_snap.track_delay_ok) {
+				_engine.set_track_delay_feedback_norm (fxpi2, _mixers[fxpi2].fx_param2 ());
+			} else if (fxpi2 == 2 && _engine_snap.track_eq_ok) {
 				_engine.set_track_eq_gain_m_norm (fxpi2, _mixers[fxpi2].fx_param2 ());
 			} else {
 				_engine.set_track_comp_ratio_norm (fxpi2, _mixers[fxpi2].fx_param2 ());
@@ -3721,7 +3744,9 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_drag = DragMode::FxParam;
 		_drag_index = fxpi;
 		if (_mixers[fxpi].drag_fx_param_to (x)) {
-			if (fxpi == 2 && _engine_snap.track_eq_ok) {
+			if (fxpi == 3 && _engine_snap.track_delay_ok) {
+				_engine.set_track_delay_time_norm (fxpi, _mixers[fxpi].fx_param ());
+			} else if (fxpi == 2 && _engine_snap.track_eq_ok) {
 				_engine.set_track_eq_gain_l_norm (fxpi, _mixers[fxpi].fx_param ());
 			} else if (fxpi == 1 && _engine_snap.track_comp_ok) {
 				_engine.set_track_comp_threshold_norm (fxpi, _mixers[fxpi].fx_param ());
@@ -3741,7 +3766,13 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	int fxi = hit_mixer_fx (x, y);
 	if (fxi >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
-			if (fxi == 2) {
+			if (fxi == 3) {
+				if (_mixers[fxi].has_fx ()) {
+					_engine.toggle_track_delay_bypass (fxi);
+				} else {
+					_engine.insert_track_delay (fxi);
+				}
+			} else if (fxi == 2) {
 				if (_mixers[fxi].has_fx ()) {
 					_engine.toggle_track_eq_bypass (fxi);
 				} else {
@@ -3898,7 +3929,10 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 
 	if (_drag == DragMode::FxParam && _drag_index >= 0 && _drag_index < kTracks) {
 		if (_mixers[_drag_index].drag_fx_param_to (x)) {
-			if (_drag_index == 2 && _engine_snap.track_eq_ok) {
+			if (_drag_index == 3 && _engine_snap.track_delay_ok) {
+				_engine.set_track_delay_time_norm (
+					_drag_index, _mixers[_drag_index].fx_param ());
+			} else if (_drag_index == 2 && _engine_snap.track_eq_ok) {
 				_engine.set_track_eq_gain_l_norm (
 					_drag_index, _mixers[_drag_index].fx_param ());
 			} else if (_drag_index == 1 && _engine_snap.track_comp_ok) {
@@ -3917,7 +3951,10 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 
 	if (_drag == DragMode::FxParam2 && _drag_index >= 0 && _drag_index < kTracks) {
 		if (_mixers[_drag_index].drag_fx_param2_to (x)) {
-			if (_drag_index == 2 && _engine_snap.track_eq_ok) {
+			if (_drag_index == 3 && _engine_snap.track_delay_ok) {
+				_engine.set_track_delay_feedback_norm (
+					_drag_index, _mixers[_drag_index].fx_param2 ());
+			} else if (_drag_index == 2 && _engine_snap.track_eq_ok) {
 				_engine.set_track_eq_gain_m_norm (
 					_drag_index, _mixers[_drag_index].fx_param2 ());
 			} else {
