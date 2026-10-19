@@ -17,22 +17,23 @@ namespace {
 constexpr wchar_t kClassName[] = L"AirdourWinShell";
 constexpr wchar_t kWindowTitle[] = L"Airdour";
 
-constexpr D2D1_COLOR_F kBgTop      = { 0.055f, 0.075f, 0.095f, 1.f };
-constexpr D2D1_COLOR_F kBgBottom   = { 0.090f, 0.140f, 0.165f, 1.f };
-constexpr D2D1_COLOR_F kBrand      = { 0.930f, 0.955f, 0.970f, 1.f };
-constexpr D2D1_COLOR_F kBody       = { 0.620f, 0.720f, 0.760f, 1.f };
-constexpr D2D1_COLOR_F kAccent     = { 0.180f, 0.820f, 0.720f, 1.f };
-constexpr D2D1_COLOR_F kPaneFill   = { 0.070f, 0.100f, 0.120f, 0.92f };
-constexpr D2D1_COLOR_F kPaneEdge   = { 0.160f, 0.220f, 0.250f, 1.f };
-constexpr D2D1_COLOR_F kPeak       = { 0.220f, 0.920f, 0.820f, 1.f };
-constexpr D2D1_COLOR_F kRms        = { 0.120f, 0.420f, 0.400f, 0.85f };
-constexpr D2D1_COLOR_F kPlayhead   = { 0.980f, 0.780f, 0.220f, 1.f };
-constexpr D2D1_COLOR_F kSelection  = { 0.350f, 0.780f, 0.920f, 1.f };
-constexpr D2D1_COLOR_F kLoop       = { 0.920f, 0.620f, 0.220f, 1.f };
-constexpr D2D1_COLOR_F kPunch      = { 0.880f, 0.320f, 0.280f, 1.f };
-constexpr D2D1_COLOR_F kMarker     = { 0.780f, 0.860f, 0.420f, 1.f };
-constexpr D2D1_COLOR_F kMidi       = { 0.720f, 0.480f, 0.920f, 1.f };
-constexpr D2D1_COLOR_F kMeterHot   = { 0.95f, 0.35f, 0.22f, 1.f };
+/* Modern D2D palette — cool slate + mint accent (no purple chrome). */
+constexpr D2D1_COLOR_F kBgTop      = { 0.042f, 0.052f, 0.062f, 1.f };
+constexpr D2D1_COLOR_F kBgBottom   = { 0.072f, 0.095f, 0.112f, 1.f };
+constexpr D2D1_COLOR_F kBrand      = { 0.960f, 0.975f, 0.985f, 1.f };
+constexpr D2D1_COLOR_F kBody       = { 0.720f, 0.800f, 0.840f, 1.f };
+constexpr D2D1_COLOR_F kAccent     = { 0.120f, 0.860f, 0.740f, 1.f };
+constexpr D2D1_COLOR_F kPaneFill   = { 0.058f, 0.078f, 0.092f, 0.94f };
+constexpr D2D1_COLOR_F kPaneEdge   = { 0.140f, 0.190f, 0.220f, 1.f };
+constexpr D2D1_COLOR_F kPeak       = { 0.200f, 0.940f, 0.820f, 1.f };
+constexpr D2D1_COLOR_F kRms        = { 0.100f, 0.380f, 0.360f, 0.88f };
+constexpr D2D1_COLOR_F kPlayhead   = { 0.990f, 0.820f, 0.280f, 1.f };
+constexpr D2D1_COLOR_F kSelection  = { 0.280f, 0.760f, 0.900f, 1.f };
+constexpr D2D1_COLOR_F kLoop       = { 0.940f, 0.640f, 0.200f, 1.f };
+constexpr D2D1_COLOR_F kPunch      = { 0.920f, 0.340f, 0.280f, 1.f };
+constexpr D2D1_COLOR_F kMarker     = { 0.820f, 0.880f, 0.420f, 1.f };
+constexpr D2D1_COLOR_F kMidi       = { 0.320f, 0.780f, 0.920f, 1.f }; /* cyan, not purple */
+constexpr D2D1_COLOR_F kMeterHot   = { 0.96f, 0.38f, 0.24f, 1.f };
 
 #ifndef WM_DPICHANGED
 #define WM_DPICHANGED 0x02E0
@@ -3018,18 +3019,19 @@ ShellWindow::init_d2d ()
 		return SUCCEEDED (h);
 	};
 
-	if (!make_fmt (L"Segoe UI Variable Display", L"Segoe UI", DWRITE_FONT_WEIGHT_SEMI_BOLD, 48.f, &_fmt_brand)) {
+	/* Brand hero: display face; body/pane: text face; meta: mono for meters/DSP. */
+	if (!make_fmt (L"Segoe UI Variable Display", L"Segoe UI", DWRITE_FONT_WEIGHT_BOLD, 44.f, &_fmt_brand)) {
 		return false;
 	}
 	_fmt_brand->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
 	_fmt_brand->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-	if (!make_fmt (L"Segoe UI Variable Text", L"Segoe UI", DWRITE_FONT_WEIGHT_NORMAL, 16.f, &_fmt_body)) {
+	if (!make_fmt (L"Segoe UI Variable Text", L"Segoe UI", DWRITE_FONT_WEIGHT_NORMAL, 15.f, &_fmt_body)) {
 		return false;
 	}
-	if (!make_fmt (L"Cascadia Mono", L"Consolas", DWRITE_FONT_WEIGHT_NORMAL, 13.f, &_fmt_meta)) {
+	if (!make_fmt (L"Cascadia Mono", L"Consolas", DWRITE_FONT_WEIGHT_MEDIUM, 12.f, &_fmt_meta)) {
 		return false;
 	}
-	if (!make_fmt (L"Segoe UI Variable Text", L"Segoe UI", DWRITE_FONT_WEIGHT_SEMI_BOLD, 14.f, &_fmt_pane)) {
+	if (!make_fmt (L"Segoe UI Variable Text", L"Segoe UI", DWRITE_FONT_WEIGHT_SEMI_BOLD, 12.5f, &_fmt_pane)) {
 		return false;
 	}
 	return true;
@@ -3118,10 +3120,10 @@ ShellWindow::layout_panes ()
 	const float w = (float)_width;
 	const float h = (float)_height;
 	const float pad = 16.f * _dpi_scale;
-	const float brand_h = 68.f * _dpi_scale;
-	const float transport_h = 44.f * _dpi_scale;
-	const float status_h = 40.f * _dpi_scale;
-	const float gap = 12.f * _dpi_scale;
+	const float brand_h = 60.f * _dpi_scale;
+	const float transport_h = 48.f * _dpi_scale;
+	const float status_h = 36.f * _dpi_scale;
+	const float gap = 14.f * _dpi_scale;
 
 	_brand_bar = D2D1::RectF (0, 0, w, brand_h);
 	_transport_bounds = D2D1::RectF (0, brand_h, w, brand_h + transport_h);
@@ -6196,17 +6198,18 @@ ShellWindow::on_paint ()
 	D2D1_SIZE_F sz = _rt->GetSize ();
 	_rt->FillRectangle (D2D1::RectF (0, 0, sz.width, sz.height), _brush_bg);
 
-	_brush_brand->SetOpacity (0.94f + 0.06f * _pulse);
+	_brush_brand->SetOpacity (0.96f + 0.04f * _pulse);
 	_rt->DrawTextW (L"Airdour", 7, _fmt_brand,
-	                D2D1::RectF (_brand_bar.left + 24.f * _dpi_scale, _brand_bar.top,
-	                             _brand_bar.right - 24.f * _dpi_scale, _brand_bar.bottom),
+	                D2D1::RectF (_brand_bar.left + 28.f * _dpi_scale, _brand_bar.top,
+	                             _brand_bar.right - 28.f * _dpi_scale, _brand_bar.bottom),
 	                _brush_brand);
 	_brush_brand->SetOpacity (1.f);
 
-	float rule_y = _brand_bar.bottom - 8.f * _dpi_scale;
-	float rule_w = (100.f + 36.f * _pulse) * _dpi_scale;
-	_rt->FillRectangle (D2D1::RectF (24.f * _dpi_scale, rule_y,
-	                                 24.f * _dpi_scale + rule_w, rule_y + 2.f * _dpi_scale),
+	/* Accent rule under brand — presence, not noise. */
+	float rule_y = _brand_bar.bottom - 6.f * _dpi_scale;
+	float rule_w = (120.f + 28.f * _pulse) * _dpi_scale;
+	_rt->FillRectangle (D2D1::RectF (28.f * _dpi_scale, rule_y,
+	                                 28.f * _dpi_scale + rule_w, rule_y + 2.5f * _dpi_scale),
 	                    _brush_accent);
 
 	sync_transport_clock_from_engine ();

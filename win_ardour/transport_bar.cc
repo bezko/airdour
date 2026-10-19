@@ -105,12 +105,12 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 {
 	_bounds = bounds;
 	float h = bounds.bottom - bounds.top;
-	float btn_h = h - 10.f * dpi_scale;
-	float btn_w = 36.f * dpi_scale;
-	float narrow = 26.f * dpi_scale;
-	float y0 = bounds.top + 5.f * dpi_scale;
-	float x0 = bounds.left + 8.f * dpi_scale;
-	float gap = 3.f * dpi_scale;
+	float btn_h = h - 12.f * dpi_scale;
+	float btn_w = 38.f * dpi_scale;
+	float narrow = 28.f * dpi_scale;
+	float y0 = bounds.top + 6.f * dpi_scale;
+	float x0 = bounds.left + 10.f * dpi_scale;
+	float gap = 4.f * dpi_scale;
 	auto place = [&] (D2D1_RECT_F& out, float& x, float w) {
 		out = D2D1::RectF (x, y0, x + w, y0 + btn_h);
 		x = out.right + gap;
@@ -376,9 +376,14 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 		D2D1::Point2F (_bounds.right, _bounds.bottom),
 		edge, 1.f);
 
+	/* Flat modern controls: quiet idle, accent when latched — no GTK chrome. */
 	auto draw_btn = [&] (const D2D1_RECT_F& r, const wchar_t* label, bool active) {
-		rt->FillRectangle (r, active ? accent : edge);
-		ID2D1SolidColorBrush* ink = brand;
+		if (active) {
+			rt->FillRectangle (r, accent);
+		} else {
+			rt->DrawRectangle (r, edge, 1.f);
+		}
+		ID2D1SolidColorBrush* ink = active ? pane : brand;
 		DWRITE_TEXT_ALIGNMENT ta = fmt->GetTextAlignment ();
 		DWRITE_PARAGRAPH_ALIGNMENT pa = fmt->GetParagraphAlignment ();
 		fmt->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
