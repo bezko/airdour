@@ -131,6 +131,14 @@ struct EngineSnapshot {
 	float        gonio_x[kGonioPts]; /* L (−1..+1) */
 	float        gonio_y[kGonioPts]; /* R (−1..+1) */
 	wchar_t      correlation_label[32];
+	/* Approximate LUFS (UI-rate K-weight / BS.1770-style; not certified). */
+	bool         loudness_enabled;
+	bool         loudness_ok;
+	bool         loudness_master; /* true = mix Audio 1..N; false = selected */
+	int          loudness_track;
+	float        loudness_momentary; /* ≈ LUFS over ~400 ms window */
+	float        loudness_integrated; /* ≈ gated running mean */
+	wchar_t      loudness_label[32];
 	float        midi_activity; /* 0..1 decaying activity indicator */
 	int          midi_device_count;
 	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices];
@@ -938,6 +946,18 @@ public:
 	bool toggle_correlation_master ();
 
 	/**
+	 * Enable approx LUFS; verify synthetic tone yields plausible momentary.
+	 * For --smoke-loudness.
+	 */
+	bool smoke_loudness ();
+	/** Toggle UI-rate approximate LUFS (LUFS / J). */
+	bool set_loudness_enabled (bool on);
+	bool toggle_loudness_enabled ();
+	bool loudness_enabled () const { return _snap.loudness_enabled; }
+	bool set_loudness_master (bool master);
+	bool toggle_loudness_master ();
+
+	/**
 	 * Scan system VST3 dirs (+ VST3_PATH / AIRDOUR_SMOKE_VST3); list; optionally
 	 * insert first usable audio FX on Audio 2. DSP-only (no GTK UI).
 	 * Scan-only with VST3=0 still returns true (proves path). For --smoke-vst3.
@@ -1037,6 +1057,7 @@ private:
 	void refresh_track_gate_snap ();
 	void refresh_spectrum_snap ();
 	void refresh_correlation_snap ();
+	void refresh_loudness_snap ();
 	bool ensure_plugins_scanned ();
 
 	bool        _started;

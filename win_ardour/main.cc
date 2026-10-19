@@ -16,7 +16,7 @@
  *                         [--smoke-locate] [--smoke-zoom] [--smoke-history]
  *                         [--smoke-prefs] [--smoke-recent] [--smoke-recovery]
  *                         [--smoke-limiter] [--smoke-gate] [--smoke-spectrum]
- *                         [--smoke-correlation]
+ *                         [--smoke-correlation] [--smoke-loudness]
  *                         [--no-splash] [--period N] [--session DIR]
  */
 
@@ -151,6 +151,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_gate = parse_flag (argc, argv, L"--smoke-gate");
 	bool smoke_spectrum = parse_flag (argc, argv, L"--smoke-spectrum");
 	bool smoke_correlation = parse_flag (argc, argv, L"--smoke-correlation");
+	bool smoke_loudness = parse_flag (argc, argv, L"--smoke-loudness");
 	bool smoke_perf = parse_flag (argc, argv, L"--smoke-perf");
 	bool no_splash = parse_flag (argc, argv, L"--no-splash");
 	std::string session_path = parse_session_path (argc, argv);
@@ -199,7 +200,7 @@ wmain (int argc, wchar_t** argv)
 		                         smoke_normalize, smoke_strip_silence,
 		                         smoke_consolidate, smoke_freeze, smoke_comp,
 		                         smoke_eq, smoke_delay, smoke_limiter, smoke_gate,
-	                         smoke_spectrum, smoke_correlation)) {
+	                         smoke_spectrum, smoke_correlation, smoke_loudness)) {
 			const char* be = backend.empty () ? "(prefs/Dummy)" : backend.c_str ();
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", be);
 		} else {

@@ -235,7 +235,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_limiter,
                             bool smoke_gate,
                             bool smoke_spectrum,
-                            bool smoke_correlation)
+                            bool smoke_correlation,
+                            bool smoke_loudness)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -434,6 +435,17 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_correlation) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-correlation FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_loudness && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_loudness ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_loudness) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-loudness FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1007,6 +1019,7 @@ ShellWindow::sync_mixer_group_from_engine ()
 	                             && _engine_snap.group_active);
 	_transport.set_spectrum_enabled (_engine_snap.spectrum_enabled);
 	_transport.set_correlation_enabled (_engine_snap.correlation_enabled);
+	_transport.set_loudness_enabled (_engine_snap.loudness_enabled);
 }
 
 void
@@ -2695,7 +2708,9 @@ ShellWindow::layout_panes ()
 	float midi_h = 96.f * _dpi_scale; /* ~24-key piano-roll */
 	const bool show_spec = _engine_snap.spectrum_enabled;
 	const bool show_phase = _engine_snap.correlation_enabled;
-	float meter_h = (show_spec || show_phase) ? (72.f * _dpi_scale) : 0.f;
+	const bool show_lufs = _engine_snap.loudness_enabled;
+	const int meter_n = (show_spec ? 1 : 0) + (show_phase ? 1 : 0) + (show_lufs ? 1 : 0);
+	float meter_h = (meter_n > 0) ? (72.f * _dpi_scale) : 0.f;
 	float lanes_top = _editor_ruler.bottom + 4.f * _dpi_scale;
 	float lanes_bot = _editor_pane.bottom - inset - midi_h - lane_gap
 	                  - (meter_h > 0.f ? (meter_h + lane_gap) : 0.f);
@@ -2726,38 +2741,36 @@ ShellWindow::layout_panes ()
 	}
 	_midi_lane = D2D1::RectF (wave_left, lanes_bot + lane_gap, wave_right,
 	                          lanes_bot + lane_gap + midi_h);
-	if (meter_h > 0.f) {
+	_spectrum_bounds = D2D1::RectF ();
+	_correlation_bounds = D2D1::RectF ();
+	_loudness_bounds = D2D1::RectF ();
+	_spectrum.set_visible (false);
+	_correlation.set_visible (false);
+	_loudness.set_visible (false);
+	if (meter_h > 0.f && meter_n > 0) {
 		float meter_top = _midi_lane.bottom + lane_gap;
 		float meter_bot = meter_top + meter_h;
 		float gap_m = 6.f * _dpi_scale;
-		if (show_spec && show_phase) {
-			float mid = (wave_left + wave_right) * 0.5f;
-			_spectrum_bounds = D2D1::RectF (wave_left, meter_top, mid - gap_m * 0.5f, meter_bot);
-			_correlation_bounds = D2D1::RectF (mid + gap_m * 0.5f, meter_top, wave_right, meter_bot);
-		} else if (show_spec) {
-			_spectrum_bounds = D2D1::RectF (wave_left, meter_top, wave_right, meter_bot);
-			_correlation_bounds = D2D1::RectF ();
-		} else {
-			_spectrum_bounds = D2D1::RectF ();
-			_correlation_bounds = D2D1::RectF (wave_left, meter_top, wave_right, meter_bot);
-		}
+		float span = wave_right - wave_left - gap_m * (float)(meter_n - 1);
+		float cell = span / (float)meter_n;
+		float x = wave_left;
 		if (show_spec) {
+			_spectrum_bounds = D2D1::RectF (x, meter_top, x + cell, meter_bot);
 			_spectrum.layout (_spectrum_bounds);
 			_spectrum.set_visible (true);
-		} else {
-			_spectrum.set_visible (false);
+			x += cell + gap_m;
 		}
 		if (show_phase) {
+			_correlation_bounds = D2D1::RectF (x, meter_top, x + cell, meter_bot);
 			_correlation.layout (_correlation_bounds);
 			_correlation.set_visible (true);
-		} else {
-			_correlation.set_visible (false);
+			x += cell + gap_m;
 		}
-	} else {
-		_spectrum_bounds = D2D1::RectF ();
-		_correlation_bounds = D2D1::RectF ();
-		_spectrum.set_visible (false);
-		_correlation.set_visible (false);
+		if (show_lufs) {
+			_loudness_bounds = D2D1::RectF (x, meter_top, x + cell, meter_bot);
+			_loudness.layout (_loudness_bounds);
+			_loudness.set_visible (true);
+		}
 	}
 
 	float mix_inset = 10.f * _dpi_scale;
@@ -3075,6 +3088,18 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 					_engine.toggle_correlation_master ();
 				} else {
 					_engine.toggle_correlation_enabled ();
+				}
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				layout_panes ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			}
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'J' || wparam == 'j')) {
+			if (_engine.is_linked ()) {
+				if (GetKeyState (VK_SHIFT) & 0x8000) {
+					_engine.toggle_loudness_master ();
+				} else {
+					_engine.toggle_loudness_enabled ();
 				}
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
@@ -3484,6 +3509,20 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				_engine.toggle_correlation_master ();
 			} else {
 				_engine.toggle_correlation_enabled ();
+			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			layout_panes ();
+		}
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+	if (th == TransportHit::Loudness) {
+		if (_engine.is_linked ()) {
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
+				_engine.toggle_loudness_master ();
+			} else {
+				_engine.toggle_loudness_enabled ();
 			}
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
@@ -4526,7 +4565,8 @@ ShellWindow::on_tick ()
 	static DWORD last_wave = 0;
 	const bool rolling = _transport_playing || _engine_snap.transport_rolling;
 	DWORD poll_ms = (rolling || _engine_snap.spectrum_enabled
-	                 || _engine_snap.correlation_enabled) ? 50u : 250u;
+	                 || _engine_snap.correlation_enabled
+	                 || _engine_snap.loudness_enabled) ? 50u : 250u;
 	if (now - last_poll > poll_ms) {
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
@@ -4546,6 +4586,7 @@ ShellWindow::on_tick ()
 		_transport.set_snap_enabled (_engine_snap.snap_enabled);
 		_transport.set_spectrum_enabled (_engine_snap.spectrum_enabled);
 		_transport.set_correlation_enabled (_engine_snap.correlation_enabled);
+		_transport.set_loudness_enabled (_engine_snap.loudness_enabled);
 		if (_engine_snap.snap_enabled) {
 			_engine.refresh_grid_lines (
 				_lanes[0].strip.view_start_sec (),
@@ -5195,6 +5236,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"U", L"Apply / clear track group" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
+		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
 	};
 
 	float y = card.top + 40.f * _dpi_scale;
@@ -5320,6 +5362,14 @@ ShellWindow::on_paint ()
 		_correlation.set_visible (true);
 		_correlation.draw (_rt, _brush_brand, _brush_body, _brush_accent,
 		                   _brush_pane, _brush_pane_edge, _fmt_meta, _dpi_scale);
+	}
+	if (_engine_snap.loudness_enabled) {
+		_loudness.set_values (_engine_snap.loudness_momentary,
+		                      _engine_snap.loudness_integrated);
+		_loudness.set_label (_engine_snap.loudness_label);
+		_loudness.set_visible (true);
+		_loudness.draw (_rt, _brush_brand, _brush_body, _brush_accent,
+		                _brush_pane, _brush_pane_edge, _fmt_meta, _dpi_scale);
 	}
 	if (_help_visible) {
 		draw_help_overlay ();

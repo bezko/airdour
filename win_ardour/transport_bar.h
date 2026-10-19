@@ -60,7 +60,8 @@ enum class TransportHit {
 	Prefs,
 	About,
 	Spectrum,
-	Phase
+	Phase,
+	Loudness
 };
 
 class TransportBar
@@ -111,6 +112,9 @@ public:
 
 	void set_correlation_enabled (bool on) { _correlation_enabled = on; }
 	bool correlation_enabled () const { return _correlation_enabled; }
+
+	void set_loudness_enabled (bool on) { _loudness_enabled = on; }
+	bool loudness_enabled () const { return _loudness_enabled; }
 
 	void set_clock_bbt (int bars, int beats, int ticks)
 	{
@@ -192,6 +196,7 @@ private:
 	D2D1_RECT_F _about_btn;
 	D2D1_RECT_F _spectrum_btn;
 	D2D1_RECT_F _phase_btn;
+	D2D1_RECT_F _loudness_btn;
 	bool        _playing;
 	bool        _recording;
 	bool        _record_armed;
@@ -205,6 +210,7 @@ private:
 	bool        _group_active;
 	bool        _spectrum_enabled;
 	bool        _correlation_enabled;
+	bool        _loudness_enabled;
 	float       _tempo_bpm;
 	float       _shuttle_norm;
 	int         _bbt_bars;

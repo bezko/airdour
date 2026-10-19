@@ -225,6 +225,7 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     "${AIRDOUR_SRC_ROOT}/win_ardour/automation_lane.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/spectrum_panel.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/correlation_panel.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/loudness_panel.cc"
   )
   target_include_directories(airdour_win_shell PRIVATE
     "${AIRDOUR_SRC_ROOT}/win_ardour"

@@ -731,6 +731,13 @@ EngineHost::EngineHost ()
 		_snap.gonio_y[gi] = 0.f;
 	}
 	_snap.correlation_label[0] = L'\0';
+	_snap.loudness_enabled = false;
+	_snap.loudness_ok = false;
+	_snap.loudness_master = false;
+	_snap.loudness_track = 0;
+	_snap.loudness_momentary = -70.f;
+	_snap.loudness_integrated = -70.f;
+	_snap.loudness_label[0] = L'\0';
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -12384,6 +12391,350 @@ EngineHost::smoke_correlation ()
 	}
 }
 
+
+/* UI-rate approx LUFS: K-weight (BS.1770-ish) over ~400 ms window. Preallocated.
+ * Not a certified meter — labeled ≈ in the UI.
+ */
+static constexpr uint32_t kLufsWin = 19200; /* 400 ms @ 48 kHz */
+
+struct KWeightState {
+	float hs_z1 = 0.f, hs_z2 = 0.f;
+	float hp_z1 = 0.f, hp_z2 = 0.f;
+};
+
+static void
+kweight_reset (KWeightState& s)
+{
+	s.hs_z1 = s.hs_z2 = s.hp_z1 = s.hp_z2 = 0.f;
+}
+
+/* ITU-R BS.1770 stage 1+2 coefficients at 48 kHz (applied for all rates as approx). */
+static float
+kweight_sample (KWeightState& s, float x)
+{
+	/* High shelf */
+	const float hs_b0 = 1.53512485958697f;
+	const float hs_b1 = -2.69169618940638f;
+	const float hs_b2 = 1.19839281085285f;
+	const float hs_a1 = -1.69065929318241f;
+	const float hs_a2 = 0.73248077421585f;
+	float hs_y = hs_b0 * x + s.hs_z1;
+	s.hs_z1 = hs_b1 * x - hs_a1 * hs_y + s.hs_z2;
+	s.hs_z2 = hs_b2 * x - hs_a2 * hs_y;
+
+	/* Highpass */
+	const float hp_b0 = 1.0f;
+	const float hp_b1 = -2.0f;
+	const float hp_b2 = 1.0f;
+	const float hp_a1 = -1.99004745483398f;
+	const float hp_a2 = 0.99007225036621f;
+	float hp_y = hp_b0 * hs_y + s.hp_z1;
+	s.hp_z1 = hp_b1 * hs_y - hp_a1 * hp_y + s.hp_z2;
+	s.hp_z2 = hp_b2 * hs_y - hp_a2 * hp_y;
+	return hp_y;
+}
+
+static float
+mean_square_to_lufs (double mean_sq)
+{
+	if (!(mean_sq > 1.0e-20)) {
+		return -120.f;
+	}
+	return (float)(-0.691 + 10.0 * std::log10 (mean_sq));
+}
+
+static float
+kweight_stereo_lufs (const float* L, const float* R, uint32_t n)
+{
+	if (!L || !R || n < 64) {
+		return -120.f;
+	}
+	KWeightState sl, sr;
+	kweight_reset (sl);
+	kweight_reset (sr);
+	double acc = 0.0;
+	for (uint32_t i = 0; i < n; ++i) {
+		float yl = kweight_sample (sl, L[i]);
+		float yr = kweight_sample (sr, R[i]);
+		acc += (double)yl * (double)yl + (double)yr * (double)yr;
+	}
+	/* Stereo channel weighting G = 1.0 for L/R (BS.1770). */
+	return mean_square_to_lufs (acc / (double)n);
+}
+
+void
+EngineHost::refresh_loudness_snap ()
+{
+	if (!_snap.loudness_enabled) {
+		_snap.loudness_ok = false;
+		return;
+	}
+	if (!_impl || !_impl->session) {
+		_snap.loudness_ok = false;
+		_snap.loudness_momentary = _snap.loudness_momentary * 0.9f - 7.f * 0.1f;
+		return;
+	}
+
+	static float left[kLufsWin];
+	static float right[kLufsWin];
+	static float mixdown[kLufsWin];
+	static float gainbuf[kLufsWin];
+	static float integ_blocks[64];
+	static int   integ_n = 0;
+	static int   integ_i = 0;
+	static bool  integ_init = false;
+	if (!integ_init) {
+		for (int i = 0; i < 64; ++i) {
+			integ_blocks[i] = -120.f;
+		}
+		integ_init = true;
+	}
+
+	samplecnt_t sr = _impl->session->sample_rate ();
+	if (sr <= 0) {
+		sr = 48000;
+	}
+	uint32_t n = (uint32_t)std::min ((samplecnt_t)kLufsWin,
+	                                 (samplecnt_t)std::max ((samplecnt_t)2048, sr / 2));
+	/* Prefer ~400 ms when rate known. */
+	samplecnt_t want = (samplecnt_t)((double)sr * 0.4);
+	if (want < 2048) {
+		want = 2048;
+	}
+	if (want > (samplecnt_t)kLufsWin) {
+		want = (samplecnt_t)kLufsWin;
+	}
+	n = (uint32_t)want;
+
+	std::memset (left, 0, sizeof (float) * n);
+	std::memset (right, 0, sizeof (float) * n);
+
+	samplepos_t pos = _impl->session->transport_sample ();
+	if (pos < (samplepos_t)n) {
+		pos = 0;
+	} else {
+		pos = pos - (samplepos_t)n;
+	}
+
+	bool got = false;
+	try {
+		collect_tracks ();
+		if (_snap.loudness_master) {
+			_snap.loudness_track = -1;
+			wcsncpy_s (_snap.loudness_label, L"Master ≈LUFS", _TRUNCATE);
+			float scale = 1.f;
+			int ntr = (int)_impl->tracks.size ();
+			if (ntr > 1) {
+				scale = 1.f / std::sqrt ((float)ntr);
+			}
+			for (size_t t = 0; t < _impl->tracks.size (); ++t) {
+				std::shared_ptr<AudioTrack> at = _impl->tracks[t];
+				if (!at || !at->playlist ()) {
+					continue;
+				}
+				std::shared_ptr<AudioPlaylist> apl =
+				    std::dynamic_pointer_cast<AudioPlaylist> (at->playlist ());
+				if (!apl) {
+					continue;
+				}
+				static float dst_l[kLufsWin];
+				static float dst_r[kLufsWin];
+				std::memset (dst_l, 0, sizeof (float) * n);
+				std::memset (dst_r, 0, sizeof (float) * n);
+				std::memset (mixdown, 0, sizeof (float) * n);
+				std::memset (gainbuf, 0, sizeof (float) * n);
+				apl->read (dst_l, mixdown, gainbuf,
+				           timepos_t (pos), timecnt_t ((samplecnt_t)n), 0);
+				std::memset (mixdown, 0, sizeof (float) * n);
+				std::memset (gainbuf, 0, sizeof (float) * n);
+				apl->read (dst_r, mixdown, gainbuf,
+				           timepos_t (pos), timecnt_t ((samplecnt_t)n), 1);
+				float er = 0.f;
+				for (uint32_t i = 0; i < n; ++i) {
+					er += std::fabs (dst_r[i]);
+				}
+				if (er < 1.0e-6f) {
+					std::memcpy (dst_r, dst_l, sizeof (float) * n);
+				}
+				for (uint32_t i = 0; i < n; ++i) {
+					left[i] += dst_l[i] * scale;
+					right[i] += dst_r[i] * scale;
+				}
+				got = true;
+			}
+		} else {
+			int tr = _snap.selection_track;
+			if (tr < 0 || tr >= (int)_impl->tracks.size () || !_impl->tracks[tr]) {
+				tr = 0;
+			}
+			_snap.loudness_track = tr;
+			if (tr < EngineSnapshot::kMeters && _snap.track_name[tr][0]) {
+				wcsncpy_s (_snap.loudness_label, _snap.track_name[tr], _TRUNCATE);
+			} else {
+				wchar_t lab[32];
+				std::swprintf (lab, 32, L"Audio %d ≈", tr + 1);
+				wcsncpy_s (_snap.loudness_label, lab, _TRUNCATE);
+			}
+			if (tr < (int)_impl->tracks.size () && _impl->tracks[tr]
+			    && _impl->tracks[tr]->playlist ()) {
+				std::shared_ptr<AudioPlaylist> apl =
+				    std::dynamic_pointer_cast<AudioPlaylist> (
+				        _impl->tracks[tr]->playlist ());
+				if (apl) {
+					std::memset (mixdown, 0, sizeof (float) * n);
+					std::memset (gainbuf, 0, sizeof (float) * n);
+					apl->read (left, mixdown, gainbuf,
+					           timepos_t (pos), timecnt_t ((samplecnt_t)n), 0);
+					std::memset (mixdown, 0, sizeof (float) * n);
+					std::memset (gainbuf, 0, sizeof (float) * n);
+					apl->read (right, mixdown, gainbuf,
+					           timepos_t (pos), timecnt_t ((samplecnt_t)n), 1);
+					float er = 0.f;
+					for (uint32_t i = 0; i < n; ++i) {
+						er += std::fabs (right[i]);
+					}
+					if (er < 1.0e-6f) {
+						std::memcpy (right, left, sizeof (float) * n);
+					}
+					got = true;
+				}
+			}
+		}
+	} catch (...) {
+		got = false;
+	}
+
+	float m = kweight_stereo_lufs (left, right, n);
+	if (!got) {
+		_snap.loudness_momentary = _snap.loudness_momentary * 0.9f - 7.f * 0.1f;
+		_snap.loudness_ok = false;
+		return;
+	}
+	_snap.loudness_momentary = _snap.loudness_momentary * 0.4f + m * 0.6f;
+
+	/* Absolute gate −70 LUFS; keep recent gated blocks for integrated approx. */
+	if (m > -70.f) {
+		integ_blocks[integ_i] = m;
+		integ_i = (integ_i + 1) % 64;
+		if (integ_n < 64) {
+			++integ_n;
+		}
+	}
+	if (integ_n > 0) {
+		double sum = 0.0;
+		int used = 0;
+		/* Relative gate: discard blocks below ungated mean − 10 LU. */
+		double ungated = 0.0;
+		for (int i = 0; i < integ_n; ++i) {
+			ungated += (double)integ_blocks[i];
+		}
+		ungated /= (double)integ_n;
+		const float rel = (float)ungated - 10.f;
+		for (int i = 0; i < integ_n; ++i) {
+			if (integ_blocks[i] >= rel) {
+				/* Convert back via energy average of LUFS blocks (approx). */
+				sum += std::pow (10.0, ((double)integ_blocks[i] + 0.691) / 10.0);
+				++used;
+			}
+		}
+		if (used > 0) {
+			_snap.loudness_integrated = mean_square_to_lufs (sum / (double)used);
+		}
+	}
+	_snap.loudness_ok = true;
+}
+
+bool
+EngineHost::set_loudness_enabled (bool on)
+{
+	_snap.loudness_enabled = on;
+	if (!on) {
+		_snap.loudness_ok = false;
+		_snap.loudness_momentary = -70.f;
+		_snap.loudness_integrated = -70.f;
+		_snap.detail = L"loudness off";
+		return true;
+	}
+	refresh_loudness_snap ();
+	_snap.detail = L"loudness on (approx LUFS)";
+	return true;
+}
+
+bool
+EngineHost::toggle_loudness_enabled ()
+{
+	return set_loudness_enabled (!_snap.loudness_enabled);
+}
+
+bool
+EngineHost::set_loudness_master (bool master)
+{
+	_snap.loudness_master = master;
+	if (_snap.loudness_enabled) {
+		refresh_loudness_snap ();
+	}
+	return true;
+}
+
+bool
+EngineHost::toggle_loudness_master ()
+{
+	return set_loudness_master (!_snap.loudness_master);
+}
+
+bool
+EngineHost::smoke_loudness ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-loudness failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_loudness_enabled (true) || !_snap.loudness_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loudness FAILED (enable)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		static float L[kLufsWin];
+		static float R[kLufsWin];
+		const uint32_t n = 4800; /* 100 ms @ 48 kHz */
+		for (uint32_t i = 0; i < n; ++i) {
+			/* −20 dBFS 1 kHz stereo sine → expect roughly −23 LUFS-ish. */
+			float s = 0.1f * std::sin (2.f * 3.14159265f * 1000.f * (float)i / 48000.f);
+			L[i] = s;
+			R[i] = s;
+		}
+		float m = kweight_stereo_lufs (L, R, n);
+		if (!(m > -40.f) || !(m < -10.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loudness FAILED (M=%.2f)\n", m);
+			std::fflush (stderr);
+			return false;
+		}
+		_snap.loudness_momentary = m;
+		_snap.loudness_integrated = m;
+		set_loudness_master (false);
+		refresh_loudness_snap ();
+		set_loudness_master (true);
+		refresh_loudness_snap ();
+		set_loudness_master (false);
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loudness ok (M=%.1f approx K-weight)\n",
+		              m);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-loudness ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-loudness exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+
 bool
 EngineHost::smoke_perf (unsigned sample_secs)
 {
@@ -13235,6 +13586,7 @@ EngineHost::refresh_snapshot ()
 			refresh_track_gate_snap ();
 			refresh_spectrum_snap ();
 			refresh_correlation_snap ();
+			refresh_loudness_snap ();
 		} else {
 			_snap.waves_from_session = false;
 			_snap.session_record_armed = false;
@@ -13451,6 +13803,13 @@ EngineHost::EngineHost ()
 		_snap.gonio_y[gi] = 0.f;
 	}
 	_snap.correlation_label[0] = L'\0';
+	_snap.loudness_enabled = false;
+	_snap.loudness_ok = false;
+	_snap.loudness_master = false;
+	_snap.loudness_track = 0;
+	_snap.loudness_momentary = -70.f;
+	_snap.loudness_integrated = -70.f;
+	_snap.loudness_label[0] = L'\0';
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -15260,6 +15619,45 @@ EngineHost::toggle_correlation_master ()
 {
 	return false;
 }
+
+
+bool
+EngineHost::smoke_loudness ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_loudness_enabled (bool on)
+{
+	(void)on;
+	return false;
+}
+
+bool
+EngineHost::toggle_loudness_enabled ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_loudness_master (bool master)
+{
+	(void)master;
+	return false;
+}
+
+bool
+EngineHost::toggle_loudness_master ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_loudness_snap ()
+{
+}
+
 
 bool
 EngineHost::smoke_vst3 ()
