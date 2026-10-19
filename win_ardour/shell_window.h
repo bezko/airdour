@@ -116,7 +116,8 @@ public:
 	                    bool smoke_correlation = false,
 	                    bool smoke_loudness = false,
 	                    bool smoke_midi_quantize = false,
-	                    bool smoke_midi_transpose = false);
+	                    bool smoke_midi_transpose = false,
+	                    bool smoke_midi_velocity = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -139,7 +140,8 @@ private:
 		TrimEnd, /* drag selected region right edge */
 		RegionMovePending, /* click on selection body; may become move */
 		RegionMove, /* drag selected region body */
-		MidiDraw, /* click/drag on MIDI lane to create a note */
+		MidiDraw, /* click/drag on MIDI piano-roll to create a note */
+		MidiVelocity, /* drag velocity lane → set selected/all note velocity */
 		TrackReorderPending, /* mixer label click; may become reorder drag */
 		TrackReorder, /* drag mixer strip label to reorder */
 		RulerScrub, /* drag editor ruler → continuous locate */
@@ -220,6 +222,7 @@ private:
 	void do_cycle_snap_density ();
 	void do_quantize_midi_notes ();
 	void do_transpose_midi_notes (int semitones);
+	void do_nudge_midi_velocity (int delta);
 	void do_toggle_loop ();
 	void do_toggle_punch ();
 	void do_toggle_count_in ();
@@ -270,6 +273,10 @@ private:
 	void draw_midi_lane ();
 	bool hit_editor_ruler (float x, float y) const;
 	bool hit_midi_lane (float x, float y) const;
+	bool hit_midi_velocity_lane (float x, float y) const;
+	D2D1_RECT_F midi_piano_rect () const;
+	D2D1_RECT_F midi_velocity_rect () const;
+	int  midi_velocity_at_y (float y) const;
 	uint8_t midi_pitch_at_y (float y) const;
 	float midi_time_at_x (float x) const;
 	int  hit_editor_lane (float x, float y) const;
@@ -312,6 +319,7 @@ private:
 	float _region_move_grab_offset_sec; /* pointer time − region start at grab */
 	float _midi_draw_start_sec;
 	uint8_t _midi_draw_pitch;
+	int     _midi_vel_drag; /* live preview 1..127 while MidiVelocity drag */
 
 	bool  _transport_playing;
 	float _playhead_sec;

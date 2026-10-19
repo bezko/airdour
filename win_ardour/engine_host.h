@@ -1001,6 +1001,14 @@ public:
 	 */
 	bool transpose_midi_notes (int semitones);
 
+	/**
+	 * Nudge velocity of selected notes (or all if none selected) by delta.
+	 * Clamped 1..127. Rebuilds the MIDI region (Windows-safe).
+	 */
+	bool nudge_midi_velocity (int delta);
+	/** Set absolute velocity for selected notes (or all if none selected). */
+	bool set_midi_velocity (int velocity);
+
 	/** Best-effort connect MidiTrack output to first physical MIDI playback port. */
 	bool connect_midi_output ();
 
@@ -1029,6 +1037,11 @@ public:
 	 * Add notes, transpose +1 then −12, verify pitches. For --smoke-midi-transpose.
 	 */
 	bool smoke_midi_transpose ();
+
+	/**
+	 * Add note, nudge velocity −20, set 64, verify. For --smoke-midi-velocity.
+	 */
+	bool smoke_midi_velocity ();
 
 	std::string session_dir () const;
 	std::string last_export_path () const;

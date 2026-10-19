@@ -13985,6 +13985,323 @@ EngineHost::smoke_midi_transpose ()
 }
 
 
+
+bool
+EngineHost::nudge_midi_velocity (int delta)
+{
+	if (delta == 0) {
+		return true;
+	}
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"velocity: no Session";
+		return false;
+	}
+	if (!ensure_midi_region (32.f) || !_impl->midi_region) {
+		_snap.detail = L"velocity: no MIDI region";
+		return false;
+	}
+	try {
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count <= 0) {
+			_snap.detail = L"velocity: no notes";
+			return false;
+		}
+
+		bool have_sel = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				have_sel = true;
+				break;
+			}
+		}
+
+		struct Kept {
+			uint8_t pitch;
+			uint8_t velocity;
+			float   start_sec;
+			float   length_sec;
+		};
+		std::vector<Kept> keep;
+		keep.reserve ((size_t)_snap.midi_note_count);
+		int moved = 0;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			Kept k;
+			k.pitch = n.pitch;
+			k.start_sec = n.start_sec;
+			k.length_sec = n.length_sec;
+			const bool do_v = !have_sel || n.selected;
+			if (do_v) {
+				int v = (int)n.velocity + delta;
+				if (v < 1) {
+					v = 1;
+				}
+				if (v > 127) {
+					v = 127;
+				}
+				if (v != (int)n.velocity) {
+					++moved;
+				}
+				k.velocity = (uint8_t)v;
+			} else {
+				k.velocity = n.velocity;
+			}
+			keep.push_back (k);
+		}
+
+		std::shared_ptr<Playlist> playlist = _impl->midi_track
+		                                        ? _impl->midi_track->playlist ()
+		                                        : std::shared_ptr<Playlist> ();
+		if (!playlist) {
+			_snap.detail = L"velocity: no playlist";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("midi velocity");
+		playlist->clear_changes ();
+		playlist->clear_owned_changes ();
+		playlist->remove_region (_impl->midi_region);
+		playlist->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		_impl->midi_region.reset ();
+		_impl->selected_midi_note_id = -1;
+		if (!ensure_midi_region (32.f)) {
+			_snap.detail = L"velocity: region rebuild failed";
+			return false;
+		}
+		int added = 0;
+		int32_t first_id = -1;
+		for (size_t i = 0; i < keep.size (); ++i) {
+			if (add_midi_note (keep[i].pitch, keep[i].start_sec,
+			                   keep[i].length_sec, keep[i].velocity)) {
+				++added;
+				if (first_id < 0 && _impl->selected_midi_note_id >= 0) {
+					first_id = _impl->selected_midi_note_id;
+				}
+			}
+		}
+		/* Prefer re-select first note that was in the edited set. */
+		_impl->selected_midi_note_id = first_id;
+		refresh_midi_notes_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: velocity ok (notes=%d moved=%d added=%d d=%+d)\n",
+		              _snap.midi_note_count, moved, added, delta);
+		std::fflush (stderr);
+		_snap.detail = L"MIDI velocity nudged";
+		return added > 0 || keep.empty ();
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: velocity exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_midi_velocity (int velocity)
+{
+	if (velocity < 1) {
+		velocity = 1;
+	}
+	if (velocity > 127) {
+		velocity = 127;
+	}
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"velocity: no Session";
+		return false;
+	}
+	if (!ensure_midi_region (32.f) || !_impl->midi_region) {
+		_snap.detail = L"velocity: no MIDI region";
+		return false;
+	}
+	try {
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count <= 0) {
+			_snap.detail = L"velocity: no notes";
+			return false;
+		}
+
+		bool have_sel = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				have_sel = true;
+				break;
+			}
+		}
+
+		struct Kept {
+			uint8_t pitch;
+			uint8_t velocity;
+			float   start_sec;
+			float   length_sec;
+		};
+		std::vector<Kept> keep;
+		keep.reserve ((size_t)_snap.midi_note_count);
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			Kept k;
+			k.pitch = n.pitch;
+			k.start_sec = n.start_sec;
+			k.length_sec = n.length_sec;
+			const bool do_v = !have_sel || n.selected;
+			k.velocity = do_v ? (uint8_t)velocity : n.velocity;
+			keep.push_back (k);
+		}
+
+		std::shared_ptr<Playlist> playlist = _impl->midi_track
+		                                        ? _impl->midi_track->playlist ()
+		                                        : std::shared_ptr<Playlist> ();
+		if (!playlist) {
+			return false;
+		}
+		_impl->session->begin_reversible_command ("set midi velocity");
+		playlist->clear_changes ();
+		playlist->clear_owned_changes ();
+		playlist->remove_region (_impl->midi_region);
+		playlist->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		_impl->midi_region.reset ();
+		_impl->selected_midi_note_id = -1;
+		if (!ensure_midi_region (32.f)) {
+			return false;
+		}
+		int32_t first_id = -1;
+		for (size_t i = 0; i < keep.size (); ++i) {
+			if (add_midi_note (keep[i].pitch, keep[i].start_sec,
+			                   keep[i].length_sec, keep[i].velocity)) {
+				if (first_id < 0 && _impl->selected_midi_note_id >= 0) {
+					first_id = _impl->selected_midi_note_id;
+				}
+			}
+		}
+		_impl->selected_midi_note_id = first_id;
+		refresh_midi_notes_snap ();
+		_snap.detail = L"MIDI velocity set";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_velocity ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-velocity failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for velocity smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		if (!add_midi_note (60, 0.0f, 0.5f, 100) || _snap.midi_note_count < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Select the note we just added. */
+		if (_snap.midi_note_count > 0) {
+			_impl->selected_midi_note_id = _snap.midi_notes[0].id;
+			refresh_midi_notes_snap ();
+		}
+
+		if (!nudge_midi_velocity (-20)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity FAILED (nudge)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		bool ok80 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 60
+			    && _snap.midi_notes[i].velocity >= 78
+			    && _snap.midi_notes[i].velocity <= 82) {
+				ok80 = true;
+			}
+		}
+		if (!ok80) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity FAILED (after nudge)\n");
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				std::fprintf (stderr, "  note p=%u v=%u\n",
+				              (unsigned)_snap.midi_notes[i].pitch,
+				              (unsigned)_snap.midi_notes[i].velocity);
+			}
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!set_midi_velocity (64)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity FAILED (set)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		bool ok64 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 60 && _snap.midi_notes[i].velocity == 64) {
+				ok64 = true;
+			}
+		}
+		if (!ok64) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity FAILED (after set)\n");
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				std::fprintf (stderr, "  note p=%u v=%u\n",
+				              (unsigned)_snap.midi_notes[i].pitch,
+				              (unsigned)_snap.midi_notes[i].velocity);
+			}
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-velocity ok (v=64 notes=%d)\n",
+		              _snap.midi_note_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-velocity ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+
 void
 EngineHost::refresh_snapshot ()
 {
@@ -16268,6 +16585,28 @@ EngineHost::smoke_midi_transpose ()
 {
 	return false;
 }
+
+
+bool
+EngineHost::nudge_midi_velocity (int delta)
+{
+	(void)delta;
+	return false;
+}
+
+bool
+EngineHost::set_midi_velocity (int velocity)
+{
+	(void)velocity;
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_velocity ()
+{
+	return false;
+}
+
 
 
 

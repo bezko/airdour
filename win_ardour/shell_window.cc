@@ -105,6 +105,7 @@ ShellWindow::ShellWindow ()
 	, _region_move_grab_offset_sec (0.f)
 	, _midi_draw_start_sec (0.f)
 	, _midi_draw_pitch (60)
+	, _midi_vel_drag (100)
 	, _transport_playing (false)
 	, _playhead_sec (0.f)
 	, _last_tick_ms (0)
@@ -238,7 +239,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_correlation,
                             bool smoke_loudness,
                             bool smoke_midi_quantize,
-                            bool smoke_midi_transpose)
+                            bool smoke_midi_transpose,
+                            bool smoke_midi_velocity)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -344,6 +346,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_transpose) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi_velocity && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_velocity ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_velocity) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -2562,6 +2573,19 @@ ShellWindow::do_transpose_midi_notes (int semitones)
 }
 
 void
+ShellWindow::do_nudge_midi_velocity (int delta)
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.nudge_midi_velocity (delta)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_cycle_snap_density ()
 {
 	if (!_engine.is_linked ()) {
@@ -2753,7 +2777,7 @@ ShellWindow::layout_panes ()
 	float wave_right = _editor_pane.right - inset;
 	_editor_ruler = D2D1::RectF (wave_left, _editor_pane.top + title_h,
 	                             wave_right, _editor_pane.top + title_h + ruler_h);
-	float midi_h = 96.f * _dpi_scale; /* ~24-key piano-roll */
+	float midi_h = 118.f * _dpi_scale; /* piano-roll + velocity lane */
 	const bool show_spec = _engine_snap.spectrum_enabled;
 	const bool show_phase = _engine_snap.correlation_enabled;
 	const bool show_lufs = _engine_snap.loudness_enabled;
@@ -3129,6 +3153,17 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_move_audio_track (-1);
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_DOWN) {
 			do_move_audio_track (+1);
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == VK_UP || wparam == VK_DOWN)) {
+			/* ↑/↓ = MIDI velocity ±1 (Shift=±8) when notes exist. */
+			if (_engine.is_linked () && _engine_snap.midi_note_count > 0) {
+				int d = (wparam == VK_UP) ? 1 : -1;
+				if (GetKeyState (VK_SHIFT) & 0x8000) {
+					d *= 8;
+				}
+				do_nudge_midi_velocity (d);
+			}
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Y' || wparam == 'y')) {
 			if (_engine.is_linked ()) {
 				if (GetKeyState (VK_SHIFT) & 0x8000) {
@@ -3236,6 +3271,26 @@ ShellWindow::hit_editor_ruler (float x, float y) const
 	return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 }
 
+D2D1_RECT_F
+ShellWindow::midi_piano_rect () const
+{
+	const D2D1_RECT_F& r = _midi_lane;
+	float vel_h = 28.f * _dpi_scale;
+	float h = r.bottom - r.top;
+	if (h < vel_h + 24.f * _dpi_scale) {
+		vel_h = std::max (12.f * _dpi_scale, h * 0.28f);
+	}
+	return D2D1::RectF (r.left, r.top, r.right, r.bottom - vel_h);
+}
+
+D2D1_RECT_F
+ShellWindow::midi_velocity_rect () const
+{
+	const D2D1_RECT_F& r = _midi_lane;
+	D2D1_RECT_F piano = midi_piano_rect ();
+	return D2D1::RectF (r.left, piano.bottom, r.right, r.bottom);
+}
+
 bool
 ShellWindow::hit_midi_lane (float x, float y) const
 {
@@ -3243,10 +3298,17 @@ ShellWindow::hit_midi_lane (float x, float y) const
 	return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 }
 
+bool
+ShellWindow::hit_midi_velocity_lane (float x, float y) const
+{
+	const D2D1_RECT_F vr = midi_velocity_rect ();
+	return x >= vr.left && x <= vr.right && y >= vr.top && y <= vr.bottom;
+}
+
 uint8_t
 ShellWindow::midi_pitch_at_y (float y) const
 {
-	const D2D1_RECT_F& r = _midi_lane;
+	const D2D1_RECT_F r = midi_piano_rect ();
 	float h = r.bottom - r.top;
 	if (h <= 1.f) {
 		return 60;
@@ -3267,6 +3329,32 @@ ShellWindow::midi_pitch_at_y (float y) const
 		row = kMidiPitchRows - 1;
 	}
 	return (uint8_t)(kMidiPitchHi - row);
+}
+
+int
+ShellWindow::midi_velocity_at_y (float y) const
+{
+	const D2D1_RECT_F vr = midi_velocity_rect ();
+	float h = vr.bottom - vr.top;
+	if (h <= 1.f) {
+		return 100;
+	}
+	/* Bottom of strip = 1, top = 127. */
+	float t = (vr.bottom - y) / h;
+	if (t < 0.f) {
+		t = 0.f;
+	}
+	if (t > 1.f) {
+		t = 1.f;
+	}
+	int v = 1 + (int)std::lround (t * 126.f);
+	if (v < 1) {
+		v = 1;
+	}
+	if (v > 127) {
+		v = 127;
+	}
+	return v;
 }
 
 float
@@ -3694,6 +3782,14 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		do_transpose_midi_notes ((GetKeyState (VK_SHIFT) & 0x8000) ? -12 : -1);
 		return true;
 	}
+	if (th == TransportHit::MidiVelUp) {
+		do_nudge_midi_velocity ((GetKeyState (VK_SHIFT) & 0x8000) ? 8 : 1);
+		return true;
+	}
+	if (th == TransportHit::MidiVelDown) {
+		do_nudge_midi_velocity ((GetKeyState (VK_SHIFT) & 0x8000) ? -8 : -1);
+		return true;
+	}
 	if (th == TransportHit::CountIn) {
 		do_toggle_count_in ();
 		return true;
@@ -3824,6 +3920,35 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	if (hit_midi_lane (x, y) && _engine.is_linked () && _engine_snap.session_ok) {
 		_engine.ensure_midi_region ();
 		float time_sec = midi_time_at_x (x);
+		if (hit_midi_velocity_lane (x, y)) {
+			/* Velocity lane: select note under x if any, then drag velocity. */
+			bool hit_note = false;
+			for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
+				const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
+				float t0 = n.start_sec;
+				float t1 = n.start_sec + n.length_sec;
+				if (time_sec >= t0 - 0.02f && time_sec <= t1 + 0.02f) {
+					_engine.select_midi_note_at (time_sec, n.pitch);
+					hit_note = true;
+					break;
+				}
+			}
+			if (!hit_note && _engine_snap.midi_selected_note_id < 0
+			    && _engine_snap.midi_note_count > 0) {
+				/* No selection → edit all on drag apply. */
+			}
+			_drag = DragMode::MidiVelocity;
+			_drag_index = -1;
+			_midi_vel_drag = midi_velocity_at_y (y);
+			_pan_down_x = x;
+			_pan_down_y = y;
+			_pan_last_x = x;
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			SetCapture (_hwnd);
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
 		uint8_t pitch = midi_pitch_at_y (y);
 		if (_engine.select_midi_note_at (time_sec, pitch)) {
 			_engine.poll ();
@@ -4416,6 +4541,12 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
+	if (_drag == DragMode::MidiVelocity) {
+		_pan_last_x = x;
+		_midi_vel_drag = midi_velocity_at_y (y);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
 
 	if (_drag == DragMode::RulerScrub && _engine.is_linked () && _engine_snap.session_ok) {
 		_pan_last_x = x;
@@ -4471,6 +4602,12 @@ ShellWindow::on_mouse_up ()
 			len = 0.25f; /* click without drag → quarter-ish note */
 		}
 		_engine.add_midi_note (_midi_draw_pitch, start, len, 100);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+	if (_drag == DragMode::MidiVelocity && _engine.is_linked () && _engine_snap.session_ok) {
+		_engine.set_midi_velocity (_midi_vel_drag);
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 		InvalidateRect (_hwnd, nullptr, FALSE);
@@ -5007,6 +5144,9 @@ ShellWindow::draw_midi_lane ()
 	if (r.right <= r.left) {
 		return;
 	}
+	const D2D1_RECT_F piano = midi_piano_rect ();
+	const D2D1_RECT_F vel = midi_velocity_rect ();
+
 	float inset = 12.f * _dpi_scale;
 	D2D1_RECT_F label_rc = D2D1::RectF (
 		_editor_pane.left + inset, r.top, r.left - 4.f * _dpi_scale, r.bottom);
@@ -5018,19 +5158,19 @@ ShellWindow::draw_midi_lane ()
 	_rt->DrawRectangle (r, _brush_midi, 1.f);
 
 	const int keys = kMidiPitchRows;
-	float h = r.bottom - r.top;
+	float h = piano.bottom - piano.top;
 	float row_h = h / (float)keys;
 	for (int k = 0; k < keys; ++k) {
-		float y0 = r.top + (float)k * row_h;
+		float y0 = piano.top + (float)k * row_h;
 		uint8_t pitch = (uint8_t)(kMidiPitchHi - k);
 		int pc = pitch % 12;
 		bool black = (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10);
 		_brush_body->SetOpacity (black ? 0.18f : 0.08f);
-		_rt->FillRectangle (D2D1::RectF (r.left, y0, r.right, y0 + row_h - 0.5f), _brush_body);
+		_rt->FillRectangle (D2D1::RectF (piano.left, y0, piano.right, y0 + row_h - 0.5f), _brush_body);
 		_brush_body->SetOpacity (1.f);
 	}
 
-	/* Session MIDI notes (real MidiModel contents). */
+	/* Session MIDI notes — height scales with velocity (bottom-aligned in row). */
 	for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
 		const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
 		if (n.pitch < kMidiPitchLo || n.pitch > kMidiPitchHi) {
@@ -5045,17 +5185,80 @@ ShellWindow::draw_midi_lane ()
 			x1 = x0 + 2.f;
 		}
 		int row = (int)(kMidiPitchHi - n.pitch);
-		float y0 = r.top + (float)row * row_h + 1.f;
-		float y1 = y0 + row_h - 2.f;
+		float row_top = piano.top + (float)row * row_h + 1.f;
+		float row_bot = row_top + row_h - 2.f;
+		float vmin = 3.f * _dpi_scale;
+		float full = std::max (vmin, row_bot - row_top);
+		float vh = vmin + (full - vmin) * ((float)n.velocity / 127.f);
+		float y1 = row_bot;
+		float y0 = y1 - vh;
 		ID2D1SolidColorBrush* brush = n.selected ? _brush_accent : _brush_midi;
 		if (!brush) {
 			continue;
 		}
-		brush->SetOpacity (n.selected ? 0.95f : (0.45f + 0.4f * (n.velocity / 127.f)));
+		brush->SetOpacity (n.selected ? 0.95f : 0.7f);
 		_rt->FillRectangle (D2D1::RectF (x0, y0, x1, y1), brush);
 		brush->SetOpacity (1.f);
 		if (n.selected && _brush_playhead) {
 			_rt->DrawRectangle (D2D1::RectF (x0, y0, x1, y1), _brush_playhead, 1.2f);
+		}
+	}
+
+	/* Velocity lane under piano-roll. */
+	if (vel.bottom > vel.top + 2.f) {
+		_rt->FillRectangle (vel, _brush_pane);
+		_rt->DrawRectangle (vel, _brush_pane_edge, 1.f);
+		if (_fmt_meta && _brush_body) {
+			_rt->DrawTextW (L"Vel", 3, _fmt_meta,
+			                D2D1::RectF (vel.left + 4.f * _dpi_scale, vel.top,
+			                             vel.left + 36.f * _dpi_scale, vel.bottom),
+			                _brush_body);
+		}
+		float vh = vel.bottom - vel.top;
+		for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
+			float x0 = _lanes[0].strip.x_at_time (r, n.start_sec);
+			float x1 = _lanes[0].strip.x_at_time (r, n.start_sec + n.length_sec);
+			if (x1 < vel.left || x0 > vel.right) {
+				continue;
+			}
+			if (x1 - x0 < 2.f) {
+				x1 = x0 + 2.f;
+			}
+			int show_v = n.velocity;
+			if (_drag == DragMode::MidiVelocity
+			    && (n.selected || _engine_snap.midi_selected_note_id < 0)) {
+				/* Preview drag value for selected (or all when none selected). */
+				bool have_sel = false;
+				for (int j = 0; j < _engine_snap.midi_note_count; ++j) {
+					if (_engine_snap.midi_notes[j].selected) {
+						have_sel = true;
+						break;
+					}
+				}
+				if (!have_sel || n.selected) {
+					show_v = _midi_vel_drag;
+				}
+			}
+			float bar_h = vh * ((float)show_v / 127.f);
+			if (bar_h < 1.f * _dpi_scale && show_v > 0) {
+				bar_h = 1.f * _dpi_scale;
+			}
+			ID2D1SolidColorBrush* brush = n.selected ? _brush_accent : _brush_midi;
+			if (!brush) {
+				continue;
+			}
+			brush->SetOpacity (n.selected ? 0.9f : 0.55f);
+			_rt->FillRectangle (D2D1::RectF (x0, vel.bottom - bar_h, x1, vel.bottom), brush);
+			brush->SetOpacity (1.f);
+		}
+		if (_drag == DragMode::MidiVelocity && _fmt_meta && _brush_brand) {
+			wchar_t vlab[24];
+			_snwprintf_s (vlab, _TRUNCATE, L"v=%d", _midi_vel_drag);
+			_rt->DrawTextW (vlab, (UINT32)wcslen (vlab), _fmt_meta,
+			                D2D1::RectF (vel.right - 48.f * _dpi_scale, vel.top,
+			                             vel.right - 4.f * _dpi_scale, vel.bottom),
+			                _brush_brand);
 		}
 	}
 
@@ -5074,7 +5277,7 @@ ShellWindow::draw_midi_lane ()
 		float x0 = _lanes[0].strip.x_at_time (r, t0);
 		float x1 = _lanes[0].strip.x_at_time (r, t1);
 		int row = (int)(kMidiPitchHi - _midi_draw_pitch);
-		float y0 = r.top + (float)row * row_h + 1.f;
+		float y0 = piano.top + (float)row * row_h + 1.f;
 		float y1 = y0 + row_h - 2.f;
 		_brush_midi->SetOpacity (0.55f);
 		_rt->FillRectangle (D2D1::RectF (x0, y0, x1, y1), _brush_midi);
@@ -5096,8 +5299,8 @@ ShellWindow::draw_midi_lane ()
 		_snwprintf_s (midicap, _TRUNCATE, L"no MIDI track");
 	}
 	_rt->DrawTextW (midicap, (UINT32)wcslen (midicap), _fmt_meta,
-	                D2D1::RectF (r.left + 6.f * _dpi_scale, r.top,
-	                             r.right - 4.f * _dpi_scale, r.top + 14.f * _dpi_scale),
+	                D2D1::RectF (piano.left + 6.f * _dpi_scale, piano.top,
+	                             piano.right - 4.f * _dpi_scale, piano.top + 14.f * _dpi_scale),
 	                _brush_brand);
 }
 
@@ -5294,6 +5497,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"Q / Qnt", L"Quantize MIDI notes to snap grid" },
 		{ L". / ,  Shift", L"MIDI transpose ±1 · ±12 (T+/T−)" },
+		{ L"↑ / ↓  Shift", L"MIDI velocity ±1 · ±8 (V+/V−)" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
