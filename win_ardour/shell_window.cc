@@ -233,7 +233,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_eq,
                             bool smoke_delay,
                             bool smoke_limiter,
-                            bool smoke_gate)
+                            bool smoke_gate,
+                            bool smoke_spectrum)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -410,6 +411,17 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_gate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-gate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_spectrum && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_spectrum ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_spectrum) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-spectrum FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -981,6 +993,7 @@ ShellWindow::sync_mixer_group_from_engine ()
 	}
 	_transport.set_group_active (_engine_snap.group_member_count >= 2
 	                             && _engine_snap.group_active);
+	_transport.set_spectrum_enabled (_engine_snap.spectrum_enabled);
 }
 
 void
@@ -2667,8 +2680,10 @@ ShellWindow::layout_panes ()
 	_editor_ruler = D2D1::RectF (wave_left, _editor_pane.top + title_h,
 	                             wave_right, _editor_pane.top + title_h + ruler_h);
 	float midi_h = 96.f * _dpi_scale; /* ~24-key piano-roll */
+	float spec_h = _engine_snap.spectrum_enabled ? (72.f * _dpi_scale) : 0.f;
 	float lanes_top = _editor_ruler.bottom + 4.f * _dpi_scale;
-	float lanes_bot = _editor_pane.bottom - inset - midi_h - lane_gap;
+	float lanes_bot = _editor_pane.bottom - inset - midi_h - lane_gap
+	                  - (spec_h > 0.f ? (spec_h + lane_gap) : 0.f);
 	const int n_lanes = std::max (1, n_audio_lanes ());
 	float lane_h = (lanes_bot - lanes_top - lane_gap * (float)(n_lanes - 1)) / (float)n_lanes;
 
@@ -2696,6 +2711,16 @@ ShellWindow::layout_panes ()
 	}
 	_midi_lane = D2D1::RectF (wave_left, lanes_bot + lane_gap, wave_right,
 	                          lanes_bot + lane_gap + midi_h);
+	if (_engine_snap.spectrum_enabled) {
+		_spectrum_bounds = D2D1::RectF (
+			wave_left, _midi_lane.bottom + lane_gap, wave_right,
+			_midi_lane.bottom + lane_gap + spec_h);
+		_spectrum.layout (_spectrum_bounds);
+		_spectrum.set_visible (true);
+	} else {
+		_spectrum_bounds = D2D1::RectF ();
+		_spectrum.set_visible (false);
+	}
 
 	float mix_inset = 10.f * _dpi_scale;
 	float mix_top = _mixer_pane.top + 36.f * _dpi_scale;
@@ -2994,6 +3019,18 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_move_audio_track (-1);
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_DOWN) {
 			do_move_audio_track (+1);
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Y' || wparam == 'y')) {
+			if (_engine.is_linked ()) {
+				if (GetKeyState (VK_SHIFT) & 0x8000) {
+					_engine.toggle_spectrum_master ();
+				} else {
+					_engine.toggle_spectrum_enabled ();
+				}
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				layout_panes ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			}
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'U' || wparam == 'u')) {
 			do_apply_or_clear_group ();
 		}
@@ -3375,6 +3412,20 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::Prefs) {
 		toggle_prefs ();
+		return true;
+	}
+	if (th == TransportHit::Spectrum) {
+		if (_engine.is_linked ()) {
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
+				_engine.toggle_spectrum_master ();
+			} else {
+				_engine.toggle_spectrum_enabled ();
+			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			layout_panes ();
+		}
+		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
 	if (th == TransportHit::About) {
@@ -4410,7 +4461,7 @@ ShellWindow::on_tick ()
 	static DWORD last_poll = 0;
 	static DWORD last_wave = 0;
 	const bool rolling = _transport_playing || _engine_snap.transport_rolling;
-	DWORD poll_ms = rolling ? 50u : 250u;
+	DWORD poll_ms = (rolling || _engine_snap.spectrum_enabled) ? 50u : 250u;
 	if (now - last_poll > poll_ms) {
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
@@ -4428,6 +4479,7 @@ ShellWindow::on_tick ()
 		apply_loop_to_lanes ();
 		refresh_automation_lane ();
 		_transport.set_snap_enabled (_engine_snap.snap_enabled);
+		_transport.set_spectrum_enabled (_engine_snap.spectrum_enabled);
 		if (_engine_snap.snap_enabled) {
 			_engine.refresh_grid_lines (
 				_lanes[0].strip.view_start_sec (),
@@ -5075,6 +5127,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"U", L"Apply / clear track group" },
+		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 	};
 
 	float y = card.top + 40.f * _dpi_scale;
@@ -5186,6 +5239,13 @@ ShellWindow::on_paint ()
 	draw_editor_pane ();
 	draw_mixer_pane ();
 	if (_help_visible) {
+		if (_engine_snap.spectrum_enabled) {
+			_spectrum.set_bands (_engine_snap.spectrum_band, EngineSnapshot::kSpectrumBands);
+			_spectrum.set_label (_engine_snap.spectrum_label);
+			_spectrum.set_visible (true);
+			_spectrum.draw (_rt, _brush_brand, _brush_body, _brush_accent,
+			               _brush_pane, _brush_pane_edge, _fmt_meta, _dpi_scale);
+		}
 		draw_help_overlay ();
 	}
 	if (_about.about_visible ()) {

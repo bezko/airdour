@@ -113,6 +113,14 @@ struct EngineSnapshot {
 	float        track_gate_hold_ms; /* Hold 1..500 ms */
 	float        track_gate_threshold_norm; /* 0..1 UI */
 	float        track_gate_hold_norm; /* 0..1 UI */
+	/* Spectrum analyzer (UI-rate Goertzel bars; no RT alloc). */
+	static constexpr int kSpectrumBands = 32;
+	bool         spectrum_enabled;
+	bool         spectrum_ok; /* last update produced usable bands */
+	bool         spectrum_master; /* true = mix Audio 1..N; false = selected/Audio1 */
+	int          spectrum_track; /* source track index, or −1 when master */
+	float        spectrum_band[kSpectrumBands]; /* 0..1 display levels */
+	wchar_t      spectrum_label[32];
 	float        midi_activity; /* 0..1 decaying activity indicator */
 	int          midi_device_count;
 	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices];
@@ -895,6 +903,19 @@ public:
 	bool smoke_gate ();
 
 	/**
+	 * Enable spectrum, analyze a synthetic tone (+ playlist window when available).
+	 * For --smoke-spectrum.
+	 */
+	bool smoke_spectrum ();
+	/** Toggle UI-rate spectrum analyzer (Spec / Y). */
+	bool set_spectrum_enabled (bool on);
+	bool toggle_spectrum_enabled ();
+	bool spectrum_enabled () const { return _snap.spectrum_enabled; }
+	/** false = selected/Audio1; true = mix of audio tracks (master view). */
+	bool set_spectrum_master (bool master);
+	bool toggle_spectrum_master ();
+
+	/**
 	 * Scan system VST3 dirs (+ VST3_PATH / AIRDOUR_SMOKE_VST3); list; optionally
 	 * insert first usable audio FX on Audio 2. DSP-only (no GTK UI).
 	 * Scan-only with VST3=0 still returns true (proves path). For --smoke-vst3.
@@ -992,6 +1013,7 @@ private:
 	void refresh_track_delay_snap ();
 	void refresh_track_limiter_snap ();
 	void refresh_track_gate_snap ();
+	void refresh_spectrum_snap ();
 	bool ensure_plugins_scanned ();
 
 	bool        _started;

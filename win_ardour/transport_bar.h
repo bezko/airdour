@@ -58,7 +58,8 @@ enum class TransportHit {
 	FitRegions,
 	Help,
 	Prefs,
-	About
+	About,
+	Spectrum
 };
 
 class TransportBar
@@ -103,6 +104,9 @@ public:
 
 	void set_group_active (bool on) { _group_active = on; }
 	bool group_active () const { return _group_active; }
+
+	void set_spectrum_enabled (bool on) { _spectrum_enabled = on; }
+	bool spectrum_enabled () const { return _spectrum_enabled; }
 
 	void set_clock_bbt (int bars, int beats, int ticks)
 	{
@@ -182,6 +186,7 @@ private:
 	D2D1_RECT_F _help_btn;
 	D2D1_RECT_F _prefs_btn;
 	D2D1_RECT_F _about_btn;
+	D2D1_RECT_F _spectrum_btn;
 	bool        _playing;
 	bool        _recording;
 	bool        _record_armed;
@@ -193,6 +198,7 @@ private:
 	bool        _count_in_enabled;
 	bool        _click_enabled;
 	bool        _group_active;
+	bool        _spectrum_enabled;
 	float       _tempo_bpm;
 	float       _shuttle_norm;
 	int         _bbt_bars;

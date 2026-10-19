@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cwchar>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -35,6 +36,7 @@
 #include "ardour/meter.h"
 #include "ardour/track.h"
 #include "ardour/playlist.h"
+#include "ardour/audioplaylist.h"
 #include "ardour/session_directory.h"
 #include "ardour/presentation_info.h"
 #include "ardour/route_group.h"
@@ -711,6 +713,14 @@ EngineHost::EngineHost ()
 	_snap.track_gate_hold_ms = 50.f;
 	_snap.track_gate_threshold_norm = (-40.f - (-60.f)) / 60.f;
 	_snap.track_gate_hold_norm = (50.f - 1.f) / 499.f;
+	_snap.spectrum_enabled = false;
+	_snap.spectrum_ok = false;
+	_snap.spectrum_master = false;
+	_snap.spectrum_track = 0;
+	for (int si = 0; si < EngineSnapshot::kSpectrumBands; ++si) {
+		_snap.spectrum_band[si] = 0.f;
+	}
+	_snap.spectrum_label[0] = L'\0';
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -11812,6 +11822,279 @@ EngineHost::smoke_gate ()
 	}
 }
 
+
+/* UI-rate spectrum: fixed Goertzel bands over a 512-sample window. Preallocated. */
+static constexpr uint32_t kSpecFftN = 512;
+
+static void
+spectrum_goertzel_bands (const float* samples, uint32_t n, float sample_rate,
+                         float* out_bands, int n_bands)
+{
+	if (!samples || !out_bands || n_bands <= 0 || n < 8 || sample_rate < 100.f) {
+		for (int i = 0; i < n_bands; ++i) {
+			out_bands[i] = 0.f;
+		}
+		return;
+	}
+	const float nyq = sample_rate * 0.5f;
+	const float f_lo = 40.f;
+	const float f_hi = std::min (nyq * 0.92f, 16000.f);
+	for (int b = 0; b < n_bands; ++b) {
+		float t = (n_bands == 1) ? 0.f : (float)b / (float)(n_bands - 1);
+		float freq = f_lo * std::pow (f_hi / f_lo, t);
+		float k = freq * (float)n / sample_rate;
+		float omega = 2.f * 3.14159265f * k / (float)n;
+		float coeff = 2.f * std::cos (omega);
+		float s0 = 0.f, s1 = 0.f, s2 = 0.f;
+		for (uint32_t i = 0; i < n; ++i) {
+			/* Hann window */
+			float w = 0.5f - 0.5f * std::cos (2.f * 3.14159265f * (float)i / (float)(n - 1));
+			float x = samples[i] * w;
+			s0 = x + coeff * s1 - s2;
+			s2 = s1;
+			s1 = s0;
+		}
+		float power = s1 * s1 + s2 * s2 - coeff * s1 * s2;
+		if (!(power > 0.f)) {
+			power = 0.f;
+		}
+		float db = (power > 1.0e-20f) ? (10.f * std::log10 (power)) : -100.f;
+		/* Map roughly −90..0 dB → 0..1 */
+		float norm = (db + 90.f) / 90.f;
+		if (norm < 0.f) {
+			norm = 0.f;
+		}
+		if (norm > 1.f) {
+			norm = 1.f;
+		}
+		out_bands[b] = norm;
+	}
+}
+
+void
+EngineHost::refresh_spectrum_snap ()
+{
+	if (!_snap.spectrum_enabled) {
+		_snap.spectrum_ok = false;
+		return;
+	}
+	if (!_impl || !_impl->session) {
+		_snap.spectrum_ok = false;
+		for (int i = 0; i < EngineSnapshot::kSpectrumBands; ++i) {
+			_snap.spectrum_band[i] *= 0.85f;
+		}
+		return;
+	}
+
+	static float work[kSpecFftN];
+	static float mixdown[kSpecFftN];
+	static float gainbuf[kSpecFftN];
+	std::memset (work, 0, sizeof (work));
+
+	samplecnt_t sr = _impl->session->sample_rate ();
+	if (sr <= 0) {
+		sr = 48000;
+	}
+	samplepos_t pos = _impl->session->transport_sample ();
+	if (pos < 0) {
+		pos = 0;
+	}
+
+	bool got = false;
+	try {
+		collect_tracks ();
+		if (_snap.spectrum_master) {
+			_snap.spectrum_track = -1;
+			wcsncpy_s (_snap.spectrum_label, L"Master mix", _TRUNCATE);
+			float scale = 1.f;
+			int ntr = (int)_impl->tracks.size ();
+			if (ntr > 1) {
+				scale = 1.f / std::sqrt ((float)ntr);
+			}
+			for (size_t t = 0; t < _impl->tracks.size (); ++t) {
+				std::shared_ptr<AudioTrack> at = _impl->tracks[t];
+				if (!at || !at->playlist ()) {
+					continue;
+				}
+				std::shared_ptr<AudioPlaylist> apl =
+				    std::dynamic_pointer_cast<AudioPlaylist> (at->playlist ());
+				if (!apl) {
+					continue;
+				}
+				static float dst[kSpecFftN];
+				std::memset (dst, 0, sizeof (dst));
+				std::memset (mixdown, 0, sizeof (mixdown));
+				std::memset (gainbuf, 0, sizeof (gainbuf));
+				apl->read (dst, mixdown, gainbuf,
+				           timepos_t (pos), timecnt_t ((samplecnt_t)kSpecFftN), 0);
+				for (uint32_t i = 0; i < kSpecFftN; ++i) {
+					work[i] += dst[i] * scale;
+				}
+				got = true;
+			}
+		} else {
+			int tr = _snap.selection_track;
+			if (tr < 0 || tr >= (int)_impl->tracks.size () || !_impl->tracks[tr]) {
+				tr = 0;
+			}
+			_snap.spectrum_track = tr;
+			if (tr < EngineSnapshot::kMeters && _snap.track_name[tr][0]) {
+				wcsncpy_s (_snap.spectrum_label, _snap.track_name[tr], _TRUNCATE);
+			} else {
+				wchar_t lab[32];
+				std::swprintf (lab, 32, L"Audio %d", tr + 1);
+				wcsncpy_s (_snap.spectrum_label, lab, _TRUNCATE);
+			}
+			if (tr < (int)_impl->tracks.size () && _impl->tracks[tr]
+			    && _impl->tracks[tr]->playlist ()) {
+				std::shared_ptr<AudioPlaylist> apl =
+				    std::dynamic_pointer_cast<AudioPlaylist> (
+				        _impl->tracks[tr]->playlist ());
+				if (apl) {
+					std::memset (mixdown, 0, sizeof (mixdown));
+					std::memset (gainbuf, 0, sizeof (gainbuf));
+					apl->read (work, mixdown, gainbuf,
+					           timepos_t (pos), timecnt_t ((samplecnt_t)kSpecFftN), 0);
+					got = true;
+				}
+			}
+		}
+	} catch (...) {
+		got = false;
+	}
+
+	float bands[EngineSnapshot::kSpectrumBands];
+	spectrum_goertzel_bands (work, kSpecFftN, (float)sr, bands,
+	                         EngineSnapshot::kSpectrumBands);
+
+	/* Soft decay when silent / no playlist data. */
+	float energy = 0.f;
+	for (int i = 0; i < EngineSnapshot::kSpectrumBands; ++i) {
+		energy += bands[i];
+	}
+	if (!got || energy < 1.0e-4f) {
+		for (int i = 0; i < EngineSnapshot::kSpectrumBands; ++i) {
+			_snap.spectrum_band[i] *= 0.88f;
+		}
+		_snap.spectrum_ok = got;
+		return;
+	}
+	for (int i = 0; i < EngineSnapshot::kSpectrumBands; ++i) {
+		float v = bands[i];
+		if (v >= _snap.spectrum_band[i]) {
+			_snap.spectrum_band[i] = v;
+		} else {
+			_snap.spectrum_band[i] = _snap.spectrum_band[i] * 0.75f + v * 0.25f;
+		}
+	}
+	_snap.spectrum_ok = true;
+}
+
+bool
+EngineHost::set_spectrum_enabled (bool on)
+{
+	_snap.spectrum_enabled = on;
+	if (!on) {
+		_snap.spectrum_ok = false;
+		for (int i = 0; i < EngineSnapshot::kSpectrumBands; ++i) {
+			_snap.spectrum_band[i] = 0.f;
+		}
+		_snap.detail = L"spectrum off";
+		return true;
+	}
+	refresh_spectrum_snap ();
+	_snap.detail = L"spectrum on";
+	return true;
+}
+
+bool
+EngineHost::toggle_spectrum_enabled ()
+{
+	return set_spectrum_enabled (!_snap.spectrum_enabled);
+}
+
+bool
+EngineHost::set_spectrum_master (bool master)
+{
+	_snap.spectrum_master = master;
+	if (_snap.spectrum_enabled) {
+		refresh_spectrum_snap ();
+	}
+	return true;
+}
+
+bool
+EngineHost::toggle_spectrum_master ()
+{
+	return set_spectrum_master (!_snap.spectrum_master);
+}
+
+bool
+EngineHost::smoke_spectrum ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-spectrum failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_spectrum_enabled (true) || !_snap.spectrum_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-spectrum FAILED (enable)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* Synthetic 440 Hz tone through the same Goertzel path. */
+		static float tone[kSpecFftN];
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		for (uint32_t i = 0; i < kSpecFftN; ++i) {
+			tone[i] = 0.35f * std::sin (2.f * 3.14159265f * 440.f * (float)i / (float)sr);
+		}
+		float bands[EngineSnapshot::kSpectrumBands];
+		spectrum_goertzel_bands (tone, kSpecFftN, (float)sr, bands,
+		                         EngineSnapshot::kSpectrumBands);
+		float peak = 0.f;
+		int peak_i = 0;
+		for (int i = 0; i < EngineSnapshot::kSpectrumBands; ++i) {
+			_snap.spectrum_band[i] = bands[i];
+			if (bands[i] > peak) {
+				peak = bands[i];
+				peak_i = i;
+			}
+		}
+		_snap.spectrum_ok = (peak > 0.05f);
+		if (!_snap.spectrum_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-spectrum FAILED (peak=%.3f)\n",
+			              peak);
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* Live playlist path (may be silent — still must not throw). */
+		set_spectrum_master (false);
+		refresh_spectrum_snap ();
+		set_spectrum_master (true);
+		refresh_spectrum_snap ();
+		set_spectrum_master (false);
+		refresh_spectrum_snap ();
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-spectrum ok (bands=%d peak=%.2f@%d)\n",
+		              EngineSnapshot::kSpectrumBands, peak, peak_i);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-spectrum ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-spectrum exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_perf (unsigned sample_secs)
 {
@@ -12661,6 +12944,7 @@ EngineHost::refresh_snapshot ()
 			refresh_track_delay_snap ();
 			refresh_track_limiter_snap ();
 			refresh_track_gate_snap ();
+			refresh_spectrum_snap ();
 		} else {
 			_snap.waves_from_session = false;
 			_snap.session_record_armed = false;
@@ -12859,6 +13143,14 @@ EngineHost::EngineHost ()
 	_snap.track_gate_hold_ms = 50.f;
 	_snap.track_gate_threshold_norm = (-40.f - (-60.f)) / 60.f;
 	_snap.track_gate_hold_norm = (50.f - 1.f) / 499.f;
+	_snap.spectrum_enabled = false;
+	_snap.spectrum_ok = false;
+	_snap.spectrum_master = false;
+	_snap.spectrum_track = 0;
+	for (int si = 0; si < EngineSnapshot::kSpectrumBands; ++si) {
+		_snap.spectrum_band[si] = 0.f;
+	}
+	_snap.spectrum_label[0] = L'\0';
 	_snap.midi_activity = 0.f;
 	_snap.dsp_load_pct = 0.f;
 	_snap.callback_last_us = 0;
@@ -14606,6 +14898,38 @@ EngineHost::smoke_gate ()
 }
 
 bool
+EngineHost::smoke_spectrum ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_spectrum_enabled (bool on)
+{
+	(void)on;
+	return false;
+}
+
+bool
+EngineHost::toggle_spectrum_enabled ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_spectrum_master (bool master)
+{
+	(void)master;
+	return false;
+}
+
+bool
+EngineHost::toggle_spectrum_master ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_vst3 ()
 {
 	return false;
@@ -14645,6 +14969,11 @@ EngineHost::refresh_track_limiter_snap ()
 
 void
 EngineHost::refresh_track_gate_snap ()
+{
+}
+
+void
+EngineHost::refresh_spectrum_snap ()
 {
 }
 
