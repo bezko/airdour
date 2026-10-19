@@ -10,7 +10,7 @@
  *                         [--smoke-midi] [--smoke-midi-edit] [--smoke-plugin]
  *                         [--smoke-perf] [--smoke-vst3] [--smoke-mute-solo]
  *                         [--smoke-pan] [--smoke-send] [--smoke-automation]
- *                         [--smoke-edit] [--period N] [--session DIR]
+ *                         [--smoke-edit] [--smoke-snap] [--period N] [--session DIR]
  */
 
 #include "shell_window.h"
@@ -115,6 +115,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_send = parse_flag (argc, argv, L"--smoke-send");
 	bool smoke_automation = parse_flag (argc, argv, L"--smoke-automation");
 	bool smoke_edit = parse_flag (argc, argv, L"--smoke-edit");
+	bool smoke_snap = parse_flag (argc, argv, L"--smoke-snap");
 	bool smoke_perf = parse_flag (argc, argv, L"--smoke-perf");
 	std::string session_path = parse_session_path (argc, argv);
 	/* --smoke-perf uses --timeout as the sample window (default 5s). */
@@ -145,7 +146,7 @@ wmain (int argc, wchar_t** argv)
 		                         smoke_loop, smoke_midi, smoke_midi_edit,
 		                         smoke_plugin, smoke_perf, session_path, period,
 		                         smoke_vst3, smoke_mute_solo, smoke_pan, smoke_send,
-		                         smoke_automation, smoke_edit)) {
+		                         smoke_automation, smoke_edit, smoke_snap)) {
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", backend.c_str ());
 		} else {
 			std::fwprintf (stderr, L"airdour_win_shell: engine not attached (ok for UI-only / CI)\n");

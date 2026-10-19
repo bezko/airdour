@@ -82,6 +82,7 @@
 #include <glibmm/miscutils.h>
 #include "pbd/xml++.h"
 #include "temporal/beats.h"
+#include "temporal/tempo.h"
 #include "temporal/types.h"
 
 #ifdef interface
@@ -382,6 +383,13 @@ EngineHost::EngineHost ()
 	_snap.aux_bus_ok = false;
 	_snap.midi_muted = false;
 	_snap.midi_soloed = false;
+	_snap.snap_enabled = false;
+	_snap.snap_density = 1; /* beat */
+	_snap.grid_line_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
+		_snap.grid_line_sec[i] = 0.f;
+		_snap.grid_line_bar[i] = false;
+	}
 	_snap.available = true;
 	_snap.running = false;
 	_snap.session_ok = false;
@@ -2319,6 +2327,7 @@ bool
 EngineHost::write_track_gain_automation (int track, float time_sec, float value_0_1)
 {
 	value_0_1 = std::max (0.f, std::min (1.f, value_0_1));
+	time_sec = snap_time (time_sec);
 	if (time_sec < 0.f) {
 		time_sec = 0.f;
 	}
@@ -3022,6 +3031,7 @@ EngineHost::split_at (float time_sec, int track)
 		if (sr <= 0) {
 			return false;
 		}
+		time_sec = snap_time (time_sec);
 		if (time_sec < 0.f) {
 			time_sec = 0.f;
 		}
@@ -3244,6 +3254,7 @@ EngineHost::trim_selected_front_to (float time_sec)
 		if (sr <= 0) {
 			sr = 48000;
 		}
+		time_sec = snap_time (time_sec);
 		if (time_sec < 0.f) {
 			time_sec = 0.f;
 		}
@@ -3308,6 +3319,7 @@ EngineHost::trim_selected_end_to (float time_sec)
 		if (sr <= 0) {
 			sr = 48000;
 		}
+		time_sec = snap_time (time_sec);
 		if (time_sec < 0.f) {
 			time_sec = 0.f;
 		}
@@ -3372,6 +3384,7 @@ EngineHost::move_selected_to (float time_sec)
 		if (sr <= 0) {
 			sr = 48000;
 		}
+		time_sec = snap_time (time_sec);
 		if (time_sec < 0.f) {
 			time_sec = 0.f;
 		}
@@ -3409,6 +3422,289 @@ EngineHost::move_selected_to (float time_sec)
 		return false;
 	} catch (...) {
 		_snap.detail = L"move failed";
+		return false;
+	}
+}
+
+void
+EngineHost::set_snap_enabled (bool on)
+{
+	_snap.snap_enabled = on;
+	_snap.detail = on ? L"snap on" : L"snap off";
+	if (!on) {
+		_snap.grid_line_count = 0;
+	}
+}
+
+bool
+EngineHost::snap_enabled () const
+{
+	return _snap.snap_enabled;
+}
+
+void
+EngineHost::toggle_snap ()
+{
+	set_snap_enabled (!_snap.snap_enabled);
+}
+
+void
+EngineHost::set_snap_density (int density_0_to_3)
+{
+	if (density_0_to_3 < 0) {
+		density_0_to_3 = 0;
+	}
+	if (density_0_to_3 > 3) {
+		density_0_to_3 = 3;
+	}
+	_snap.snap_density = density_0_to_3;
+	static const wchar_t* labels[] = { L"snap bar", L"snap beat", L"snap 1/2", L"snap 1/4" };
+	_snap.detail = labels[_snap.snap_density];
+}
+
+void
+EngineHost::cycle_snap_density ()
+{
+	set_snap_density ((_snap.snap_density + 1) % 4);
+}
+
+int
+EngineHost::snap_density () const
+{
+	return _snap.snap_density;
+}
+
+namespace {
+
+double
+snap_unit_sec_fallback (int density)
+{
+	/* Fixed 120 BPM / 4/4 — matches win_ardour MIDI beat mapping. */
+	const double beat = 60.0 / 120.0;
+	switch (density) {
+	case 0: return beat * 4.0; /* bar */
+	case 2: return beat * 0.5;
+	case 3: return beat * 0.25;
+	default: return beat;
+	}
+}
+
+void
+snap_grid_params (int density, uint32_t* bar_mod, uint32_t* beat_div)
+{
+	switch (density) {
+	case 0:
+		*bar_mod = 1;
+		*beat_div = 1;
+		break;
+	case 2:
+		*bar_mod = 0;
+		*beat_div = 2;
+		break;
+	case 3:
+		*bar_mod = 0;
+		*beat_div = 4;
+		break;
+	default:
+		*bar_mod = 0;
+		*beat_div = 1;
+		break;
+	}
+}
+
+} // namespace
+
+float
+EngineHost::snap_time (float time_sec) const
+{
+	if (!_snap.snap_enabled) {
+		return time_sec;
+	}
+	if (time_sec < 0.f) {
+		time_sec = 0.f;
+	}
+	const int density = _snap.snap_density;
+
+	try {
+		Temporal::TempoMap::SharedPtr tm = Temporal::TempoMap::fetch ();
+		if (tm) {
+			samplecnt_t sr = 48000;
+			if (_impl && _impl->session) {
+				sr = _impl->session->sample_rate ();
+				if (sr <= 0 && _impl->engine) {
+					sr = (samplecnt_t)_impl->engine->sample_rate ();
+				}
+			}
+			if (sr <= 0) {
+				sr = 48000;
+			}
+			samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+			if (density == 0) {
+				Temporal::BBT_Argument bbt = tm->bbt_at (timepos_t (sample));
+				Temporal::BBT_Argument rounded = tm->round_to_bar (bbt);
+				samplepos_t snapped = tm->sample_at (rounded);
+				if (snapped < 0) {
+					snapped = 0;
+				}
+				return (float)snapped / (float)sr;
+			}
+			Temporal::Beats q = tm->quarters_at_sample (sample);
+			Temporal::Beats unit (1, 0);
+			if (density == 2) {
+				unit = Temporal::Beats (0, Temporal::Beats::PPQN / 2);
+			} else if (density == 3) {
+				unit = Temporal::Beats (0, Temporal::Beats::PPQN / 4);
+			}
+			if (unit.to_ticks () <= 0) {
+				unit = Temporal::Beats (1, 0);
+			}
+			Temporal::Beats snapped_b = q.round_to_multiple (unit);
+			samplepos_t snapped = tm->sample_at (snapped_b);
+			if (snapped < 0) {
+				snapped = 0;
+			}
+			return (float)snapped / (float)sr;
+		}
+	} catch (...) {
+	}
+
+	double unit = snap_unit_sec_fallback (density);
+	if (unit < 1.0e-6) {
+		return time_sec;
+	}
+	double n = std::round ((double)time_sec / unit);
+	if (n < 0.0) {
+		n = 0.0;
+	}
+	return (float)(n * unit);
+}
+
+void
+EngineHost::refresh_grid_lines (float view_start_sec, float view_span_sec)
+{
+	_snap.grid_line_count = 0;
+	if (!_snap.snap_enabled || view_span_sec <= 0.f) {
+		return;
+	}
+	float view_end = view_start_sec + view_span_sec;
+
+	try {
+		Temporal::TempoMap::SharedPtr tm = Temporal::TempoMap::fetch ();
+		samplecnt_t sr = 48000;
+		if (_impl && _impl->session) {
+			sr = _impl->session->sample_rate ();
+			if (sr <= 0 && _impl->engine) {
+				sr = (samplecnt_t)_impl->engine->sample_rate ();
+			}
+		}
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		if (tm) {
+			uint32_t bar_mod = 0;
+			uint32_t beat_div = 1;
+			snap_grid_params (_snap.snap_density, &bar_mod, &beat_div);
+			samplepos_t s0 = (samplepos_t)std::llround ((double)std::max (0.f, view_start_sec) * (double)sr);
+			samplepos_t s1 = (samplepos_t)std::llround ((double)view_end * (double)sr);
+			if (s1 <= s0) {
+				s1 = s0 + sr;
+			}
+			superclock_t sc0 = Temporal::samples_to_superclock (s0, sr);
+			superclock_t sc1 = Temporal::samples_to_superclock (s1, sr);
+			Temporal::TempoMapPoints pts;
+			tm->grid (pts, sc0, sc1, bar_mod, beat_div);
+			int n = 0;
+			for (size_t i = 0; i < pts.size () && n < EngineSnapshot::kMaxGridLines; ++i) {
+				samplepos_t smp = Temporal::superclock_to_samples (pts[i].sclock (), sr);
+				float sec = (float)smp / (float)sr;
+				if (sec < view_start_sec - 0.001f || sec > view_end + 0.001f) {
+					continue;
+				}
+				_snap.grid_line_sec[n] = sec;
+				_snap.grid_line_bar[n] = pts[i].bbt ().is_bar ();
+				++n;
+			}
+			_snap.grid_line_count = n;
+			return;
+		}
+	} catch (...) {
+	}
+
+	/* Fixed 120 BPM fallback grid. */
+	double unit = snap_unit_sec_fallback (_snap.snap_density);
+	double bar = snap_unit_sec_fallback (0);
+	if (unit < 1.0e-6) {
+		return;
+	}
+	double t0 = std::floor ((double)std::max (0.f, view_start_sec) / unit) * unit;
+	int n = 0;
+	for (double t = t0; t <= (double)view_end + unit * 0.5 && n < EngineSnapshot::kMaxGridLines; t += unit) {
+		if (t < (double)view_start_sec - 1.0e-4) {
+			continue;
+		}
+		_snap.grid_line_sec[n] = (float)t;
+		_snap.grid_line_bar[n] = (std::fabs (std::fmod (t + 1.0e-6, bar)) < unit * 0.25);
+		++n;
+	}
+	_snap.grid_line_count = n;
+}
+
+bool
+EngineHost::smoke_snap ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-snap failed — no Session";
+		return false;
+	}
+	try {
+		set_snap_density (1); /* beat */
+		set_snap_enabled (true);
+		float s1 = snap_time (1.1f);
+		if (std::fabs (s1 - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (beat 1.1→%.3f)\n", s1);
+			std::fflush (stderr);
+			return false;
+		}
+		float s2 = snap_time (0.24f);
+		if (std::fabs (s2 - 0.0f) > 0.08f && std::fabs (s2 - 0.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (beat 0.24→%.3f)\n", s2);
+			std::fflush (stderr);
+			return false;
+		}
+		set_snap_density (0); /* bar */
+		float s3 = snap_time (1.1f);
+		if (std::fabs (s3 - 0.0f) > 0.08f && std::fabs (s3 - 2.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (bar 1.1→%.3f)\n", s3);
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_grid_lines (0.f, 4.f);
+		int lines = _snap.grid_line_count;
+		if (lines < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (grid lines=%d)\n",
+			              lines);
+			std::fflush (stderr);
+			return false;
+		}
+		set_snap_enabled (false);
+		float s4 = snap_time (1.1f);
+		if (std::fabs (s4 - 1.1f) > 0.001f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (off 1.1→%.3f)\n", s4);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-snap ok (beat 1.1→%.2f bar→%.2f lines=%d)\n",
+		              s1, s3, lines);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-snap ok";
+		/* Leave snap off after smoke so interactive default stays free. */
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-snap exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
 		return false;
 	}
 }
@@ -3896,6 +4192,7 @@ EngineHost::locate_to (float time_sec, bool snap_to_marker, float slop_sec)
 		if (sr <= 0) {
 			return false;
 		}
+		time_sec = snap_time (time_sec);
 		if (time_sec < 0.f) {
 			time_sec = 0.f;
 		}
@@ -3916,7 +4213,8 @@ EngineHost::locate_to (float time_sec, bool snap_to_marker, float slop_sec)
 		}
 		_impl->session->request_locate (sample, true, MustStop, TRS_UI);
 		_snap.transport_sec = time_sec;
-		_snap.detail = snap_to_marker ? L"located (snap mark)" : L"located";
+		_snap.detail = _snap.snap_enabled ? L"located (grid snap)"
+		              : (snap_to_marker ? L"located (snap mark)" : L"located");
 		return true;
 	} catch (...) {
 		_snap.detail = L"locate failed";
@@ -5668,6 +5966,13 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.snap_enabled = false;
+	_snap.snap_density = 1;
+	_snap.grid_line_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
+		_snap.grid_line_sec[i] = 0.f;
+		_snap.grid_line_bar[i] = false;
+	}
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -6220,6 +6525,62 @@ EngineHost::move_selected_to (float time_sec)
 	return false;
 }
 
+void
+EngineHost::set_snap_enabled (bool on)
+{
+	_snap.snap_enabled = on;
+}
+
+bool
+EngineHost::snap_enabled () const
+{
+	return _snap.snap_enabled;
+}
+
+void
+EngineHost::toggle_snap ()
+{
+	_snap.snap_enabled = !_snap.snap_enabled;
+}
+
+void
+EngineHost::cycle_snap_density ()
+{
+	_snap.snap_density = (_snap.snap_density + 1) % 4;
+}
+
+void
+EngineHost::set_snap_density (int density_0_to_3)
+{
+	if (density_0_to_3 < 0) {
+		density_0_to_3 = 0;
+	}
+	if (density_0_to_3 > 3) {
+		density_0_to_3 = 3;
+	}
+	_snap.snap_density = density_0_to_3;
+}
+
+int
+EngineHost::snap_density () const
+{
+	return _snap.snap_density;
+}
+
+float
+EngineHost::snap_time (float time_sec) const
+{
+	return time_sec;
+}
+
+void
+EngineHost::refresh_grid_lines (float view_start_sec, float view_span_sec)
+{
+	(void)view_start_sec;
+	(void)view_span_sec;
+	_snap.grid_line_count = 0;
+}
+
 int
 EngineHost::track_region_count (int track) const
 {
@@ -6229,6 +6590,12 @@ EngineHost::track_region_count (int track) const
 
 bool
 EngineHost::smoke_edit ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_snap ()
 {
 	return false;
 }

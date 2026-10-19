@@ -104,6 +104,12 @@ struct EngineSnapshot {
 	bool         aux_bus_ok; /* Session Aux audio bus exists */
 	bool         midi_muted;
 	bool         midi_soloed;
+	bool         snap_enabled; /* Editor snap-to-grid */
+	int          snap_density; /* 0=bar 1=beat 2=1/2 3=1/4 */
+	int          grid_line_count; /* visible grid lines for Editor draw */
+	static constexpr int kMaxGridLines = 96;
+	float        grid_line_sec[kMaxGridLines];
+	bool         grid_line_bar[kMaxGridLines]; /* thicker bar lines */
 	float        transport_sec;
 	std::wstring detail;
 };
@@ -281,6 +287,19 @@ public:
 	/** Move selected region so its start is at time_sec (Region::set_position). */
 	bool move_selected_to (float time_sec);
 
+	/** Snap-to-grid: TempoMap beat/bar (fallback fixed 120 BPM). */
+	void set_snap_enabled (bool on);
+	bool snap_enabled () const;
+	void toggle_snap ();
+	/** Cycle density: bar → beat → 1/2 → 1/4 → bar. */
+	void cycle_snap_density ();
+	void set_snap_density (int density_0_to_3);
+	int  snap_density () const;
+	/** Snap time_sec to current grid when enabled; identity when off. */
+	float snap_time (float time_sec) const;
+	/** Fill snapshot grid_line_* for Editor draw over [view_start, view_start+span]. */
+	void refresh_grid_lines (float view_start_sec, float view_span_sec);
+
 	/** Count audio regions on a track playlist (smoke / diagnostics). */
 	int track_region_count (int track) const;
 
@@ -289,6 +308,12 @@ public:
 	 * For --smoke-edit.
 	 */
 	bool smoke_edit ();
+
+	/**
+	 * Enable beat snap; verify 1.1s → ~1.0s; density bar; off → identity.
+	 * For --smoke-snap.
+	 */
+	bool smoke_snap ();
 
 	/**
 	 * Import a test tone, undo it (regions gone), redo (regions back), undo again.

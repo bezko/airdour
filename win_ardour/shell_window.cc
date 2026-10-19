@@ -192,7 +192,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_pan,
                             bool smoke_send,
                             bool smoke_automation,
-                            bool smoke_edit)
+                            bool smoke_edit,
+                            bool smoke_snap)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -378,6 +379,17 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_edit) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_snap && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_snap ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_snap) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -991,6 +1003,42 @@ ShellWindow::do_apply_crossfade ()
 	}
 }
 
+void
+ShellWindow::do_toggle_snap ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	_engine.toggle_snap ();
+	_engine_snap = _engine.snapshot ();
+	_transport.set_snap_enabled (_engine_snap.snap_enabled);
+	if (_engine_snap.snap_enabled) {
+		_engine.refresh_grid_lines (
+			_lanes[0].strip.view_start_sec (),
+			_lanes[0].strip.view_span_sec ());
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_cycle_snap_density ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	_engine.cycle_snap_density ();
+	if (!_engine.snap_enabled ()) {
+		_engine.set_snap_enabled (true);
+	}
+	_engine.refresh_grid_lines (
+		_lanes[0].strip.view_start_sec (),
+		_lanes[0].strip.view_span_sec ());
+	_engine_snap = _engine.snapshot ();
+	_transport.set_snap_enabled (_engine_snap.snap_enabled);
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 float
 ShellWindow::stub_meter_peak (int track, float dt) const
 {
@@ -1334,6 +1382,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_split_at_playhead ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'F' || wparam == 'f')) {
 			do_apply_crossfade ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'G' || wparam == 'g')) {
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
+				do_cycle_snap_density ();
+			} else {
+				do_toggle_snap ();
+			}
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'O' || wparam == 'o')) {
 			prompt_open_session ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')) {
@@ -1610,6 +1664,14 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::Fade) {
 		do_apply_crossfade ();
+		return true;
+	}
+	if (th == TransportHit::Snap) {
+		if (GetKeyState (VK_SHIFT) & 0x8000) {
+			do_cycle_snap_density ();
+		} else {
+			do_toggle_snap ();
+		}
 		return true;
 	}
 
@@ -2149,6 +2211,13 @@ ShellWindow::on_tick ()
 		apply_region_selection_to_lanes ();
 		apply_loop_to_lanes ();
 		refresh_automation_lane ();
+		_transport.set_snap_enabled (_engine_snap.snap_enabled);
+		if (_engine_snap.snap_enabled) {
+			_engine.refresh_grid_lines (
+				_lanes[0].strip.view_start_sec (),
+				_lanes[0].strip.view_span_sec ());
+			_engine_snap = _engine.snapshot ();
+		}
 		last_poll = now;
 	}
 
@@ -2288,6 +2357,47 @@ ShellWindow::draw_editor_ruler ()
 }
 
 void
+ShellWindow::draw_editor_grid ()
+{
+	if (!_engine_snap.snap_enabled || _engine_snap.grid_line_count <= 0 || !_brush_body) {
+		return;
+	}
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	/* Vertical span: ruler through Audio lanes (+ automation under Audio 1). */
+	float top = _editor_ruler.top;
+	float bot = _lanes[kTracks - 1].bounds.bottom;
+	if (_auto_lane_bounds.bottom > bot) {
+		bot = _auto_lane_bounds.bottom;
+	}
+	if (_midi_lane.bottom > bot) {
+		bot = _midi_lane.bottom;
+	}
+	float left = _lanes[0].bounds.left;
+	float right = _lanes[0].bounds.right;
+	float w = right - left;
+	if (w < 8.f || bot <= top) {
+		return;
+	}
+
+	for (int i = 0; i < _engine_snap.grid_line_count; ++i) {
+		float n = (_engine_snap.grid_line_sec[i] - view0) / span;
+		if (n < 0.f || n > 1.f) {
+			continue;
+		}
+		float px = left + n * w;
+		bool is_bar = _engine_snap.grid_line_bar[i];
+		float thick = is_bar ? std::max (1.25f, 1.5f * _dpi_scale)
+		                     : std::max (1.f, 1.f * _dpi_scale);
+		_brush_body->SetOpacity (is_bar ? 0.28f : 0.14f);
+		_rt->FillRectangle (
+			D2D1::RectF (px - thick * 0.5f, top, px + thick * 0.5f, bot),
+			_brush_body);
+	}
+	_brush_body->SetOpacity (1.f);
+}
+
+void
 ShellWindow::draw_editor_pane ()
 {
 	const D2D1_RECT_F& r = _editor_pane;
@@ -2317,13 +2427,16 @@ ShellWindow::draw_editor_pane ()
 			              _engine_snap.marker_count);
 		} else if (_engine_snap.has_selection) {
 			_snwprintf_s (caption, _TRUNCATE,
-			              L"sel T%d [%.1f–%.1f]  ·  edges=trim  body=move  S/F  Del",
+			              L"sel T%d [%.1f–%.1f]  ·  trim/move  S/F  G=snap%s",
 			              _engine_snap.selection_track + 1,
-			              _engine_snap.selection_start_sec, _engine_snap.selection_end_sec);
+			              _engine_snap.selection_start_sec, _engine_snap.selection_end_sec,
+			              _engine_snap.snap_enabled ? L" ON" : L"");
 		} else if (with_audio > 0) {
 			_snwprintf_s (caption, _TRUNCATE,
-			              L"%d tracks  ·  %d with audio  ·  marks %d  ·  [ ] loop",
-			              kTracks, with_audio, _engine_snap.marker_count);
+			              L"%d tracks  ·  %d with audio  ·  G=snap%s  ·  marks %d",
+			              kTracks, with_audio,
+			              _engine_snap.snap_enabled ? L" ON" : L"",
+			              _engine_snap.marker_count);
 		} else {
 			_snwprintf_s (caption, _TRUNCATE,
 			              L"%d tracks  ·  empty  ·  [ ]=loop  M=mark  L=loop play",
@@ -2382,6 +2495,7 @@ ShellWindow::draw_editor_pane ()
 
 	draw_automation_lane ();
 	draw_midi_lane ();
+	draw_editor_grid ();
 }
 
 void

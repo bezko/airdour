@@ -69,7 +69,8 @@ public:
 	                    bool smoke_pan = false,
 	                    bool smoke_send = false,
 	                    bool smoke_automation = false,
-	                    bool smoke_edit = false);
+	                    bool smoke_edit = false,
+	                    bool smoke_snap = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -141,7 +142,10 @@ private:
 	void do_delete_selection ();
 	void do_split_at_playhead ();
 	void do_apply_crossfade ();
+	void do_toggle_snap ();
+	void do_cycle_snap_density ();
 	void do_toggle_loop ();
+	void draw_editor_grid ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
 	void sync_mixer_arm_from_engine ();
