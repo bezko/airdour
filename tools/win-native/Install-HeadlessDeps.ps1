@@ -11,7 +11,8 @@
 param(
   [string]$VcpkgRoot = "C:\vcpkg",
   [string]$Triplet = "x64-windows",
-  [string]$ManifestDir = ""
+  [string]$ManifestDir = "",
+  [switch]$WithGtkLibs
 )
 
 $ErrorActionPreference = "Stop"
@@ -49,10 +50,17 @@ if (-not (Test-Path $vcpkgExe)) {
   if (-not (Test-Path $vcpkgExe)) { throw "bootstrap failed: $vcpkgExe missing" }
 }
 
+$featureArgs = @()
+if ($WithGtkLibs) {
+  # Feature gtk-libs → gtk3 + cairo + pango (MSVC libs; not product chrome).
+  $featureArgs += "--x-feature=gtk-libs"
+  Write-Host "WithGtkLibs: enabling manifest feature gtk-libs (gtk3/cairo/pango)"
+}
+
 Write-Host "Installing manifest from $ManifestDir (triplet=$Triplet)"
 Push-Location $ManifestDir
 try {
-  & $vcpkgExe install --triplet $Triplet
+  & $vcpkgExe install --triplet $Triplet @featureArgs
   if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed: $LASTEXITCODE" }
 } finally {
   Pop-Location
@@ -150,3 +158,12 @@ Write-Host "CMake toolchain: $(Join-Path $VcpkgRoot 'scripts\buildsystems\vcpkg.
 Write-Host "Pass -DVCPKG_MANIFEST_DIR=$ManifestDir when configuring cmake/win64."
 Write-Host "waf tip: --boost-include=$installed\include and PKG_CONFIG_PATH=$installed\lib\pkgconfig"
 Write-Host "Overlays: libsigcpp2 + glibmm24 provide sigc++-2.0 / glibmm-2.4 (see overlays/README.md)."
+if ($WithGtkLibs) {
+  $gtkH = Join-Path $installed "include\gtk-3.0\gtk\gtk.h"
+  if (Test-Path $gtkH) {
+    Write-Host "GTK3 libs ready: $gtkH"
+    Write-Host "Probe: tools\win-native\gtk-lib-probe\build-and-run.cmd"
+  } else {
+    Write-Warning "WithGtkLibs set but gtk/gtk.h missing under $installed"
+  }
+}

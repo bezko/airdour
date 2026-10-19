@@ -4,11 +4,12 @@
 #   1) wasapi_io_smoke     — WasapiIO + Windows SDK only (CI green path)
 #   2) deps_headless_smoke — vcpkg C stack (glib/xml/sndfile/curl/archive/pthread)
 #   3) deps_glibmm_smoke   — overlay glibmm-2.4 + sigc++-2.0 link probe
-#   4) INTERFACE notes for full wasapi_backend / libpbd
+#   4) gtk_lib_probe       — optional GTK3+Cairo MSVC lib link (no chrome)
+#   5) INTERFACE notes for full wasapi_backend / libpbd
 #
 # Audio product path: WASAPI shared (libs/backends/wasapi).
 # Exclusive / DirectSound / ASIO: out of scope.
-# GTK2: out of scope for this spine.
+# GTK chrome: out of scope — D2D shell is product UI; GTK3 only as optional libs.
 
 cmake_minimum_required(VERSION 3.20)
 project(airdour_win64 LANGUAGES C CXX)
@@ -19,6 +20,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(AIRDOUR_BUILD_WASAPI_IO_SMOKE "Build WasapiIO smoke static lib (Windows SDK only)" ON)
 option(AIRDOUR_BUILD_DEPS_HEADLESS_SMOKE "Build headless vcpkg C-deps probe executable" OFF)
 option(AIRDOUR_BUILD_DEPS_GLIBMM_SMOKE "Build overlay glibmm-2.4 + sigc++-2.0 probe executable" OFF)
+option(AIRDOUR_BUILD_GTK_LIB_PROBE "Build GTK3+Cairo MSVC lib probe (no chrome; needs -WithGtkLibs)" OFF)
 option(AIRDOUR_BUILD_WIN_SHELL "Build minimal Win32+Direct2D Airdour shell (no GTK)" ON)
 
 if(NOT WIN32)
@@ -26,6 +28,7 @@ if(NOT WIN32)
   set(AIRDOUR_BUILD_WASAPI_IO_SMOKE OFF)
   set(AIRDOUR_BUILD_DEPS_HEADLESS_SMOKE OFF)
   set(AIRDOUR_BUILD_DEPS_GLIBMM_SMOKE OFF)
+  set(AIRDOUR_BUILD_GTK_LIB_PROBE OFF)
   set(AIRDOUR_BUILD_WIN_SHELL OFF)
 endif()
 
@@ -201,6 +204,45 @@ if(AIRDOUR_BUILD_DEPS_GLIBMM_SMOKE)
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
   )
   message(STATUS "Airdour win64: deps_glibmm_smoke enabled (overlay glibmm-2.4)")
+endif()
+
+# --- GTK3 + Cairo MSVC lib probe (optional; not product chrome) ---
+if(AIRDOUR_BUILD_GTK_LIB_PROBE)
+  set(_gtk_prefix "${AIRDOUR_SRC_ROOT}/tools/win-native/vcpkg_installed/x64-windows")
+  if(NOT EXISTS "${_gtk_prefix}/include/gtk-3.0/gtk/gtk.h")
+    message(FATAL_ERROR
+      "GTK3 missing under ${_gtk_prefix}. "
+      "Run tools/win-native/Install-HeadlessDeps.ps1 -WithGtkLibs")
+  endif()
+  set(_gtk_inc "${_gtk_prefix}/include")
+  set(_gtk_lib "${_gtk_prefix}/lib")
+  add_executable(gtk_lib_probe
+    "${AIRDOUR_SRC_ROOT}/tools/win-native/gtk-lib-probe/main.cc"
+  )
+  target_include_directories(gtk_lib_probe PRIVATE
+    "${_gtk_inc}"
+    "${_gtk_inc}/gtk-3.0"
+    "${_gtk_inc}/glib-2.0"
+    "${_gtk_lib}/glib-2.0/include"
+    "${_gtk_inc}/cairo"
+    "${_gtk_inc}/pango-1.0"
+    "${_gtk_inc}/harfbuzz"
+    "${_gtk_inc}/gdk-pixbuf-2.0"
+    "${_gtk_inc}/atk-1.0"
+    "${_gtk_inc}/fribidi"
+  )
+  foreach(_rel_lib IN ITEMS
+      gtk-3.lib gdk-3.lib gobject-2.0.lib gio-2.0.lib glib-2.0.lib gmodule-2.0.lib
+      cairo.lib pangocairo-1.0.lib pango-1.0.lib pangowin32-1.0.lib
+      gdk_pixbuf-2.0.lib atk-1.0.lib harfbuzz.lib intl.lib fribidi.lib)
+    if(EXISTS "${_gtk_lib}/${_rel_lib}")
+      target_link_libraries(gtk_lib_probe PRIVATE "${_gtk_lib}/${_rel_lib}")
+    endif()
+  endforeach()
+  set_target_properties(gtk_lib_probe PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
+  )
+  message(STATUS "Airdour win64: gtk_lib_probe enabled (MSVC GTK3+Cairo libs; no chrome)")
 endif()
 
 # --- Minimal Win32 + Direct2D + DirectWrite GUI shell (no GTK2) ---

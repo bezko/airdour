@@ -70,7 +70,9 @@ Default backends: **dummy** + **wasapi**. Needs MSVC deps above **plus** the gli
 | Code signing | No | Not wired |
 | GTK2 MSVC prefix | Blocked | Main GUI release blocker |
 
-Manifest for the next deps stage: `tools/win-native/vcpkg.json` (core only — no GTK2).
+Manifest: `tools/win-native/vcpkg.json` (core headless deps; **no GTK2 chrome**).  
+Optional MSVC **GTK3/Cairo libs** (not product UI): `-WithGtkLibs` → feature `gtk-libs`.  
+Probe (no windows): `tools/win-native/gtk-lib-probe/build-and-run.cmd` — see store doc `gtk-native-msvc.md`.
 
 ### Packaging scripts
 

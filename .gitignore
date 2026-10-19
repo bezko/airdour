@@ -159,6 +159,7 @@ waf3-*
 /build-win64-*/
 /build-win64-logs/
 /tools/win-native/vcpkg_installed/
+/build-gtk-lib-probe/
 
 
 # Local release packaging output
