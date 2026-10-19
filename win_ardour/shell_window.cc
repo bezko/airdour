@@ -220,13 +220,16 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
-                            bool smoke_recent)
+                            bool smoke_recent,
+                            bool smoke_recovery)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
 		_engine_snap = _engine.snapshot ();
 		return false;
 	}
+	/* --timeout smokes: autosave off (unless --smoke-recovery). */
+	_engine.set_autosave_enabled (smoke_recovery || smoke_timeout_secs == 0);
 	if (period_frames > 0) {
 		_engine.set_period_frames (period_frames);
 		std::fprintf (stderr, "airdour_win_shell: --period %u\n", period_frames);
@@ -615,6 +618,17 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_recovery && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_recovery ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_recovery) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-recovery FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -656,6 +670,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	layout_panes ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
+	if (smoke_timeout_secs == 0 && !smoke_recovery) {
+		maybe_show_recovery_prompt ();
+	}
 	if (autoplay) {
 		_transport_playing = true;
 		_transport.set_playing (true);
@@ -1146,6 +1163,74 @@ ShellWindow::apply_recent_hit (RecentHit hit)
 		}
 		return;
 	}
+	}
+}
+
+void
+ShellWindow::maybe_show_recovery_prompt ()
+{
+	if (!_engine.recovery_offer_available ()) {
+		return;
+	}
+	std::string path;
+	std::string snap;
+	if (!_engine.recovery_offer_path (&path, &snap)) {
+		return;
+	}
+	std::wstring wpath;
+	int n = MultiByteToWideChar (CP_UTF8, 0, path.c_str (), (int)path.size (), nullptr, 0);
+	if (n > 0) {
+		wpath.assign ((size_t)n, L'\0');
+		MultiByteToWideChar (CP_UTF8, 0, path.c_str (), (int)path.size (), &wpath[0], n);
+	}
+	std::wstring label = L"session";
+	size_t slash = path.find_last_of ("/\\");
+	if (slash != std::string::npos && slash + 1 < path.size ()) {
+		std::string base = path.substr (slash + 1);
+		int nb = MultiByteToWideChar (CP_UTF8, 0, base.c_str (), (int)base.size (), nullptr, 0);
+		if (nb > 0) {
+			label.assign ((size_t)nb, L'\0');
+			MultiByteToWideChar (CP_UTF8, 0, base.c_str (), (int)base.size (), &label[0], nb);
+		}
+	}
+	_recovery.set_session_hint (label.c_str (), wpath.c_str ());
+	_recovery.set_visible (true);
+	_recovery.layout ((float)_width, (float)_height, _dpi_scale);
+	_recent.set_visible (false);
+	_prefs_visible = false;
+	_prefs.set_visible (false);
+	_help_visible = false;
+	_about.set_about_visible (false);
+	dismiss_splash ();
+	std::fprintf (stderr, "airdour_win_shell: recovery prompt shown\n");
+	std::fflush (stderr);
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::apply_recovery_hit (RecoveryHit hit)
+{
+	if (hit == RecoveryHit::Restore) {
+		_recovery.set_visible (false);
+		if (_engine.restore_recovery_session ()) {
+			std::fprintf (stderr, "airdour_win_shell: recovery restored\n");
+		} else {
+			std::fprintf (stderr, "airdour_win_shell: recovery restore FAILED\n");
+		}
+		std::fflush (stderr);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_arm_from_engine ();
+		sync_track_labels_from_engine ();
+		sync_recent_from_engine ();
+		layout_panes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	if (hit == RecoveryHit::Discard) {
+		_engine.discard_recovery_offer ();
+		_recovery.set_visible (false);
+		InvalidateRect (_hwnd, nullptr, FALSE);
 	}
 }
 
@@ -2383,6 +2468,14 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			dismiss_splash ();
 			return 0;
 		}
+		if (_recovery.visible ()) {
+			if (wparam == VK_ESCAPE || wparam == 'N' || wparam == 'n') {
+				apply_recovery_hit (RecoveryHit::Discard);
+			} else if (wparam == VK_RETURN || wparam == 'Y' || wparam == 'y') {
+				apply_recovery_hit (RecoveryHit::Restore);
+			}
+			return 0;
+		}
 		if (wparam == VK_ESCAPE) {
 			if (_recent.visible ()) {
 				_recent.set_visible (false);
@@ -2845,6 +2938,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	if (_about.splash_visible ()) {
 		dismiss_splash ();
+		return true;
+	}
+
+	if (_recovery.visible ()) {
+		apply_recovery_hit (_recovery.hit_test (x, y));
 		return true;
 	}
 
@@ -3732,6 +3830,10 @@ ShellWindow::on_tick ()
 		dismiss_splash ();
 	}
 
+	if (!_recovery.visible () && _timeout_secs == 0) {
+		_engine.autosave_tick (now);
+	}
+
 	/* Poll engine often enough for meters while playing. */
 	static DWORD last_poll = 0;
 	static DWORD last_wave = 0;
@@ -4515,6 +4617,11 @@ ShellWindow::on_paint ()
 		_recent.layout_under (_transport.open_btn (), (float)_width, (float)_height, _dpi_scale);
 		_recent.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
 		              _brush_pane_edge, _fmt_meta, _dpi_scale);
+	}
+	if (_recovery.visible ()) {
+		_recovery.layout ((float)_width, (float)_height, _dpi_scale);
+		_recovery.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
+		                _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
 	}
 	if (_about.splash_visible ()) {
 		_about.draw_splash (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,

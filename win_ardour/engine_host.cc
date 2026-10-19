@@ -18,6 +18,7 @@
 #ifdef AIRDOUR_WIN_SHELL_WITH_ENGINE
 
 #include "ardour/ardour.h"
+#include "ardour/filesystem_paths.h"
 #include "ardour/audio_backend.h"
 #include "ardour/audio_track.h"
 #include "ardour/audioengine.h"
@@ -401,6 +402,11 @@ EngineHost::EngineHost ()
 	, _pref_period_frames (0)
 	, _pref_snap_default (false)
 	, _pref_click_default (true)
+	, _autosave_enabled (true)
+	, _last_autosave_ms (0)
+	, _recovery_saved_ft (0)
+	, _recovery_last_open_ft (0)
+	, _recovery_dirty (false)
 	, _gain (0.85f)
 	, _impl (new Impl)
 {
@@ -1064,6 +1070,342 @@ EngineHost::smoke_recent ()
 	}
 }
 
+void
+EngineHost::set_autosave_enabled (bool on)
+{
+	_autosave_enabled = on;
+	if (!on) {
+		_last_autosave_ms = 0;
+	}
+	std::fprintf (stderr, "airdour_win_shell: autosave %s\n", on ? "on" : "off");
+	std::fflush (stderr);
+}
+
+std::string
+EngineHost::recovery_copy_path () const
+{
+	if (!Config) {
+		return std::string ();
+	}
+	return Glib::build_filename (user_config_directory (), "win_shell_recovery", "recovery.ardour");
+}
+
+uint64_t
+EngineHost::snapshot_filetime (const std::string& session_dir, const std::string& snap) const
+{
+	if (session_dir.empty ()) {
+		return 0;
+	}
+	std::string name = snap.empty () ? "win_shell" : snap;
+	std::string file = path_join (session_dir, name + ".ardour");
+	std::wstring w = utf8_path_to_wide (file);
+	WIN32_FILE_ATTRIBUTE_DATA fad = {};
+	if (!GetFileAttributesExW (w.c_str (), GetFileExInfoStandard, &fad)) {
+		return 0;
+	}
+	ULARGE_INTEGER ul;
+	ul.LowPart = fad.ftLastWriteTime.dwLowDateTime;
+	ul.HighPart = fad.ftLastWriteTime.dwHighDateTime;
+	return ul.QuadPart;
+}
+
+void
+EngineHost::load_recovery_marker ()
+{
+	_recovery_path.clear ();
+	_recovery_snapshot = "win_shell";
+	_recovery_saved_ft = 0;
+	_recovery_last_open_ft = 0;
+	_recovery_dirty = false;
+	if (!_impl || !_impl->ardour_inited || !Config) {
+		return;
+	}
+	try {
+		XMLNode* node = Config->instant_xml ("WinShellRecovery");
+		if (!node) {
+			return;
+		}
+		node->get_property ("path", _recovery_path);
+		std::string snap;
+		if (node->get_property ("snapshot", snap) && !snap.empty ()) {
+			_recovery_snapshot = snap;
+		}
+		uint64_t saved = 0;
+		uint64_t opened = 0;
+		int dirty = 0;
+		node->get_property ("saved-ft", saved);
+		node->get_property ("last-open-ft", opened);
+		node->get_property ("dirty", dirty);
+		_recovery_saved_ft = saved;
+		_recovery_last_open_ft = opened;
+		_recovery_dirty = (dirty != 0);
+		std::fprintf (stderr,
+		              "airdour_win_shell: recovery marker (dirty=%d saved=%llu open=%llu)\n",
+		              _recovery_dirty ? 1 : 0,
+		              (unsigned long long)_recovery_saved_ft,
+		              (unsigned long long)_recovery_last_open_ft);
+		std::fflush (stderr);
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::save_recovery_marker ()
+{
+	if (!_impl || !_impl->ardour_inited || !Config) {
+		return false;
+	}
+	try {
+		XMLNode node ("WinShellRecovery");
+		node.set_property ("path", _recovery_path);
+		node.set_property ("snapshot", _recovery_snapshot.empty () ? "win_shell" : _recovery_snapshot);
+		node.set_property ("saved-ft", _recovery_saved_ft);
+		node.set_property ("last-open-ft", _recovery_last_open_ft);
+		node.set_property ("dirty", _recovery_dirty ? 1 : 0);
+		Config->add_instant_xml (node);
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::copy_snapshot_to_recovery ()
+{
+	if (!_impl || _impl->session_dir.empty ()) {
+		return false;
+	}
+	std::string snap = _recovery_snapshot.empty () ? "win_shell" : _recovery_snapshot;
+	if (_impl->session) {
+		std::string sn = _impl->session->snap_name ();
+		if (!sn.empty ()) {
+			snap = sn;
+		}
+	}
+	std::string src = path_join (_impl->session_dir, snap + ".ardour");
+	std::string dst = recovery_copy_path ();
+	if (dst.empty ()) {
+		return false;
+	}
+	try {
+		std::string dir = Glib::path_get_dirname (dst);
+		if (!Glib::file_test (dir, Glib::FILE_TEST_IS_DIR)) {
+			std::wstring wdir = utf8_path_to_wide (dir);
+			CreateDirectoryW (wdir.c_str (), nullptr);
+		}
+		std::wstring wsrc = utf8_path_to_wide (src);
+		std::wstring wdst = utf8_path_to_wide (dst);
+		if (!CopyFileW (wsrc.c_str (), wdst.c_str (), FALSE)) {
+			std::fprintf (stderr, "airdour_win_shell: recovery copy failed (%lu)\n", GetLastError ());
+			std::fflush (stderr);
+			return false;
+		}
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+void
+EngineHost::autosave_tick (uint32_t now_ms)
+{
+	if (!_autosave_enabled || !_impl || !_impl->session) {
+		return;
+	}
+	const uint32_t interval_ms = 45000u; /* 45s */
+	if (_last_autosave_ms != 0 && (now_ms - _last_autosave_ms) < interval_ms) {
+		return;
+	}
+	autosave_now ();
+	_last_autosave_ms = now_ms ? now_ms : 1;
+}
+
+bool
+EngineHost::autosave_now ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (!save_session ()) {
+		return false;
+	}
+	std::string snap = "win_shell";
+	if (_impl->session) {
+		snap = _impl->session->snap_name ();
+		if (snap.empty ()) {
+			snap = "win_shell";
+		}
+	}
+	_recovery_path = _impl->session_dir;
+	_recovery_snapshot = snap;
+	_recovery_saved_ft = snapshot_filetime (_recovery_path, snap);
+	if (_recovery_saved_ft == 0) {
+		FILETIME ft;
+		GetSystemTimeAsFileTime (&ft);
+		ULARGE_INTEGER ul;
+		ul.LowPart = ft.dwLowDateTime;
+		ul.HighPart = ft.dwHighDateTime;
+		_recovery_saved_ft = ul.QuadPart;
+	}
+	_recovery_dirty = true;
+	copy_snapshot_to_recovery ();
+	if (!save_recovery_marker ()) {
+		return false;
+	}
+	_snap.detail = L"autosave — recovery marker written";
+	std::fprintf (stderr, "airdour_win_shell: autosave ok (path=%s ft=%llu)\n",
+	              _recovery_path.c_str (), (unsigned long long)_recovery_saved_ft);
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+EngineHost::recovery_offer_available () const
+{
+	if (!_recovery_dirty || _recovery_path.empty ()) {
+		return false;
+	}
+	if (_recovery_saved_ft == 0 || _recovery_saved_ft <= _recovery_last_open_ft) {
+		return false;
+	}
+	DWORD attrs = GetFileAttributesW (utf8_path_to_wide (_recovery_path).c_str ());
+	if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+		return false;
+	}
+	return true;
+}
+
+bool
+EngineHost::recovery_offer_path (std::string* path, std::string* snapshot) const
+{
+	if (!recovery_offer_available ()) {
+		return false;
+	}
+	if (path) {
+		*path = _recovery_path;
+	}
+	if (snapshot) {
+		*snapshot = _recovery_snapshot.empty () ? "win_shell" : _recovery_snapshot;
+	}
+	return true;
+}
+
+bool
+EngineHost::restore_recovery_session ()
+{
+	std::string path;
+	std::string snap;
+	if (!recovery_offer_path (&path, &snap)) {
+		_snap.detail = L"recovery restore failed — nothing to offer";
+		return false;
+	}
+	if (!open_session (path, snap)) {
+		return false;
+	}
+	/* open_session already mark_recovery_clean_open(). */
+	_snap.detail = L"session restored from autosave";
+	return true;
+}
+
+bool
+EngineHost::discard_recovery_offer ()
+{
+	_recovery_dirty = false;
+	FILETIME ft;
+	GetSystemTimeAsFileTime (&ft);
+	ULARGE_INTEGER ul;
+	ul.LowPart = ft.dwLowDateTime;
+	ul.HighPart = ft.dwHighDateTime;
+	_recovery_last_open_ft = ul.QuadPart;
+	bool ok = save_recovery_marker ();
+	_snap.detail = L"recovery offer discarded";
+	std::fprintf (stderr, "airdour_win_shell: recovery discarded\n");
+	std::fflush (stderr);
+	return ok;
+}
+
+bool
+EngineHost::mark_recovery_clean_open ()
+{
+	FILETIME ft;
+	GetSystemTimeAsFileTime (&ft);
+	ULARGE_INTEGER ul;
+	ul.LowPart = ft.dwLowDateTime;
+	ul.HighPart = ft.dwHighDateTime;
+	_recovery_last_open_ft = ul.QuadPart;
+	_recovery_dirty = false;
+	if (_impl && !_impl->session_dir.empty ()) {
+		_recovery_path = _impl->session_dir;
+		if (_impl->session) {
+			_recovery_snapshot = _impl->session->snap_name ();
+			if (_recovery_snapshot.empty ()) {
+				_recovery_snapshot = "win_shell";
+			}
+		}
+	}
+	return save_recovery_marker ();
+}
+
+bool
+EngineHost::smoke_recovery ()
+{
+	if (!_impl || !_impl->session || !_impl->ardour_inited || !Config) {
+		_snap.detail = L"smoke-recovery failed — no Session";
+		return false;
+	}
+	try {
+		const bool prev = _autosave_enabled;
+		_autosave_enabled = true;
+		if (!autosave_now ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-recovery FAILED (autosave)\n");
+			std::fflush (stderr);
+			_autosave_enabled = prev;
+			return false;
+		}
+		load_recovery_marker ();
+		if (!_recovery_dirty || _recovery_path.empty () || _recovery_saved_ft == 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-recovery FAILED (marker)\n");
+			std::fflush (stderr);
+			_autosave_enabled = prev;
+			return false;
+		}
+		std::string copy = recovery_copy_path ();
+		if (copy.empty () || !Glib::file_test (copy, Glib::FILE_TEST_IS_REGULAR)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-recovery FAILED (copy missing)\n");
+			std::fflush (stderr);
+			_autosave_enabled = prev;
+			return false;
+		}
+		/* Force offer: last-open older than saved. */
+		_recovery_last_open_ft = _recovery_saved_ft > 1 ? (_recovery_saved_ft - 1) : 0;
+		_recovery_dirty = true;
+		save_recovery_marker ();
+		if (!recovery_offer_available ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-recovery FAILED (offer)\n");
+			std::fflush (stderr);
+			_autosave_enabled = prev;
+			return false;
+		}
+		if (!discard_recovery_offer () || recovery_offer_available ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-recovery FAILED (discard)\n");
+			std::fflush (stderr);
+			_autosave_enabled = prev;
+			return false;
+		}
+		_autosave_enabled = prev;
+		std::fprintf (stderr, "airdour_win_shell: smoke-recovery ok (autosave+offer+discard)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-recovery ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-recovery exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::start (const std::string& backend_name)
 {
@@ -1569,6 +1911,7 @@ EngineHost::open_session (const std::string& session_dir, const std::string& sna
 		refresh_region_flags ();
 		refresh_record_flags ();
 		remember_recent_session (session_dir, snap, true);
+		mark_recovery_clean_open ();
 		_snap.detail = L"session reopened — Editor peaks from disk";
 		std::fprintf (stderr, "airdour_win_shell: opened %s (tracks=%u regions0=%d)\n",
 		              session_dir.c_str (),
@@ -1961,6 +2304,7 @@ EngineHost::start ()
 
 	load_shell_prefs ();
 	load_recent_sessions ();
+	load_recovery_marker ();
 	if (_backend_name.empty ()) {
 		_backend_name = _pref_backend.empty () ? "Dummy" : _pref_backend;
 	}
@@ -8437,6 +8781,11 @@ EngineHost::EngineHost ()
 	, _pref_period_frames (0)
 	, _pref_snap_default (false)
 	, _pref_click_default (true)
+	, _autosave_enabled (false)
+	, _last_autosave_ms (0)
+	, _recovery_saved_ft (0)
+	, _recovery_last_open_ft (0)
+	, _recovery_dirty (false)
 	, _gain (0.85f)
 {
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
@@ -8722,6 +9071,93 @@ bool
 EngineHost::smoke_recent ()
 {
 	return false;
+}
+
+void
+EngineHost::set_autosave_enabled (bool on)
+{
+	_autosave_enabled = on;
+}
+
+void
+EngineHost::autosave_tick (uint32_t now_ms)
+{
+	(void)now_ms;
+}
+
+bool
+EngineHost::autosave_now ()
+{
+	return false;
+}
+
+bool
+EngineHost::recovery_offer_available () const
+{
+	return false;
+}
+
+bool
+EngineHost::recovery_offer_path (std::string* path, std::string* snapshot) const
+{
+	(void)path;
+	(void)snapshot;
+	return false;
+}
+
+bool
+EngineHost::restore_recovery_session ()
+{
+	return false;
+}
+
+bool
+EngineHost::discard_recovery_offer ()
+{
+	return false;
+}
+
+bool
+EngineHost::mark_recovery_clean_open ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_recovery ()
+{
+	return false;
+}
+
+void
+EngineHost::load_recovery_marker ()
+{
+}
+
+bool
+EngineHost::save_recovery_marker ()
+{
+	return false;
+}
+
+std::string
+EngineHost::recovery_copy_path () const
+{
+	return std::string ();
+}
+
+bool
+EngineHost::copy_snapshot_to_recovery ()
+{
+	return false;
+}
+
+uint64_t
+EngineHost::snapshot_filetime (const std::string& session_dir, const std::string& snap) const
+{
+	(void)session_dir;
+	(void)snap;
+	return 0;
 }
 
 bool

@@ -220,6 +220,7 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     "${AIRDOUR_SRC_ROOT}/win_ardour/prefs_panel.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/about_panel.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/recent_panel.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/recovery_panel.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/level_meter.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/automation_lane.cc"
   )

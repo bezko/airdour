@@ -217,6 +217,30 @@ public:
 	 */
 	bool smoke_recent ();
 
+	/**
+	 * Autosave / crash recovery (WinShellRecovery instant.xml + recovery .ardour copy).
+	 * Disabled for --timeout smokes via set_autosave_enabled(false).
+	 */
+	void set_autosave_enabled (bool on);
+	bool autosave_enabled () const { return _autosave_enabled; }
+	/** Periodic tick; saves when interval elapsed (GetTickCount ms). */
+	void autosave_tick (uint32_t now_ms);
+	/** Force Session save + write recovery marker / file copy. */
+	bool autosave_now ();
+	/** True when dirty recovery is newer than last clean open and path exists. */
+	bool recovery_offer_available () const;
+	bool recovery_offer_path (std::string* path, std::string* snapshot) const;
+	/** Open the recovered session path. */
+	bool restore_recovery_session ();
+	/** Clear dirty flag (user discarded). */
+	bool discard_recovery_offer ();
+	/** Mark current open as clean (updates last-open FILETIME). */
+	bool mark_recovery_clean_open ();
+	/**
+	 * Autosave → verify marker → discard dirty → verify. For --smoke-recovery.
+	 */
+	bool smoke_recovery ();
+
 	/** Start backend + scaffold minimal Session (tracks + demo tones). */
 	bool start ();
 	bool start (const std::string& backend_name);
@@ -743,6 +767,18 @@ private:
 	};
 	std::vector<RecentEntry> _recent;
 	void refresh_recent_snap ();
+	bool        _autosave_enabled;
+	uint32_t    _last_autosave_ms;
+	std::string _recovery_path; /* original session dir in marker */
+	std::string _recovery_snapshot;
+	uint64_t    _recovery_saved_ft;
+	uint64_t    _recovery_last_open_ft;
+	bool        _recovery_dirty;
+	void load_recovery_marker ();
+	bool save_recovery_marker ();
+	std::string recovery_copy_path () const;
+	bool copy_snapshot_to_recovery ();
+	uint64_t snapshot_filetime (const std::string& session_dir, const std::string& snap) const;
 	float       _gain;
 	float       _track_gain[EngineSnapshot::kMeters];
 	EngineSnapshot _snap;
