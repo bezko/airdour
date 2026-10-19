@@ -156,6 +156,7 @@ ShellWindow::ShellWindow ()
 		_mixers[i].set_label (lab);
 		_mixers[i].set_gain (0.85f - 0.04f * (float)i);
 		_mixers[i].set_midi_strip (false);
+		_group_pick[i] = false;
 	}
 	for (int i = 0; i < kMixerStripsMax; ++i) {
 		if (i >= kTracksMax) {
@@ -209,7 +210,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_tempo,
                             bool smoke_click,
                             bool smoke_tracks,
-                            bool smoke_rename)
+                            bool smoke_rename,
+                            bool smoke_group)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -478,6 +480,22 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_group && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_group ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_group_from_engine ();
+			sync_mixer_gains_from_engine ();
+			sync_mixer_mute_solo_from_engine ();
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_group) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -505,6 +523,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	sync_transport_punch_from_engine ();
 	sync_transport_tempo_from_engine ();
 	sync_track_labels_from_engine ();
+	sync_mixer_gains_from_engine ();
+	sync_mixer_group_from_engine ();
 	layout_panes ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
@@ -611,6 +631,19 @@ ShellWindow::sync_mixer_gains_from_engine ()
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_gain (_engine_snap.track_gain[i]);
 	}
+}
+
+void
+ShellWindow::sync_mixer_group_from_engine ()
+{
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < kTracksMax; ++i) {
+		bool in = (i < na && i < EngineSnapshot::kMeters && _engine_snap.track_in_group[i]);
+		_mixers[i].set_in_group (in);
+		_mixers[i].set_group_picked (_group_pick[i]);
+	}
+	_transport.set_group_active (_engine_snap.group_member_count >= 2
+	                             && _engine_snap.group_active);
 }
 
 void
@@ -1135,6 +1168,7 @@ ShellWindow::do_add_audio_track ()
 	_engine_snap = _engine.snapshot ();
 	sync_track_labels_from_engine ();
 	sync_mixer_gains_from_engine ();
+	sync_mixer_group_from_engine ();
 	sync_mixer_arm_from_engine ();
 	sync_mixer_mute_solo_from_engine ();
 	sync_mixer_pan_from_engine ();
@@ -1407,6 +1441,69 @@ ShellWindow::do_rename_focused_track ()
 		idx = 0;
 	}
 	prompt_rename_track (idx, false);
+}
+
+void
+ShellWindow::do_toggle_group_pick (int audio_index)
+{
+	if (audio_index < 0 || audio_index >= kTracksMax || audio_index >= n_audio_lanes ()) {
+		return;
+	}
+	_group_pick[audio_index] = !_group_pick[audio_index];
+	_focus_audio_track = audio_index;
+	sync_mixer_group_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_apply_or_clear_group ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	/* Shift+Grp clears; else build from picks (≥2) or focus+neighbour. */
+	if (GetKeyState (VK_SHIFT) & 0x8000) {
+		_engine.clear_route_group ();
+		for (int i = 0; i < kTracksMax; ++i) {
+			_group_pick[i] = false;
+		}
+	} else {
+		int idxs[EngineSnapshot::kMeters];
+		int n = 0;
+		for (int i = 0; i < n_audio_lanes () && i < EngineSnapshot::kMeters; ++i) {
+			if (_group_pick[i]) {
+				idxs[n++] = i;
+			}
+		}
+		if (n < 2) {
+			int a = _focus_audio_track;
+			if (a < 0 || a >= n_audio_lanes ()) {
+				a = 0;
+			}
+			int b = a + 1;
+			if (b >= n_audio_lanes ()) {
+				b = a - 1;
+			}
+			if (b < 0 || b == a) {
+				_engine_snap = _engine.snapshot ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return;
+			}
+			idxs[0] = a;
+			idxs[1] = b;
+			n = 2;
+		}
+		_engine.create_route_group (idxs, n);
+		for (int i = 0; i < kTracksMax; ++i) {
+			_group_pick[i] = false;
+		}
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_group_from_engine ();
+	sync_mixer_gains_from_engine ();
+	sync_mixer_mute_solo_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
@@ -1969,6 +2066,8 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_move_audio_track (-1);
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_DOWN) {
 			do_move_audio_track (+1);
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'U' || wparam == 'u')) {
+			do_apply_or_clear_group ();
 		}
 		return 0;
 	case WM_MOUSEWHEEL:
@@ -2359,6 +2458,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		do_move_audio_track (+1);
 		return true;
 	}
+	if (th == TransportHit::Group) {
+		do_apply_or_clear_group ();
+		return true;
+	}
 
 	if (hit_editor_ruler (x, y) && _engine.is_linked () && _engine_snap.session_ok) {
 		float time_sec = _lanes[0].strip.time_at_x (_editor_ruler, x);
@@ -2402,6 +2505,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			return true;
 		}
 		if (lab < n_audio_lanes ()) {
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
+				do_toggle_group_pick (lab);
+				return true;
+			}
 			_focus_audio_track = lab;
 			_drag = DragMode::TrackReorderPending;
 			_drag_index = lab;
@@ -2662,9 +2769,8 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 				_engine.set_midi_gain (_mixers[_drag_index].gain ());
 			} else {
 				_engine.set_track_gain (_drag_index, _mixers[_drag_index].gain ());
-				if (_drag_index == 0) {
-					_engine_snap.gain = _mixers[0].gain ();
-				}
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_gains_from_engine ();
 			}
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		}

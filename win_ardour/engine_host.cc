@@ -35,6 +35,7 @@
 #include "ardour/playlist.h"
 #include "ardour/session_directory.h"
 #include "ardour/presentation_info.h"
+#include "ardour/route_group.h"
 #include "ardour/rc_configuration.h"
 #include "ardour/region.h"
 #include "ardour/region_factory.h"
@@ -348,6 +349,7 @@ public:
 	std::string     session_dir;
 	std::vector<std::shared_ptr<AudioTrack> > tracks;
 	std::shared_ptr<Route> aux_bus; /* Aux destination for mixer sends */
+	std::shared_ptr<RouteGroup> shell_group; /* optional mute/solo/gain link */
 	std::shared_ptr<MidiTrack> midi_track;
 	std::shared_ptr<MidiRegion> midi_region;
 	int             selected_track;
@@ -407,8 +409,15 @@ EngineHost::EngineHost ()
 		_snap.track_send_ok[i] = false;
 		_snap.track_gain[i] = _track_gain[i];
 		_snap.track_name[i][0] = L'\0';
+		_snap.track_in_group[i] = false;
 	}
 	_snap.midi_track_name[0] = L'\0';
+	_snap.group_member_count = 0;
+	_snap.group_active = false;
+	_snap.group_shares_mute = false;
+	_snap.group_shares_solo = false;
+	_snap.group_shares_gain = false;
+	_snap.group_name[0] = L'\0';
 	_snap.aux_bus_ok = false;
 	_snap.midi_muted = false;
 	_snap.midi_soloed = false;
@@ -1591,7 +1600,16 @@ EngineHost::set_track_gain (int track, float linear)
 	}
 	if (_impl && track < (int)_impl->tracks.size () && _impl->tracks[track]
 	    && _impl->tracks[track]->gain_control ()) {
-		_impl->tracks[track]->gain_control ()->set_value (linear, Controllable::NoGroup);
+		_impl->tracks[track]->gain_control ()->set_value (linear, Controllable::UseGroup);
+		/* Mirror peers after UseGroup propagation. */
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			if (_impl->tracks[i] && _impl->tracks[i]->gain_control ()) {
+				_track_gain[i] = (float)_impl->tracks[i]->gain_control ()->get_value ();
+				_snap.track_gain[i] = _track_gain[i];
+			}
+		}
+		_gain = _track_gain[0];
+		_snap.gain = _gain;
 	}
 }
 
@@ -1953,7 +1971,7 @@ EngineHost::set_track_muted (int track, bool muted)
 	}
 	try {
 		std::shared_ptr<MuteControl> mc = _impl->tracks[track]->mute_control ();
-		_impl->session->set_control (mc, muted ? 1.0 : 0.0, Controllable::NoGroup);
+		_impl->session->set_control (mc, muted ? 1.0 : 0.0, Controllable::UseGroup);
 		wait_until ([&] () {
 			refresh_mute_solo_flags ();
 			return _snap.track_muted[track] == muted;
@@ -1987,7 +2005,7 @@ EngineHost::set_track_soloed (int track, bool soloed)
 	}
 	try {
 		std::shared_ptr<SoloControl> sc = _impl->tracks[track]->solo_control ();
-		_impl->session->set_control (sc, soloed ? 1.0 : 0.0, Controllable::NoGroup);
+		_impl->session->set_control (sc, soloed ? 1.0 : 0.0, Controllable::UseGroup);
 		wait_until ([&] () {
 			refresh_mute_solo_flags ();
 			return _snap.track_soloed[track] == soloed;
@@ -4975,6 +4993,265 @@ EngineHost::smoke_rename ()
 	}
 }
 
+void
+EngineHost::refresh_group_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_in_group[i] = false;
+	}
+	_snap.group_member_count = 0;
+	_snap.group_active = false;
+	_snap.group_shares_mute = false;
+	_snap.group_shares_solo = false;
+	_snap.group_shares_gain = false;
+	_snap.group_name[0] = L'\0';
+	if (!_impl) {
+		return;
+	}
+	try {
+		std::shared_ptr<RouteGroup> rg = _impl->shell_group;
+		if (!rg && _impl->session) {
+			rg = _impl->session->route_group_by_name ("Group 1");
+			_impl->shell_group = rg;
+		}
+		if (!rg) {
+			return;
+		}
+		copy_name_to_snap (_snap.group_name, EngineSnapshot::kGroupNameLen, rg->name ());
+		_snap.group_active = rg->is_active ();
+		_snap.group_shares_mute = rg->is_mute ();
+		_snap.group_shares_solo = rg->is_solo ();
+		_snap.group_shares_gain = rg->is_gain ();
+		int n = 0;
+		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+			if (_impl->tracks[i] && _impl->tracks[i]->route_group () == rg) {
+				_snap.track_in_group[i] = true;
+				++n;
+			}
+		}
+		_snap.group_member_count = n;
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::create_route_group (const int* indices, int n)
+{
+	if (!_impl || !_impl->session || !indices || n < 2) {
+		_snap.detail = L"group — need ≥2 tracks";
+		return false;
+	}
+	collect_tracks ();
+	try {
+		std::shared_ptr<RouteGroup> rg = _impl->session->route_group_by_name ("Group 1");
+		if (!rg) {
+			rg = _impl->session->new_route_group ("Group 1");
+			if (!rg) {
+				_snap.detail = L"group create failed";
+				return false;
+			}
+			_impl->session->add_route_group (rg);
+		}
+		/* Honest scope: mute + solo + gain only. */
+		rg->set_active (true, nullptr);
+		rg->set_mute (true);
+		rg->set_solo (true);
+		rg->set_gain (true);
+		rg->set_recenable (false);
+		rg->set_select (false);
+		rg->set_route_active (false);
+		rg->set_color (false);
+		rg->set_monitoring (false);
+		rg->set_sursend_enable (false);
+
+		rg->clear ();
+		int added = 0;
+		for (int k = 0; k < n; ++k) {
+			int idx = indices[k];
+			if (idx < 0 || idx >= (int)_impl->tracks.size () || !_impl->tracks[idx]) {
+				continue;
+			}
+			if (rg->add (_impl->tracks[idx]) == 0) {
+				++added;
+			}
+		}
+		if (added < 2) {
+			rg->clear ();
+			_impl->shell_group = rg;
+			refresh_group_flags ();
+			_snap.detail = L"group — <2 valid tracks";
+			return false;
+		}
+		_impl->shell_group = rg;
+		refresh_group_flags ();
+		_snap.detail = L"route group ready";
+		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain\n",
+		              rg->name ().c_str (), _snap.group_member_count);
+		std::fflush (stderr);
+		return _snap.group_member_count >= 2;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: create_route_group: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"group failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"group failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::clear_route_group ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		std::shared_ptr<RouteGroup> rg = _impl->shell_group;
+		if (!rg) {
+			rg = _impl->session->route_group_by_name ("Group 1");
+		}
+		if (!rg) {
+			refresh_group_flags ();
+			_snap.detail = L"no group";
+			return true;
+		}
+		_impl->session->remove_route_group (rg);
+		_impl->shell_group.reset ();
+		refresh_group_flags ();
+		_snap.detail = L"group cleared";
+		std::fprintf (stderr, "airdour_win_shell: RouteGroup cleared\n");
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: clear_route_group: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_route_group_active (bool enable)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		std::shared_ptr<RouteGroup> rg = _impl->shell_group;
+		if (!rg) {
+			rg = _impl->session->route_group_by_name ("Group 1");
+			_impl->shell_group = rg;
+		}
+		if (!rg) {
+			_snap.detail = L"no group to activate";
+			return false;
+		}
+		rg->set_active (enable, nullptr);
+		refresh_group_flags ();
+		_snap.detail = enable ? L"group active" : L"group inactive";
+		return _snap.group_active == enable;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_route_group_active ()
+{
+	refresh_group_flags ();
+	return set_route_group_active (!_snap.group_active);
+}
+
+bool
+EngineHost::smoke_group ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-group failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_snap.audio_track_count < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (need ≥2 audio)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const int idxs[2] = { 0, 1 };
+		if (!create_route_group (idxs, 2) || _snap.group_member_count < 2
+		    || !_snap.track_in_group[0] || !_snap.track_in_group[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (create)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		set_track_muted (0, false);
+		set_track_muted (1, false);
+		set_track_soloed (0, false);
+		set_track_soloed (1, false);
+		if (!set_track_muted (0, true) || !_snap.track_muted[0] || !_snap.track_muted[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (mute propagate %d/%d)\n",
+			              (int)_snap.track_muted[0], (int)_snap.track_muted[1]);
+			std::fflush (stderr);
+			clear_route_group ();
+			return false;
+		}
+		if (!set_track_muted (0, false) || _snap.track_muted[0] || _snap.track_muted[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (unmute)\n");
+			std::fflush (stderr);
+			clear_route_group ();
+			return false;
+		}
+		if (!set_track_soloed (0, true) || !_snap.track_soloed[0] || !_snap.track_soloed[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (solo propagate)\n");
+			std::fflush (stderr);
+			clear_route_group ();
+			return false;
+		}
+		set_track_soloed (0, false);
+		set_track_gain (0, 0.42f);
+		Sleep (60);
+		refresh_group_flags ();
+		collect_tracks ();
+		float g0 = _snap.track_gain[0];
+		float g1 = _snap.track_gain[1];
+		if (std::fabs (g0 - 0.42f) > 0.08f || std::fabs (g1 - 0.42f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (gain %.2f/%.2f)\n",
+			              g0, g1);
+			std::fflush (stderr);
+			clear_route_group ();
+			return false;
+		}
+		if (!clear_route_group () || _snap.group_member_count != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		set_track_muted (0, true);
+		wait_until ([&] () {
+			refresh_mute_solo_flags ();
+			return _snap.track_muted[0];
+		});
+		if (!_snap.track_muted[0] || _snap.track_muted[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (ungrouped mute)\n");
+			std::fflush (stderr);
+			set_track_muted (0, false);
+			return false;
+		}
+		set_track_muted (0, false);
+		std::fprintf (stderr, "airdour_win_shell: smoke-group ok (mute/solo/gain + clear)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-group ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_tempo ()
 {
@@ -6925,6 +7202,7 @@ EngineHost::refresh_snapshot ()
 			refresh_mute_solo_flags ();
 			refresh_pan_flags ();
 			refresh_send_flags ();
+			refresh_group_flags ();
 			refresh_history_flags ();
 			refresh_selection_snap ();
 			refresh_locations_snap ();
@@ -6994,8 +7272,15 @@ EngineHost::EngineHost ()
 		_snap.track_send_ok[i] = false;
 		_snap.track_gain[i] = _track_gain[i];
 		_snap.track_name[i][0] = L'\0';
+		_snap.track_in_group[i] = false;
 	}
 	_snap.midi_track_name[0] = L'\0';
+	_snap.group_member_count = 0;
+	_snap.group_active = false;
+	_snap.group_shares_mute = false;
+	_snap.group_shares_solo = false;
+	_snap.group_shares_gain = false;
+	_snap.group_name[0] = L'\0';
 	_snap.aux_bus_ok = false;
 	_snap.available = false;
 	_snap.running = false;
@@ -7861,6 +8146,44 @@ EngineHost::move_audio_track (int index, int delta)
 
 bool
 EngineHost::smoke_rename ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_group_flags ()
+{
+}
+
+bool
+EngineHost::create_route_group (const int* indices, int n)
+{
+	(void)indices;
+	(void)n;
+	return false;
+}
+
+bool
+EngineHost::clear_route_group ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_route_group_active (bool enable)
+{
+	(void)enable;
+	return false;
+}
+
+bool
+EngineHost::toggle_route_group_active ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_group ()
 {
 	return false;
 }

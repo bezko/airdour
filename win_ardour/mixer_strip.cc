@@ -39,6 +39,8 @@ MixerStrip::MixerStrip ()
 	, _soloed (false)
 	, _fx_bypassed (false)
 	, _midi_strip (false)
+	, _in_group (false)
+	, _group_picked (false)
 {
 	wcsncpy_s (_label, L"Track", _TRUNCATE);
 	_fx_label[0] = L'\0';
@@ -349,6 +351,24 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 	rt->FillRectangle (
 		D2D1::RectF (_strip.left, _strip.top, _strip.left + 3.f * dpi_scale, _strip.bottom),
 		_muted ? body : accent);
+
+	/* Group indicator: top accent bar + "G"; pick shows a second edge wash. */
+	if (_in_group || _group_picked) {
+		ID2D1SolidColorBrush* bar = _in_group ? accent : edge;
+		rt->FillRectangle (
+			D2D1::RectF (_strip.left + 3.f * dpi_scale, _strip.top,
+			             _strip.right, _strip.top + 3.f * dpi_scale),
+			bar);
+		if (_in_group) {
+			DWRITE_TEXT_ALIGNMENT ta_g = fmt_meta->GetTextAlignment ();
+			fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_TRAILING);
+			rt->DrawTextW (L"G", 1, fmt_meta,
+			               D2D1::RectF (_strip.right - 18.f * dpi_scale, _strip.top + 2.f * dpi_scale,
+			                            _strip.right - 4.f * dpi_scale, _strip.top + 18.f * dpi_scale),
+			               brand);
+			fmt_meta->SetTextAlignment (ta_g);
+		}
+	}
 
 	DWRITE_TEXT_ALIGNMENT ta = fmt_title->GetTextAlignment ();
 	fmt_title->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);

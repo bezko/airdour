@@ -78,7 +78,8 @@ public:
 	                    bool smoke_tempo = false,
 	                    bool smoke_click = false,
 	                    bool smoke_tracks = false,
-	                    bool smoke_rename = false);
+	                    bool smoke_rename = false,
+	                    bool smoke_group = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -165,11 +166,14 @@ private:
 	void do_move_audio_track (int delta);
 	void prompt_rename_track (int audio_index, bool midi);
 	void do_rename_focused_track ();
+	void do_toggle_group_pick (int audio_index);
+	void do_apply_or_clear_group ();
 	int  n_audio_lanes () const;
 	int  n_mixer_strips () const;
 	int  midi_mixer_index () const;
 	void sync_track_labels_from_engine ();
 	void sync_mixer_gains_from_engine ();
+	void sync_mixer_group_from_engine ();
 	void draw_editor_grid ();
 	void draw_punch_overlay ();
 	void do_add_marker_at_playhead ();
@@ -223,6 +227,7 @@ private:
 	DragMode _drag;
 	int _drag_index;
 	int _focus_audio_track; /* last mixer/editor label click for rename/reorder */
+	bool _group_pick[kTracksMax]; /* Shift+click candidates for Grp */
 	float _pan_last_x;
 	float _pan_down_x;
 	float _pan_down_y;

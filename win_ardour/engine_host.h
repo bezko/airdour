@@ -123,6 +123,14 @@ struct EngineSnapshot {
 	wchar_t      track_name[kMeters][kTrackNameLen]; /* Session Route names */
 	wchar_t      midi_track_name[kTrackNameLen];
 	float        track_gain[kMeters]; /* Route gain_control mirror after reorder */
+	bool         track_in_group[kMeters]; /* member of Session RouteGroup */
+	int          group_member_count; /* 0 = no shell group */
+	bool         group_active; /* RouteGroup::is_active */
+	bool         group_shares_mute;
+	bool         group_shares_solo;
+	bool         group_shares_gain;
+	static constexpr int kGroupNameLen = 32;
+	wchar_t      group_name[kGroupNameLen];
 	float        transport_sec;
 	std::wstring detail;
 };
@@ -166,7 +174,10 @@ public:
 	bool set_track_armed (int track, bool armed);
 	bool toggle_track_armed (int track);
 
-	/** Route mute/solo (audio tracks 0..kMeters-1). Controllable::NoGroup. */
+	/**
+	 * Route mute/solo (audio tracks 0..kMeters-1).
+	 * Uses Controllable::UseGroup when the track is in an active sharing group.
+	 */
 	bool set_track_muted (int track, bool muted);
 	bool toggle_track_muted (int track);
 	bool set_track_soloed (int track, bool soloed);
@@ -445,6 +456,22 @@ public:
 	 */
 	bool smoke_rename ();
 
+	/**
+	 * Create/replace the shell Session RouteGroup ("Group 1") from audio
+	 * indices (≥2). Shares mute + solo + gain when active. Honest scope:
+	 * one group, no VCA/subgroup/recenable.
+	 */
+	bool create_route_group (const int* indices, int n);
+	/** Remove shell RouteGroup members (and drop empty group). */
+	bool clear_route_group ();
+	bool set_route_group_active (bool enable);
+	bool toggle_route_group_active ();
+
+	/**
+	 * Group Audio 0+1; mute/solo/gain propagate; clear. For --smoke-group.
+	 */
+	bool smoke_group ();
+
 	/** Ensure a Session MidiTrack exists (creates one if needed). */
 	bool ensure_midi_track ();
 
@@ -555,6 +582,7 @@ private:
 	void refresh_mute_solo_flags ();
 	void refresh_pan_flags ();
 	void refresh_send_flags ();
+	void refresh_group_flags ();
 	bool ensure_aux_sends ();
 	void refresh_history_flags ();
 	void refresh_selection_snap ();

@@ -41,7 +41,8 @@ enum class TransportHit {
 	AddMidi,
 	RemoveTrack,
 	TrackUp,
-	TrackDown
+	TrackDown,
+	Group
 };
 
 class TransportBar
@@ -81,6 +82,9 @@ public:
 	void set_tempo_bpm (float bpm) { _tempo_bpm = bpm; }
 	float tempo_bpm () const { return _tempo_bpm; }
 
+	void set_group_active (bool on) { _group_active = on; }
+	bool group_active () const { return _group_active; }
+
 	TransportHit hit_test (float x, float y) const;
 
 	void draw (ID2D1RenderTarget* rt,
@@ -119,6 +123,7 @@ private:
 	D2D1_RECT_F _remove_track_btn;
 	D2D1_RECT_F _track_up_btn;
 	D2D1_RECT_F _track_dn_btn;
+	D2D1_RECT_F _group_btn;
 	bool        _playing;
 	bool        _recording;
 	bool        _record_armed;
@@ -128,5 +133,6 @@ private:
 	bool        _snap_enabled;
 	bool        _count_in_enabled;
 	bool        _click_enabled;
+	bool        _group_active;
 	float       _tempo_bpm;
 };
