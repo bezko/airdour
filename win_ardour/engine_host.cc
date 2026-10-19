@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -5913,6 +5914,163 @@ EngineHost::smoke_locate ()
 }
 
 bool
+EngineHost::session_extent_sec (float* start_sec, float* end_sec) const
+{
+	if (!start_sec || !end_sec) {
+		return false;
+	}
+	*start_sec = 0.f;
+	*end_sec = 0.f;
+	int64_t s = 0;
+	int64_t e = 0;
+	if (!compute_export_range (&s, &e) || e <= s) {
+		return false;
+	}
+	samplecnt_t sr = 48000;
+	if (_impl && _impl->session) {
+		sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+	}
+	if (sr <= 0) {
+		sr = 48000;
+	}
+	*start_sec = (float)s / (float)sr;
+	*end_sec = (float)e / (float)sr;
+	return *end_sec > *start_sec;
+}
+
+bool
+EngineHost::regions_extent_sec (float* start_sec, float* end_sec) const
+{
+	if (!start_sec || !end_sec || !_impl || !_impl->session) {
+		return false;
+	}
+	*start_sec = 0.f;
+	*end_sec = 0.f;
+	samplecnt_t sr = _impl->session->sample_rate ();
+	if (sr <= 0 && _impl->engine) {
+		sr = (samplecnt_t)_impl->engine->sample_rate ();
+	}
+	if (sr <= 0) {
+		return false;
+	}
+
+	samplepos_t min_s = std::numeric_limits<samplepos_t>::max ();
+	samplepos_t max_e = 0;
+	bool any = false;
+	try {
+		for (size_t t = 0; t < _impl->tracks.size (); ++t) {
+			if (!_impl->tracks[t] || !_impl->tracks[t]->playlist ()) {
+				continue;
+			}
+			std::shared_ptr<RegionList> regions = _impl->tracks[t]->playlist ()->region_list ();
+			if (!regions) {
+				continue;
+			}
+			for (RegionList::const_iterator it = regions->begin (); it != regions->end (); ++it) {
+				if (!*it) {
+					continue;
+				}
+				samplepos_t rs = (*it)->position ().samples ();
+				samplepos_t re = (*it)->end_position ().samples ();
+				if (re <= rs) {
+					continue;
+				}
+				if (rs < min_s) {
+					min_s = rs;
+				}
+				if (re > max_e) {
+					max_e = re;
+				}
+				any = true;
+			}
+		}
+		if (_impl->midi_track && _impl->midi_track->playlist ()) {
+			std::shared_ptr<RegionList> regions = _impl->midi_track->playlist ()->region_list ();
+			if (regions) {
+				for (RegionList::const_iterator it = regions->begin (); it != regions->end (); ++it) {
+					if (!*it) {
+						continue;
+					}
+					samplepos_t rs = (*it)->position ().samples ();
+					samplepos_t re = (*it)->end_position ().samples ();
+					if (re <= rs) {
+						continue;
+					}
+					if (rs < min_s) {
+						min_s = rs;
+					}
+					if (re > max_e) {
+						max_e = re;
+					}
+					any = true;
+				}
+			}
+		}
+	} catch (...) {
+		return false;
+	}
+	if (!any || max_e <= min_s) {
+		return false;
+	}
+	*start_sec = (float)min_s / (float)sr;
+	*end_sec = (float)max_e / (float)sr;
+	return true;
+}
+
+bool
+EngineHost::smoke_zoom ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-zoom failed — no Session";
+		return false;
+	}
+	try {
+		if (!_snap.track_has_regions[0]) {
+			if (!import_test_tone (0, 220.f, 2.f) || !_snap.track_has_regions[0]) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-zoom FAILED (import tone)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		float s0 = 0.f, e0 = 0.f;
+		if (!session_extent_sec (&s0, &e0) || (e0 - s0) < 0.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom FAILED (session extent %.2f..%.2f)\n",
+			              s0, e0);
+			std::fflush (stderr);
+			return false;
+		}
+		float s1 = 0.f, e1 = 0.f;
+		if (!regions_extent_sec (&s1, &e1) || (e1 - s1) < 0.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom FAILED (regions extent %.2f..%.2f)\n",
+			              s1, e1);
+			std::fflush (stderr);
+			return false;
+		}
+		/* Select the tone region so shell can fit-selection. */
+		if (!select_region_at (0, s1 + 0.1f) || !_snap.has_selection) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom FAILED (select region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-zoom ok (session %.2f..%.2f regions %.2f..%.2f sel %.2f..%.2f)\n",
+		              s0, e0, s1, e1, _snap.selection_start_sec, _snap.selection_end_sec);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-zoom ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::smoke_loop_markers ()
 {
 	if (!_impl || !_impl->session) {
@@ -8678,6 +8836,36 @@ EngineHost::stop_shuttle ()
 
 bool
 EngineHost::smoke_locate ()
+{
+	return false;
+}
+
+bool
+EngineHost::session_extent_sec (float* start_sec, float* end_sec) const
+{
+	if (start_sec) {
+		*start_sec = 0.f;
+	}
+	if (end_sec) {
+		*end_sec = 0.f;
+	}
+	return false;
+}
+
+bool
+EngineHost::regions_extent_sec (float* start_sec, float* end_sec) const
+{
+	if (start_sec) {
+		*start_sec = 0.f;
+	}
+	if (end_sec) {
+		*end_sec = 0.f;
+	}
+	return false;
+}
+
+bool
+EngineHost::smoke_zoom ()
 {
 	return false;
 }

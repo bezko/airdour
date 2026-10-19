@@ -77,6 +77,57 @@ WaveStrip::reset_view ()
 }
 
 void
+WaveStrip::set_view_window (float start_sec, float span_sec)
+{
+	if (span_sec < 0.05f) {
+		span_sec = 0.05f;
+	}
+	float zoom = kDefaultSpanSec / span_sec;
+	zoom = std::max (kZoomMin, std::min (kZoomMax, zoom));
+	span_sec = kDefaultSpanSec / zoom;
+	_zoom = zoom;
+	_pan = start_sec;
+	_view_start_sec = start_sec;
+	_view_span_sec = span_sec;
+	_user_view = true;
+}
+
+void
+WaveStrip::fit_range (float start_sec, float end_sec, float pad_frac)
+{
+	if (end_sec < start_sec) {
+		float t = start_sec;
+		start_sec = end_sec;
+		end_sec = t;
+	}
+	float len = end_sec - start_sec;
+	if (len < 0.05f) {
+		/* Degenerate / click selection — show a short window centered. */
+		float mid = 0.5f * (start_sec + end_sec);
+		start_sec = mid - 0.25f;
+		end_sec = mid + 0.25f;
+		len = end_sec - start_sec;
+	}
+	if (pad_frac < 0.f) {
+		pad_frac = 0.f;
+	}
+	if (pad_frac > 0.4f) {
+		pad_frac = 0.4f;
+	}
+	float pad = len * pad_frac;
+	float span = len + 2.f * pad;
+	float start = start_sec - pad;
+	if (start < 0.f) {
+		span += start; /* keep end coverage; clamp left to 0 */
+		start = 0.f;
+		if (span < 0.05f) {
+			span = 0.05f;
+		}
+	}
+	set_view_window (start, span);
+}
+
+void
 WaveStrip::sync_view_from (const WaveStrip& other)
 {
 	_zoom = other._zoom;

@@ -425,6 +425,23 @@ public:
 	bool smoke_locate ();
 
 	/**
+	 * Session range (current_start..current_end) or playlist fallback, seconds.
+	 * Used by Editor zoom-fit session.
+	 */
+	bool session_extent_sec (float* start_sec, float* end_sec) const;
+	/**
+	 * Union of all audio (+ MIDI) region extents across tracks, seconds.
+	 * Used by Editor zoom-fit all regions.
+	 */
+	bool regions_extent_sec (float* start_sec, float* end_sec) const;
+
+	/**
+	 * Ensure tone on Audio 0; verify session + regions extents.
+	 * Shell applies WaveStrip fit_* and checks view window. For --smoke-zoom.
+	 */
+	bool smoke_zoom ();
+
+	/**
 	 * Set loop 0.5–2.5s, add two marks, remove one; verify snapshot.
 	 * Does not enable loop-play (avoids forced roll during --timeout).
 	 */

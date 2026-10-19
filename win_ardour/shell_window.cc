@@ -213,7 +213,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_rename,
                             bool smoke_group,
                             bool smoke_monitor,
-                            bool smoke_locate)
+                            bool smoke_locate,
+                            bool smoke_zoom)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -524,6 +525,40 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_zoom && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_zoom ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			apply_region_selection_to_lanes ();
+			float before = _lanes[0].strip.view_span_sec ();
+			do_fit_session ();
+			float span_sess = _lanes[0].strip.view_span_sec ();
+			do_fit_selection ();
+			float span_sel = _lanes[0].strip.view_span_sec ();
+			do_fit_all_regions ();
+			float span_all = _lanes[0].strip.view_span_sec ();
+			if (span_sess < 0.2f || span_sel < 0.05f || span_all < 0.2f
+			    || span_sel > span_sess * 1.05f + 0.5f) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-zoom FAILED (UI fit spans sess=%.2f sel=%.2f all=%.2f before=%.2f)\n",
+				              span_sess, span_sel, span_all, before);
+				_smoke_failed = true;
+			} else {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-zoom UI fit ok (sess=%.2fs sel=%.2fs all=%.2fs)\n",
+				              span_sess, span_sel, span_all);
+			}
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_zoom) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1136,6 +1171,77 @@ ShellWindow::reset_shared_view ()
 {
 	for (int i = 0; i < kTracks; ++i) {
 		_lanes[i].strip.reset_view ();
+	}
+}
+
+void
+ShellWindow::fit_shared_range (float start_sec, float end_sec)
+{
+	_lanes[0].strip.fit_range (start_sec, end_sec);
+	apply_shared_view (0);
+	refresh_editor_view_after_nav ();
+}
+
+void
+ShellWindow::do_fit_session ()
+{
+	float s = 0.f, e = 0.f;
+	if (_engine.is_linked () && _engine.session_extent_sec (&s, &e) && e > s) {
+		fit_shared_range (s, e);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	/* Fallback: default 0..8s window. */
+	fit_shared_range (0.f, WaveStrip::kDefaultSpanSec);
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_fit_selection ()
+{
+	if (_engine_snap.has_selection
+	    && _engine_snap.selection_end_sec > _engine_snap.selection_start_sec) {
+		fit_shared_range (_engine_snap.selection_start_sec, _engine_snap.selection_end_sec);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	/* No selection → fit all regions (honest fallback). */
+	do_fit_all_regions ();
+}
+
+void
+ShellWindow::do_fit_all_regions ()
+{
+	float s = 0.f, e = 0.f;
+	if (_engine.is_linked () && _engine.regions_extent_sec (&s, &e) && e > s) {
+		fit_shared_range (s, e);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	do_fit_session ();
+}
+
+void
+ShellWindow::do_scroll_editor (float delta_widths)
+{
+	if (delta_widths == 0.f) {
+		return;
+	}
+	_lanes[0].strip.pan_by (delta_widths);
+	apply_shared_view (0);
+	refresh_editor_view_after_nav ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::refresh_editor_view_after_nav ()
+{
+	/* Keep snap grid + playhead overlay consistent with the new window. */
+	if (_engine.is_linked () && _engine_snap.session_ok && _engine_snap.snap_enabled) {
+		_engine.refresh_grid_lines (
+			_lanes[0].strip.view_start_sec (),
+			_lanes[0].strip.view_span_sec ());
+		_engine_snap = _engine.snapshot ();
 	}
 }
 
@@ -2104,7 +2210,24 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_delete_selection ();
 		} else if (wparam == VK_HOME || wparam == '0') {
 			reset_shared_view ();
+			refresh_editor_view_after_nav ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
+		} else if (wparam == VK_LEFT) {
+			float step = (GetKeyState (VK_SHIFT) & 0x8000) ? 0.5f : 0.15f;
+			do_scroll_editor (-step);
+		} else if (wparam == VK_RIGHT) {
+			float step = (GetKeyState (VK_SHIFT) & 0x8000) ? 0.5f : 0.15f;
+			do_scroll_editor (step);
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'A' || wparam == 'a')) {
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
+				do_fit_session ();
+			} else {
+				do_fit_all_regions ();
+			}
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')
+		           && !(GetKeyState (VK_MENU) & 0x8000)) {
+			/* E = fit selection (Ctrl+E remains export). */
+			do_fit_selection ();
 		} else if (wparam == 'L' || wparam == 'l') {
 			do_toggle_loop ();
 		} else if (wparam == 'P' || wparam == 'p') {
@@ -2177,6 +2300,16 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			prompt_open_session ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')) {
 			prompt_export_wav ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == VK_OEM_PLUS || wparam == VK_ADD)) {
+			_lanes[0].strip.zoom_at (1.15f, 0.5f);
+			apply_shared_view (0);
+			refresh_editor_view_after_nav ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == VK_OEM_MINUS || wparam == VK_SUBTRACT)) {
+			_lanes[0].strip.zoom_at (1.f / 1.15f, 0.5f);
+			apply_shared_view (0);
+			refresh_editor_view_after_nav ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
 		} else if (wparam == VK_F2) {
 			do_rename_focused_track ();
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_UP) {
@@ -2460,18 +2593,33 @@ ShellWindow::on_mouse_wheel (WPARAM wparam, LPARAM lparam)
 	float x = (float)pt.x;
 	float y = (float)pt.y;
 	int lane = hit_editor_lane (x, y);
-	if (lane < 0) {
+	bool over_editor = (lane >= 0) || hit_editor_ruler (x, y) || hit_midi_lane (x, y);
+	if (!over_editor) {
 		return false;
+	}
+	if (lane < 0) {
+		lane = 0;
+	}
+
+	int delta = GET_WHEEL_DELTA_WPARAM (wparam);
+	/* Shift+wheel → horizontal scroll (keep zoom / snap / playhead). */
+	if (GetKeyState (VK_SHIFT) & 0x8000) {
+		float widths = (delta > 0) ? -0.12f : 0.12f;
+		if (GetKeyState (VK_CONTROL) & 0x8000) {
+			widths *= 0.35f;
+		}
+		do_scroll_editor (widths);
+		return true;
 	}
 
 	const D2D1_RECT_F& r = _lanes[lane].bounds;
 	float w = r.right - r.left;
 	float norm_x = w > 1.f ? (x - r.left) / w : 0.5f;
-	int delta = GET_WHEEL_DELTA_WPARAM (wparam);
 	float step = (GetKeyState (VK_CONTROL) & 0x8000) ? 1.05f : 1.12f;
 	float factor = (delta > 0) ? step : (1.f / step);
 	_lanes[lane].strip.zoom_at (factor, norm_x);
 	apply_shared_view (lane);
+	refresh_editor_view_after_nav ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 	return true;
 }
@@ -2577,6 +2725,18 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (th == TransportHit::Group) {
 		do_apply_or_clear_group ();
+		return true;
+	}
+	if (th == TransportHit::FitSession) {
+		do_fit_session ();
+		return true;
+	}
+	if (th == TransportHit::FitSelection) {
+		do_fit_selection ();
+		return true;
+	}
+	if (th == TransportHit::FitRegions) {
+		do_fit_all_regions ();
 		return true;
 	}
 	if (th == TransportHit::Shuttle) {
@@ -3077,6 +3237,7 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 			if (delta_widths != 0.f) {
 				_lanes[_drag_index].strip.pan_by (delta_widths);
 				apply_shared_view (_drag_index);
+				refresh_editor_view_after_nav ();
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			}
 		}

@@ -44,7 +44,10 @@ enum class TransportHit {
 	TrackUp,
 	TrackDown,
 	Group,
-	Shuttle
+	Shuttle,
+	FitSession,
+	FitSelection,
+	FitRegions
 };
 
 class TransportBar
@@ -150,6 +153,9 @@ private:
 	D2D1_RECT_F _track_dn_btn;
 	D2D1_RECT_F _group_btn;
 	D2D1_RECT_F _shuttle_btn;
+	D2D1_RECT_F _fit_session_btn;
+	D2D1_RECT_F _fit_selection_btn;
+	D2D1_RECT_F _fit_regions_btn;
 	bool        _playing;
 	bool        _recording;
 	bool        _record_armed;

@@ -82,7 +82,8 @@ public:
 	                    bool smoke_rename = false,
 	                    bool smoke_group = false,
 	                    bool smoke_monitor = false,
-	                    bool smoke_locate = false);
+	                    bool smoke_locate = false,
+	                    bool smoke_zoom = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -198,6 +199,12 @@ private:
 	void sync_transport_clock_from_engine ();
 	void apply_shared_view (int source_lane);
 	void reset_shared_view ();
+	void fit_shared_range (float start_sec, float end_sec);
+	void do_fit_session ();
+	void do_fit_selection ();
+	void do_fit_all_regions ();
+	void do_scroll_editor (float delta_widths);
+	void refresh_editor_view_after_nav ();
 	void apply_region_selection_to_lanes ();
 	void apply_loop_to_lanes ();
 	void draw_editor_ruler ();

@@ -34,8 +34,8 @@ class WaveStrip
 {
 public:
 	static constexpr size_t kMaxColumns = 256;
-	static constexpr float  kZoomMin    = 0.25f;
-	static constexpr float  kZoomMax    = 16.f;
+	static constexpr float  kZoomMin    = 0.05f;  /* ~160s window at default span */
+	static constexpr float  kZoomMax    = 32.f;   /* ~0.25s window */
 	/** Default visible window at zoom=1 (seconds). */
 	static constexpr float  kDefaultSpanSec = 8.f;
 	/** Screen fraction where playhead sits while following transport. */
@@ -63,6 +63,13 @@ public:
 	void zoom_at (float factor, float norm_x);
 	void pan_by (float delta_widths);
 	void reset_view ();
+	/**
+	 * Fit absolute time range into the strip width (small pad).
+	 * Sets user_view so transport follow does not steal the window.
+	 */
+	void fit_range (float start_sec, float end_sec, float pad_frac = 0.06f);
+	/** Absolute view window (seconds); clamps zoom to kZoomMin..kZoomMax. */
+	void set_view_window (float start_sec, float span_sec);
 
 	/** Copy shared timeline view from another strip (linked zoom/pan). */
 	void sync_view_from (const WaveStrip& other);
