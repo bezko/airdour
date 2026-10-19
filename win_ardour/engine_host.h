@@ -272,11 +272,20 @@ public:
 	 */
 	bool apply_selected_crossfade (float length_sec = 0.08f);
 
+	/**
+	 * Trim selected region front/end to absolute time (seconds).
+	 * Uses Region::trim_front / trim_end; peaks refresh via refresh_region_flags.
+	 */
+	bool trim_selected_front_to (float time_sec);
+	bool trim_selected_end_to (float time_sec);
+	/** Move selected region so its start is at time_sec (Region::set_position). */
+	bool move_selected_to (float time_sec);
+
 	/** Count audio regions on a track playlist (smoke / diagnostics). */
 	int track_region_count (int track) const;
 
 	/**
-	 * Import tone → split @1s → crossfade → verify region count + fades.
+	 * Import tone → split → crossfade → trim → move; verify lengths/position.
 	 * For --smoke-edit.
 	 */
 	bool smoke_edit ();

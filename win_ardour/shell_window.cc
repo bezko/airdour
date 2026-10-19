@@ -100,6 +100,7 @@ ShellWindow::ShellWindow ()
 	, _pan_last_x (0.f)
 	, _pan_down_x (0.f)
 	, _pan_down_y (0.f)
+	, _region_move_grab_offset_sec (0.f)
 	, _midi_draw_start_sec (0.f)
 	, _midi_draw_pitch (60)
 	, _transport_playing (false)
@@ -1826,9 +1827,19 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			InvalidateRect (_hwnd, nullptr, FALSE);
 			return true;
 		}
-		/* Fade handles on selected region (drag to set fade-in/out). */
+		/* Selected region: trim edges → fade wedges → body move → else pan/select. */
 		if (_engine.is_linked () && _engine_snap.has_selection
 		    && _engine_snap.selection_track == lane) {
+			int te = _lanes[lane].strip.hit_trim_edge (
+				_lanes[lane].bounds, x, y, _dpi_scale);
+			if (te == 0 || te == 1) {
+				_drag = (te == 0) ? DragMode::TrimFront : DragMode::TrimEnd;
+				_drag_index = lane;
+				SetCapture (_hwnd);
+				SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return true;
+			}
 			int fh = _lanes[lane].strip.hit_fade_handle (
 				_lanes[lane].bounds, x, y, _dpi_scale);
 			if (fh == 0 || fh == 1) {
@@ -1837,6 +1848,18 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				SetCapture (_hwnd);
 				SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
 				InvalidateRect (_hwnd, nullptr, FALSE);
+				return true;
+			}
+			if (_lanes[lane].strip.hit_selection_body (
+				    _lanes[lane].bounds, x, y, _dpi_scale)) {
+				float t = _lanes[lane].strip.time_at_x (_lanes[lane].bounds, x);
+				_region_move_grab_offset_sec = t - _engine_snap.selection_start_sec;
+				_drag = DragMode::RegionMovePending;
+				_drag_index = lane;
+				_pan_last_x = x;
+				_pan_down_x = x;
+				_pan_down_y = y;
+				SetCapture (_hwnd);
 				return true;
 			}
 		}
@@ -1933,6 +1956,46 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 		return true;
 	}
 
+	if ((_drag == DragMode::TrimFront || _drag == DragMode::TrimEnd)
+	    && _drag_index >= 0 && _drag_index < kTracks
+	    && _engine_snap.has_selection) {
+		float t = _lanes[_drag_index].strip.time_at_x (_lanes[_drag_index].bounds, x);
+		if (_drag == DragMode::TrimFront) {
+			_engine.trim_selected_front_to (t);
+		} else {
+			_engine.trim_selected_end_to (t);
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	if (_drag == DragMode::RegionMovePending && _drag_index >= 0 && _drag_index < kTracks) {
+		float dx = x - _pan_down_x;
+		float dy = y - _pan_down_y;
+		float thresh = 4.f * _dpi_scale;
+		if ((dx * dx + dy * dy) >= (thresh * thresh)) {
+			_drag = DragMode::RegionMove;
+			SetCursor (LoadCursorW (nullptr, IDC_SIZEALL));
+		} else {
+			return true;
+		}
+	}
+
+	if (_drag == DragMode::RegionMove && _drag_index >= 0 && _drag_index < kTracks
+	    && _engine_snap.has_selection) {
+		float t = _lanes[_drag_index].strip.time_at_x (_lanes[_drag_index].bounds, x);
+		float new_start = t - _region_move_grab_offset_sec;
+		_engine.move_selected_to (new_start);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
 	if (_drag == DragMode::WavePending && _drag_index >= 0 && _drag_index < kTracks) {
 		float dx = x - _pan_down_x;
 		float dy = y - _pan_down_y;
@@ -2001,6 +2064,10 @@ ShellWindow::on_mouse_up ()
 			apply_region_selection_to_lanes ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		}
+	}
+	/* RegionMovePending click (no drag): keep selection — no timeline pan. */
+	if (_drag == DragMode::RegionMovePending) {
+		InvalidateRect (_hwnd, nullptr, FALSE);
 	}
 	if (_drag != DragMode::None) {
 		_drag = DragMode::None;
@@ -2250,7 +2317,7 @@ ShellWindow::draw_editor_pane ()
 			              _engine_snap.marker_count);
 		} else if (_engine_snap.has_selection) {
 			_snwprintf_s (caption, _TRUNCATE,
-			              L"sel T%d [%.1f–%.1f]  ·  S=split  F=fade  Del  ·  drag handles",
+			              L"sel T%d [%.1f–%.1f]  ·  edges=trim  body=move  S/F  Del",
 			              _engine_snap.selection_track + 1,
 			              _engine_snap.selection_start_sec, _engine_snap.selection_end_sec);
 		} else if (with_audio > 0) {

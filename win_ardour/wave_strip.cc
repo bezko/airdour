@@ -103,6 +103,63 @@ WaveStrip::set_selection (bool active, float start_sec, float end_sec,
 }
 
 int
+WaveStrip::hit_trim_edge (const D2D1_RECT_F& bounds, float x, float y, float dpi_scale) const
+{
+	if (!_sel_active || !_has_regions || _sel_end_sec <= _sel_start_sec) {
+		return -1;
+	}
+	float w = bounds.right - bounds.left;
+	float h = bounds.bottom - bounds.top;
+	if (w < 8.f || h < 8.f) {
+		return -1;
+	}
+	if (y < bounds.top || y > bounds.bottom) {
+		return -1;
+	}
+	float span = std::max (0.001f, _view_span_sec);
+	float pad = std::max (7.f, 9.f * dpi_scale);
+	float ns = (_sel_start_sec - _view_start_sec) / span;
+	float ne = (_sel_end_sec - _view_start_sec) / span;
+	float hs = bounds.left + std::max (0.f, std::min (1.f, ns)) * w;
+	float he = bounds.left + std::max (0.f, std::min (1.f, ne)) * w;
+	/* Prefer the nearer edge when both pads overlap (tiny regions). */
+	float ds = std::fabs (x - hs);
+	float de = std::fabs (x - he);
+	if (ds <= pad && ds <= de) {
+		return 0;
+	}
+	if (de <= pad) {
+		return 1;
+	}
+	return -1;
+}
+
+bool
+WaveStrip::hit_selection_body (const D2D1_RECT_F& bounds, float x, float y, float dpi_scale) const
+{
+	if (!_sel_active || !_has_regions || _sel_end_sec <= _sel_start_sec) {
+		return false;
+	}
+	if (y < bounds.top || y > bounds.bottom) {
+		return false;
+	}
+	float w = bounds.right - bounds.left;
+	if (w < 8.f) {
+		return false;
+	}
+	float span = std::max (0.001f, _view_span_sec);
+	float pad = std::max (7.f, 9.f * dpi_scale);
+	float ns = (_sel_start_sec - _view_start_sec) / span;
+	float ne = (_sel_end_sec - _view_start_sec) / span;
+	float hs = bounds.left + std::max (0.f, std::min (1.f, ns)) * w;
+	float he = bounds.left + std::max (0.f, std::min (1.f, ne)) * w;
+	if (he <= hs + pad * 2.f) {
+		return false; /* too narrow — edges own the hit */
+	}
+	return x > hs + pad && x < he - pad;
+}
+
+int
 WaveStrip::hit_fade_handle (const D2D1_RECT_F& bounds, float x, float y, float dpi_scale) const
 {
 	if (!_sel_active || !_has_regions) {
@@ -113,30 +170,28 @@ WaveStrip::hit_fade_handle (const D2D1_RECT_F& bounds, float x, float y, float d
 	if (w < 8.f || h < 8.f) {
 		return -1;
 	}
+	if (y < bounds.top || y > bounds.bottom) {
+		return -1;
+	}
+	/* Outer edges belong to trim — only hit the inward fade wedge. */
 	float span = std::max (0.001f, _view_span_sec);
 	float pad = std::max (6.f, 8.f * dpi_scale);
-	if (_sel_fade_in_sec > 0.001f || true) {
-		float n = (_sel_start_sec + std::max (0.02f, _sel_fade_in_sec) - _view_start_sec) / span;
+	float region_len = std::max (0.001f, _sel_end_sec - _sel_start_sec);
+	float fi = std::max (0.02f, std::min (_sel_fade_in_sec > 0.001f ? _sel_fade_in_sec : 0.05f,
+	                                      region_len * 0.49f));
+	float fo = std::max (0.02f, std::min (_sel_fade_out_sec > 0.001f ? _sel_fade_out_sec : 0.05f,
+	                                      region_len * 0.49f));
+	{
+		float n = (_sel_start_sec + fi - _view_start_sec) / span;
 		float hx = bounds.left + std::max (0.f, std::min (1.f, n)) * w;
-		if (std::fabs (x - hx) <= pad && y >= bounds.top && y <= bounds.bottom) {
-			return 0;
-		}
-		/* Also hit near selection start. */
-		float ns = (_sel_start_sec - _view_start_sec) / span;
-		float hs = bounds.left + std::max (0.f, std::min (1.f, ns)) * w;
-		if (std::fabs (x - hs) <= pad && y >= bounds.top && y <= bounds.bottom) {
+		if (std::fabs (x - hx) <= pad) {
 			return 0;
 		}
 	}
 	{
-		float n = (_sel_end_sec - std::max (0.02f, _sel_fade_out_sec) - _view_start_sec) / span;
+		float n = (_sel_end_sec - fo - _view_start_sec) / span;
 		float hx = bounds.left + std::max (0.f, std::min (1.f, n)) * w;
-		if (std::fabs (x - hx) <= pad && y >= bounds.top && y <= bounds.bottom) {
-			return 1;
-		}
-		float ne = (_sel_end_sec - _view_start_sec) / span;
-		float he = bounds.left + std::max (0.f, std::min (1.f, ne)) * w;
-		if (std::fabs (x - he) <= pad && y >= bounds.top && y <= bounds.bottom) {
+		if (std::fabs (x - hx) <= pad) {
 			return 1;
 		}
 	}

@@ -74,6 +74,12 @@ public:
 	/** Hit-test fade handles on selection; returns -1 none, 0=in, 1=out. */
 	int hit_fade_handle (const D2D1_RECT_F& bounds, float x, float y, float dpi_scale) const;
 
+	/** Hit-test outer trim edges; returns -1 none, 0=front, 1=end. */
+	int hit_trim_edge (const D2D1_RECT_F& bounds, float x, float y, float dpi_scale) const;
+
+	/** True if (x,y) is inside the selection body (not outer trim pads). */
+	bool hit_selection_body (const D2D1_RECT_F& bounds, float x, float y, float dpi_scale) const;
+
 	/** Absolute-time loop range overlay; inactive clears. */
 	void set_loop_range (bool active, float start_sec, float end_sec);
 

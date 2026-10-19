@@ -3229,6 +3229,191 @@ EngineHost::apply_selected_crossfade (float length_sec)
 }
 
 bool
+EngineHost::trim_selected_front_to (float time_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"trim front — select a region";
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		if (time_sec < 0.f) {
+			time_sec = 0.f;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplepos_t pos = region->position_sample ();
+		samplecnt_t len = region->length_samples ();
+		samplepos_t end_excl = pos + len;
+		samplecnt_t min_len = std::max ((samplecnt_t)1, (samplecnt_t)(sr / 50)); /* ~20 ms */
+		if (sample + min_len >= end_excl) {
+			sample = end_excl > min_len ? end_excl - min_len : 0;
+		}
+		if (sample == pos) {
+			return true;
+		}
+		std::shared_ptr<Playlist> pl = region->playlist ();
+		_impl->session->begin_reversible_command ("trim front");
+		if (pl) {
+			pl->clear_changes ();
+			pl->clear_owned_changes ();
+			pl->freeze ();
+		}
+		region->clear_changes ();
+		region->trim_front (timepos_t (sample));
+		if (pl) {
+			std::vector<Command*> cmds;
+			pl->rdiff (cmds);
+			_impl->session->add_commands (cmds);
+			pl->thaw ();
+		} else {
+			_impl->session->add_command (new StatefulDiffCommand (region));
+		}
+		_impl->session->commit_reversible_command ();
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"trim front — peaks refresh";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: trim front exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"trim front exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"trim front failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::trim_selected_end_to (float time_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"trim end — select a region";
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		if (time_sec < 0.f) {
+			time_sec = 0.f;
+		}
+		/* selection_end_sec is exclusive end (position + length). */
+		samplepos_t end_excl = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplepos_t pos = region->position_sample ();
+		samplecnt_t min_len = std::max ((samplecnt_t)1, (samplecnt_t)(sr / 50));
+		if (end_excl <= pos + min_len) {
+			end_excl = pos + min_len;
+		}
+		samplecnt_t new_len = end_excl - pos;
+		if (new_len == region->length_samples ()) {
+			return true;
+		}
+		std::shared_ptr<Playlist> pl = region->playlist ();
+		_impl->session->begin_reversible_command ("trim end");
+		if (pl) {
+			pl->clear_changes ();
+			pl->clear_owned_changes ();
+			pl->freeze ();
+		}
+		region->clear_changes ();
+		region->trim_to (timepos_t (pos), timecnt_t (new_len, timepos_t (pos)));
+		if (pl) {
+			std::vector<Command*> cmds;
+			pl->rdiff (cmds);
+			_impl->session->add_commands (cmds);
+			pl->thaw ();
+		} else {
+			_impl->session->add_command (new StatefulDiffCommand (region));
+		}
+		_impl->session->commit_reversible_command ();
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"trim end — peaks refresh";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: trim end exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"trim end exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"trim end failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::move_selected_to (float time_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"move — select a region";
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		if (time_sec < 0.f) {
+			time_sec = 0.f;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		if (sample == region->position_sample ()) {
+			return true;
+		}
+		std::shared_ptr<Playlist> pl = region->playlist ();
+		_impl->session->begin_reversible_command ("move region");
+		if (pl) {
+			pl->clear_changes ();
+			pl->clear_owned_changes ();
+			pl->freeze ();
+		}
+		region->clear_changes ();
+		region->set_position (timepos_t (sample));
+		if (pl) {
+			std::vector<Command*> cmds;
+			pl->rdiff (cmds);
+			_impl->session->add_commands (cmds);
+			pl->thaw ();
+		} else {
+			_impl->session->add_command (new StatefulDiffCommand (region));
+		}
+		_impl->session->commit_reversible_command ();
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"move region — peaks refresh";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: move region exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"move exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"move failed";
+		return false;
+	}
+}
+
+bool
 EngineHost::smoke_edit ()
 {
 	if (!_impl || !_impl->session) {
@@ -3281,9 +3466,54 @@ EngineHost::smoke_edit ()
 			std::fflush (stderr);
 			return false;
 		}
+		/* Left region was [0..1]; trim end to 0.75s then front to 0.15s. */
+		if (!trim_selected_end_to (0.75f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (trim end)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		float len1 = _snap.selection_end_sec - _snap.selection_start_sec;
+		if (len1 < 0.65f || len1 > 0.85f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (trim end len=%.3f)\n",
+			              len1);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!trim_selected_front_to (0.15f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (trim front)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.selection_start_sec < 0.10f || _snap.selection_start_sec > 0.20f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (trim front start=%.3f)\n",
+			              _snap.selection_start_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		float len2 = _snap.selection_end_sec - _snap.selection_start_sec;
+		if (!move_selected_to (0.40f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (move)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.selection_start_sec < 0.35f || _snap.selection_start_sec > 0.45f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (move start=%.3f)\n",
+			              _snap.selection_start_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		float len3 = _snap.selection_end_sec - _snap.selection_start_sec;
+		if (std::fabs (len3 - len2) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (move changed len %.3f→%.3f)\n",
+			              len2, len3);
+			std::fflush (stderr);
+			return false;
+		}
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-edit ok (split %d→%d fade_out=%.0fms)\n",
-		              n0, n1, _snap.selection_fade_out_sec * 1000.f);
+		              "airdour_win_shell: smoke-edit ok (split %d→%d fade_out=%.0fms "
+		              "trim+move start=%.2f len=%.2f)\n",
+		              n0, n1, _snap.selection_fade_out_sec * 1000.f,
+		              _snap.selection_start_sec, len3);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-edit ok";
 		return true;
@@ -5966,6 +6196,27 @@ bool
 EngineHost::apply_selected_crossfade (float length_sec)
 {
 	(void)length_sec;
+	return false;
+}
+
+bool
+EngineHost::trim_selected_front_to (float time_sec)
+{
+	(void)time_sec;
+	return false;
+}
+
+bool
+EngineHost::trim_selected_end_to (float time_sec)
+{
+	(void)time_sec;
+	return false;
+}
+
+bool
+EngineHost::move_selected_to (float time_sec)
+{
+	(void)time_sec;
 	return false;
 }
 

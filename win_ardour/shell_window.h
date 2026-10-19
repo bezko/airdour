@@ -86,6 +86,10 @@ private:
 		AutoWrite, /* click/drag Editor automation lane */
 		FadeIn, /* drag selection fade-in handle */
 		FadeOut, /* drag selection fade-out handle */
+		TrimFront, /* drag selected region left edge */
+		TrimEnd, /* drag selected region right edge */
+		RegionMovePending, /* click on selection body; may become move */
+		RegionMove, /* drag selected region body */
 		MidiDraw /* click/drag on MIDI lane to create a note */
 	};
 
@@ -187,6 +191,7 @@ private:
 	float _pan_last_x;
 	float _pan_down_x;
 	float _pan_down_y;
+	float _region_move_grab_offset_sec; /* pointer time − region start at grab */
 	float _midi_draw_start_sec;
 	uint8_t _midi_draw_pitch;
 
