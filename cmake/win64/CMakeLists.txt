@@ -216,6 +216,7 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     "${AIRDOUR_SRC_ROOT}/win_ardour/transport_bar.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/mixer_strip.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/monitor_strip.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/history_panel.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/level_meter.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/automation_lane.cc"
   )

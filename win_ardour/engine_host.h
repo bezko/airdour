@@ -48,6 +48,12 @@ struct EngineSnapshot {
 	bool         export_ok; /* last export produced a file */
 	uint32_t     undo_depth;
 	uint32_t     redo_depth;
+	static constexpr int kMaxHistory = 8;
+	static constexpr int kHistoryNameLen = 40;
+	int          undo_list_count; /* recent undo names, newest first */
+	wchar_t      undo_list_name[kMaxHistory][kHistoryNameLen];
+	wchar_t      next_undo_name[kHistoryNameLen];
+	wchar_t      next_redo_name[kHistoryNameLen];
 	bool         has_selection; /* Editor region selection */
 	int          selection_track; /* 0..kMeters-1, or -1 */
 	float        selection_start_sec;
@@ -289,6 +295,11 @@ public:
 	/** Session history undo/redo (Ctrl+Z / Ctrl+Y). */
 	bool undo (uint32_t n = 1);
 	bool redo (uint32_t n = 1);
+	/**
+	 * Jump by undoing (index+1) steps. index 0 = newest (next_undo).
+	 * Honest API: Session only exposes undo(n), not random-access restore.
+	 */
+	bool undo_to_index (int index);
 
 	/**
 	 * Hit-test playlist at time_sec on track; select topmost region if any.
@@ -378,6 +389,11 @@ public:
 	 * For --smoke-undo. Returns false if history/import path fails.
 	 */
 	bool smoke_undo ();
+	/**
+	 * Import tone; verify undo list names; undo_to_index(0); redo.
+	 * For --smoke-history.
+	 */
+	bool smoke_history ();
 
 	/** Create/update Session auto-loop Location [start_sec, end_sec]. */
 	bool set_loop_range (float start_sec, float end_sec);

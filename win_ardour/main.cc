@@ -13,7 +13,7 @@
  *                         [--smoke-edit] [--smoke-snap] [--smoke-punch]
  *                         [--smoke-tempo] [--smoke-click] [--smoke-tracks]
  *                         [--smoke-rename] [--smoke-group] [--smoke-monitor]
- *                         [--smoke-locate] [--smoke-zoom]
+ *                         [--smoke-locate] [--smoke-zoom] [--smoke-history]
  *                         [--period N] [--session DIR]
  */
 
@@ -129,6 +129,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_monitor = parse_flag (argc, argv, L"--smoke-monitor");
 	bool smoke_locate = parse_flag (argc, argv, L"--smoke-locate");
 	bool smoke_zoom = parse_flag (argc, argv, L"--smoke-zoom");
+	bool smoke_history = parse_flag (argc, argv, L"--smoke-history");
 	bool smoke_perf = parse_flag (argc, argv, L"--smoke-perf");
 	std::string session_path = parse_session_path (argc, argv);
 	/* --smoke-perf uses --timeout as the sample window (default 5s). */
@@ -162,7 +163,7 @@ wmain (int argc, wchar_t** argv)
 		                         smoke_automation, smoke_edit, smoke_snap, smoke_punch,
 		                         smoke_tempo, smoke_click, smoke_tracks,
 		                         smoke_rename, smoke_group, smoke_monitor,
-		                         smoke_locate, smoke_zoom)) {
+		                         smoke_locate, smoke_zoom, smoke_history)) {
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", backend.c_str ());
 		} else {
 			std::fwprintf (stderr, L"airdour_win_shell: engine not attached (ok for UI-only / CI)\n");

@@ -23,6 +23,7 @@
 
 #include "automation_lane.h"
 #include "engine_host.h"
+#include "history_panel.h"
 #include "mixer_strip.h"
 #include "monitor_strip.h"
 #include "transport_bar.h"
@@ -83,7 +84,8 @@ public:
 	                    bool smoke_group = false,
 	                    bool smoke_monitor = false,
 	                    bool smoke_locate = false,
-	                    bool smoke_zoom = false);
+	                    bool smoke_zoom = false,
+	                    bool smoke_history = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -156,6 +158,8 @@ private:
 	void prompt_export_wav ();
 	void do_undo ();
 	void do_redo ();
+	void do_undo_to_index (int index);
+	void sync_history_from_engine ();
 	void do_delete_selection ();
 	void do_split_at_playhead ();
 	void do_apply_crossfade ();
@@ -300,5 +304,6 @@ private:
 	AutomationLane _auto_lane;
 	MixerStrip     _mixers[kMixerStrips];
 	MonitorStrip   _monitor;
+	HistoryPanel   _history;
 	float          _auto_last_write_sec;
 };

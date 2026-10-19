@@ -456,6 +456,12 @@ EngineHost::EngineHost ()
 	_snap.export_ok = false;
 	_snap.undo_depth = 0;
 	_snap.redo_depth = 0;
+	_snap.undo_list_count = 0;
+	_snap.next_undo_name[0] = L'\0';
+	_snap.next_redo_name[0] = L'\0';
+	for (int i = 0; i < EngineSnapshot::kMaxHistory; ++i) {
+		_snap.undo_list_name[i][0] = L'\0';
+	}
 	_snap.has_selection = false;
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
@@ -801,6 +807,12 @@ EngineHost::destroy_session ()
 	_snap.session_saved = false;
 	_snap.undo_depth = 0;
 	_snap.redo_depth = 0;
+	_snap.undo_list_count = 0;
+	_snap.next_undo_name[0] = L'\0';
+	_snap.next_redo_name[0] = L'\0';
+	for (int i = 0; i < EngineSnapshot::kMaxHistory; ++i) {
+		_snap.undo_list_name[i][0] = L'\0';
+	}
 	_snap.has_selection = false;
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
@@ -2881,12 +2893,55 @@ EngineHost::refresh_history_flags ()
 {
 	_snap.undo_depth = 0;
 	_snap.redo_depth = 0;
+	_snap.undo_list_count = 0;
+	_snap.next_undo_name[0] = L'\0';
+	_snap.next_redo_name[0] = L'\0';
+	for (int i = 0; i < EngineSnapshot::kMaxHistory; ++i) {
+		_snap.undo_list_name[i][0] = L'\0';
+	}
 	if (!_impl || !_impl->session) {
 		return;
 	}
 	try {
 		_snap.undo_depth = _impl->session->undo_depth ();
 		_snap.redo_depth = _impl->session->redo_depth ();
+		std::string nu = _impl->session->next_undo ();
+		std::string nr = _impl->session->next_redo ();
+		if (!nu.empty ()) {
+			copy_name_to_snap (_snap.next_undo_name, EngineSnapshot::kHistoryNameLen, nu);
+		}
+		if (!nr.empty ()) {
+			copy_name_to_snap (_snap.next_redo_name, EngineSnapshot::kHistoryNameLen, nr);
+		}
+
+		/* Recent undo names via UndoHistory::get_state (oldest-first among last N). */
+		int want = (int)std::min ((uint32_t)EngineSnapshot::kMaxHistory, _snap.undo_depth);
+		if (want > 0) {
+			XMLNode& hist = _impl->session->history ().get_state (want);
+			std::vector<std::string> names;
+			names.reserve ((size_t)want);
+			const XMLNodeList& kids = hist.children ();
+			for (XMLNodeList::const_iterator it = kids.begin (); it != kids.end (); ++it) {
+				if (!*it) {
+					continue;
+				}
+				std::string nm;
+				if ((*it)->get_property ("name", nm) && !nm.empty ()) {
+					names.push_back (nm);
+				}
+			}
+			delete &hist;
+			/* Newest first for the UI list. */
+			int n = (int)names.size ();
+			if (n > EngineSnapshot::kMaxHistory) {
+				n = EngineSnapshot::kMaxHistory;
+			}
+			for (int i = 0; i < n; ++i) {
+				copy_name_to_snap (_snap.undo_list_name[i], EngineSnapshot::kHistoryNameLen,
+				                   names[(size_t)(n - 1 - i)]);
+			}
+			_snap.undo_list_count = n;
+		}
 	} catch (...) {
 	}
 }
@@ -2933,6 +2988,20 @@ EngineHost::refresh_selection_snap ()
 		_snap.selection_fade_in_sec = (float)ar->fade_in_length ().samples () / (float)sr;
 		_snap.selection_fade_out_sec = (float)ar->fade_out_length ().samples () / (float)sr;
 	}
+}
+
+bool
+EngineHost::undo_to_index (int index)
+{
+	if (index < 0) {
+		return false;
+	}
+	refresh_history_flags ();
+	if ((uint32_t)index >= _snap.undo_depth) {
+		_snap.detail = L"undo jump — out of range";
+		return false;
+	}
+	return undo ((uint32_t)index + 1u);
 }
 
 bool
@@ -4029,6 +4098,66 @@ EngineHost::smoke_undo ()
 		return false;
 	} catch (...) {
 		_snap.detail = L"smoke-undo unknown failure";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_history ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-history failed — no Session";
+		return false;
+	}
+	try {
+		if (!_snap.track_has_regions[0]) {
+			if (!import_test_tone (0, 330.f, 1.0f) || !_snap.track_has_regions[0]) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-history FAILED (import)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		refresh_history_flags ();
+		if (_snap.undo_depth == 0 || _snap.undo_list_count < 1 || !_snap.next_undo_name[0]) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-history FAILED (depth=%u list=%d next=%ls)\n",
+			              (unsigned)_snap.undo_depth, _snap.undo_list_count, _snap.next_undo_name);
+			std::fflush (stderr);
+			return false;
+		}
+		uint32_t before = _snap.undo_depth;
+		bool had_region = _snap.track_has_regions[0];
+		if (!undo_to_index (0) || _snap.undo_depth >= before) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-history FAILED (jump depth %u→%u)\n",
+			              (unsigned)before, (unsigned)_snap.undo_depth);
+			std::fflush (stderr);
+			return false;
+		}
+		if (had_region && _snap.track_has_regions[0]) {
+			/* Jump should have removed the imported region when undoing import. */
+			std::fprintf (stderr, "airdour_win_shell: smoke-history FAILED (region still present after jump)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!redo (1) || (had_region && !_snap.track_has_regions[0])) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-history FAILED (redo)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_history_flags ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-history ok (list=%d next=\"%ls\" depths U%u/R%u)\n",
+		              _snap.undo_list_count, _snap.next_undo_name,
+		              (unsigned)_snap.undo_depth, (unsigned)_snap.redo_depth);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-history ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-history exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
 		return false;
 	}
 }
@@ -7834,6 +7963,12 @@ EngineHost::EngineHost ()
 	_snap.export_ok = false;
 	_snap.undo_depth = 0;
 	_snap.redo_depth = 0;
+	_snap.undo_list_count = 0;
+	_snap.next_undo_name[0] = L'\0';
+	_snap.next_redo_name[0] = L'\0';
+	for (int i = 0; i < EngineSnapshot::kMaxHistory; ++i) {
+		_snap.undo_list_name[i][0] = L'\0';
+	}
 	_snap.has_selection = false;
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
@@ -8326,9 +8461,22 @@ EngineHost::undo (uint32_t n)
 }
 
 bool
+EngineHost::undo_to_index (int index)
+{
+	(void)index;
+	return false;
+}
+
+bool
 EngineHost::redo (uint32_t n)
 {
 	(void)n;
+	return false;
+}
+
+bool
+EngineHost::smoke_history ()
+{
 	return false;
 }
 

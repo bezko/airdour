@@ -214,7 +214,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
-                            bool smoke_zoom)
+                            bool smoke_zoom,
+                            bool smoke_history)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -563,6 +564,22 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_history && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_history ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_history_from_engine ();
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_history) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-history FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -598,6 +615,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		_engine_snap = _engine.snapshot ();
 	}
 	sync_monitor_from_engine ();
+	sync_history_from_engine ();
 	layout_panes ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
@@ -1761,6 +1779,15 @@ ShellWindow::do_remove_marker_at_playhead ()
 }
 
 void
+ShellWindow::sync_history_from_engine ()
+{
+	_history.set_available (_engine_snap.session_ok);
+	_history.set_depths (_engine_snap.undo_depth, _engine_snap.redo_depth);
+	_history.set_next_names (_engine_snap.next_undo_name, _engine_snap.next_redo_name);
+	_history.set_undo_rows (_engine_snap.undo_list_count, _engine_snap.undo_list_name);
+}
+
+void
 ShellWindow::do_undo ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -1770,6 +1797,7 @@ ShellWindow::do_undo ()
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	apply_region_selection_to_lanes ();
+	sync_history_from_engine ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
@@ -1783,6 +1811,24 @@ ShellWindow::do_redo ()
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	apply_region_selection_to_lanes ();
+	sync_history_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_undo_to_index (int index)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.undo_to_index (index)) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	apply_region_selection_to_lanes ();
+	sync_mixer_gains_from_engine ();
+	sync_history_from_engine ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
@@ -2095,12 +2141,14 @@ ShellWindow::layout_panes ()
 	float mix_inner = _mixer_pane.right - _mixer_pane.left - mix_inset * 2.f;
 	float strip_gap = 6.f * _dpi_scale;
 	const int n_mix = std::max (1, n_mixer_strips ());
-	/* Reserve a narrow Monitor strip on the right. */
+	/* Reserve History + Monitor strips on the right. */
 	float mon_w = 56.f * _dpi_scale;
-	float strips_inner = mix_inner - mon_w - strip_gap;
+	float hist_w = 128.f * _dpi_scale;
+	float strips_inner = mix_inner - mon_w - hist_w - strip_gap * 2.f;
 	if (strips_inner < 40.f * _dpi_scale) {
+		hist_w = 110.f * _dpi_scale;
 		mon_w = 48.f * _dpi_scale;
-		strips_inner = mix_inner - mon_w - strip_gap;
+		strips_inner = mix_inner - mon_w - hist_w - strip_gap * 2.f;
 	}
 	float strip_w = (strips_inner - strip_gap * (float)(n_mix - 1)) / (float)n_mix;
 	for (int i = 0; i < kMixerStripsMax; ++i) {
@@ -2111,6 +2159,8 @@ ShellWindow::layout_panes ()
 		_mixers[i].layout (D2D1::RectF (x0, mix_top, x0 + strip_w, mix_bot), _dpi_scale);
 	}
 	float mon_x = _mixer_pane.right - mix_inset - mon_w;
+	float hist_x = mon_x - strip_gap - hist_w;
+	_history.layout (D2D1::RectF (hist_x, mix_top, hist_x + hist_w, mix_bot), _dpi_scale);
 	_monitor.layout (D2D1::RectF (mon_x, mix_top, mon_x + mon_w, mix_bot), _dpi_scale);
 }
 
@@ -2764,6 +2814,21 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		}
 		SetCapture (_hwnd);
 		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	int hist_row = -1;
+	HistoryHit hh = _history.hit_test (x, y, &hist_row);
+	if (hh == HistoryHit::UndoBtn) {
+		do_undo ();
+		return true;
+	}
+	if (hh == HistoryHit::RedoBtn || hh == HistoryHit::RedoNext) {
+		do_redo ();
+		return true;
+	}
+	if (hh == HistoryHit::UndoRow && hist_row >= 0) {
+		do_undo_to_index (hist_row);
 		return true;
 	}
 
@@ -3471,6 +3536,7 @@ ShellWindow::on_tick ()
 		sync_transport_punch_from_engine ();
 		sync_transport_tempo_from_engine ();
 		sync_transport_clock_from_engine ();
+		sync_history_from_engine ();
 		apply_region_selection_to_lanes ();
 		apply_loop_to_lanes ();
 		refresh_automation_lane ();
@@ -3956,6 +4022,8 @@ ShellWindow::draw_mixer_pane ()
 		_mixers[i].draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
 		                 _brush_pane_edge, _brush_meter_hot, _fmt_pane, _fmt_meta, _dpi_scale);
 	}
+	_history.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
+	               _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
 	_monitor.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
 	               _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
 }

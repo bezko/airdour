@@ -98,6 +98,7 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 | `--smoke-mute-solo` | Mute/solo Audio 1 + MIDI (Session Route; RT settle) |
 | `--smoke-locate` | Locate/scrub ruler path + shuttle speed + BBT/timecode clock |
 | `--smoke-zoom` | Session/regions extents + Editor Fit/Sel/All view windows |
+| `--smoke-history` | Undo list names + jump via undo(n) + redo |
 | `--smoke-perf` | Sample WASAPI callback µs vs period, DSP %, xruns, working set (`--timeout` = window) |
 | `--session DIR` | Open existing session folder after engine start |
 | `AIRDOUR_WIN_SHELL_SESSION=0` | Skip Session; stub meters; empty lanes |
