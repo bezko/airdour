@@ -93,6 +93,10 @@ struct EngineSnapshot {
 	float        meter_peak[kMeters]; /* linear 0..1 */
 	bool         track_has_regions[kMeters];
 	bool         track_armed[kMeters];
+	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
+	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
+	bool         midi_muted;
+	bool         midi_soloed;
 	float        transport_sec;
 	std::wstring detail;
 };
@@ -129,11 +133,29 @@ public:
 
 	void  set_gain (float linear);
 	void  set_track_gain (int track, float linear);
+	bool  set_midi_gain (float linear);
 	float gain () const;
 
 	/** Arm / disarm a track for recording (Session rec-enable control). */
 	bool set_track_armed (int track, bool armed);
 	bool toggle_track_armed (int track);
+
+	/** Route mute/solo (audio tracks 0..kMeters-1). Controllable::NoGroup. */
+	bool set_track_muted (int track, bool muted);
+	bool toggle_track_muted (int track);
+	bool set_track_soloed (int track, bool soloed);
+	bool toggle_track_soloed (int track);
+
+	/** MIDI track mute/solo (Session MidiTrack as Route). */
+	bool set_midi_muted (bool muted);
+	bool toggle_midi_muted ();
+	bool set_midi_soloed (bool soloed);
+	bool toggle_midi_soloed ();
+
+	/**
+	 * Mute/solo Audio 1 + MIDI round-trip; clear. For --smoke-mute-solo.
+	 */
+	bool smoke_mute_solo ();
 
 	/** Session-level record enable (maybe_enable_record / disable_record). */
 	bool set_session_record (bool enable);
@@ -323,6 +345,7 @@ private:
 	void read_meters ();
 	void refresh_region_flags ();
 	void refresh_record_flags ();
+	void refresh_mute_solo_flags ();
 	void refresh_history_flags ();
 	void refresh_selection_snap ();
 	void refresh_locations_snap ();

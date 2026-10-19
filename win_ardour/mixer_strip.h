@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Direct2D mixer track strip: arm + FX bypass/param + fader + level meter (not GTK).
+ * Direct2D mixer track strip: arm + mute/solo + FX + fader + meter (not GTK).
  */
 
 #pragma once
@@ -37,6 +37,15 @@ public:
 	void set_armed (bool armed) { _armed = armed; }
 	bool armed () const { return _armed; }
 
+	void set_muted (bool muted) { _muted = muted; }
+	bool muted () const { return _muted; }
+	void set_soloed (bool soloed) { _soloed = soloed; }
+	bool soloed () const { return _soloed; }
+
+	/** MIDI strip: hide rec-arm / FX chrome; keep M/S + fader + meter. */
+	void set_midi_strip (bool midi) { _midi_strip = midi; }
+	bool is_midi_strip () const { return _midi_strip; }
+
 	/** True when strip has a non-empty FX label (insert/bypass is live). */
 	bool has_fx () const { return _fx_label[0] != L'\0'; }
 	bool fx_bypassed () const { return _fx_bypassed; }
@@ -52,6 +61,8 @@ public:
 
 	bool hit_fader (float x, float y) const;
 	bool hit_arm (float x, float y) const;
+	bool hit_mute (float x, float y) const;
+	bool hit_solo (float x, float y) const;
 	bool drag_to (float y);
 
 	void draw (ID2D1RenderTarget* rt,
@@ -73,11 +84,16 @@ private:
 	D2D1_RECT_F _strip;
 	D2D1_RECT_F _track;
 	D2D1_RECT_F _arm_btn;
+	D2D1_RECT_F _mute_btn;
+	D2D1_RECT_F _solo_btn;
 	D2D1_RECT_F _fx_btn;
 	D2D1_RECT_F _fx_param_track;
 	LevelMeter  _meter;
 	float       _gain;
 	float       _fx_param;
 	bool        _armed;
+	bool        _muted;
+	bool        _soloed;
 	bool        _fx_bypassed;
+	bool        _midi_strip;
 };

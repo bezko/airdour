@@ -148,7 +148,11 @@ ShellWindow::ShellWindow ()
 		_lanes[i].bounds = D2D1::RectF ();
 		_mixers[i].set_label (labels[i]);
 		_mixers[i].set_gain (gains[i]);
+		_mixers[i].set_midi_strip (false);
 	}
+	_mixers[3].set_label (L"MIDI 1");
+	_mixers[3].set_gain (0.85f);
+	_mixers[3].set_midi_strip (true);
 }
 
 ShellWindow::~ShellWindow ()
@@ -179,7 +183,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_perf,
                             const std::string& open_session_path,
                             unsigned period_frames,
-                            bool smoke_vst3)
+                            bool smoke_vst3,
+                            bool smoke_mute_solo)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -304,6 +309,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_mute_solo && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_mute_solo ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_mute_solo_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_mute_solo) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -354,7 +372,19 @@ ShellWindow::sync_mixer_arm_from_engine ()
 		bool armed = (i < EngineSnapshot::kMeters) && _engine_snap.track_armed[i];
 		_mixers[i].set_armed (armed);
 	}
+	_mixers[3].set_armed (false);
 	_transport.set_record_armed (_engine_snap.session_record_armed);
+}
+
+void
+ShellWindow::sync_mixer_mute_solo_from_engine ()
+{
+	for (int i = 0; i < kTracks; ++i) {
+		_mixers[i].set_muted (_engine_snap.track_muted[i]);
+		_mixers[i].set_soloed (_engine_snap.track_soloed[i]);
+	}
+	_mixers[3].set_muted (_engine_snap.midi_muted);
+	_mixers[3].set_soloed (_engine_snap.midi_soloed);
 	_transport.set_recording (_engine_snap.session_recording);
 }
 
@@ -977,9 +1007,9 @@ ShellWindow::layout_panes ()
 	float mix_top = _mixer_pane.top + 36.f * _dpi_scale;
 	float mix_bot = _mixer_pane.bottom - mix_inset;
 	float mix_inner = _mixer_pane.right - _mixer_pane.left - mix_inset * 2.f;
-	float strip_gap = 8.f * _dpi_scale;
-	float strip_w = (mix_inner - strip_gap * (kTracks - 1)) / (float)kTracks;
-	for (int i = 0; i < kTracks; ++i) {
+	float strip_gap = 6.f * _dpi_scale;
+	float strip_w = (mix_inner - strip_gap * (kMixerStrips - 1)) / (float)kMixerStrips;
+	for (int i = 0; i < kMixerStrips; ++i) {
 		float x0 = _mixer_pane.left + mix_inset + (float)i * (strip_w + strip_gap);
 		_mixers[i].layout (D2D1::RectF (x0, mix_top, x0 + strip_w, mix_bot), _dpi_scale);
 	}
@@ -1228,6 +1258,28 @@ ShellWindow::hit_mixer_arm (float x, float y) const
 }
 
 int
+ShellWindow::hit_mixer_mute (float x, float y) const
+{
+	for (int i = 0; i < kMixerStrips; ++i) {
+		if (_mixers[i].hit_mute (x, y)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int
+ShellWindow::hit_mixer_solo (float x, float y) const
+{
+	for (int i = 0; i < kMixerStrips; ++i) {
+		if (_mixers[i].hit_solo (x, y)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int
 ShellWindow::hit_mixer_fx (float x, float y) const
 {
 	for (int i = 0; i < kTracks; ++i) {
@@ -1252,7 +1304,7 @@ ShellWindow::hit_mixer_fx_param (float x, float y) const
 int
 ShellWindow::hit_mixer_fader (float x, float y) const
 {
-	for (int i = 0; i < kTracks; ++i) {
+	for (int i = 0; i < kMixerStrips; ++i) {
 		if (_mixers[i].hit_fader (x, y)) {
 			return i;
 		}
@@ -1380,6 +1432,38 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
+	int mute_i = hit_mixer_mute (x, y);
+	if (mute_i >= 0) {
+		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
+			if (mute_i == 3) {
+				_engine.toggle_midi_muted ();
+			} else {
+				_engine.toggle_track_muted (mute_i);
+			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_mute_solo_from_engine ();
+		}
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	int solo_i = hit_mixer_solo (x, y);
+	if (solo_i >= 0) {
+		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
+			if (solo_i == 3) {
+				_engine.toggle_midi_soloed ();
+			} else {
+				_engine.toggle_track_soloed (solo_i);
+			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_mute_solo_from_engine ();
+		}
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
 	int fxpi = hit_mixer_fx_param (x, y);
 	if (fxpi >= 0 && _mixers[fxpi].has_fx ()) {
 		_drag = DragMode::FxParam;
@@ -1417,9 +1501,13 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_drag = DragMode::Fader;
 		_drag_index = mi;
 		_mixers[mi].drag_to (y);
-		_engine.set_track_gain (mi, _mixers[mi].gain ());
-		if (mi == 0) {
-			_engine_snap.gain = _mixers[0].gain ();
+		if (mi == 3) {
+			_engine.set_midi_gain (_mixers[mi].gain ());
+		} else {
+			_engine.set_track_gain (mi, _mixers[mi].gain ());
+			if (mi == 0) {
+				_engine_snap.gain = _mixers[0].gain ();
+			}
 		}
 		SetCapture (_hwnd);
 		SetCursor (LoadCursorW (nullptr, IDC_SIZENS));
@@ -1470,11 +1558,15 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 	float x, y;
 	client_from_lparam (lparam, &x, &y);
 
-	if (_drag == DragMode::Fader && _drag_index >= 0 && _drag_index < kTracks) {
+	if (_drag == DragMode::Fader && _drag_index >= 0 && _drag_index < kMixerStrips) {
 		if (_mixers[_drag_index].drag_to (y)) {
-			_engine.set_track_gain (_drag_index, _mixers[_drag_index].gain ());
-			if (_drag_index == 0) {
-				_engine_snap.gain = _mixers[0].gain ();
+			if (_drag_index == 3) {
+				_engine.set_midi_gain (_mixers[_drag_index].gain ());
+			} else {
+				_engine.set_track_gain (_drag_index, _mixers[_drag_index].gain ());
+				if (_drag_index == 0) {
+					_engine_snap.gain = _mixers[0].gain ();
+				}
 			}
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		}
@@ -1634,6 +1726,7 @@ ShellWindow::on_tick ()
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 		sync_mixer_arm_from_engine ();
+		sync_mixer_mute_solo_from_engine ();
 		sync_transport_loop_from_engine ();
 		apply_region_selection_to_lanes ();
 		apply_loop_to_lanes ();
@@ -1701,7 +1794,10 @@ ShellWindow::on_tick ()
 		_mixers[i].set_meter_peak (peak);
 		_mixers[i].meter_tick (dt);
 	}
+	_mixers[3].set_meter_peak (_engine_snap.midi_activity);
+	_mixers[3].meter_tick (dt);
 	sync_mixer_fx_from_engine ();
+	sync_mixer_mute_solo_from_engine ();
 
 	if (_timeout_secs > 0 && (now - _start_tick) >= (_timeout_secs * 1000u)) {
 		PostQuitMessage (0);
@@ -1980,18 +2076,18 @@ ShellWindow::draw_mixer_pane ()
 		              _engine_snap.track_fx_bypassed ? L" BYP" : L"",
 		              _engine_snap.track_fx_param * 100.f);
 	} else if (_engine_snap.meters_real) {
-		wcsncpy_s (hint, L"Meters: Session PeakMeter  ·  click + FX on strips", _TRUNCATE);
+		wcsncpy_s (hint, L"PeakMeter  ·  M/S mute/solo  ·  + FX on audio strips", _TRUNCATE);
 	} else if (_transport_playing) {
 		wcsncpy_s (hint, L"Meters: play stub (no Session)", _TRUNCATE);
 	} else {
-		wcsncpy_s (hint, L"Meters idle until Play  ·  drag faders", _TRUNCATE);
+		wcsncpy_s (hint, L"M/S · faders  ·  idle until Play", _TRUNCATE);
 	}
 	_rt->DrawTextW (hint, (UINT32)wcslen (hint), _fmt_meta,
 	                D2D1::RectF (r.left + inset + 70.f * _dpi_scale, r.top + 10.f * _dpi_scale,
 	                             r.right - inset, r.top + 30.f * _dpi_scale),
 	                _brush_body);
 
-	for (int i = 0; i < kTracks; ++i) {
+	for (int i = 0; i < kMixerStrips; ++i) {
 		_mixers[i].draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
 		                 _brush_pane_edge, _brush_meter_hot, _fmt_pane, _fmt_meta, _dpi_scale);
 	}

@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,8 @@
 #include "ardour/midi_source.h"
 #include "ardour/midi_track.h"
 #include "ardour/automation_control.h"
+#include "ardour/mute_control.h"
+#include "ardour/solo_control.h"
 #include "ardour/plugin.h"
 #include "ardour/plugin_insert.h"
 #include "ardour/plugin_manager.h"
@@ -348,7 +351,11 @@ EngineHost::EngineHost ()
 		_snap.meter_peak[i] = 0.f;
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
+		_snap.track_muted[i] = false;
+		_snap.track_soloed[i] = false;
 	}
+	_snap.midi_muted = false;
+	_snap.midi_soloed = false;
 	_snap.available = true;
 	_snap.running = false;
 	_snap.session_ok = false;
@@ -1434,6 +1441,25 @@ EngineHost::set_track_gain (int track, float linear)
 	}
 }
 
+bool
+EngineHost::set_midi_gain (float linear)
+{
+	linear = std::max (0.f, std::min (1.f, linear));
+	if (!_impl) {
+		return false;
+	}
+	ensure_midi_track ();
+	if (!_impl->midi_track || !_impl->midi_track->gain_control ()) {
+		return false;
+	}
+	try {
+		_impl->midi_track->gain_control ()->set_value (linear, Controllable::NoGroup);
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
 float
 EngineHost::gain () const
 {
@@ -1682,6 +1708,264 @@ EngineHost::toggle_track_armed (int track)
 		return false;
 	}
 	return set_track_armed (track, !_snap.track_armed[track]);
+}
+
+void
+EngineHost::refresh_mute_solo_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_muted[i] = false;
+		_snap.track_soloed[i] = false;
+	}
+	_snap.midi_muted = false;
+	_snap.midi_soloed = false;
+	if (!_impl) {
+		return;
+	}
+	try {
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]) {
+				std::shared_ptr<Route> r = _impl->tracks[i];
+				if (r->mute_control ()) {
+					_snap.track_muted[i] = r->muted ();
+				}
+				if (r->solo_control ()) {
+					_snap.track_soloed[i] = r->soloed ();
+				}
+			}
+		}
+		if (_impl->midi_track) {
+			std::shared_ptr<Route> r = _impl->midi_track;
+			if (r->mute_control ()) {
+				_snap.midi_muted = r->muted ();
+			}
+			if (r->solo_control ()) {
+				_snap.midi_soloed = r->soloed ();
+			}
+		}
+	} catch (...) {
+	}
+}
+
+/** Mute/Solo are Controllable::RealTime — applied on the process thread. */
+static bool
+wait_until (std::function<bool ()> pred, int timeout_ms = 400)
+{
+	const int step = 20;
+	for (int waited = 0; waited < timeout_ms; waited += step) {
+		if (pred ()) {
+			return true;
+		}
+		Sleep ((DWORD)step);
+	}
+	return pred ();
+}
+
+bool
+EngineHost::set_track_muted (int track, bool muted)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
+	    || !_impl->tracks[track]->mute_control ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<MuteControl> mc = _impl->tracks[track]->mute_control ();
+		_impl->session->set_control (mc, muted ? 1.0 : 0.0, Controllable::NoGroup);
+		wait_until ([&] () {
+			refresh_mute_solo_flags ();
+			return _snap.track_muted[track] == muted;
+		});
+		_snap.detail = muted ? L"track muted" : L"track unmuted";
+		return _snap.track_muted[track] == muted;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_track_muted (int track)
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	refresh_mute_solo_flags ();
+	return set_track_muted (track, !_snap.track_muted[track]);
+}
+
+bool
+EngineHost::set_track_soloed (int track, bool soloed)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
+	    || !_impl->tracks[track]->solo_control ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<SoloControl> sc = _impl->tracks[track]->solo_control ();
+		_impl->session->set_control (sc, soloed ? 1.0 : 0.0, Controllable::NoGroup);
+		wait_until ([&] () {
+			refresh_mute_solo_flags ();
+			return _snap.track_soloed[track] == soloed;
+		});
+		_snap.detail = soloed ? L"track soloed" : L"track unsoloed";
+		return _snap.track_soloed[track] == soloed;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_track_soloed (int track)
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	refresh_mute_solo_flags ();
+	return set_track_soloed (track, !_snap.track_soloed[track]);
+}
+
+bool
+EngineHost::set_midi_muted (bool muted)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	ensure_midi_track ();
+	if (!_impl->midi_track || !_impl->midi_track->mute_control ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<MuteControl> mc = _impl->midi_track->mute_control ();
+		_impl->session->set_control (mc, muted ? 1.0 : 0.0, Controllable::NoGroup);
+		wait_until ([&] () {
+			refresh_mute_solo_flags ();
+			return _snap.midi_muted == muted;
+		});
+		_snap.detail = muted ? L"MIDI muted" : L"MIDI unmuted";
+		return _snap.midi_muted == muted;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_midi_muted ()
+{
+	refresh_mute_solo_flags ();
+	return set_midi_muted (!_snap.midi_muted);
+}
+
+bool
+EngineHost::set_midi_soloed (bool soloed)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	ensure_midi_track ();
+	if (!_impl->midi_track || !_impl->midi_track->solo_control ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<SoloControl> sc = _impl->midi_track->solo_control ();
+		_impl->session->set_control (sc, soloed ? 1.0 : 0.0, Controllable::NoGroup);
+		wait_until ([&] () {
+			refresh_mute_solo_flags ();
+			return _snap.midi_soloed == soloed;
+		});
+		_snap.detail = soloed ? L"MIDI soloed" : L"MIDI unsoloed";
+		return _snap.midi_soloed == soloed;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_midi_soloed ()
+{
+	refresh_mute_solo_flags ();
+	return set_midi_soloed (!_snap.midi_soloed);
+}
+
+bool
+EngineHost::smoke_mute_solo ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-mute-solo failed — no Session";
+		return false;
+	}
+	try {
+		ensure_midi_track ();
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_impl->midi_track) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (no MIDI)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* Clear first (RT — wait for settle). */
+		set_track_muted (0, false);
+		set_track_soloed (0, false);
+		set_midi_muted (false);
+		set_midi_soloed (false);
+
+		if (!set_track_muted (0, true)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (mute Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_muted (0, false)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (unmute Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!set_track_soloed (0, true)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (solo Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_soloed (0, false)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (unsolo Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!set_midi_muted (true)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (mute MIDI)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_midi_soloed (true)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (solo MIDI)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		set_midi_muted (false);
+		set_midi_soloed (false);
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-mute-solo ok "
+		              "(Audio1 mute/solo + MIDI mute/solo)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-mute-solo ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 bool
@@ -4107,6 +4391,7 @@ EngineHost::refresh_snapshot ()
 			_snap.waves_from_session = true;
 			refresh_region_flags ();
 			refresh_record_flags ();
+			refresh_mute_solo_flags ();
 			refresh_history_flags ();
 			refresh_selection_snap ();
 			refresh_locations_snap ();
@@ -4365,6 +4650,18 @@ EngineHost::refresh_record_flags ()
 {
 }
 
+void
+EngineHost::refresh_mute_solo_flags ()
+{
+}
+
+bool
+EngineHost::set_midi_gain (float linear)
+{
+	(void)linear;
+	return false;
+}
+
 bool
 EngineHost::set_track_armed (int track, bool armed)
 {
@@ -4377,6 +4674,68 @@ bool
 EngineHost::toggle_track_armed (int track)
 {
 	(void)track;
+	return false;
+}
+
+bool
+EngineHost::set_track_muted (int track, bool muted)
+{
+	(void)track;
+	(void)muted;
+	return false;
+}
+
+bool
+EngineHost::toggle_track_muted (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::set_track_soloed (int track, bool soloed)
+{
+	(void)track;
+	(void)soloed;
+	return false;
+}
+
+bool
+EngineHost::toggle_track_soloed (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::set_midi_muted (bool muted)
+{
+	(void)muted;
+	return false;
+}
+
+bool
+EngineHost::toggle_midi_muted ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_midi_soloed (bool soloed)
+{
+	(void)soloed;
+	return false;
+}
+
+bool
+EngineHost::toggle_midi_soloed ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_mute_solo ()
+{
 	return false;
 }
 

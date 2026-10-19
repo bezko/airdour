@@ -7,7 +7,7 @@
 - Brand window (**Airdour**), DPI-aware layout
 - **Transport** — Play / Stop (+ spacebar); engine start/stop; playhead locked to content
 - **Editor** — 3 stacked wave lanes (Audio 1–3), linked zoom/pan, labels
-- **Mixer** — 3 strips with faders + **Session PeakMeter** (Dummy and WASAPI; stub only if Session fails / opted out)
+- **Mixer** — 4 strips (Audio 1–3 + MIDI 1): faders, **M/S**, rec-arm (audio), PeakMeter
 - Playhead follows Session transport when attached, else engine `processed_samples`
 - Optional **engine attach** (Dummy or WASAPI shared)
 - `--timeout N` for unattended smoke
@@ -95,6 +95,7 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 | `--smoke-midi-edit` | Add/select/delete notes + attach Reasonable Synth → master |
 | `--smoke-plugin` | Insert ACE Reverb; toggle bypass; set Blend; verify on route |
 | `--smoke-vst3` | Scan system VST3 dirs (+ `VST3_PATH`); list; insert FX on Audio 2 if found |
+| `--smoke-mute-solo` | Mute/solo Audio 1 + MIDI (Session Route; RT settle) |
 | `--smoke-perf` | Sample WASAPI callback µs vs period, DSP %, xruns, working set (`--timeout` = window) |
 | `--session DIR` | Open existing session folder after engine start |
 | `AIRDOUR_WIN_SHELL_SESSION=0` | Skip Session; stub meters; empty lanes |

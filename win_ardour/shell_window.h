@@ -37,6 +37,7 @@ class ShellWindow
 {
 public:
 	static constexpr int kTracks = 3;
+	static constexpr int kMixerStrips = 4; /* Audio 1–3 + MIDI */
 
 	ShellWindow ();
 	~ShellWindow ();
@@ -62,7 +63,8 @@ public:
 	                    bool smoke_perf = false,
 	                    const std::string& open_session_path = std::string (),
 	                    unsigned period_frames = 0,
-	                    bool smoke_vst3 = false);
+	                    bool smoke_vst3 = false,
+	                    bool smoke_mute_solo = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -124,6 +126,7 @@ private:
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
 	void sync_mixer_arm_from_engine ();
+	void sync_mixer_mute_solo_from_engine ();
 	void sync_mixer_fx_from_engine ();
 	void sync_transport_loop_from_engine ();
 	void apply_shared_view (int source_lane);
@@ -139,6 +142,8 @@ private:
 	int  hit_editor_lane (float x, float y) const;
 	int  hit_mixer_fader (float x, float y) const;
 	int  hit_mixer_arm (float x, float y) const;
+	int  hit_mixer_mute (float x, float y) const;
+	int  hit_mixer_solo (float x, float y) const;
 	int  hit_mixer_fx (float x, float y) const;
 	int  hit_mixer_fx_param (float x, float y) const;
 	void client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const;
@@ -208,5 +213,5 @@ private:
 	EngineSnapshot _engine_snap;
 	TransportBar   _transport;
 	EditorLane     _lanes[kTracks];
-	MixerStrip     _mixers[kTracks];
+	MixerStrip     _mixers[kMixerStrips];
 };
