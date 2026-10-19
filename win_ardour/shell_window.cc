@@ -196,7 +196,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_automation,
                             bool smoke_edit,
                             bool smoke_snap,
-                            bool smoke_punch)
+                            bool smoke_punch,
+                            bool smoke_tempo)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -410,6 +411,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_tempo && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_tempo ()) {
+			_smoke_failed = true;
+		} else {
+			sync_transport_tempo_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_tempo) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_perf) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
@@ -435,6 +449,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	sync_mixer_fx_from_engine ();
 	sync_transport_loop_from_engine ();
 	sync_transport_punch_from_engine ();
+	sync_transport_tempo_from_engine ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
 	if (autoplay) {
@@ -458,6 +473,13 @@ void
 ShellWindow::sync_transport_punch_from_engine ()
 {
 	_transport.set_punch_enabled (_engine_snap.punch_enabled);
+}
+
+void
+ShellWindow::sync_transport_tempo_from_engine ()
+{
+	_transport.set_tempo_bpm (_engine_snap.tempo_bpm);
+	_transport.set_count_in_enabled (_engine_snap.count_in_enabled);
 }
 
 void
@@ -924,6 +946,35 @@ ShellWindow::do_toggle_punch ()
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_transport_punch_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_toggle_count_in ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.toggle_count_in ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_transport_tempo_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_nudge_tempo (float delta)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (GetKeyState (VK_SHIFT) & 0x8000) {
+		delta *= 5.f;
+	}
+	_engine.nudge_tempo_bpm (delta);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_transport_tempo_from_engine ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
@@ -1444,6 +1495,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else {
 				do_toggle_snap ();
 			}
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'C' || wparam == 'c')) {
+			do_toggle_count_in ();
+		} else if (wparam == VK_OEM_MINUS || wparam == VK_SUBTRACT) {
+			do_nudge_tempo (-1.f);
+		} else if (wparam == VK_OEM_PLUS || wparam == VK_ADD) {
+			do_nudge_tempo (1.f);
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'O' || wparam == 'o')) {
 			prompt_open_session ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')) {
@@ -1732,6 +1789,18 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		} else {
 			do_toggle_snap ();
 		}
+		return true;
+	}
+	if (th == TransportHit::CountIn) {
+		do_toggle_count_in ();
+		return true;
+	}
+	if (th == TransportHit::TempoDown) {
+		do_nudge_tempo (-1.f);
+		return true;
+	}
+	if (th == TransportHit::TempoUp) {
+		do_nudge_tempo (1.f);
 		return true;
 	}
 
@@ -2269,6 +2338,7 @@ ShellWindow::on_tick ()
 		sync_mixer_send_from_engine ();
 		sync_transport_loop_from_engine ();
 		sync_transport_punch_from_engine ();
+		sync_transport_tempo_from_engine ();
 		apply_region_selection_to_lanes ();
 		apply_loop_to_lanes ();
 		refresh_automation_lane ();

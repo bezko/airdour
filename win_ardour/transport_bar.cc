@@ -32,6 +32,9 @@ TransportBar::TransportBar ()
 	, _split_btn ()
 	, _fade_btn ()
 	, _snap_btn ()
+	, _count_btn ()
+	, _tempo_dn_btn ()
+	, _tempo_up_btn ()
 	, _playing (false)
 	, _recording (false)
 	, _record_armed (false)
@@ -39,6 +42,8 @@ TransportBar::TransportBar ()
 	, _loop_active (false)
 	, _punch_enabled (false)
 	, _snap_enabled (false)
+	, _count_in_enabled (false)
+	, _tempo_bpm (120.f)
 {
 }
 
@@ -48,7 +53,8 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	_bounds = bounds;
 	float h = bounds.bottom - bounds.top;
 	float btn_h = h - 10.f * dpi_scale;
-	float btn_w = 42.f * dpi_scale;
+	float btn_w = 40.f * dpi_scale;
+	float narrow = 28.f * dpi_scale;
 	float y0 = bounds.top + 5.f * dpi_scale;
 	float x0 = bounds.left + 8.f * dpi_scale;
 	float gap = 3.f * dpi_scale;
@@ -66,6 +72,9 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_split_btn, x, btn_w);
 	place (_fade_btn, x, btn_w);
 	place (_snap_btn, x, btn_w);
+	place (_count_btn, x, btn_w);
+	place (_tempo_dn_btn, x, narrow);
+	place (_tempo_up_btn, x, narrow);
 	place (_import_btn, x, btn_w * 1.15f);
 	place (_save_btn, x, btn_w);
 	place (_open_btn, x, btn_w);
@@ -101,6 +110,15 @@ TransportBar::hit_test (float x, float y) const
 	}
 	if (contains (_snap_btn, x, y)) {
 		return TransportHit::Snap;
+	}
+	if (contains (_count_btn, x, y)) {
+		return TransportHit::CountIn;
+	}
+	if (contains (_tempo_dn_btn, x, y)) {
+		return TransportHit::TempoDown;
+	}
+	if (contains (_tempo_up_btn, x, y)) {
+		return TransportHit::TempoUp;
 	}
 	if (contains (_import_btn, x, y)) {
 		return TransportHit::Import;
@@ -159,24 +177,31 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_split_btn, L"Split", false);
 	draw_btn (_fade_btn, L"Fade", false);
 	draw_btn (_snap_btn, L"Snap", _snap_enabled);
+	draw_btn (_count_btn, L"Count", _count_in_enabled);
+	draw_btn (_tempo_dn_btn, L"−", false);
+	draw_btn (_tempo_up_btn, L"+", false);
 	draw_btn (_import_btn, L"Import", false);
 	draw_btn (_save_btn, L"Save", false);
 	draw_btn (_open_btn, L"Open", false);
 	draw_btn (_export_btn, L"Export", false);
 
-	wchar_t clock[96];
+	wchar_t clock[112];
 	int m = (int)(playhead_sec / 60.f);
 	float s = playhead_sec - (float)m * 60.f;
+	int bpm_i = (int)(_tempo_bpm + 0.5f);
 	if (_recording) {
-		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  RECORDING", m, s);
+		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  %d BPM  ·  RECORDING", m, s, bpm_i);
 	} else if (_loop_playing) {
-		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  LOOP", m, s);
+		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  %d BPM  ·  LOOP", m, s, bpm_i);
+	} else if (_count_in_enabled && _record_armed) {
+		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  %d BPM  ·  count-in", m, s, bpm_i);
 	} else if (_record_armed) {
-		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  rec armed", m, s);
+		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  %d BPM  ·  rec armed", m, s, bpm_i);
 	} else {
 		_snwprintf_s (clock, _TRUNCATE,
-		              _snap_enabled ? L"%02d:%05.2f  ·  snap on  G" : L"%02d:%05.2f  ·  S/F/G",
-		              m, s);
+		              _snap_enabled ? L"%02d:%05.2f  ·  %d BPM  ·  snap"
+		                            : L"%02d:%05.2f  ·  %d BPM  ·  −/+ tempo",
+		              m, s, bpm_i);
 	}
 
 	float clock_left = _export_btn.right + 8.f * dpi_scale;

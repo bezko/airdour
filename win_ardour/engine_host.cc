@@ -416,6 +416,8 @@ EngineHost::EngineHost ()
 	_snap.punch_enabled = false;
 	_snap.punch_start_sec = 0.f;
 	_snap.punch_end_sec = 0.f;
+	_snap.tempo_bpm = 120.f;
+	_snap.count_in_enabled = false;
 	_snap.marker_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
@@ -752,6 +754,8 @@ EngineHost::destroy_session ()
 	_snap.punch_enabled = false;
 	_snap.punch_start_sec = 0.f;
 	_snap.punch_end_sec = 0.f;
+	_snap.tempo_bpm = 120.f;
+	_snap.count_in_enabled = false;
 	_snap.marker_count = 0;
 	_snap.session_path.clear ();
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
@@ -4261,6 +4265,183 @@ EngineHost::toggle_punch_enabled ()
 	return set_punch_enabled (!_snap.punch_enabled);
 }
 
+void
+EngineHost::refresh_tempo_snap ()
+{
+	_snap.tempo_bpm = 120.f;
+	_snap.count_in_enabled = false;
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	try {
+		_snap.count_in_enabled = _impl->session->config.get_count_in ();
+		Temporal::TempoMap::SharedPtr tm = Temporal::TempoMap::fetch ();
+		if (tm) {
+			Temporal::TempoPoint const& tp = tm->tempo_at (Temporal::timepos_t (0));
+			double bpm = tp.quarter_notes_per_minute ();
+			if (bpm > 1.0 && bpm < 1000.0) {
+				_snap.tempo_bpm = (float)bpm;
+			}
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::set_tempo_bpm (float bpm)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (bpm < 20.f) {
+		bpm = 20.f;
+	}
+	if (bpm > 400.f) {
+		bpm = 400.f;
+	}
+	try {
+		Temporal::TempoMap::WritableSharedPtr tmap = Temporal::TempoMap::write_copy ();
+		if (!tmap) {
+			_snap.detail = L"tempo set failed — no map";
+			return false;
+		}
+		Temporal::TempoMetric const& metric = tmap->metric_at (Temporal::timepos_t (0));
+		/* Keep existing note type; set constant BPM. */
+		int note_type = metric.tempo ().note_type ();
+		if (note_type <= 0) {
+			note_type = 4;
+		}
+		tmap->change_tempo (metric.get_editable_tempo (),
+		                    Temporal::Tempo ((double)bpm, (uint8_t)note_type));
+		Temporal::TempoMap::update (tmap);
+		refresh_tempo_snap ();
+		_snap.detail = L"tempo set";
+		std::fprintf (stderr, "airdour_win_shell: tempo %.1f BPM\n", _snap.tempo_bpm);
+		std::fflush (stderr);
+		return std::fabs (_snap.tempo_bpm - bpm) < 0.6f;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: set_tempo_bpm exception: %s\n", e.what ());
+		std::fflush (stderr);
+		Temporal::TempoMap::abort_update ();
+		_snap.detail = L"tempo set failed";
+		return false;
+	} catch (...) {
+		Temporal::TempoMap::abort_update ();
+		_snap.detail = L"tempo set failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::nudge_tempo_bpm (float delta)
+{
+	float next = _snap.tempo_bpm + delta;
+	return set_tempo_bpm (next);
+}
+
+bool
+EngineHost::set_count_in (bool enable)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		_impl->session->config.set_count_in (enable);
+		refresh_tempo_snap ();
+		_snap.detail = enable ? L"count-in on — 1–2 bars before record"
+		                      : L"count-in off";
+		std::fprintf (stderr, "airdour_win_shell: count-in %s\n", enable ? "on" : "off");
+		std::fflush (stderr);
+		return enable ? _snap.count_in_enabled : !_snap.count_in_enabled;
+	} catch (...) {
+		_snap.detail = L"count-in set failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_count_in ()
+{
+	return set_count_in (!_snap.count_in_enabled);
+}
+
+bool
+EngineHost::smoke_tempo ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-tempo failed — no Session";
+		return false;
+	}
+	try {
+		/* Anchor at 120 so snap expectations are stable. */
+		if (!set_tempo_bpm (120.f) || std::fabs (_snap.tempo_bpm - 120.f) > 0.6f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (set 120 → %.1f)\n",
+			              _snap.tempo_bpm);
+			std::fflush (stderr);
+			return false;
+		}
+		set_snap_density (1);
+		set_snap_enabled (true);
+		float at120 = snap_time (0.60f);
+		if (std::fabs (at120 - 0.50f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (120 BPM snap 0.60→%.3f)\n",
+			              at120);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_tempo_bpm (60.f) || std::fabs (_snap.tempo_bpm - 60.f) > 0.6f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (set 60 → %.1f)\n",
+			              _snap.tempo_bpm);
+			std::fflush (stderr);
+			return false;
+		}
+		float at60 = snap_time (0.60f);
+		if (std::fabs (at60 - 1.00f) > 0.08f && std::fabs (at60 - 0.00f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (60 BPM snap 0.60→%.3f)\n",
+			              at60);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_tempo_bpm (140.f) || std::fabs (_snap.tempo_bpm - 140.f) > 0.6f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (set 140 → %.1f)\n",
+			              _snap.tempo_bpm);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_count_in (true) || !_snap.count_in_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (count-in on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_impl->session->config.get_count_in ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (config count-in)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_count_in (false) || _snap.count_in_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (count-in off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Restore defaults for later smokes / interactive. */
+		set_tempo_bpm (120.f);
+		set_snap_enabled (false);
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-tempo ok "
+		              "(120→%.2f 60→%.2f bpm=140 count-in)\n",
+		              at120, at60);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-tempo ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-tempo exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_punch ()
 {
@@ -6137,6 +6318,7 @@ EngineHost::refresh_snapshot ()
 			refresh_history_flags ();
 			refresh_selection_snap ();
 			refresh_locations_snap ();
+			refresh_tempo_snap ();
 			refresh_midi_snap ();
 			refresh_track_fx_snap ();
 		} else {
@@ -6235,6 +6417,8 @@ EngineHost::EngineHost ()
 	_snap.punch_enabled = false;
 	_snap.punch_start_sec = 0.f;
 	_snap.punch_end_sec = 0.f;
+	_snap.tempo_bpm = 120.f;
+	_snap.count_in_enabled = false;
 	_snap.marker_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
@@ -6942,6 +7126,39 @@ EngineHost::toggle_punch_enabled ()
 
 bool
 EngineHost::smoke_punch ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_tempo_bpm (float bpm)
+{
+	(void)bpm;
+	return false;
+}
+
+bool
+EngineHost::nudge_tempo_bpm (float delta)
+{
+	(void)delta;
+	return false;
+}
+
+bool
+EngineHost::set_count_in (bool enable)
+{
+	(void)enable;
+	return false;
+}
+
+bool
+EngineHost::toggle_count_in ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_tempo ()
 {
 	return false;
 }

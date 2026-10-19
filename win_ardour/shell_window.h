@@ -71,7 +71,8 @@ public:
 	                    bool smoke_automation = false,
 	                    bool smoke_edit = false,
 	                    bool smoke_snap = false,
-	                    bool smoke_punch = false);
+	                    bool smoke_punch = false,
+	                    bool smoke_tempo = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -147,6 +148,8 @@ private:
 	void do_cycle_snap_density ();
 	void do_toggle_loop ();
 	void do_toggle_punch ();
+	void do_toggle_count_in ();
+	void do_nudge_tempo (float delta);
 	void draw_editor_grid ();
 	void draw_punch_overlay ();
 	void do_add_marker_at_playhead ();
@@ -158,6 +161,7 @@ private:
 	void sync_mixer_fx_from_engine ();
 	void sync_transport_loop_from_engine ();
 	void sync_transport_punch_from_engine ();
+	void sync_transport_tempo_from_engine ();
 	void apply_shared_view (int source_lane);
 	void reset_shared_view ();
 	void apply_region_selection_to_lanes ();

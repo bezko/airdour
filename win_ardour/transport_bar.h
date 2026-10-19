@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Direct2D transport: Play / Stop / Rec / Loop / Punch / Mark / Split / Fade /
- * Snap / Import / Save / Open / Export.
+ * Snap / Count / Tempo± / Import / Save / Open / Export.
  */
 
 #pragma once
@@ -32,7 +32,10 @@ enum class TransportHit {
 	Mark,
 	Split,
 	Fade,
-	Snap
+	Snap,
+	CountIn,
+	TempoDown,
+	TempoUp
 };
 
 class TransportBar
@@ -63,6 +66,12 @@ public:
 	void set_snap_enabled (bool on) { _snap_enabled = on; }
 	bool snap_enabled () const { return _snap_enabled; }
 
+	void set_count_in_enabled (bool on) { _count_in_enabled = on; }
+	bool count_in_enabled () const { return _count_in_enabled; }
+
+	void set_tempo_bpm (float bpm) { _tempo_bpm = bpm; }
+	float tempo_bpm () const { return _tempo_bpm; }
+
 	TransportHit hit_test (float x, float y) const;
 
 	void draw (ID2D1RenderTarget* rt,
@@ -92,6 +101,9 @@ private:
 	D2D1_RECT_F _split_btn;
 	D2D1_RECT_F _fade_btn;
 	D2D1_RECT_F _snap_btn;
+	D2D1_RECT_F _count_btn;
+	D2D1_RECT_F _tempo_dn_btn;
+	D2D1_RECT_F _tempo_up_btn;
 	bool        _playing;
 	bool        _recording;
 	bool        _record_armed;
@@ -99,4 +111,6 @@ private:
 	bool        _loop_active;
 	bool        _punch_enabled;
 	bool        _snap_enabled;
+	bool        _count_in_enabled;
+	float       _tempo_bpm;
 };

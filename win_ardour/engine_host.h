@@ -114,6 +114,8 @@ struct EngineSnapshot {
 	static constexpr int kMaxGridLines = 96;
 	float        grid_line_sec[kMaxGridLines];
 	bool         grid_line_bar[kMaxGridLines]; /* thicker bar lines */
+	float        tempo_bpm; /* Session TempoMap BPM at t=0 (quarter-note) */
+	bool         count_in_enabled; /* Session config count-in before record roll */
 	float        transport_sec;
 	std::wstring detail;
 };
@@ -304,6 +306,21 @@ public:
 	/** Fill snapshot grid_line_* for Editor draw over [view_start, view_start+span]. */
 	void refresh_grid_lines (float view_start_sec, float view_span_sec);
 
+	/**
+	 * Set Session TempoMap BPM (quarter note) at the map origin.
+	 * Grid snap/lines follow TempoMap after update. Clamped ~20..400.
+	 */
+	bool set_tempo_bpm (float bpm);
+	/** Nudge current BPM by delta (e.g. ±1 / ±5). */
+	bool nudge_tempo_bpm (float delta);
+
+	/**
+	 * Session config count-in: when enabled, 1–2 bar click count-in before
+	 * record roll (Rec armed + Play, or punch+record). Plain Play skips it.
+	 */
+	bool set_count_in (bool enable);
+	bool toggle_count_in ();
+
 	/** Count audio regions on a track playlist (smoke / diagnostics). */
 	int track_region_count (int track) const;
 
@@ -364,6 +381,12 @@ public:
 	 * For --smoke-punch. Does not roll transport.
 	 */
 	bool smoke_punch ();
+
+	/**
+	 * Set BPM 60 then 140; verify snap beat spacing follows TempoMap;
+	 * toggle count-in; restore 120 + count-in off. For --smoke-tempo.
+	 */
+	bool smoke_tempo ();
 
 	/** Ensure a Session MidiTrack exists (creates one if needed). */
 	bool ensure_midi_track ();
@@ -479,6 +502,7 @@ private:
 	void refresh_history_flags ();
 	void refresh_selection_snap ();
 	void refresh_locations_snap ();
+	void refresh_tempo_snap ();
 	void collect_tracks ();
 	void update_session_path_snap ();
 	bool compute_export_range (int64_t* start_sample, int64_t* end_sample) const;
