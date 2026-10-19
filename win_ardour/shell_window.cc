@@ -190,7 +190,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_mute_solo,
                             bool smoke_pan,
                             bool smoke_send,
-                            bool smoke_automation)
+                            bool smoke_automation,
+                            bool smoke_edit)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -363,6 +364,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_automation) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-automation FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_edit && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_edit ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_edit) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -833,7 +847,9 @@ ShellWindow::apply_region_selection_to_lanes ()
 		_lanes[i].strip.set_selection (
 			active,
 			_engine_snap.selection_start_sec,
-			_engine_snap.selection_end_sec);
+			_engine_snap.selection_end_sec,
+			active ? _engine_snap.selection_fade_in_sec : 0.f,
+			active ? _engine_snap.selection_fade_out_sec : 0.f);
 	}
 }
 
@@ -936,6 +952,42 @@ ShellWindow::do_delete_selection ()
 	_engine_snap = _engine.snapshot ();
 	apply_region_selection_to_lanes ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_split_at_playhead ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	float t = _playhead_sec;
+	if (_engine_snap.transport_rolling) {
+		t = _engine_snap.transport_sec;
+	}
+	int track = _engine_snap.has_selection ? _engine_snap.selection_track : 0;
+	if (_engine.split_at (t, track)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_apply_crossfade ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.apply_selected_crossfade (0.08f)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
 }
 
 float
@@ -1277,6 +1329,10 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_redo ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
 			do_save_session ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
+			do_split_at_playhead ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'F' || wparam == 'f')) {
+			do_apply_crossfade ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'O' || wparam == 'o')) {
 			prompt_open_session ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')) {
@@ -1547,6 +1603,14 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		do_add_marker_at_playhead ();
 		return true;
 	}
+	if (th == TransportHit::Split) {
+		do_split_at_playhead ();
+		return true;
+	}
+	if (th == TransportHit::Fade) {
+		do_apply_crossfade ();
+		return true;
+	}
 
 	if (hit_editor_ruler (x, y) && _engine.is_linked () && _engine_snap.session_ok) {
 		float time_sec = _lanes[0].strip.time_at_x (_editor_ruler, x);
@@ -1762,6 +1826,20 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			InvalidateRect (_hwnd, nullptr, FALSE);
 			return true;
 		}
+		/* Fade handles on selected region (drag to set fade-in/out). */
+		if (_engine.is_linked () && _engine_snap.has_selection
+		    && _engine_snap.selection_track == lane) {
+			int fh = _lanes[lane].strip.hit_fade_handle (
+				_lanes[lane].bounds, x, y, _dpi_scale);
+			if (fh == 0 || fh == 1) {
+				_drag = (fh == 0) ? DragMode::FadeIn : DragMode::FadeOut;
+				_drag_index = lane;
+				SetCapture (_hwnd);
+				SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return true;
+			}
+		}
 		/* Click selects a region; drag past threshold pans the timeline. */
 		_drag = DragMode::WavePending;
 		_drag_index = lane;
@@ -1833,6 +1911,24 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 
 	if (_drag == DragMode::AutoWrite) {
 		write_automation_at (x, y);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	if ((_drag == DragMode::FadeIn || _drag == DragMode::FadeOut)
+	    && _drag_index >= 0 && _drag_index < kTracks
+	    && _engine_snap.has_selection) {
+		float t = _lanes[_drag_index].strip.time_at_x (_lanes[_drag_index].bounds, x);
+		if (_drag == DragMode::FadeIn) {
+			float len = t - _engine_snap.selection_start_sec;
+			_engine.set_selected_fade_in_sec (len);
+		} else {
+			float len = _engine_snap.selection_end_sec - t;
+			_engine.set_selected_fade_out_sec (len);
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
@@ -2154,8 +2250,8 @@ ShellWindow::draw_editor_pane ()
 			              _engine_snap.marker_count);
 		} else if (_engine_snap.has_selection) {
 			_snwprintf_s (caption, _TRUNCATE,
-			              L"%d tracks  ·  sel T%d [%.1f–%.1f]s  ·  Del · Ctrl+Z/Y",
-			              kTracks, _engine_snap.selection_track + 1,
+			              L"sel T%d [%.1f–%.1f]  ·  S=split  F=fade  Del  ·  drag handles",
+			              _engine_snap.selection_track + 1,
 			              _engine_snap.selection_start_sec, _engine_snap.selection_end_sec);
 		} else if (with_audio > 0) {
 			_snwprintf_s (caption, _TRUNCATE,

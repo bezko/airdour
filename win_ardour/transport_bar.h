@@ -1,7 +1,8 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Direct2D transport: Play / Stop / Rec / Import / Save / Open / Export / Loop / Mark.
+ * Direct2D transport: Play / Stop / Rec / Loop / Mark / Split / Fade /
+ * Import / Save / Open / Export.
  */
 
 #pragma once
@@ -27,7 +28,9 @@ enum class TransportHit {
 	Open,
 	Export,
 	Loop,
-	Mark
+	Mark,
+	Split,
+	Fade
 };
 
 class TransportBar
@@ -77,6 +80,8 @@ private:
 	D2D1_RECT_F _export_btn;
 	D2D1_RECT_F _loop_btn;
 	D2D1_RECT_F _mark_btn;
+	D2D1_RECT_F _split_btn;
+	D2D1_RECT_F _fade_btn;
 	bool        _playing;
 	bool        _recording;
 	bool        _record_armed;

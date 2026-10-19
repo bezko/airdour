@@ -68,7 +68,8 @@ public:
 	                    bool smoke_mute_solo = false,
 	                    bool smoke_pan = false,
 	                    bool smoke_send = false,
-	                    bool smoke_automation = false);
+	                    bool smoke_automation = false,
+	                    bool smoke_edit = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -83,6 +84,8 @@ private:
 		Pan, /* drag Mixer pan azimuth */
 		Send, /* drag Mixer aux send level */
 		AutoWrite, /* click/drag Editor automation lane */
+		FadeIn, /* drag selection fade-in handle */
+		FadeOut, /* drag selection fade-out handle */
 		MidiDraw /* click/drag on MIDI lane to create a note */
 	};
 
@@ -132,6 +135,8 @@ private:
 	void do_undo ();
 	void do_redo ();
 	void do_delete_selection ();
+	void do_split_at_playhead ();
+	void do_apply_crossfade ();
 	void do_toggle_loop ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();

@@ -28,6 +28,8 @@ TransportBar::TransportBar ()
 	, _export_btn ()
 	, _loop_btn ()
 	, _mark_btn ()
+	, _split_btn ()
+	, _fade_btn ()
 	, _playing (false)
 	, _recording (false)
 	, _record_armed (false)
@@ -56,6 +58,8 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_rec_btn, x, btn_w);
 	place (_loop_btn, x, btn_w);
 	place (_mark_btn, x, btn_w);
+	place (_split_btn, x, btn_w);
+	place (_fade_btn, x, btn_w);
 	place (_import_btn, x, btn_w * 1.15f);
 	place (_save_btn, x, btn_w);
 	place (_open_btn, x, btn_w);
@@ -79,6 +83,12 @@ TransportBar::hit_test (float x, float y) const
 	}
 	if (contains (_mark_btn, x, y)) {
 		return TransportHit::Mark;
+	}
+	if (contains (_split_btn, x, y)) {
+		return TransportHit::Split;
+	}
+	if (contains (_fade_btn, x, y)) {
+		return TransportHit::Fade;
 	}
 	if (contains (_import_btn, x, y)) {
 		return TransportHit::Import;
@@ -133,6 +143,8 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_rec_btn, L"Rec", _recording || _record_armed);
 	draw_btn (_loop_btn, L"Loop", _loop_playing || _loop_active);
 	draw_btn (_mark_btn, L"Mark", false);
+	draw_btn (_split_btn, L"Split", false);
+	draw_btn (_fade_btn, L"Fade", false);
 	draw_btn (_import_btn, L"Import", false);
 	draw_btn (_save_btn, L"Save", false);
 	draw_btn (_open_btn, L"Open", false);
@@ -148,7 +160,7 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	} else if (_record_armed) {
 		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  rec armed", m, s);
 	} else {
-		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  [ ] loop  M mark", m, s);
+		_snwprintf_s (clock, _TRUNCATE, L"%02d:%05.2f  ·  S split  F fade", m, s);
 	}
 
 	float clock_left = _export_btn.right + 8.f * dpi_scale;

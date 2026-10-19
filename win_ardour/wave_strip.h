@@ -68,7 +68,11 @@ public:
 	void sync_view_from (const WaveStrip& other);
 
 	/** Absolute-time selection highlight (seconds); inactive clears. */
-	void set_selection (bool active, float start_sec, float end_sec);
+	void set_selection (bool active, float start_sec, float end_sec,
+	                    float fade_in_sec = 0.f, float fade_out_sec = 0.f);
+
+	/** Hit-test fade handles on selection; returns -1 none, 0=in, 1=out. */
+	int hit_fade_handle (const D2D1_RECT_F& bounds, float x, float y, float dpi_scale) const;
 
 	/** Absolute-time loop range overlay; inactive clears. */
 	void set_loop_range (bool active, float start_sec, float end_sec);
@@ -102,6 +106,8 @@ private:
 	bool               _sel_active;
 	float              _sel_start_sec;
 	float              _sel_end_sec;
+	float              _sel_fade_in_sec;
+	float              _sel_fade_out_sec;
 	bool               _loop_active;
 	float              _loop_start_sec;
 	float              _loop_end_sec;

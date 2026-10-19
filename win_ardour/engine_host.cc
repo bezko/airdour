@@ -75,6 +75,7 @@
 #include "pbd/mutex.h"
 #include "pbd/property_list.h"
 #include "pbd/rwlock.h"
+#include "pbd/stateful_diff_command.h"
 
 #include <glib.h>
 #include <glibmm/fileutils.h>
@@ -397,6 +398,8 @@ EngineHost::EngineHost ()
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
 	_snap.selection_end_sec = 0.f;
+	_snap.selection_fade_in_sec = 0.f;
+	_snap.selection_fade_out_sec = 0.f;
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -2753,6 +2756,8 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
 	_snap.selection_end_sec = 0.f;
+	_snap.selection_fade_in_sec = 0.f;
+	_snap.selection_fade_out_sec = 0.f;
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -2781,6 +2786,11 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_track = _impl->selected_track;
 	_snap.selection_start_sec = (float)start / (float)sr;
 	_snap.selection_end_sec = (float)(start + len) / (float)sr;
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (ar) {
+		_snap.selection_fade_in_sec = (float)ar->fade_in_length ().samples () / (float)sr;
+		_snap.selection_fade_out_sec = (float)ar->fade_out_length ().samples () / (float)sr;
+	}
 }
 
 bool
@@ -2916,6 +2926,8 @@ EngineHost::clear_region_selection ()
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
 	_snap.selection_end_sec = 0.f;
+	_snap.selection_fade_in_sec = 0.f;
+	_snap.selection_fade_out_sec = 0.f;
 }
 
 bool
@@ -2959,6 +2971,327 @@ EngineHost::delete_selected_region ()
 		return false;
 	} catch (...) {
 		_snap.detail = L"delete unknown failure";
+		return false;
+	}
+}
+
+int
+EngineHost::track_region_count (int track) const
+{
+	if (!_impl || !_impl->session || track < 0 || track >= (int)_impl->tracks.size ()
+	    || !_impl->tracks[track]) {
+		return 0;
+	}
+	try {
+		std::shared_ptr<Playlist> pl = _impl->tracks[track]->playlist ();
+		if (!pl) {
+			return 0;
+		}
+		std::shared_ptr<RegionList> rl = pl->region_list ();
+		return rl ? (int)rl->size () : 0;
+	} catch (...) {
+		return 0;
+	}
+}
+
+bool
+EngineHost::split_at (float time_sec, int track)
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"split failed — no Session";
+		return false;
+	}
+	if (track < 0) {
+		track = _impl->selected_track >= 0 ? _impl->selected_track : 0;
+	}
+	if (track < 0 || track >= EngineSnapshot::kMeters
+	    || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"split failed — no track";
+		return false;
+	}
+	try {
+		std::shared_ptr<Playlist> pl = _impl->tracks[track]->playlist ();
+		if (!pl) {
+			_snap.detail = L"split failed — no playlist";
+			return false;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		if (time_sec < 0.f) {
+			time_sec = 0.f;
+		}
+		int before = track_region_count (track);
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		_impl->session->begin_reversible_command ("split");
+		pl->clear_changes ();
+		pl->clear_owned_changes ();
+		pl->split (timepos_t (sample));
+		pl->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+		refresh_region_flags ();
+		refresh_history_flags ();
+		refresh_selection_snap ();
+		int after = track_region_count (track);
+		_snap.detail = L"split at playhead — peaks refresh";
+		std::fprintf (stderr,
+		              "airdour_win_shell: split track=%d @%.2fs regions %d→%d\n",
+		              track, time_sec, before, after);
+		std::fflush (stderr);
+		return after >= before;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: split exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"split exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"split unknown failure";
+		return false;
+	}
+}
+
+bool
+EngineHost::split_at_playhead (int track)
+{
+	float t = _snap.transport_sec;
+	if (t < 0.f) {
+		t = 0.f;
+	}
+	return split_at (t, track);
+}
+
+bool
+EngineHost::set_selected_fade_in_sec (float sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (!ar) {
+		_snap.detail = L"fade-in — select an audio region";
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		sec = std::max (0.f, sec);
+		samplecnt_t samples = (samplecnt_t)std::llround ((double)sec * (double)sr);
+		samplecnt_t max_len = ar->length_samples () / 2;
+		if (samples > max_len) {
+			samples = max_len;
+		}
+		_impl->session->begin_reversible_command ("fade in");
+		ar->clear_changes ();
+		ar->set_fade_in_active (true);
+		ar->set_fade_in (FadeLinear, samples);
+		_impl->session->add_command (new StatefulDiffCommand (ar));
+		_impl->session->commit_reversible_command ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"fade-in set";
+		return true;
+	} catch (...) {
+		_snap.detail = L"fade-in failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::set_selected_fade_out_sec (float sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (!ar) {
+		_snap.detail = L"fade-out — select an audio region";
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		sec = std::max (0.f, sec);
+		samplecnt_t samples = (samplecnt_t)std::llround ((double)sec * (double)sr);
+		samplecnt_t max_len = ar->length_samples () / 2;
+		if (samples > max_len) {
+			samples = max_len;
+		}
+		_impl->session->begin_reversible_command ("fade out");
+		ar->clear_changes ();
+		ar->set_fade_out_active (true);
+		ar->set_fade_out (FadeLinear, samples);
+		_impl->session->add_command (new StatefulDiffCommand (ar));
+		_impl->session->commit_reversible_command ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"fade-out set";
+		return true;
+	} catch (...) {
+		_snap.detail = L"fade-out failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::apply_selected_crossfade (float length_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	int track = _impl->selected_track;
+	if (!ar || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"crossfade — select an audio region";
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		length_sec = std::max (0.01f, std::min (0.5f, length_sec));
+		samplecnt_t fade_samp = (samplecnt_t)std::llround ((double)length_sec * (double)sr);
+		samplecnt_t half = ar->length_samples () / 2;
+		if (fade_samp > half) {
+			fade_samp = std::max ((samplecnt_t)1, half);
+		}
+
+		std::shared_ptr<Playlist> pl = ar->playlist ();
+		if (!pl) {
+			pl = _impl->tracks[track]->playlist ();
+		}
+		std::shared_ptr<AudioRegion> neighbor;
+		if (pl) {
+			/* Prefer region that starts at/after our end (next clip). */
+			std::shared_ptr<Region> next = pl->find_next_region (ar->end_position (), Start, 1);
+			if (!next) {
+				next = pl->find_next_region (ar->position (), Start, -1);
+			}
+			if (next && next != region) {
+				neighbor = std::dynamic_pointer_cast<AudioRegion> (next);
+			}
+		}
+
+		_impl->session->begin_reversible_command ("crossfade / fades");
+		ar->clear_changes ();
+		ar->set_fade_in_active (true);
+		ar->set_fade_out_active (true);
+		ar->set_fade_in (FadeLinear, fade_samp);
+		ar->set_fade_out (FadeLinear, fade_samp);
+		_impl->session->add_command (new StatefulDiffCommand (ar));
+
+		if (neighbor) {
+			samplecnt_t nhalf = neighbor->length_samples () / 2;
+			samplecnt_t nf = fade_samp;
+			if (nf > nhalf) {
+				nf = std::max ((samplecnt_t)1, nhalf);
+			}
+			neighbor->clear_changes ();
+			/* If neighbor is after us, give it fade-in; if before, fade-out. */
+			if (neighbor->position_sample () >= ar->last_sample ()) {
+				neighbor->set_fade_in_active (true);
+				neighbor->set_fade_in (FadeLinear, nf);
+			} else {
+				neighbor->set_fade_out_active (true);
+				neighbor->set_fade_out (FadeLinear, nf);
+			}
+			_impl->session->add_command (new StatefulDiffCommand (neighbor));
+		}
+		_impl->session->commit_reversible_command ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+		_snap.detail = neighbor ? L"crossfade fades applied" : L"region fades applied";
+		std::fprintf (stderr,
+		              "airdour_win_shell: fades %.0fms on selection%s\n",
+		              length_sec * 1000.f, neighbor ? " + neighbor" : "");
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: crossfade exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"crossfade exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"crossfade failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_edit ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-edit failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!import_test_tone (0, 220.f, 3.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (import)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		int n0 = track_region_count (0);
+		if (n0 < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (no regions after import)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!split_at (1.0f, 0)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (split)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		int n1 = track_region_count (0);
+		if (n1 < n0 + 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (regions %d→%d)\n",
+			              n0, n1);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!select_region_at (0, 0.5f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (select left)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!apply_selected_crossfade (0.08f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (crossfade)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.selection_fade_out_sec < 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (fade_out=%.3f)\n",
+			              _snap.selection_fade_out_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-edit ok (split %d→%d fade_out=%.0fms)\n",
+		              n0, n1, _snap.selection_fade_out_sec * 1000.f);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-edit ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-edit exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
 		return false;
 	}
 }
@@ -5103,6 +5436,8 @@ EngineHost::EngineHost ()
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
 	_snap.selection_end_sec = 0.f;
+	_snap.selection_fade_in_sec = 0.f;
+	_snap.selection_fade_out_sec = 0.f;
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -5594,6 +5929,55 @@ EngineHost::clear_region_selection ()
 
 bool
 EngineHost::delete_selected_region ()
+{
+	return false;
+}
+
+bool
+EngineHost::split_at (float time_sec, int track)
+{
+	(void)time_sec;
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::split_at_playhead (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::set_selected_fade_in_sec (float sec)
+{
+	(void)sec;
+	return false;
+}
+
+bool
+EngineHost::set_selected_fade_out_sec (float sec)
+{
+	(void)sec;
+	return false;
+}
+
+bool
+EngineHost::apply_selected_crossfade (float length_sec)
+{
+	(void)length_sec;
+	return false;
+}
+
+int
+EngineHost::track_region_count (int track) const
+{
+	(void)track;
+	return 0;
+}
+
+bool
+EngineHost::smoke_edit ()
 {
 	return false;
 }

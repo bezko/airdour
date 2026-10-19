@@ -18,6 +18,8 @@ WaveStrip::WaveStrip ()
 	, _sel_active (false)
 	, _sel_start_sec (0.f)
 	, _sel_end_sec (0.f)
+	, _sel_fade_in_sec (0.f)
+	, _sel_fade_out_sec (0.f)
 	, _loop_active (false)
 	, _loop_start_sec (0.f)
 	, _loop_end_sec (0.f)
@@ -85,7 +87,8 @@ WaveStrip::sync_view_from (const WaveStrip& other)
 }
 
 void
-WaveStrip::set_selection (bool active, float start_sec, float end_sec)
+WaveStrip::set_selection (bool active, float start_sec, float end_sec,
+                          float fade_in_sec, float fade_out_sec)
 {
 	_sel_active = active;
 	if (end_sec < start_sec) {
@@ -95,6 +98,49 @@ WaveStrip::set_selection (bool active, float start_sec, float end_sec)
 	}
 	_sel_start_sec = start_sec;
 	_sel_end_sec = end_sec;
+	_sel_fade_in_sec = std::max (0.f, fade_in_sec);
+	_sel_fade_out_sec = std::max (0.f, fade_out_sec);
+}
+
+int
+WaveStrip::hit_fade_handle (const D2D1_RECT_F& bounds, float x, float y, float dpi_scale) const
+{
+	if (!_sel_active || !_has_regions) {
+		return -1;
+	}
+	float w = bounds.right - bounds.left;
+	float h = bounds.bottom - bounds.top;
+	if (w < 8.f || h < 8.f) {
+		return -1;
+	}
+	float span = std::max (0.001f, _view_span_sec);
+	float pad = std::max (6.f, 8.f * dpi_scale);
+	if (_sel_fade_in_sec > 0.001f || true) {
+		float n = (_sel_start_sec + std::max (0.02f, _sel_fade_in_sec) - _view_start_sec) / span;
+		float hx = bounds.left + std::max (0.f, std::min (1.f, n)) * w;
+		if (std::fabs (x - hx) <= pad && y >= bounds.top && y <= bounds.bottom) {
+			return 0;
+		}
+		/* Also hit near selection start. */
+		float ns = (_sel_start_sec - _view_start_sec) / span;
+		float hs = bounds.left + std::max (0.f, std::min (1.f, ns)) * w;
+		if (std::fabs (x - hs) <= pad && y >= bounds.top && y <= bounds.bottom) {
+			return 0;
+		}
+	}
+	{
+		float n = (_sel_end_sec - std::max (0.02f, _sel_fade_out_sec) - _view_start_sec) / span;
+		float hx = bounds.left + std::max (0.f, std::min (1.f, n)) * w;
+		if (std::fabs (x - hx) <= pad && y >= bounds.top && y <= bounds.bottom) {
+			return 1;
+		}
+		float ne = (_sel_end_sec - _view_start_sec) / span;
+		float he = bounds.left + std::max (0.f, std::min (1.f, ne)) * w;
+		if (std::fabs (x - he) <= pad && y >= bounds.top && y <= bounds.bottom) {
+			return 1;
+		}
+	}
+	return -1;
 }
 
 void
@@ -253,6 +299,56 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 				D2D1::RectF (bounds.left + n1 * w - edge, bounds.top,
 				             bounds.left + n1 * w, bounds.bottom),
 				selection_brush);
+
+			/* Fade wedges — honest affordance for fade in/out handles. */
+			float region_len = std::max (0.001f, _sel_end_sec - _sel_start_sec);
+			float fi = std::min (_sel_fade_in_sec, region_len * 0.49f);
+			float fo = std::min (_sel_fade_out_sec, region_len * 0.49f);
+			selection_brush->SetOpacity (0.45f);
+			if (fi > 0.001f) {
+				float nf = (_sel_start_sec + fi - _view_start_sec) / span;
+				nf = std::max (0.f, std::min (1.f, nf));
+				ID2D1PathGeometry* geo = nullptr;
+				ID2D1Factory* fac = nullptr;
+				rt->GetFactory (&fac);
+				if (fac && SUCCEEDED (fac->CreatePathGeometry (&geo)) && geo) {
+					ID2D1GeometrySink* sink = nullptr;
+					if (SUCCEEDED (geo->Open (&sink)) && sink) {
+						sink->BeginFigure (
+							D2D1::Point2F (bounds.left + n0 * w, bounds.bottom),
+							D2D1_FIGURE_BEGIN_FILLED);
+						sink->AddLine (D2D1::Point2F (bounds.left + nf * w, bounds.top));
+						sink->AddLine (D2D1::Point2F (bounds.left + nf * w, bounds.bottom));
+						sink->EndFigure (D2D1_FIGURE_END_CLOSED);
+						sink->Close ();
+						sink->Release ();
+						rt->FillGeometry (geo, selection_brush);
+					}
+					geo->Release ();
+				}
+			}
+			if (fo > 0.001f) {
+				float nf = (_sel_end_sec - fo - _view_start_sec) / span;
+				nf = std::max (0.f, std::min (1.f, nf));
+				ID2D1PathGeometry* geo = nullptr;
+				ID2D1Factory* fac = nullptr;
+				rt->GetFactory (&fac);
+				if (fac && SUCCEEDED (fac->CreatePathGeometry (&geo)) && geo) {
+					ID2D1GeometrySink* sink = nullptr;
+					if (SUCCEEDED (geo->Open (&sink)) && sink) {
+						sink->BeginFigure (
+							D2D1::Point2F (bounds.left + n1 * w, bounds.bottom),
+							D2D1_FIGURE_BEGIN_FILLED);
+						sink->AddLine (D2D1::Point2F (bounds.left + nf * w, bounds.top));
+						sink->AddLine (D2D1::Point2F (bounds.left + nf * w, bounds.bottom));
+						sink->EndFigure (D2D1_FIGURE_END_CLOSED);
+						sink->Close ();
+						sink->Release ();
+						rt->FillGeometry (geo, selection_brush);
+					}
+					geo->Release ();
+				}
+			}
 			selection_brush->SetOpacity (1.f);
 		}
 	}

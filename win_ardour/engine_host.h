@@ -52,6 +52,8 @@ struct EngineSnapshot {
 	int          selection_track; /* 0..kMeters-1, or -1 */
 	float        selection_start_sec;
 	float        selection_end_sec;
+	float        selection_fade_in_sec; /* AudioRegion fade-in length */
+	float        selection_fade_out_sec;
 	bool         loop_active; /* auto-loop Location exists with positive length */
 	bool         loop_playing; /* Session get_play_loop() */
 	float        loop_start_sec;
@@ -255,6 +257,29 @@ public:
 
 	/** Remove selected region via reversible command; peaks refresh on next poll. */
 	bool delete_selected_region ();
+
+	/** Split playlist region(s) at time_sec on track (−1 = selection track or 0). */
+	bool split_at (float time_sec, int track = -1);
+	/** Split at current transport playhead. */
+	bool split_at_playhead (int track = -1);
+
+	/** Set fade-in/out length (seconds) on selected AudioRegion; activates fades. */
+	bool set_selected_fade_in_sec (float sec);
+	bool set_selected_fade_out_sec (float sec);
+	/**
+	 * Apply ~80 ms fades on selection; if an adjacent region exists, set
+	 * complementary fade so the abut/overlap reads as a crossfade.
+	 */
+	bool apply_selected_crossfade (float length_sec = 0.08f);
+
+	/** Count audio regions on a track playlist (smoke / diagnostics). */
+	int track_region_count (int track) const;
+
+	/**
+	 * Import tone → split @1s → crossfade → verify region count + fades.
+	 * For --smoke-edit.
+	 */
+	bool smoke_edit ();
 
 	/**
 	 * Import a test tone, undo it (regions gone), redo (regions back), undo again.
