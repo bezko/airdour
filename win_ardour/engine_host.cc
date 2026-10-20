@@ -10803,6 +10803,100 @@ EngineHost::toggle_track_fx_bypass (int track)
 }
 
 bool
+EngineHost::set_all_fx_bypassed (bool bypassed)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		collect_tracks ();
+		insert_track_fx (0);
+		insert_track_comp (1);
+		insert_track_eq (2);
+		insert_track_delay (3);
+		insert_track_limiter (4);
+		insert_track_gate (5);
+
+		bool ok = true;
+		ok = set_track_fx_bypassed (0, bypassed) && ok;
+		ok = set_track_comp_bypassed (1, bypassed) && ok;
+		ok = set_track_eq_bypassed (2, bypassed) && ok;
+		ok = set_track_delay_bypassed (3, bypassed) && ok;
+		ok = set_track_limiter_bypassed (4, bypassed) && ok;
+		ok = set_track_gate_bypassed (5, bypassed) && ok;
+
+		const bool want = bypassed;
+		if (_snap.track_fx_bypassed != want || _snap.track_comp_bypassed != want
+		    || _snap.track_eq_bypassed != want || _snap.track_delay_bypassed != want
+		    || _snap.track_limiter_bypassed != want || _snap.track_gate_bypassed != want) {
+			ok = false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: all FX bypass=%d (%s)\n",
+		              bypassed ? 1 : 0, ok ? "ok" : "partial");
+		std::fflush (stderr);
+		_snap.detail = bypassed ? L"all FX bypassed" : L"all FX active";
+		return ok;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: set_all_fx_bypassed: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_fx_activate_all ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-fx-activate-all failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if ((int)_impl->tracks.size () < 6) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all FAILED (need 6 audio)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_all_fx_bypassed (true)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all FAILED (bypass)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_snap.track_fx_bypassed || !_snap.track_comp_bypassed
+		    || !_snap.track_eq_bypassed || !_snap.track_delay_bypassed
+		    || !_snap.track_limiter_bypassed || !_snap.track_gate_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all FAILED (bypass flags)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_all_fx_bypassed (false)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all FAILED (activate)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_fx_bypassed || _snap.track_comp_bypassed
+		    || _snap.track_eq_bypassed || _snap.track_delay_bypassed
+		    || _snap.track_limiter_bypassed || _snap.track_gate_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all FAILED (still bypassed)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-fx-activate-all ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::set_track_fx_param (int track, float value_0_1)
 {
 	if (!_impl || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
@@ -19327,6 +19421,19 @@ EngineHost::set_track_fx_bypassed (int track, bool bypassed)
 {
 	(void)track;
 	(void)bypassed;
+	return false;
+}
+
+bool
+EngineHost::set_all_fx_bypassed (bool bypassed)
+{
+	(void)bypassed;
+	return false;
+}
+
+bool
+EngineHost::smoke_fx_activate_all ()
+{
 	return false;
 }
 

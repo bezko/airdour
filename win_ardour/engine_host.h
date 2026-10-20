@@ -883,6 +883,13 @@ public:
 	/** Toggle Processor activate/deactivate (hard bypass) on Audio FX insert. */
 	bool toggle_track_fx_bypass (int track = 0);
 	bool set_track_fx_bypassed (int track, bool bypassed);
+	/**
+	 * Bypass or activate every shell ACE insert (Reverb…Gate).
+	 * For Alt+Shift+B activate-all / --smoke-fx-activate-all.
+	 */
+	bool set_all_fx_bypassed (bool bypassed);
+	/** Bypass all → activate all → verify none bypassed. */
+	bool smoke_fx_activate_all ();
 
 	/**
 	 * Set ACE Reverb Blend (wet mix) 0..1 via PluginInsert AutomationControl.
