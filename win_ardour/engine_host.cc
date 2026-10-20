@@ -613,6 +613,7 @@ EngineHost::EngineHost ()
 	_snap.monitor_dim = false;
 	_snap.monitor_mono = false;
 	_snap.monitor_cut = false;
+	_snap.monitor_solo_boost_db = 0.f;
 	_snap.transport_speed = 0.f;
 	_snap.bbt_bars = 1;
 	_snap.bbt_beats = 1;
@@ -8820,6 +8821,7 @@ EngineHost::refresh_monitor_flags ()
 	_snap.monitor_dim = false;
 	_snap.monitor_mono = false;
 	_snap.monitor_cut = false;
+	_snap.monitor_solo_boost_db = 0.f;
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -8833,6 +8835,11 @@ EngineHost::refresh_monitor_flags ()
 		_snap.monitor_dim = mp->dim_all ();
 		_snap.monitor_mono = mp->mono ();
 		_snap.monitor_cut = mp->cut_all ();
+		_snap.monitor_solo_boost_db = accurate_coefficient_to_dB (
+			std::max (0.0001f, (float)mp->solo_boost_level ()));
+		if (_snap.monitor_solo_boost_db < 0.f) {
+			_snap.monitor_solo_boost_db = 0.f;
+		}
 	} catch (...) {
 	}
 }
@@ -8956,6 +8963,58 @@ EngineHost::toggle_monitor_cut ()
 }
 
 bool
+EngineHost::set_monitor_solo_boost_db (float db)
+{
+	if (!ensure_monitor_section ()) {
+		return false;
+	}
+	try {
+		float d = db;
+		if (d < 0.f) {
+			d = 0.f;
+		}
+		if (d > 10.f) {
+			d = 10.f;
+		}
+		std::shared_ptr<MonitorProcessor> mp =
+			_impl->session->monitor_out ()->monitor_control ();
+		float coeff = dB_to_coefficient (d);
+		if (mp->solo_boost_control ()) {
+			mp->solo_boost_control ()->set_value (
+				(double)coeff, Controllable::NoGroup);
+		}
+		refresh_monitor_flags ();
+		std::fprintf (stderr, "airdour_win_shell: monitor solo-boost=%.1f dB\n",
+		              _snap.monitor_solo_boost_db);
+		std::fflush (stderr);
+		_snap.detail = L"monitor solo boost";
+		return std::fabs (_snap.monitor_solo_boost_db - d) < 0.6f;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: solo-boost: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::cycle_monitor_solo_boost ()
+{
+	refresh_monitor_flags ();
+	float cur = _snap.monitor_solo_boost_db;
+	float next = 0.f;
+	if (cur < 1.5f) {
+		next = 3.f;
+	} else if (cur < 4.5f) {
+		next = 6.f;
+	} else {
+		next = 0.f;
+	}
+	return set_monitor_solo_boost_db (next);
+}
+
+bool
 EngineHost::smoke_monitor ()
 {
 	if (!_impl || !_impl->session) {
@@ -8996,6 +9055,65 @@ EngineHost::smoke_monitor ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-monitor exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_solo_boost ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-solo-boost failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_monitor_section ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-boost FAILED (ensure)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_monitor_solo_boost_db (0.f)
+		    || std::fabs (_snap.monitor_solo_boost_db) > 0.6f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-solo-boost FAILED (0 got=%.1f)\n",
+			              _snap.monitor_solo_boost_db);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_monitor_solo_boost_db (3.f)
+		    || std::fabs (_snap.monitor_solo_boost_db - 3.f) > 0.6f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-solo-boost FAILED (+3 got=%.1f)\n",
+			              _snap.monitor_solo_boost_db);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_monitor_solo_boost_db (6.f)
+		    || std::fabs (_snap.monitor_solo_boost_db - 6.f) > 0.6f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-solo-boost FAILED (+6 got=%.1f)\n",
+			              _snap.monitor_solo_boost_db);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_monitor_solo_boost_db (0.f)
+		    || std::fabs (_snap.monitor_solo_boost_db) > 0.6f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-solo-boost FAILED (restore got=%.1f)\n",
+			              _snap.monitor_solo_boost_db);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-boost ok (0/+3/+6/0)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-solo-boost ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-boost exception: %s\n",
+		              e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17580,6 +17698,7 @@ EngineHost::EngineHost ()
 	_snap.monitor_dim = false;
 	_snap.monitor_mono = false;
 	_snap.monitor_cut = false;
+	_snap.monitor_solo_boost_db = 0.f;
 	_snap.transport_speed = 0.f;
 	_snap.bbt_bars = 1;
 	_snap.bbt_beats = 1;
@@ -19200,6 +19319,25 @@ EngineHost::toggle_monitor_cut ()
 
 bool
 EngineHost::smoke_monitor ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_monitor_solo_boost_db (float db)
+{
+	(void)db;
+	return false;
+}
+
+bool
+EngineHost::cycle_monitor_solo_boost ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_solo_boost ()
 {
 	return false;
 }

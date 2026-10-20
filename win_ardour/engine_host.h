@@ -215,6 +215,7 @@ struct EngineSnapshot {
 	bool         monitor_dim; /* MonitorProcessor::dim_all */
 	bool         monitor_mono;
 	bool         monitor_cut; /* cut_all = monitor mute */
+	float        monitor_solo_boost_db; /* solo_boost_level 0..+10 dB (default 0) */
 	float        transport_sec;
 	float        transport_speed; /* Session actual_speed (−N..+N); 1 = play */
 	int          bbt_bars; /* TempoMap BBT at playhead (1-based) */
@@ -856,11 +857,17 @@ public:
 	bool toggle_monitor_mono ();
 	bool set_monitor_cut (bool enable); /* mute / cut_all */
 	bool toggle_monitor_cut ();
+	/** Solo-boost dB (0..+10). For Boost click / Alt+Shift+K. */
+	bool set_monitor_solo_boost_db (float db);
+	/** Cycle 0 → +3 → +6 → 0. */
+	bool cycle_monitor_solo_boost ();
 
 	/**
 	 * Ensure monitor; dim→mono→cut on then off. For --smoke-monitor.
 	 */
 	bool smoke_monitor ();
+	/** 0 → +3 → +6 → restore 0. For --smoke-solo-boost. */
+	bool smoke_solo_boost ();
 
 	/** Refresh BBT + timecode clock fields from Session transport. */
 	void refresh_clock_snap ();

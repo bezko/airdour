@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_solo_boost)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -874,6 +875,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_monitor) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-monitor FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_solo_boost && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_solo_boost ()) {
+			_smoke_failed = true;
+		} else {
+			sync_monitor_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_solo_boost) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-boost FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2404,6 +2418,7 @@ ShellWindow::sync_monitor_from_engine ()
 	_monitor.set_dim (_engine_snap.monitor_dim);
 	_monitor.set_mono (_engine_snap.monitor_mono);
 	_monitor.set_mute (_engine_snap.monitor_cut);
+	_monitor.set_solo_boost_db (_engine_snap.monitor_solo_boost_db);
 }
 
 void
@@ -2439,6 +2454,19 @@ ShellWindow::do_toggle_monitor_cut ()
 		return;
 	}
 	_engine.toggle_monitor_cut ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_monitor_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_cycle_monitor_solo_boost ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.cycle_monitor_solo_boost ();
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_monitor_from_engine ();
@@ -3740,7 +3768,15 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_transpose_midi_notes (st);
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'C' || wparam == 'c')) {
 			do_toggle_count_in ();
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'K' || wparam == 'k')) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'K' || wparam == 'k')) {
+			/* Alt+Shift+K — cycle monitor solo boost 0/+3/+6. */
+			do_cycle_monitor_solo_boost ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'K' || wparam == 'k')) {
 			do_toggle_click ();
 		} else if (wparam == VK_OEM_MINUS || wparam == VK_SUBTRACT) {
 			do_nudge_tempo (-1.f);
@@ -4565,6 +4601,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (mh == MonitorHit::Mute) {
 		do_toggle_monitor_cut ();
+		return true;
+	}
+	if (mh == MonitorHit::Boost) {
+		do_cycle_monitor_solo_boost ();
 		return true;
 	}
 
@@ -6307,6 +6347,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
+		{ L"Alt+Shift+K / Boost", L"Cycle monitor solo boost 0/+3/+6 dB" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
 		{ L"Home / 0", L"Follow transport (reset view)" },
