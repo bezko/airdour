@@ -3,6 +3,7 @@
  */
 
 #include "spectrum_panel.h"
+#include "cairo_wave_blit.h"
 
 #include <algorithm>
 #include <cmath>
@@ -106,16 +107,25 @@ SpectrumPanel::draw (ID2D1RenderTarget* rt,
 		return;
 	}
 
-	const float gap = 1.f * dpi_scale;
-	const float bar_w = (plot_w - gap * (float)(kBands - 1)) / (float)kBands;
-	for (int i = 0; i < kBands; ++i) {
-		float h = _levels[i] * plot_h;
-		if (h < 1.f * dpi_scale && _levels[i] > 0.01f) {
-			h = 1.f * dpi_scale;
+	D2D1_RECT_F plot = D2D1::RectF (plot_l, plot_t, plot_r, plot_b);
+	bool cairo_ok = false;
+	if (CairoWaveBlit::available ()) {
+		cairo_ok = CairoWaveBlit::blit_bars (
+			rt, plot, _levels, (size_t)kBands, dpi_scale,
+			0.12f, 0.86f, 0.74f, 0.95f);
+	}
+	if (!cairo_ok) {
+		const float gap = 1.f * dpi_scale;
+		const float bar_w = (plot_w - gap * (float)(kBands - 1)) / (float)kBands;
+		for (int i = 0; i < kBands; ++i) {
+			float h = _levels[i] * plot_h;
+			if (h < 1.f * dpi_scale && _levels[i] > 0.01f) {
+				h = 1.f * dpi_scale;
+			}
+			float x0 = plot_l + (float)i * (bar_w + gap);
+			D2D1_RECT_F bar = D2D1::RectF (x0, plot_b - h, x0 + bar_w, plot_b);
+			rt->FillRectangle (bar, accent);
 		}
-		float x0 = plot_l + (float)i * (bar_w + gap);
-		D2D1_RECT_F bar = D2D1::RectF (x0, plot_b - h, x0 + bar_w, plot_b);
-		rt->FillRectangle (bar, accent);
 	}
 
 	if (body && fmt) {

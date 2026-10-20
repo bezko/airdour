@@ -90,6 +90,16 @@ public:
 	                             float dpi_scale);
 
 	/**
+	 * Spectrum / meter bars from levels 0..1 (left→right, bottom-aligned).
+	 */
+	static bool blit_bars (ID2D1RenderTarget* rt,
+	                       const D2D1_RECT_F& dest,
+	                       const float* levels_0_1,
+	                       size_t n,
+	                       float dpi_scale,
+	                       float r, float g, float b, float a);
+
+	/**
 	 * Headless smoke: peaks + curve + fades + notes ink; no HWND / GTK.
 	 * For --smoke-cairo-wave.
 	 */
@@ -133,6 +143,12 @@ public:
 	}
 	static bool blit_midi_notes (ID2D1RenderTarget*, const D2D1_RECT_F&,
 	                             const CairoMidiNoteBlit*, size_t, float)
+	{
+		return false;
+	}
+	static bool blit_bars (ID2D1RenderTarget*, const D2D1_RECT_F&,
+	                       const float*, size_t, float,
+	                       float, float, float, float)
 	{
 		return false;
 	}

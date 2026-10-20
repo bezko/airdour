@@ -477,6 +477,66 @@ CairoWaveBlit::blit_midi_notes (ID2D1RenderTarget* rt,
 }
 
 bool
+CairoWaveBlit::blit_bars (ID2D1RenderTarget* rt,
+                          const D2D1_RECT_F& dest,
+                          const float* levels_0_1,
+                          size_t n,
+                          float dpi_scale,
+                          float r, float g, float b, float a)
+{
+	if (!rt || !levels_0_1 || n == 0) {
+		return false;
+	}
+	int width = 0;
+	int height = 0;
+	if (!dims_ok (dest.right - dest.left, dest.bottom - dest.top, &width, &height, 2048, 512)) {
+		return false;
+	}
+
+	cairo_surface_t* surface =
+	    cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, height);
+	if (!surface || cairo_surface_status (surface) != CAIRO_STATUS_SUCCESS) {
+		if (surface) {
+			cairo_surface_destroy (surface);
+		}
+		return false;
+	}
+
+	cairo_t* cr = cairo_create (surface);
+	surface_clear (cr);
+	const double gap = std::max (1.0, (double)dpi_scale);
+	const double bar_w = ((double)width - gap * (double)(n - 1)) / (double)n;
+	cairo_set_source_rgba (cr, r, g, b, a);
+	cairo_set_antialias (cr, CAIRO_ANTIALIAS_DEFAULT);
+	for (size_t i = 0; i < n; ++i) {
+		float lv = std::max (0.f, std::min (1.f, levels_0_1[i]));
+		double h = (double)lv * (double)height;
+		if (h < 1.0 * (double)dpi_scale && lv > 0.01f) {
+			h = 1.0 * (double)dpi_scale;
+		}
+		double x0 = (double)i * (bar_w + gap);
+		double rr = std::min (2.0 * (double)dpi_scale, bar_w * 0.25);
+		cairo_new_path (cr);
+		cairo_move_to (cr, x0 + rr, (double)height - h);
+		cairo_line_to (cr, x0 + bar_w - rr, (double)height - h);
+		cairo_arc (cr, x0 + bar_w - rr, (double)height - h + rr, rr, -1.5707963267948966, 0);
+		cairo_line_to (cr, x0 + bar_w, (double)height - rr);
+		cairo_arc (cr, x0 + bar_w - rr, (double)height - rr, rr, 0, 1.5707963267948966);
+		cairo_line_to (cr, x0 + rr, (double)height);
+		cairo_arc (cr, x0 + rr, (double)height - rr, rr, 1.5707963267948966, 3.141592653589793);
+		cairo_line_to (cr, x0, (double)height - h + rr);
+		cairo_arc (cr, x0 + rr, (double)height - h + rr, rr, 3.141592653589793, 4.71238898038469);
+		cairo_close_path (cr);
+		cairo_fill (cr);
+	}
+	cairo_destroy (cr);
+
+	bool ok = blit_surface_to_d2d (rt, dest, surface);
+	cairo_surface_destroy (surface);
+	return ok;
+}
+
+bool
 CairoWaveBlit::smoke_offline ()
 {
 	uint32_t total_ink = 0;
