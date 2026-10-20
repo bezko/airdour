@@ -127,7 +127,8 @@ public:
 	                    bool smoke_midi_scale = false,
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
-	                    bool smoke_midi_pressure = false);
+	                    bool smoke_midi_pressure = false,
+	                    bool smoke_auto_lane_focus = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -193,6 +194,7 @@ private:
 	void layout_panes ();
 	void draw_editor_pane ();
 	void draw_automation_lane ();
+	int  auto_lane_track () const;
 	void refresh_automation_lane ();
 	void write_automation_at (float x, float y);
 	void draw_midi_cc_lane ();
