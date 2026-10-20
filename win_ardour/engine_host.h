@@ -578,7 +578,7 @@ public:
 
 	/**
 	 * Activate selected AudioRegion gain envelope and write unity→dip→unity
-	 * (region-relative AutomationList). Alt+E. For --smoke-region-envelope.
+	 * (region-relative AutomationList). Shift+E. For --smoke-region-envelope.
 	 */
 	bool ensure_selected_region_envelope ();
 	/** Sample selected region envelope across its length into y_0_1[n] (0..1). */

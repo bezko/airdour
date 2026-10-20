@@ -3663,14 +3663,16 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else {
 				do_fit_all_regions ();
 			}
-		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		} else if ((GetKeyState (VK_SHIFT) & 0x8000)
 		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
 		           && (wparam == 'E' || wparam == 'e')) {
-			/* Alt+E = activate region gain envelope (unity→dip→unity stub). */
+			/* Shift+E = activate region gain envelope (unity→dip→unity stub). */
 			do_ensure_region_envelope ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')
-		           && !(GetKeyState (VK_MENU) & 0x8000)) {
-			/* E = fit selection (Ctrl+E remains export). */
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && !(GetKeyState (VK_SHIFT) & 0x8000)) {
+			/* E = fit selection (Ctrl+E remains export; Alt+E = export sel tip). */
 			do_fit_selection ();
 		} else if (wparam == 'L' || wparam == 'l') {
 			do_toggle_loop ();
@@ -6387,7 +6389,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
-		{ L"Alt+E", L"Region gain envelope (unity→dip→unity)" },
+		{ L"Shift+E", L"Region gain envelope (unity→dip→unity)" },
 	};
 
 	float y = card.top + 40.f * _dpi_scale;
