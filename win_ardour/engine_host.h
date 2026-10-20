@@ -14,6 +14,8 @@
 struct EngineMarkerSnap {
 	float        sec;
 	wchar_t      name[24];
+	bool         cue; /* Location::is_cue_marker */
+	int32_t      cue_id; /* TriggerBox cue slot when cue */
 };
 
 struct EngineMidiDeviceSnap {
@@ -729,6 +731,14 @@ public:
 
 	/** Add IsMark at time_sec (name auto if empty). */
 	bool add_marker_at (float time_sec, const std::string& name = std::string ());
+	bool add_cue_marker_at (float time_sec, int32_t cue_id = 1,
+	                        const std::string& name = std::string ());
+	bool remove_cue_marker_near (float time_sec, float slop_sec = 0.35f);
+	/** Locate to next/prev IsCueMarker. Ctrl+Alt+,/. */
+	bool locate_next_cue ();
+	bool locate_prev_cue ();
+	/** Add two cues → tour → remove. For --smoke-cue-navigate. */
+	bool smoke_cue_navigate ();
 	/** Remove nearest IsMark within slop_sec of time_sec. */
 	bool remove_marker_near (float time_sec, float slop_sec = 0.35f);
 	/** Locate transport to time_sec (optional snap to nearest mark within slop). */
