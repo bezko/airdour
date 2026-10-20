@@ -9298,6 +9298,43 @@ EngineHost::locate_to (float time_sec, bool snap_to_marker, float slop_sec)
 }
 
 bool
+EngineHost::locate_to_selection_start ()
+{
+	refresh_selection_snap ();
+	if (!_snap.has_selection) {
+		_snap.detail = L"locate start — no selection";
+		return false;
+	}
+	/* Bypass grid snap so we hit the region edge exactly. */
+	const bool snap_was = _snap.snap_enabled;
+	set_snap_enabled (false);
+	bool ok = locate_to (_snap.selection_start_sec, false, 0.f);
+	set_snap_enabled (snap_was);
+	if (ok) {
+		_snap.detail = L"located to selection start";
+	}
+	return ok;
+}
+
+bool
+EngineHost::locate_to_selection_end ()
+{
+	refresh_selection_snap ();
+	if (!_snap.has_selection) {
+		_snap.detail = L"locate end — no selection";
+		return false;
+	}
+	const bool snap_was = _snap.snap_enabled;
+	set_snap_enabled (false);
+	bool ok = locate_to (_snap.selection_end_sec, false, 0.f);
+	set_snap_enabled (snap_was);
+	if (ok) {
+		_snap.detail = L"located to selection end";
+	}
+	return ok;
+}
+
+bool
 EngineHost::scrub_to (float time_sec)
 {
 	/* Drag scrub: continuous locate, no mark snap (grid snap still applies). */
@@ -9451,6 +9488,72 @@ EngineHost::smoke_locate ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_locate_selection ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-locate-selection failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-locate-selection FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 0.8f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-locate-selection FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-locate-selection FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float s0 = _snap.selection_start_sec;
+		float e0 = _snap.selection_end_sec;
+		if (!locate_to_selection_end ()
+		    || std::fabs (_snap.transport_sec - e0) > 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-locate-selection FAILED (end → %.3f expect %.3f)\n",
+			              _snap.transport_sec, e0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_to_selection_start ()
+		    || std::fabs (_snap.transport_sec - s0) > 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-locate-selection FAILED (start → %.3f expect %.3f)\n",
+			              _snap.transport_sec, s0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-locate-selection ok (start=%.2f end=%.2f)\n",
+		              s0, e0);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-locate-selection ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-locate-selection exception: %s\n",
+		              e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -19230,6 +19333,18 @@ EngineHost::locate_to (float time_sec, bool snap_to_marker, float slop_sec)
 }
 
 bool
+EngineHost::locate_to_selection_start ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_to_selection_end ()
+{
+	return false;
+}
+
+bool
 EngineHost::scrub_to (float time_sec)
 {
 	(void)time_sec;
@@ -19256,6 +19371,12 @@ EngineHost::stop_shuttle ()
 
 bool
 EngineHost::smoke_locate ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_locate_selection ()
 {
 	return false;
 }

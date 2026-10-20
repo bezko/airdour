@@ -14,6 +14,7 @@
  *                         [--smoke-midi-chord] [--smoke-midi-arp]
  *                         [--smoke-midi-scale] [--smoke-midi-cc]
  *                         [--smoke-midi-bend] [--smoke-midi-pressure]
+ *                         [--smoke-locate-selection]
  *                         [--smoke-plugin]
  *                         [--smoke-perf] [--smoke-vst3] [--smoke-mute-solo]
  *                         [--smoke-pan] [--smoke-send] [--smoke-automation]
@@ -136,6 +137,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_midi_cc = parse_flag (argc, argv, L"--smoke-midi-cc");
 	bool smoke_midi_bend = parse_flag (argc, argv, L"--smoke-midi-bend");
 	bool smoke_midi_pressure = parse_flag (argc, argv, L"--smoke-midi-pressure");
+	bool smoke_locate_selection = parse_flag (argc, argv, L"--smoke-locate-selection");
 	bool smoke_plugin = parse_flag (argc, argv, L"--smoke-plugin");
 	bool smoke_vst3 = parse_flag (argc, argv, L"--smoke-vst3");
 	bool smoke_mute_solo = parse_flag (argc, argv, L"--smoke-mute-solo");
@@ -227,7 +229,7 @@ wmain (int argc, wchar_t** argv)
 	                         smoke_midi_step, smoke_midi_chord,
 	                         smoke_midi_arp, smoke_midi_scale,
 	                         smoke_midi_cc, smoke_midi_bend,
-	                         smoke_midi_pressure)) {
+	                         smoke_midi_pressure, smoke_locate_selection)) {
 			const char* be = backend.empty () ? "(prefs/Dummy)" : backend.c_str ();
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", be);
 		} else {

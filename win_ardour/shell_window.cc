@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_locate_selection)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -890,6 +891,23 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_locate_selection && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_locate_selection ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			_playhead_sec = _engine_snap.transport_sec;
+			sync_transport_clock_from_engine ();
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_locate_selection) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-locate-selection FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1983,6 +2001,36 @@ ShellWindow::do_fit_selection ()
 	}
 	/* No selection → fit all regions (honest fallback). */
 	do_fit_all_regions ();
+}
+
+void
+ShellWindow::do_locate_selection_start ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok || !_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.locate_to_selection_start ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_playhead_sec = _engine_snap.transport_sec;
+		sync_transport_clock_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_locate_selection_end ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok || !_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.locate_to_selection_end ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_playhead_sec = _engine_snap.transport_sec;
+		sync_transport_clock_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
 }
 
 void
@@ -3572,6 +3620,14 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			transport_toggle ();
 		} else if (wparam == VK_DELETE || wparam == VK_BACK) {
 			do_delete_selection ();
+		} else if ((GetKeyState (VK_SHIFT) & 0x8000) && wparam == VK_HOME
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)) {
+			/* Shift+Home = locate to selection start. */
+			do_locate_selection_start ();
+		} else if ((GetKeyState (VK_SHIFT) & 0x8000) && wparam == VK_END
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)) {
+			/* Shift+End = locate to selection end. */
+			do_locate_selection_end ();
 		} else if (wparam == VK_HOME || wparam == '0') {
 			reset_shared_view ();
 			refresh_editor_view_after_nav ();
@@ -6310,6 +6366,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
 		{ L"Home / 0", L"Follow transport (reset view)" },
+		{ L"Shift+Home / End", L"Locate to selection start / end" },
 		{ L"← →  Shift+←→", L"Scroll editor · larger step" },
 		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
