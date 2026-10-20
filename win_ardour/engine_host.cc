@@ -615,6 +615,7 @@ EngineHost::EngineHost ()
 	_snap.vca_ok = false;
 	_snap.vca_slave_count = 0;
 	_snap.vca_gain = 1.f;
+	_snap.group_has_vca_master = false;
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
 	_snap.monitor_mono = false;
@@ -8571,6 +8572,7 @@ EngineHost::refresh_group_flags ()
 	_snap.group_shares_mute = false;
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
+	_snap.group_has_vca_master = false;
 	_snap.group_name[0] = L'\0';
 	if (!_impl) {
 		return;
@@ -8589,6 +8591,7 @@ EngineHost::refresh_group_flags ()
 		_snap.group_shares_mute = rg->is_mute ();
 		_snap.group_shares_solo = rg->is_solo ();
 		_snap.group_shares_gain = rg->is_gain ();
+		_snap.group_has_vca_master = rg->has_control_master ();
 		int n = 0;
 		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
 			if (_impl->tracks[i] && _impl->tracks[i]->route_group () == rg) {
@@ -9031,6 +9034,115 @@ EngineHost::smoke_vca ()
 		return false;
 	} catch (...) {
 		clear_vca_master ();
+		return false;
+	}
+}
+
+bool
+EngineHost::assign_route_group_to_vca (bool on)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (!ensure_vca_master ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<RouteGroup> rg = _impl->shell_group;
+		if (!rg) {
+			rg = _impl->session->route_group_by_name ("Group 1");
+			_impl->shell_group = rg;
+		}
+		refresh_group_flags ();
+		if (!rg || _snap.group_member_count < 2) {
+			_snap.detail = L"group→VCA — need RouteGroup (≥2)";
+			return false;
+		}
+		std::shared_ptr<VCA> vca = _impl->shell_vca;
+		if (on) {
+			rg->assign_master (vca);
+		} else {
+			rg->unassign_master (vca);
+		}
+		refresh_group_flags ();
+		refresh_vca_flags ();
+		_snap.detail = on ? L"group → VCA assigned" : L"group VCA cleared";
+		return on ? _snap.group_has_vca_master : !_snap.group_has_vca_master;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: assign_route_group_to_vca: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"group→VCA failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"group→VCA failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_group_vca ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-group-vca failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if ((int)_impl->tracks.size () < 2 || !_impl->tracks[0] || !_impl->tracks[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-vca FAILED (need Audio 1+2)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_vca_master ();
+		clear_route_group ();
+		int idxs[2] = { 0, 1 };
+		if (!create_route_group (idxs, 2) || _snap.group_member_count < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-vca FAILED (group)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!assign_route_group_to_vca (true)
+		    || !_snap.group_has_vca_master
+		    || _snap.vca_slave_count < 2) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-group-vca FAILED "
+			              "(assign master=%d slaves=%d)\n",
+			              (int)_snap.group_has_vca_master, _snap.vca_slave_count);
+			std::fflush (stderr);
+			clear_vca_master ();
+			clear_route_group ();
+			return false;
+		}
+		if (!_impl->tracks[0]->slaved_to (_impl->shell_vca)
+		    || !_impl->tracks[1]->slaved_to (_impl->shell_vca)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-vca FAILED (slaved_to)\n");
+			std::fflush (stderr);
+			clear_vca_master ();
+			clear_route_group ();
+			return false;
+		}
+		if (!assign_route_group_to_vca (false) || _snap.group_has_vca_master) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-vca FAILED (unassign)\n");
+			std::fflush (stderr);
+			clear_vca_master ();
+			clear_route_group ();
+			return false;
+		}
+		clear_vca_master ();
+		clear_route_group ();
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-vca ok (assign_master + clear)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-group-vca ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-vca exception: %s\n", e.what ());
+		std::fflush (stderr);
+		clear_vca_master ();
+		clear_route_group ();
+		return false;
+	} catch (...) {
+		clear_vca_master ();
+		clear_route_group ();
 		return false;
 	}
 }
@@ -17801,6 +17913,7 @@ EngineHost::EngineHost ()
 	_snap.vca_ok = false;
 	_snap.vca_slave_count = 0;
 	_snap.vca_gain = 1.f;
+	_snap.group_has_vca_master = false;
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
 	_snap.monitor_mono = false;
@@ -19407,6 +19520,19 @@ EngineHost::clear_vca_master ()
 
 bool
 EngineHost::smoke_vca ()
+{
+	return false;
+}
+
+bool
+EngineHost::assign_route_group_to_vca (bool on)
+{
+	(void)on;
+	return false;
+}
+
+bool
+EngineHost::smoke_group_vca ()
 {
 	return false;
 }

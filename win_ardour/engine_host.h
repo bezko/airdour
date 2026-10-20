@@ -214,6 +214,7 @@ struct EngineSnapshot {
 	bool         vca_ok; /* Session VCA master exists */
 	int          vca_slave_count; /* tracks assigned to shell VCA */
 	float        vca_gain; /* VCA gain_control linear */
+	bool         group_has_vca_master; /* RouteGroup::has_control_master */
 	bool         monitor_ok; /* Session monitor_out + MonitorProcessor */
 	bool         monitor_dim; /* MonitorProcessor::dim_all */
 	bool         monitor_mono;
@@ -861,6 +862,17 @@ public:
 	 * For --smoke-vca.
 	 */
 	bool smoke_vca ();
+
+	/**
+	 * Bind/unbind shell RouteGroup members to the shell VCA via
+	 * RouteGroup::assign_master (no subgroup bus rewire).
+	 */
+	bool assign_route_group_to_vca (bool on);
+	/**
+	 * Group Audio 0+1 → VCA assign → both slaved → unassign.
+	 * For --smoke-group-vca.
+	 */
+	bool smoke_group_vca ();
 
 	/**
 	 * Ensure Session monitor bus + MonitorProcessor (add_monitor_section).
