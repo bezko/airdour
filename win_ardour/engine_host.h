@@ -14,6 +14,8 @@
 struct EngineMarkerSnap {
 	float        sec;
 	wchar_t      name[24];
+	bool         scene;
+	int32_t      program;
 };
 
 struct EngineMidiDeviceSnap {
@@ -729,6 +731,14 @@ public:
 
 	/** Add IsMark at time_sec (name auto if empty). */
 	bool add_marker_at (float time_sec, const std::string& name = std::string ());
+	bool add_scene_marker_at (float time_sec, int program = 0,
+	                         const std::string& name = std::string ());
+	bool remove_scene_marker_near (float time_sec, float slop_sec = 0.35f);
+	/** Locate to next/prev IsScene mark. Ctrl+Alt+←/→. */
+	bool locate_next_scene ();
+	bool locate_prev_scene ();
+	/** Add two scenes → tour → remove. For --smoke-scene-navigate. */
+	bool smoke_scene_navigate ();
 	/** Remove nearest IsMark within slop_sec of time_sec. */
 	bool remove_marker_near (float time_sec, float slop_sec = 0.35f);
 	/** Locate transport to time_sec (optional snap to nearest mark within slop). */
