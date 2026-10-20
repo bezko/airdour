@@ -746,6 +746,11 @@ public:
 	bool stop_shuttle ();
 
 	/**
+	 * Locate to 10.0s for shell scroll-playhead-into-view UI check.
+	 * For --smoke-scroll-playhead.
+	 */
+	bool smoke_scroll_playhead ();
+	/**
 	 * Locate 1.0→2.5s; shuttle +2→0; verify BBT/TC clock fields.
 	 * For --smoke-locate. Does not leave transport rolling.
 	 */

@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_scroll_playhead,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,42 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_scroll_playhead && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_scroll_playhead ()) {
+			_smoke_failed = true;
+		} else {
+			/* Keep locate snap (poll would reset async transport). */
+			_engine_snap = _engine.snapshot ();
+			_playhead_sec = _engine_snap.transport_sec;
+			sync_transport_clock_from_engine ();
+			/* Pan view away so playhead@10 is off-screen. */
+			_lanes[0].strip.set_view_window (0.f, 2.f);
+			apply_shared_view (0);
+			do_scroll_playhead_into_view ();
+			float start = _lanes[0].strip.view_start_sec ();
+			float span = _lanes[0].strip.view_span_sec ();
+			float end = start + span;
+			float ph = _playhead_sec;
+			if (ph < start || ph > end) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-scroll-playhead FAILED (ph=%.3f view=[%.3f..%.3f])\n",
+				              ph, start, end);
+				_smoke_failed = true;
+			} else {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-scroll-playhead ok (ph=%.3f view=[%.3f..%.3f])\n",
+				              ph, start, end);
+			}
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_scroll_playhead) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-scroll-playhead FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1948,6 +1985,41 @@ ShellWindow::reset_shared_view ()
 	for (int i = 0; i < kTracks; ++i) {
 		_lanes[i].strip.reset_view ();
 	}
+}
+
+
+void
+ShellWindow::do_scroll_playhead_into_view ()
+{
+	float span = _lanes[0].strip.view_span_sec ();
+	if (span < 0.05f) {
+		span = WaveStrip::kDefaultSpanSec;
+	}
+	float start = _lanes[0].strip.view_start_sec ();
+	float ph = _playhead_sec;
+	if (ph < 0.f) {
+		ph = 0.f;
+	}
+	float end = start + span;
+	/* Already visible with a little margin — no-op. */
+	if (ph >= start + span * 0.05f && ph <= end - span * 0.05f) {
+		return;
+	}
+	float new_start;
+	if (ph < start) {
+		/* Scroll left: playhead at 25% into the window. */
+		new_start = ph - span * 0.25f;
+	} else {
+		/* Scroll right: playhead at 75% into the window. */
+		new_start = ph - span * 0.75f;
+	}
+	if (new_start < 0.f) {
+		new_start = 0.f;
+	}
+	_lanes[0].strip.set_view_window (new_start, span);
+	apply_shared_view (0);
+	refresh_editor_view_after_nav ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
@@ -3572,6 +3644,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			transport_toggle ();
 		} else if (wparam == VK_DELETE || wparam == VK_BACK) {
 			do_delete_selection ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && (wparam == '0' || wparam == VK_NUMPAD0)) {
+			/* Ctrl+Shift+0 = scroll view to keep playhead visible (keep zoom). */
+			do_scroll_playhead_into_view ();
 		} else if (wparam == VK_HOME || wparam == '0') {
 			reset_shared_view ();
 			refresh_editor_view_after_nav ();
@@ -6310,6 +6387,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
 		{ L"Home / 0", L"Follow transport (reset view)" },
+		{ L"Ctrl+Shift+0", L"Scroll playhead into view (keep zoom)" },
 		{ L"← →  Shift+←→", L"Scroll editor · larger step" },
 		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
 		{ L"Ctrl+±", L"Zoom in / out (center)" },

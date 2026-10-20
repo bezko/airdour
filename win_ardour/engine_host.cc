@@ -9393,6 +9393,36 @@ EngineHost::stop_shuttle ()
 	return set_transport_speed (0.0);
 }
 
+
+bool
+EngineHost::smoke_scroll_playhead ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-scroll-playhead failed — no Session";
+		return false;
+	}
+	try {
+		if (!locate_to (10.0f, false, 0.f)
+		    || std::fabs (_snap.transport_sec - 10.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-scroll-playhead FAILED (locate got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-scroll-playhead locate ok (10.00s)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-scroll-playhead locate ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-scroll-playhead exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_locate ()
 {
@@ -19250,6 +19280,12 @@ EngineHost::set_transport_speed (double speed)
 
 bool
 EngineHost::stop_shuttle ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_scroll_playhead ()
 {
 	return false;
 }
