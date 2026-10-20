@@ -3307,6 +3307,66 @@ EngineHost::toggle_midi_soloed ()
 	return set_midi_soloed (!_snap.midi_soloed);
 }
 
+bool
+EngineHost::clear_all_mutes ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		collect_tracks ();
+		ensure_midi_track ();
+		bool any = false;
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]
+			    && _impl->tracks[i]->mute_control ()) {
+				std::shared_ptr<MuteControl> mc = _impl->tracks[i]->mute_control ();
+				if (mc->get_value () > 0.5) {
+					_impl->session->set_control (mc, 0.0, Controllable::NoGroup);
+					any = true;
+				}
+			}
+		}
+		if (_impl->midi_track && _impl->midi_track->mute_control ()
+		    && _impl->midi_track->mute_control ()->get_value () > 0.5) {
+			_impl->session->set_control (
+				_impl->midi_track->mute_control (), 0.0, Controllable::NoGroup);
+			any = true;
+		}
+		wait_until ([&] () {
+			refresh_mute_solo_flags ();
+			for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+				if (_snap.track_muted[i]) {
+					return false;
+				}
+			}
+			return !_snap.midi_muted;
+		});
+		refresh_mute_solo_flags ();
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (_snap.track_muted[i]) {
+				_snap.detail = L"clear mutes — audio still muted";
+				return false;
+			}
+		}
+		if (_snap.midi_muted) {
+			_snap.detail = L"clear mutes — MIDI still muted";
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: clear all mutes%s\n",
+		              any ? "" : " (none were on)");
+		std::fflush (stderr);
+		_snap.detail = L"all mutes cleared";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: clear mutes exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 void
 EngineHost::refresh_pan_flags ()
 {
@@ -4685,6 +4745,58 @@ EngineHost::smoke_mute_solo ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_clear_mutes ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-clear-mutes failed — no Session";
+		return false;
+	}
+	try {
+		ensure_midi_track ();
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0] || !_impl->midi_track) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes FAILED (tracks)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		set_track_muted (0, false);
+		set_midi_muted (false);
+		if (!set_track_muted (0, true) || !_snap.track_muted[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes FAILED (mute Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_midi_muted (true) || !_snap.midi_muted) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes FAILED (mute MIDI)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!clear_all_mutes ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_muted[0] || _snap.midi_muted) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-clear-mutes FAILED (still muted a=%d m=%d)\n",
+			              _snap.track_muted[0] ? 1 : 0, _snap.midi_muted ? 1 : 0);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-clear-mutes ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -18203,6 +18315,18 @@ EngineHost::toggle_midi_soloed ()
 
 bool
 EngineHost::smoke_mute_solo ()
+{
+	return false;
+}
+
+bool
+EngineHost::clear_all_mutes ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_clear_mutes ()
 {
 	return false;
 }
