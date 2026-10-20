@@ -177,6 +177,7 @@ struct EngineSnapshot {
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
+	bool         track_send_muted[kMeters]; /* Send Processor !active() */
 	bool         aux_bus_ok; /* Session Aux audio bus exists */
 	bool         midi_muted;
 	bool         midi_soloed;
@@ -370,9 +371,16 @@ public:
 	/** Aux send level 0..1 (gain coeff) via InternalSend → Aux bus. */
 	bool  set_track_send (int track, float send_0_1);
 	float track_send (int track) const;
+	/** Mute aux send via Processor deactivate (Alt+click send). */
+	bool set_track_send_muted (int track, bool muted);
+	bool toggle_track_send_muted (int track);
 
 	/** Send 0 → 0.75 → 0.25 on Audio 1. For --smoke-send. */
 	bool smoke_send ();
+	/**
+	 * Ensure Aux send → mute → unmute. For --smoke-send-mute.
+	 */
+	bool smoke_send_mute ();
 
 	/**
 	 * Track fader AutomationList (GainAutomation). Enable Play, write points,

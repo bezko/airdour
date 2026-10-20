@@ -35,6 +35,7 @@ MixerStrip::MixerStrip ()
 	, _gain (0.85f)
 	, _pan (0.5f)
 	, _send (0.f)
+	, _send_muted (false)
 	, _fx_param (0.3f)
 	, _fx_param2 (0.16f)
 	, _fx_param3 (0.5f)
@@ -522,16 +523,19 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 			D2D1::Point2F (mid_x, _pan_track.bottom),
 			body, 1.f);
 
-		/* Aux send level → Aux bus */
+		/* Aux send level → Aux bus (dim when Processor-muted). */
 		rt->FillRectangle (_send_track, edge);
 		{
 			float sw = _send_track.right - _send_track.left;
 			float fill_r = _send_track.left + sw * _send;
-			accent->SetOpacity (0.65f);
+			accent->SetOpacity (_send_muted ? 0.22f : 0.65f);
 			rt->FillRectangle (
 				D2D1::RectF (_send_track.left, _send_track.top, fill_r, _send_track.bottom),
 				accent);
 			accent->SetOpacity (1.f);
+			if (_send_muted) {
+				rt->DrawTextW (L"Sm", 2, fmt_meta, _send_track, body);
+			}
 		}
 
 		const bool fx_on = _fx_label[0] != L'\0';

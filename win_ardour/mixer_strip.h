@@ -56,6 +56,8 @@ public:
 	/** Aux send level 0..1 (gain coeff) to session Aux bus (audio strips only). */
 	void  set_send (float send_0_1);
 	float send () const { return _send; }
+	void  set_send_muted (bool muted) { _send_muted = muted; }
+	bool  send_muted () const { return _send_muted; }
 	bool  hit_send (float x, float y) const;
 	bool  drag_send_to (float x);
 
@@ -132,6 +134,7 @@ private:
 	float       _gain;
 	float       _pan;
 	float       _send;
+	bool        _send_muted;
 	float       _fx_param;
 	float       _fx_param2;
 	float       _fx_param3;

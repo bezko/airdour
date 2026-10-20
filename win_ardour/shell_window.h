@@ -84,6 +84,7 @@ public:
 	                    bool smoke_mute_solo = false,
 	                    bool smoke_pan = false,
 	                    bool smoke_send = false,
+	                    bool smoke_send_mute = false,
 	                    bool smoke_automation = false,
 	                    bool smoke_edit = false,
 	                    bool smoke_snap = false,
