@@ -60,6 +60,7 @@
 #include "ardour/automation_list.h"
 #include "ardour/mute_control.h"
 #include "ardour/solo_control.h"
+#include "ardour/amp.h"
 #include "ardour/gain_control.h"
 #include "ardour/plugin.h"
 #include "ardour/plugin_insert.h"
@@ -684,6 +685,7 @@ EngineHost::EngineHost ()
 	_snap.tempo_bpm = 120.f;
 	_snap.count_in_enabled = false;
 	_snap.click_enabled = false;
+	_snap.click_gain = 1.f;
 	_snap.audio_track_count = 0;
 	_snap.midi_track_count = 0;
 	_snap.marker_count = 0;
@@ -7919,12 +7921,17 @@ EngineHost::refresh_tempo_snap ()
 	_snap.tempo_bpm = 120.f;
 	_snap.count_in_enabled = false;
 	_snap.click_enabled = false;
+	_snap.click_gain = 1.f;
 	if (!_impl || !_impl->session) {
 		return;
 	}
 	try {
 		_snap.count_in_enabled = _impl->session->config.get_count_in ();
 		_snap.click_enabled = Config->get_clicking ();
+		_snap.click_gain = (float)Config->get_click_gain ();
+		if (_snap.click_gain < 0.01f) {
+			_snap.click_gain = 0.01f;
+		}
 		Temporal::TempoMap::SharedPtr tm = Temporal::TempoMap::fetch ();
 		if (tm) {
 			Temporal::TempoPoint const& tp = tm->tempo_at (Temporal::timepos_t (0));
@@ -8050,6 +8057,47 @@ EngineHost::toggle_clicking ()
 }
 
 bool
+EngineHost::set_click_gain (float linear_0_to_4)
+{
+	linear_0_to_4 = std::max (0.01f, std::min (4.f, linear_0_to_4));
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		Config->set_click_gain ((gain_t)linear_0_to_4);
+		if (_impl->session->click_gain ()
+		    && _impl->session->click_gain ()->gain_control ()) {
+			_impl->session->click_gain ()->gain_control ()->set_value (
+				(double)linear_0_to_4, Controllable::NoGroup);
+		}
+		refresh_tempo_snap ();
+		std::fprintf (stderr, "airdour_win_shell: click gain=%.3f\n", _snap.click_gain);
+		std::fflush (stderr);
+		_snap.detail = L"click gain set";
+		return std::fabs (_snap.click_gain - linear_0_to_4) < 0.05f;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::cycle_click_gain ()
+{
+	static const float kLevels[] = { 0.25f, 0.5f, 1.0f, 2.0f };
+	static const int kN = 4;
+	refresh_tempo_snap ();
+	float cur = _snap.click_gain;
+	int next = 0;
+	for (int i = 0; i < kN; ++i) {
+		if (std::fabs (kLevels[i] - cur) < 0.08f) {
+			next = (i + 1) % kN;
+			break;
+		}
+	}
+	return set_click_gain (kLevels[next]);
+}
+
+bool
 EngineHost::smoke_click ()
 {
 	if (!_impl || !_impl->session) {
@@ -8078,6 +8126,56 @@ EngineHost::smoke_click ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-click exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_click_gain ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-click-gain failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_click_gain (1.0f) || std::fabs (_snap.click_gain - 1.0f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-click-gain FAILED (unity)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_click_gain () || std::fabs (_snap.click_gain - 2.0f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-click-gain FAILED (→2.0 got=%.3f)\n",
+			              _snap.click_gain);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_click_gain () || std::fabs (_snap.click_gain - 0.25f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-click-gain FAILED (→0.25 got=%.3f)\n",
+			              _snap.click_gain);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_click_gain () || std::fabs (_snap.click_gain - 0.5f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-click-gain FAILED (→0.5 got=%.3f)\n",
+			              _snap.click_gain);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_click_gain () || std::fabs (_snap.click_gain - 1.0f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-click-gain FAILED (→1.0 got=%.3f)\n",
+			              _snap.click_gain);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-click-gain ok (1→2→0.25→0.5→1)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-click-gain ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-click-gain exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17655,6 +17753,7 @@ EngineHost::EngineHost ()
 	_snap.tempo_bpm = 120.f;
 	_snap.count_in_enabled = false;
 	_snap.click_enabled = false;
+	_snap.click_gain = 1.f;
 	_snap.audio_track_count = 0;
 	_snap.midi_track_count = 0;
 	_snap.marker_count = 0;
@@ -19039,6 +19138,25 @@ EngineHost::toggle_clicking ()
 
 bool
 EngineHost::smoke_click ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_click_gain (float linear_0_to_4)
+{
+	(void)linear_0_to_4;
+	return false;
+}
+
+bool
+EngineHost::cycle_click_gain ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_click_gain ()
 {
 	return false;
 }

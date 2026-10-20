@@ -83,6 +83,7 @@ TransportBar::TransportBar ()
 	, _freeze_active (false)
 	, _count_in_enabled (false)
 	, _click_enabled (false)
+	, _click_gain (1.f)
 	, _group_active (false)
 	, _spectrum_enabled (false)
 	, _correlation_enabled (false)
@@ -466,7 +467,20 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 		draw_btn (_midi_scale_btn, scl_lab, _midi_scale_lock);
 	}
 	draw_btn (_count_btn, L"Count", _count_in_enabled);
-	draw_btn (_click_btn, L"Click", _click_enabled);
+	{
+		wchar_t click_lab[12];
+		float g = _click_gain;
+		if (g < 0.35f) {
+			wcsncpy_s (click_lab, L"Clk−12", _TRUNCATE);
+		} else if (g < 0.70f) {
+			wcsncpy_s (click_lab, L"Clk−6", _TRUNCATE);
+		} else if (g < 1.40f) {
+			wcsncpy_s (click_lab, L"Click", _TRUNCATE);
+		} else {
+			wcsncpy_s (click_lab, L"Clk+6", _TRUNCATE);
+		}
+		draw_btn (_click_btn, click_lab, _click_enabled);
+	}
 	draw_btn (_tempo_dn_btn, L"−", false);
 	draw_btn (_tempo_up_btn, L"+", false);
 	draw_btn (_add_audio_btn, L"+A", false);
