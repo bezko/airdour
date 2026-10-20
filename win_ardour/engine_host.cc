@@ -609,6 +609,7 @@ EngineHost::EngineHost ()
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
 	_snap.group_name[0] = L'\0';
+	_snap.mixer_narrow = false;
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
 	_snap.monitor_mono = false;
@@ -8816,6 +8817,7 @@ EngineHost::smoke_group ()
 void
 EngineHost::refresh_monitor_flags ()
 {
+	_snap.mixer_narrow = false;
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
 	_snap.monitor_mono = false;
@@ -9001,6 +9003,46 @@ EngineHost::smoke_monitor ()
 	} catch (...) {
 		return false;
 	}
+}
+
+bool
+EngineHost::set_mixer_narrow (bool narrow)
+{
+	_snap.mixer_narrow = narrow;
+	std::fprintf (stderr, "airdour_win_shell: mixer narrow=%d\n", narrow ? 1 : 0);
+	std::fflush (stderr);
+	_snap.detail = narrow ? L"mixer narrow" : L"mixer wide";
+	return true;
+}
+
+bool
+EngineHost::toggle_mixer_narrow ()
+{
+	return set_mixer_narrow (!_snap.mixer_narrow);
+}
+
+bool
+EngineHost::smoke_narrow_mixer ()
+{
+	if (!set_mixer_narrow (false) || _snap.mixer_narrow) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-narrow-mixer FAILED (wide)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!set_mixer_narrow (true) || !_snap.mixer_narrow) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-narrow-mixer FAILED (narrow)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!set_mixer_narrow (false) || _snap.mixer_narrow) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-narrow-mixer FAILED (restore)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr, "airdour_win_shell: smoke-narrow-mixer ok\n");
+	std::fflush (stderr);
+	_snap.detail = L"smoke-narrow-mixer ok";
+	return true;
 }
 
 bool
@@ -17576,6 +17618,7 @@ EngineHost::EngineHost ()
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
 	_snap.group_name[0] = L'\0';
+	_snap.mixer_narrow = false;
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
 	_snap.monitor_mono = false;
@@ -19200,6 +19243,25 @@ EngineHost::toggle_monitor_cut ()
 
 bool
 EngineHost::smoke_monitor ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_mixer_narrow (bool narrow)
+{
+	_snap.mixer_narrow = narrow;
+	return true;
+}
+
+bool
+EngineHost::toggle_mixer_narrow ()
+{
+	return set_mixer_narrow (!_snap.mixer_narrow);
+}
+
+bool
+EngineHost::smoke_narrow_mixer ()
 {
 	return false;
 }
