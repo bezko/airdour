@@ -673,6 +673,7 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_layer = 0;
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -1968,6 +1969,7 @@ EngineHost::destroy_session ()
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
 	_snap.selection_end_sec = 0.f;
+	_snap.selection_layer = 0;
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -4897,6 +4899,7 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_layer = 0;
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -4925,6 +4928,7 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_track = _impl->selected_track;
 	_snap.selection_start_sec = (float)start / (float)sr;
 	_snap.selection_end_sec = (float)(start + len) / (float)sr;
+	_snap.selection_layer = region->layer ();
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (ar) {
 		_snap.selection_fade_in_sec = (float)ar->fade_in_length ().samples () / (float)sr;
@@ -5081,6 +5085,7 @@ EngineHost::clear_region_selection ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_layer = 0;
 }
 
 bool
@@ -5124,6 +5129,110 @@ EngineHost::delete_selected_region ()
 		return false;
 	} catch (...) {
 		_snap.detail = L"delete unknown failure";
+		return false;
+	}
+}
+
+bool
+EngineHost::raise_selected_region (bool to_top)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"raise — select a region";
+		return false;
+	}
+	try {
+		std::shared_ptr<Playlist> pl = region->playlist ();
+		if (!pl) {
+			_snap.detail = L"raise — no playlist";
+			return false;
+		}
+		const uint32_t layer0 = region->layer ();
+		_impl->session->begin_reversible_command (
+			to_top ? "raise region to top" : "raise region");
+		pl->clear_owned_changes ();
+		if (to_top) {
+			region->raise_to_top ();
+		} else {
+			region->raise ();
+		}
+		std::vector<Command*> cmds;
+		pl->rdiff (cmds);
+		_impl->session->add_commands (cmds);
+		_impl->session->commit_reversible_command ();
+
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+
+		std::fprintf (stderr, "airdour_win_shell: raise region%s layer %u→%u\n",
+		              to_top ? " to top" : "",
+		              (unsigned)layer0, (unsigned)_snap.selection_layer);
+		std::fflush (stderr);
+		_snap.detail = to_top ? L"region raised to top" : L"region raised";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: raise exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"raise exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"raise failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::lower_selected_region (bool to_bottom)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"lower — select a region";
+		return false;
+	}
+	try {
+		std::shared_ptr<Playlist> pl = region->playlist ();
+		if (!pl) {
+			_snap.detail = L"lower — no playlist";
+			return false;
+		}
+		const uint32_t layer0 = region->layer ();
+		_impl->session->begin_reversible_command (
+			to_bottom ? "lower region to bottom" : "lower region");
+		pl->clear_owned_changes ();
+		if (to_bottom) {
+			region->lower_to_bottom ();
+		} else {
+			region->lower ();
+		}
+		std::vector<Command*> cmds;
+		pl->rdiff (cmds);
+		_impl->session->add_commands (cmds);
+		_impl->session->commit_reversible_command ();
+
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+
+		std::fprintf (stderr, "airdour_win_shell: lower region%s layer %u→%u\n",
+		              to_bottom ? " to bottom" : "",
+		              (unsigned)layer0, (unsigned)_snap.selection_layer);
+		std::fflush (stderr);
+		_snap.detail = to_bottom ? L"region lowered to bottom" : L"region lowered";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: lower exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"lower exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"lower failed";
 		return false;
 	}
 }
@@ -6858,6 +6967,133 @@ EngineHost::smoke_edit ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-edit exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_region_layer ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-region-layer failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-layer FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 1.0f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-layer FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!split_at (0.5f, 0)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-layer FAILED (split)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (track_region_count (0) < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-layer FAILED (need 2 regions)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		/* Move right half onto left so they overlap for layering. */
+		if (!select_region_at (0, 0.7f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-layer FAILED (select right)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float right_start = _snap.selection_start_sec;
+		if (!move_selected_to (0.1f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-layer FAILED (move)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.25f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-layer FAILED (select top)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float top_start = _snap.selection_start_sec;
+		uint32_t top_layer = _snap.selection_layer;
+		if (!lower_selected_region (false)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-layer FAILED (lower)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.25f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-layer FAILED (reselect)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		/* After lowering former top, the other region should be topmost. */
+		if (std::fabs (_snap.selection_start_sec - top_start) < 0.02f
+		    && _snap.selection_layer == top_layer) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-layer FAILED "
+			              "(top unchanged start=%.3f layer=%u; right was %.3f)\n",
+			              _snap.selection_start_sec, (unsigned)_snap.selection_layer,
+			              right_start);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float other_start = _snap.selection_start_sec;
+		if (!raise_selected_region (false)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-layer FAILED (raise)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!raise_selected_region (true)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-layer FAILED (raise to top)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.25f)
+		    || std::fabs (_snap.selection_start_sec - other_start) > 0.03f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-layer FAILED "
+			              "(raise-to-top start=%.3f expect≈%.3f)\n",
+			              _snap.selection_start_sec, other_start);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!lower_selected_region (true)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-layer FAILED (lower to bottom)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-region-layer ok "
+		              "(overlap lower/raise; starts %.3f↔%.3f)\n",
+		              top_start, other_start);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-region-layer ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-layer exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -18649,6 +18885,20 @@ EngineHost::delete_selected_region ()
 }
 
 bool
+EngineHost::raise_selected_region (bool to_top)
+{
+	(void)to_top;
+	return false;
+}
+
+bool
+EngineHost::lower_selected_region (bool to_bottom)
+{
+	(void)to_bottom;
+	return false;
+}
+
+bool
 EngineHost::split_at (float time_sec, int track)
 {
 	(void)time_sec;
@@ -18851,6 +19101,12 @@ EngineHost::track_region_count (int track) const
 
 bool
 EngineHost::smoke_edit ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_region_layer ()
 {
 	return false;
 }

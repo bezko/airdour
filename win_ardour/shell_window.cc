@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_region_layer)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -673,6 +674,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_edit) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_region_layer && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_region_layer ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_region_layer) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-layer FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2617,6 +2631,40 @@ ShellWindow::do_delete_selection ()
 }
 
 void
+ShellWindow::do_raise_selection (bool to_top)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.raise_selected_region (to_top)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_lower_selection (bool to_bottom)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.lower_selected_region (to_bottom)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::do_split_at_playhead ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -3642,6 +3690,14 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
 				do_toggle_punch ();
 			}
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && wparam == VK_OEM_6 /* ] */
+		           && !(GetKeyState (VK_MENU) & 0x8000)) {
+			/* Ctrl+] = raise; Ctrl+Shift+] = raise to top. */
+			do_raise_selection ((GetKeyState (VK_SHIFT) & 0x8000) != 0);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && wparam == VK_OEM_4 /* [ */
+		           && !(GetKeyState (VK_MENU) & 0x8000)) {
+			/* Ctrl+[ = lower; Ctrl+Shift+[ = lower to bottom. */
+			do_lower_selection ((GetKeyState (VK_SHIFT) & 0x8000) != 0);
 		} else if (wparam == VK_OEM_4) { /* [ */
 			if (_engine.is_linked () && _engine_snap.session_ok) {
 				if (GetKeyState (VK_SHIFT) & 0x8000) {
@@ -6284,6 +6340,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+S / O / E", L"Save / Open browse / Export" },
 		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
+		{ L"Ctrl+] / [", L"Raise / lower region · Shift = top/bottom" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
 		{ L"V", L"Reverse selected audio region" },

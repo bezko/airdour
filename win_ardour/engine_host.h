@@ -60,6 +60,7 @@ struct EngineSnapshot {
 	float        selection_end_sec;
 	float        selection_fade_in_sec; /* AudioRegion fade-in length */
 	float        selection_fade_out_sec;
+	uint32_t     selection_layer; /* Playlist layer (higher = on top) */
 	bool         loop_active; /* auto-loop Location exists with positive length */
 	bool         loop_playing; /* Session get_play_loop() */
 	float        loop_start_sec;
@@ -524,6 +525,14 @@ public:
 	/** Remove selected region via reversible command; peaks refresh on next poll. */
 	bool delete_selected_region ();
 
+	/**
+	 * Raise / lower selected region one step (or to top / bottom).
+	 * Playlist layering via Region::raise/_to_top / lower/_to_bottom.
+	 * For Ctrl+] / Ctrl+[ · Shift = extreme.
+	 */
+	bool raise_selected_region (bool to_top = false);
+	bool lower_selected_region (bool to_bottom = false);
+
 	/** Split playlist region(s) at time_sec on track (−1 = selection track or 0). */
 	bool split_at (float time_sec, int track = -1);
 	/** Split at current transport playhead. */
@@ -646,6 +655,12 @@ public:
 	 * For --smoke-edit.
 	 */
 	bool smoke_edit ();
+
+	/**
+	 * Import → split → overlap → lower top → topmost changes; raise back.
+	 * For --smoke-region-layer.
+	 */
+	bool smoke_region_layer ();
 
 	/**
 	 * Import tone → select → stretch 1.5×; verify length ~1.5× source.
