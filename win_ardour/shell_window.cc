@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_scene_program,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,18 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_scene_program && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_scene_program ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_scene_program) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-scene-program FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2536,6 +2549,22 @@ ShellWindow::do_remove_marker_at_playhead ()
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+
+void
+ShellWindow::do_cycle_scene_program ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.cycle_scene_program_near (_playhead_sec)) {
+		MessageBoxW (_hwnd, L"No scene marker near playhead to cycle program.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 void
 ShellWindow::sync_history_from_engine ()
 {
@@ -3674,6 +3703,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				}
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'M' || wparam == 'm')) {
+			/* Alt+Shift+M = cycle scene program on nearest scene mark. */
+			do_cycle_scene_program ();
 		} else if (wparam == 'M' || wparam == 'm') {
 			if (GetKeyState (VK_SHIFT) & 0x8000) {
 				do_remove_marker_at_playhead ();
@@ -6306,6 +6341,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
+		{ L"Alt+Shift+M", L"Cycle scene marker program 0..15" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
