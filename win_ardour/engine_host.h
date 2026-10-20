@@ -174,6 +174,8 @@ struct EngineSnapshot {
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
+	static constexpr int kCommentLen = 40;
+	wchar_t      track_comment[kMeters][kCommentLen]; /* Route::comment() */
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
@@ -354,6 +356,17 @@ public:
 	bool toggle_midi_muted ();
 	bool set_midi_soloed (bool soloed);
 	bool toggle_midi_soloed ();
+
+	/**
+	 * Route::comment on audio tracks (0..kMeters-1).
+	 * For Alt+Shift+N / Alt+Shift+click label / --smoke-track-comment.
+	 */
+	bool set_track_comment (int track, const char* utf8);
+	bool clear_track_comment (int track);
+	/** Empty ↔ "note" on the given track. */
+	bool toggle_track_comment (int track = 0);
+	/** Set "smoke" → verify → clear on Audio 1. */
+	bool smoke_track_comment ();
 
 	/**
 	 * Mute/solo Audio 1 + MIDI round-trip; clear. For --smoke-mute-solo.
@@ -1283,6 +1296,7 @@ private:
 	void refresh_freeze_flags ();
 	void refresh_record_flags ();
 	void refresh_mute_solo_flags ();
+	void refresh_track_comment_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_send_flags ();
