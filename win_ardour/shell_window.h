@@ -127,7 +127,8 @@ public:
 	                    bool smoke_midi_scale = false,
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
-	                    bool smoke_midi_pressure = false);
+	                    bool smoke_midi_pressure = false,
+	                    bool smoke_pan_auto_state = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -274,6 +275,7 @@ private:
 	void do_rename_focused_track ();
 	void do_toggle_group_pick (int audio_index);
 	void do_apply_or_clear_group ();
+	void do_cycle_pan_auto_state ();
 	void do_toggle_monitor_dim ();
 	void do_toggle_monitor_mono ();
 	void do_toggle_monitor_cut ();

@@ -174,6 +174,8 @@ struct EngineSnapshot {
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
+	/** Pan AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
+	int          track_pan_auto_state[kMeters];
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
@@ -363,9 +365,17 @@ public:
 	/** Pan azimuth 0=L … 0.5=C … 1=R via Route::pan_azimuth_control. */
 	bool  set_track_pan (int track, float pan_0_1);
 	float track_pan (int track) const;
+	/**
+	 * Pan AutoState: 0=Off 1=Play 2=Write 3=Touch.
+	 * Alt+Shift+P / --smoke-pan-auto-state.
+	 */
+	bool set_track_pan_auto_state (int track, int state_0_off_1_play_2_write_3_touch);
+	bool cycle_track_pan_auto_state (int track = 0);
 
 	/** Pan L → C → R on Audio 1. For --smoke-pan. */
 	bool smoke_pan ();
+	/** Cycle Off→Play→Write→Touch→Off on Audio 1 pan. For --smoke-pan-auto-state. */
+	bool smoke_pan_auto_state ();
 
 	/** Aux send level 0..1 (gain coeff) via InternalSend → Aux bus. */
 	bool  set_track_send (int track, float send_0_1);
@@ -1285,6 +1295,7 @@ private:
 	void refresh_mute_solo_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
+	void refresh_pan_auto_state_flags ();
 	void refresh_send_flags ();
 	void refresh_group_flags ();
 	void refresh_monitor_flags ();
