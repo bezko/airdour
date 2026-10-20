@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_group_monitoring)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -860,6 +861,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_group) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_group_monitoring && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_group_monitoring ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_group_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_group_monitoring) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-monitoring FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}

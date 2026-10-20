@@ -174,6 +174,8 @@ struct EngineSnapshot {
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
+	/** MonitorChoice: 0=Auto 1=Input 2=Disk (MonitorCue unused in shell). */
+	int          track_monitor_choice[kMeters];
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
@@ -209,6 +211,7 @@ struct EngineSnapshot {
 	bool         group_shares_mute;
 	bool         group_shares_solo;
 	bool         group_shares_gain;
+	bool         group_shares_monitoring;
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
 	bool         monitor_ok; /* Session monitor_out + MonitorProcessor */
@@ -831,8 +834,8 @@ public:
 
 	/**
 	 * Create/replace the shell Session RouteGroup ("Group 1") from audio
-	 * indices (≥2). Shares mute + solo + gain when active. Honest scope:
-	 * one group, no VCA/subgroup/recenable.
+	 * indices (≥2). Shares mute + solo + gain + monitoring when active.
+	 * Honest scope: one group, no VCA/subgroup.
 	 */
 	bool create_route_group (const int* indices, int n);
 	/** Remove shell RouteGroup members (and drop empty group). */
@@ -844,6 +847,18 @@ public:
 	 * Group Audio 0+1; mute/solo/gain propagate; clear. For --smoke-group.
 	 */
 	bool smoke_group ();
+	/**
+	 * Group Audio 0+1; input-monitor choice propagates via UseGroup; clear
+	 * isolates. For --smoke-group-monitoring.
+	 */
+	bool smoke_group_monitoring ();
+
+	/**
+	 * Track input monitor choice (MonitorControl): Auto / Input / Disk.
+	 * Uses UseGroup so RouteGroup monitoring share propagates peers.
+	 */
+	bool set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk);
+	bool cycle_track_monitor_choice (int track = 0);
 
 	/**
 	 * Ensure Session monitor bus + MonitorProcessor (add_monitor_section).
@@ -1283,6 +1298,7 @@ private:
 	void refresh_freeze_flags ();
 	void refresh_record_flags ();
 	void refresh_mute_solo_flags ();
+	void refresh_monitor_choice_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_send_flags ();
