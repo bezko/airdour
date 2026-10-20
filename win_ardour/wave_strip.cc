@@ -16,6 +16,7 @@ WaveStrip::WaveStrip ()
 	, _view_start_sec (0.f)
 	, _view_span_sec (kDefaultSpanSec)
 	, _sel_active (false)
+	, _sel_muted (false)
 	, _sel_start_sec (0.f)
 	, _sel_end_sec (0.f)
 	, _sel_fade_in_sec (0.f)
@@ -139,9 +140,10 @@ WaveStrip::sync_view_from (const WaveStrip& other)
 
 void
 WaveStrip::set_selection (bool active, float start_sec, float end_sec,
-                          float fade_in_sec, float fade_out_sec)
+                          float fade_in_sec, float fade_out_sec, bool muted)
 {
 	_sel_active = active;
+	_sel_muted = muted;
 	if (end_sec < start_sec) {
 		float t = start_sec;
 		start_sec = end_sec;
@@ -390,12 +392,13 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 		n0 = std::max (0.f, std::min (1.f, n0));
 		n1 = std::max (0.f, std::min (1.f, n1));
 		if (n1 > n0) {
-			selection_brush->SetOpacity (0.28f);
+			/* Muted selection: cooler / dimmer wash so mute is visible. */
+			selection_brush->SetOpacity (_sel_muted ? 0.14f : 0.28f);
 			rt->FillRectangle (
 				D2D1::RectF (bounds.left + n0 * w, bounds.top,
 				             bounds.left + n1 * w, bounds.bottom),
 				selection_brush);
-			selection_brush->SetOpacity (0.85f);
+			selection_brush->SetOpacity (_sel_muted ? 0.45f : 0.85f);
 			float edge = std::max (1.f, 1.5f * dpi_scale);
 			rt->FillRectangle (
 				D2D1::RectF (bounds.left + n0 * w, bounds.top,

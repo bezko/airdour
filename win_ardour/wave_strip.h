@@ -76,7 +76,8 @@ public:
 
 	/** Absolute-time selection highlight (seconds); inactive clears. */
 	void set_selection (bool active, float start_sec, float end_sec,
-	                    float fade_in_sec = 0.f, float fade_out_sec = 0.f);
+	                    float fade_in_sec = 0.f, float fade_out_sec = 0.f,
+	                    bool muted = false);
 
 	/** Hit-test fade handles on selection; returns -1 none, 0=in, 1=out. */
 	int hit_fade_handle (const D2D1_RECT_F& bounds, float x, float y, float dpi_scale) const;
@@ -117,6 +118,7 @@ private:
 	float              _view_start_sec;
 	float              _view_span_sec;
 	bool               _sel_active;
+	bool               _sel_muted;
 	float              _sel_start_sec;
 	float              _sel_end_sec;
 	float              _sel_fade_in_sec;

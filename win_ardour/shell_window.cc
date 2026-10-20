@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_region_mute_gain)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -725,6 +726,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_normalize) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-normalize FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_region_mute_gain && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_region_mute_gain ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_region_mute_gain) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-mute-gain FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2031,7 +2045,8 @@ ShellWindow::apply_region_selection_to_lanes ()
 			_engine_snap.selection_start_sec,
 			_engine_snap.selection_end_sec,
 			active ? _engine_snap.selection_fade_in_sec : 0.f,
-			active ? _engine_snap.selection_fade_out_sec : 0.f);
+			active ? _engine_snap.selection_fade_out_sec : 0.f,
+			active && _engine_snap.selection_muted);
 	}
 }
 
@@ -2713,6 +2728,40 @@ ShellWindow::do_normalize_selection (float target_dbfs)
 		return;
 	}
 	if (_engine.normalize_selected (target_dbfs)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_toggle_selection_muted ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.toggle_selection_muted ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_nudge_selection_gain_db (float delta_db)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.nudge_selection_gain_db (delta_db)) {
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 		apply_region_selection_to_lanes ();
@@ -3708,6 +3757,16 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'N' || wparam == 'n')) {
 			/* N = normalize selection to −1 dBFS. */
 			do_normalize_selection (-1.f);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'M' || wparam == 'm')
+		           && !(GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)) {
+			/* Ctrl+M = mute / unmute selected region (M alone = marker). */
+			do_toggle_selection_muted ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && (wparam == VK_UP || wparam == VK_DOWN)
+		           && !(GetKeyState (VK_MENU) & 0x8000)) {
+			/* Ctrl+Shift+↑/↓ = region gain ±1 dB. */
+			do_nudge_selection_gain_db (wparam == VK_UP ? 1.f : -1.f);
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'I' || wparam == 'i')) {
 			/* I = strip silence on selection (−40 dBFS threshold). */
 			do_strip_silence_selection ();
@@ -5854,9 +5913,11 @@ ShellWindow::draw_editor_pane ()
 			              _engine_snap.marker_count);
 		} else if (_engine_snap.has_selection) {
 			_snwprintf_s (caption, _TRUNCATE,
-			              L"sel T%d [%.1f–%.1f]  ·  trim/move  S/F  G=snap%s",
+			              L"sel T%d [%.1f–%.1f]%s  ·  %.1f dB  ·  Ctrl+M mute  S/F  G=snap%s",
 			              _engine_snap.selection_track + 1,
 			              _engine_snap.selection_start_sec, _engine_snap.selection_end_sec,
+			              _engine_snap.selection_muted ? L" MUTE" : L"",
+			              _engine_snap.selection_gain_db,
 			              _engine_snap.snap_enabled ? L" ON" : L"");
 		} else if (with_audio > 0) {
 			_snwprintf_s (caption, _TRUNCATE,
@@ -6288,6 +6349,8 @@ ShellWindow::draw_help_overlay ()
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
 		{ L"V", L"Reverse selected audio region" },
 		{ L"N", L"Normalize selection to −1 dBFS" },
+		{ L"Ctrl+M", L"Mute / unmute selected region" },
+		{ L"Ctrl+Shift+↑/↓", L"Region gain ±1 dB" },
 		{ L"I", L"Strip silence (−40 dBFS threshold)" },
 		{ L"B", L"Consolidate / bounce selection in place" },
 		{ L"Z", L"Freeze / unfreeze focused audio track" },

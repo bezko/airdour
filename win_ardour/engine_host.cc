@@ -673,6 +673,8 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_muted = false;
+	_snap.selection_gain_db = 0.f;
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -4897,6 +4899,8 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_muted = false;
+	_snap.selection_gain_db = 0.f;
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -4925,10 +4929,17 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_track = _impl->selected_track;
 	_snap.selection_start_sec = (float)start / (float)sr;
 	_snap.selection_end_sec = (float)(start + len) / (float)sr;
+	_snap.selection_muted = region->muted ();
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (ar) {
 		_snap.selection_fade_in_sec = (float)ar->fade_in_length ().samples () / (float)sr;
 		_snap.selection_fade_out_sec = (float)ar->fade_out_length ().samples () / (float)sr;
+		float scale = ar->scale_amplitude ();
+		if (scale < 1.0e-6f) {
+			_snap.selection_gain_db = -120.f;
+		} else {
+			_snap.selection_gain_db = 20.f * std::log10 (scale);
+		}
 	}
 }
 
@@ -5081,6 +5092,8 @@ EngineHost::clear_region_selection ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_muted = false;
+	_snap.selection_gain_db = 0.f;
 }
 
 bool
@@ -5998,6 +6011,139 @@ EngineHost::normalize_selected (float target_dbfs)
 		_snap.detail = L"normalize failed";
 		return false;
 	}
+}
+
+bool
+EngineHost::set_selection_muted (bool muted)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"mute — select a region";
+		return false;
+	}
+	try {
+		if (region->muted () == muted) {
+			refresh_selection_snap ();
+			return true;
+		}
+		_impl->session->begin_reversible_command (muted ? "mute region" : "unmute region");
+		region->clear_changes ();
+		region->set_muted (muted);
+		_impl->session->add_command (new StatefulDiffCommand (region));
+		_impl->session->commit_reversible_command ();
+
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+
+		std::fprintf (stderr, "airdour_win_shell: region mute %s\n",
+		              muted ? "on" : "off");
+		std::fflush (stderr);
+		_snap.detail = muted ? L"region muted" : L"region unmuted";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: region mute exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"region mute exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"region mute failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_selection_muted ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"mute — select a region";
+		return false;
+	}
+	return set_selection_muted (!region->muted ());
+}
+
+bool
+EngineHost::set_selection_gain_db (float gain_db)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (!ar) {
+		_snap.detail = L"gain — select an audio region";
+		return false;
+	}
+	if (!std::isfinite (gain_db)) {
+		gain_db = 0.f;
+	}
+	if (gain_db < -120.f) {
+		gain_db = -120.f;
+	}
+	if (gain_db > 24.f) {
+		gain_db = 24.f;
+	}
+	try {
+		float scale_before = ar->scale_amplitude ();
+		float scale = dB_to_coefficient (gain_db);
+		_impl->session->begin_reversible_command ("region gain");
+		ar->clear_changes ();
+		ar->set_scale_amplitude (scale);
+		_impl->session->add_command (new StatefulDiffCommand (ar));
+		_impl->session->commit_reversible_command ();
+
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+
+		float scale_after = ar->scale_amplitude ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: region gain %.1f dB (scale %.4f→%.4f)\n",
+		              gain_db, scale_before, scale_after);
+		std::fflush (stderr);
+		_snap.detail = L"region gain";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: region gain exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"region gain exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"region gain failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::nudge_selection_gain_db (float delta_db)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (!ar) {
+		_snap.detail = L"gain — select an audio region";
+		return false;
+	}
+	float scale = ar->scale_amplitude ();
+	float cur_db;
+	if (scale < 1.0e-6f) {
+		cur_db = -120.f;
+	} else {
+		cur_db = 20.f * std::log10 (scale);
+	}
+	if (!std::isfinite (delta_db)) {
+		delta_db = 0.f;
+	}
+	return set_selection_gain_db (cur_db + delta_db);
 }
 
 bool
@@ -7154,6 +7300,123 @@ EngineHost::smoke_normalize ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-normalize exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_region_mute_gain ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-region-mute-gain failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-mute-gain FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 0.8f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-mute-gain FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-mute-gain FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::shared_ptr<Region> region = _impl->selected_region.lock ();
+		std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+		if (!ar) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-mute-gain FAILED (no AudioRegion)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (ar->muted ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-mute-gain FAILED (already muted)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!set_selection_muted (true) || !ar->muted () || !_snap.selection_muted) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-mute-gain FAILED (mute on)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!toggle_selection_muted () || ar->muted () || _snap.selection_muted) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-mute-gain FAILED (mute off)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float scale0 = ar->scale_amplitude ();
+		if (!set_selection_gain_db (-6.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-mute-gain FAILED (gain −6)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		ar = std::dynamic_pointer_cast<AudioRegion> (_impl->selected_region.lock ());
+		if (!ar) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-mute-gain FAILED (selection lost)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float scale1 = ar->scale_amplitude ();
+		float expect = dB_to_coefficient (-6.f);
+		if (std::fabs (scale1 - expect) > 0.02f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-mute-gain FAILED (scale %.4f→%.4f expect≈%.4f)\n",
+			              scale0, scale1, expect);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (std::fabs (_snap.selection_gain_db + 6.f) > 0.25f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-mute-gain FAILED (snap gain_db=%.2f)\n",
+			              _snap.selection_gain_db);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!nudge_selection_gain_db (3.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-mute-gain FAILED (nudge +3)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (std::fabs (_snap.selection_gain_db + 3.f) > 0.25f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-mute-gain FAILED (after nudge gain_db=%.2f)\n",
+			              _snap.selection_gain_db);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-region-mute-gain ok (mute toggle + gain −6→−3 dB scale %.3f→%.3f)\n",
+		              scale0, ar->scale_amplitude ());
+		std::fflush (stderr);
+		_snap.detail = L"smoke-region-mute-gain ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-mute-gain exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17629,6 +17892,8 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_muted = false;
+	_snap.selection_gain_db = 0.f;
 	_snap.snap_enabled = false;
 	_snap.midi_step_enabled = false;
 	_snap.midi_chord_quality = 0;
@@ -18733,6 +18998,33 @@ EngineHost::normalize_selected (float target_dbfs)
 }
 
 bool
+EngineHost::set_selection_muted (bool muted)
+{
+	(void)muted;
+	return false;
+}
+
+bool
+EngineHost::toggle_selection_muted ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_selection_gain_db (float gain_db)
+{
+	(void)gain_db;
+	return false;
+}
+
+bool
+EngineHost::nudge_selection_gain_db (float delta_db)
+{
+	(void)delta_db;
+	return false;
+}
+
+bool
 EngineHost::strip_silence_selected (float threshold_dbfs,
                                     float min_silence_sec,
                                     float fade_sec)
@@ -18875,6 +19167,12 @@ EngineHost::smoke_reverse ()
 
 bool
 EngineHost::smoke_normalize ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_region_mute_gain ()
 {
 	return false;
 }

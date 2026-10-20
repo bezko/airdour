@@ -60,6 +60,8 @@ struct EngineSnapshot {
 	float        selection_end_sec;
 	float        selection_fade_in_sec; /* AudioRegion fade-in length */
 	float        selection_fade_out_sec;
+	bool         selection_muted; /* Region::muted() */
+	float        selection_gain_db; /* AudioRegion scale_amplitude as dB */
 	bool         loop_active; /* auto-loop Location exists with positive length */
 	bool         loop_playing; /* Session get_play_loop() */
 	float        loop_start_sec;
@@ -575,6 +577,20 @@ public:
 	bool normalize_selected (float target_dbfs = -1.f);
 
 	/**
+	 * Mute / unmute selected Region (Region::set_muted). Audio or MIDI.
+	 * Undoable via StatefulDiffCommand.
+	 */
+	bool set_selection_muted (bool muted);
+	bool toggle_selection_muted ();
+
+	/**
+	 * Region gain via AudioRegion::set_scale_amplitude (dB).
+	 * Clamped ~−120..+24 dB. Undoable; peaks refresh via scale.
+	 */
+	bool set_selection_gain_db (float gain_db);
+	bool nudge_selection_gain_db (float delta_db);
+
+	/**
 	 * Strip silence from selected AudioRegion (find_silence + StripSilence Filter).
 	 * Threshold dBFS (default −40); min silence / fade in seconds.
 	 * Quiet spans removed; audible parts become one or more regions.
@@ -670,6 +686,12 @@ public:
 	 * For --smoke-normalize.
 	 */
 	bool smoke_normalize ();
+
+	/**
+	 * Import tone → select → mute on/off → gain −6 dB; verify muted + scale.
+	 * For --smoke-region-mute-gain.
+	 */
+	bool smoke_region_mute_gain ();
 
 	/**
 	 * Import gated tone (silence gaps) → strip silence → ≥2 regions.
