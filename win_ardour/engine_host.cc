@@ -9035,6 +9035,61 @@ EngineHost::smoke_vca ()
 	}
 }
 
+bool
+EngineHost::smoke_vca_status ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-vca-status failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vca-status FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_vca_master ();
+		if (!ensure_vca_master ()
+		    || !assign_track_to_vca (0, true)
+		    || !set_vca_gain (0.75f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vca-status FAILED (setup)\n");
+			std::fflush (stderr);
+			clear_vca_master ();
+			return false;
+		}
+		refresh_vca_flags ();
+		if (!_snap.vca_ok || _snap.vca_slave_count < 1
+		    || std::fabs (_snap.vca_gain - 0.75f) > 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vca-status FAILED "
+			              "(ok=%d slaves=%d gain=%.2f)\n",
+			              (int)_snap.vca_ok, _snap.vca_slave_count, _snap.vca_gain);
+			std::fflush (stderr);
+			clear_vca_master ();
+			return false;
+		}
+		/* Mirror status-line fragment the shell draws when vca_ok. */
+		wchar_t frag[96];
+		_snwprintf_s (frag, _TRUNCATE, L"VCA 1 · slaves=%d · g=%.2f",
+		              _snap.vca_slave_count, _snap.vca_gain);
+		_snap.detail = frag;
+		std::fprintf (stderr, "airdour_win_shell: smoke-vca-status ok (%ls)\n", frag);
+		std::fflush (stderr);
+		clear_vca_master ();
+		_snap.detail = L"smoke-vca-status ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vca-status exception: %s\n", e.what ());
+		std::fflush (stderr);
+		clear_vca_master ();
+		return false;
+	} catch (...) {
+		clear_vca_master ();
+		return false;
+	}
+}
+
 void
 EngineHost::refresh_monitor_flags ()
 {
@@ -19407,6 +19462,12 @@ EngineHost::clear_vca_master ()
 
 bool
 EngineHost::smoke_vca ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_vca_status ()
 {
 	return false;
 }

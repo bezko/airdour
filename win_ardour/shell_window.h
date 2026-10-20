@@ -128,7 +128,8 @@ public:
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
 	                    bool smoke_midi_pressure = false,
-	                    bool smoke_vca = false);
+	                    bool smoke_vca = false,
+	                    bool smoke_vca_status = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -275,6 +276,8 @@ private:
 	void do_rename_focused_track ();
 	void do_toggle_group_pick (int audio_index);
 	void do_apply_or_clear_group ();
+	/** Alt+Shift+V — ensure shell VCA + toggle Audio 1 assign. */
+	void do_toggle_vca_assign ();
 	void do_toggle_monitor_dim ();
 	void do_toggle_monitor_mono ();
 	void do_toggle_monitor_cut ();

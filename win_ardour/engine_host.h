@@ -861,6 +861,11 @@ public:
 	 * For --smoke-vca.
 	 */
 	bool smoke_vca ();
+	/**
+	 * Create VCA → assign → set gain; assert status snap fields; clear.
+	 * For --smoke-vca-status (status-line chrome path).
+	 */
+	bool smoke_vca_status ();
 
 	/**
 	 * Ensure Session monitor bus + MonitorProcessor (add_monitor_section).
