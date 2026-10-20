@@ -197,6 +197,7 @@ struct EngineSnapshot {
 	float        tempo_bpm; /* Session TempoMap BPM at t=0 (quarter-note) */
 	bool         count_in_enabled; /* Session config count-in before record roll */
 	bool         click_enabled; /* RC Config clicking — audible metronome */
+	int          listen_mode; /* 0=Solo 1=PFL 2=AFL (RC solo-control-is-listen + listen-position) */
 	int          audio_track_count; /* Session audio tracks (1..kMeters) */
 	int          midi_track_count; /* 0 or 1 in this shell */
 	static constexpr int kTrackNameLen = 32;
@@ -354,6 +355,15 @@ public:
 	bool toggle_midi_muted ();
 	bool set_midi_soloed (bool soloed);
 	bool toggle_midi_soloed ();
+
+	/**
+	 * Solo vs listen: 0=Solo, 1=PFL, 2=AFL (RC Config).
+	 * For Alt+Shift+L / --smoke-listen-mode.
+	 */
+	bool set_listen_mode (int mode_0_solo_1_pfl_2_afl);
+	bool cycle_listen_mode ();
+	/** Solo → PFL → AFL → Solo. For --smoke-listen-mode. */
+	bool smoke_listen_mode ();
 
 	/**
 	 * Mute/solo Audio 1 + MIDI round-trip; clear. For --smoke-mute-solo.
@@ -1283,6 +1293,7 @@ private:
 	void refresh_freeze_flags ();
 	void refresh_record_flags ();
 	void refresh_mute_solo_flags ();
+	void refresh_listen_mode_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_send_flags ();

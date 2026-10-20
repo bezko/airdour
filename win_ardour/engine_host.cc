@@ -684,6 +684,7 @@ EngineHost::EngineHost ()
 	_snap.tempo_bpm = 120.f;
 	_snap.count_in_enabled = false;
 	_snap.click_enabled = false;
+	_snap.listen_mode = 0;
 	_snap.audio_track_count = 0;
 	_snap.midi_track_count = 0;
 	_snap.marker_count = 0;
@@ -1979,6 +1980,7 @@ EngineHost::destroy_session ()
 	_snap.tempo_bpm = 120.f;
 	_snap.count_in_enabled = false;
 	_snap.click_enabled = false;
+	_snap.listen_mode = 0;
 	_snap.marker_count = 0;
 	_snap.session_path.clear ();
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
@@ -3305,6 +3307,117 @@ EngineHost::toggle_midi_soloed ()
 {
 	refresh_mute_solo_flags ();
 	return set_midi_soloed (!_snap.midi_soloed);
+}
+
+void
+EngineHost::refresh_listen_mode_flags ()
+{
+	_snap.listen_mode = 0;
+	try {
+		if (!Config) {
+			return;
+		}
+		if (!Config->get_solo_control_is_listen_control ()) {
+			_snap.listen_mode = 0;
+			return;
+		}
+		_snap.listen_mode =
+			(Config->get_listen_position () == PreFaderListen) ? 1 : 2;
+	} catch (...) {
+		_snap.listen_mode = 0;
+	}
+}
+
+bool
+EngineHost::set_listen_mode (int mode_0_solo_1_pfl_2_afl)
+{
+	if (!_impl || !_impl->session || !Config) {
+		return false;
+	}
+	int mode = mode_0_solo_1_pfl_2_afl;
+	if (mode < 0) {
+		mode = 0;
+	}
+	if (mode > 2) {
+		mode = 2;
+	}
+	try {
+		if (mode == 0) {
+			Config->set_solo_control_is_listen_control (false);
+		} else {
+			Config->set_listen_position (
+				mode == 1 ? PreFaderListen : AfterFaderListen);
+			Config->set_solo_control_is_listen_control (true);
+		}
+		refresh_listen_mode_flags ();
+		const char* name = (mode == 0) ? "Solo" : (mode == 1) ? "PFL" : "AFL";
+		std::fprintf (stderr, "airdour_win_shell: listen-mode → %s\n", name);
+		std::fflush (stderr);
+		_snap.detail = (mode == 0) ? L"listen Solo"
+		              : (mode == 1) ? L"listen PFL" : L"listen AFL";
+		return _snap.listen_mode == mode;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: listen-mode: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::cycle_listen_mode ()
+{
+	refresh_listen_mode_flags ();
+	int next = (_snap.listen_mode + 1) % 3;
+	return set_listen_mode (next);
+}
+
+bool
+EngineHost::smoke_listen_mode ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-listen-mode failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_listen_mode (0) || _snap.listen_mode != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-listen-mode FAILED (Solo)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_listen_mode (1) || _snap.listen_mode != 1
+		    || !Config->get_solo_control_is_listen_control ()
+		    || Config->get_listen_position () != PreFaderListen) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-listen-mode FAILED (PFL)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_listen_mode (2) || _snap.listen_mode != 2
+		    || !Config->get_solo_control_is_listen_control ()
+		    || Config->get_listen_position () != AfterFaderListen) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-listen-mode FAILED (AFL)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_listen_mode (0) || _snap.listen_mode != 0
+		    || Config->get_solo_control_is_listen_control ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-listen-mode FAILED (restore Solo)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-listen-mode ok (Solo→PFL→AFL→Solo)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-listen-mode ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-listen-mode exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 void
@@ -17462,6 +17575,7 @@ EngineHost::refresh_snapshot ()
 			refresh_region_flags ();
 			refresh_record_flags ();
 			refresh_mute_solo_flags ();
+			refresh_listen_mode_flags ();
 			refresh_pan_flags ();
 			refresh_send_flags ();
 			refresh_group_flags ();
@@ -17655,6 +17769,7 @@ EngineHost::EngineHost ()
 	_snap.tempo_bpm = 120.f;
 	_snap.count_in_enabled = false;
 	_snap.click_enabled = false;
+	_snap.listen_mode = 0;
 	_snap.audio_track_count = 0;
 	_snap.midi_track_count = 0;
 	_snap.marker_count = 0;
@@ -18199,6 +18314,30 @@ bool
 EngineHost::toggle_midi_soloed ()
 {
 	return false;
+}
+
+bool
+EngineHost::set_listen_mode (int mode_0_solo_1_pfl_2_afl)
+{
+	(void)mode_0_solo_1_pfl_2_afl;
+	return false;
+}
+
+bool
+EngineHost::cycle_listen_mode ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_listen_mode ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_listen_mode_flags ()
+{
 }
 
 bool

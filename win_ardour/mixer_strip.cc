@@ -41,6 +41,7 @@ MixerStrip::MixerStrip ()
 	, _armed (false)
 	, _muted (false)
 	, _soloed (false)
+	, _listen_mode (0)
 	, _fx_bypassed (false)
 	, _fx_param_count (1)
 	, _midi_strip (false)
@@ -493,15 +494,23 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		rt->DrawTextW (L"M", 1, fmt_meta, _mute_btn, brand);
 	}
 
-	/* Solo — accent when self/effective solo. */
-	if (_soloed) {
-		accent->SetOpacity (0.85f);
-		rt->FillRectangle (_solo_btn, accent);
-		accent->SetOpacity (1.f);
-		rt->DrawTextW (L"S", 1, fmt_meta, _solo_btn, brand);
-	} else {
-		rt->FillRectangle (_solo_btn, edge);
-		rt->DrawTextW (L"S", 1, fmt_meta, _solo_btn, brand);
+	/* Solo / PFL / AFL — accent when self/effective solo or listen. */
+	{
+		const wchar_t* solo_glyph = L"S";
+		if (_listen_mode == 1) {
+			solo_glyph = L"P";
+		} else if (_listen_mode == 2) {
+			solo_glyph = L"A";
+		}
+		if (_soloed) {
+			accent->SetOpacity (0.85f);
+			rt->FillRectangle (_solo_btn, accent);
+			accent->SetOpacity (1.f);
+			rt->DrawTextW (solo_glyph, 1, fmt_meta, _solo_btn, brand);
+		} else {
+			rt->FillRectangle (_solo_btn, edge);
+			rt->DrawTextW (solo_glyph, 1, fmt_meta, _solo_btn, brand);
+		}
 	}
 
 	if (!_midi_strip) {

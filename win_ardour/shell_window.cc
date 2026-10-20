@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_listen_mode)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -621,6 +622,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_mute_solo) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_listen_mode && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_listen_mode ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_listen_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_listen_mode) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-listen-mode FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1209,6 +1223,15 @@ ShellWindow::sync_mixer_mute_solo_from_engine ()
 	if (mi >= 0 && mi < kMixerStripsMax) {
 		_mixers[mi].set_muted (_engine_snap.midi_muted);
 		_mixers[mi].set_soloed (_engine_snap.midi_soloed);
+	}
+}
+
+void
+ShellWindow::sync_mixer_listen_from_engine ()
+{
+	const int n = n_mixer_strips ();
+	for (int i = 0; i < n; ++i) {
+		_mixers[i].set_listen_mode (_engine_snap.listen_mode);
 	}
 }
 
@@ -3636,7 +3659,20 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && !(GetKeyState (VK_MENU) & 0x8000)) {
 			/* E = fit selection (Ctrl+E remains export). */
 			do_fit_selection ();
-		} else if (wparam == 'L' || wparam == 'l') {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'L' || wparam == 'l')) {
+			/* Alt+Shift+L — cycle Solo → PFL → AFL → Solo. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				_engine.cycle_listen_mode ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_listen_from_engine ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			}
+		} else if (!(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'L' || wparam == 'l')) {
 			do_toggle_loop ();
 		} else if (wparam == 'P' || wparam == 'p') {
 			if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
@@ -5667,6 +5703,7 @@ ShellWindow::on_tick ()
 	}
 	sync_mixer_fx_from_engine ();
 	sync_mixer_mute_solo_from_engine ();
+	sync_mixer_listen_from_engine ();
 	sync_mixer_pan_from_engine ();
 	sync_mixer_send_from_engine ();
 	sync_monitor_from_engine ();
@@ -6304,6 +6341,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
 		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
 		{ L"L / P", L"Loop · Punch" },
+		{ L"Alt+Shift+L", L"Cycle Solo → PFL → AFL (listen mode)" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
