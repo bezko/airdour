@@ -60,6 +60,7 @@ struct EngineSnapshot {
 	float        selection_end_sec;
 	float        selection_fade_in_sec; /* AudioRegion fade-in length */
 	float        selection_fade_out_sec;
+	bool         selection_locked; /* Region::locked() — blocks move/trim */
 	bool         loop_active; /* auto-loop Location exists with positive length */
 	bool         loop_playing; /* Session get_play_loop() */
 	float        loop_start_sec;
@@ -575,6 +576,13 @@ public:
 	bool normalize_selected (float target_dbfs = -1.f);
 
 	/**
+	 * Lock / unlock selected Region (Region::set_locked).
+	 * Locked regions refuse move/trim (Region::can_move). Undoable.
+	 */
+	bool set_selection_locked (bool locked);
+	bool toggle_selection_locked ();
+
+	/**
 	 * Strip silence from selected AudioRegion (find_silence + StripSilence Filter).
 	 * Threshold dBFS (default −40); min silence / fade in seconds.
 	 * Quiet spans removed; audible parts become one or more regions.
@@ -670,6 +678,12 @@ public:
 	 * For --smoke-normalize.
 	 */
 	bool smoke_normalize ();
+
+	/**
+	 * Import tone → select → lock → move refused → unlock → move ok.
+	 * For --smoke-region-lock.
+	 */
+	bool smoke_region_lock ();
 
 	/**
 	 * Import gated tone (silence gaps) → strip silence → ≥2 regions.

@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_region_lock)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -725,6 +726,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_normalize) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-normalize FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_region_lock && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_region_lock ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_region_lock) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-lock FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2721,6 +2735,23 @@ ShellWindow::do_normalize_selection (float target_dbfs)
 }
 
 void
+ShellWindow::do_toggle_selection_locked ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.toggle_selection_locked ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::do_strip_silence_selection ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -3636,7 +3667,7 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && !(GetKeyState (VK_MENU) & 0x8000)) {
 			/* E = fit selection (Ctrl+E remains export). */
 			do_fit_selection ();
-		} else if (wparam == 'L' || wparam == 'l') {
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'L' || wparam == 'l')) {
 			do_toggle_loop ();
 		} else if (wparam == 'P' || wparam == 'p') {
 			if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
@@ -3708,6 +3739,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'N' || wparam == 'n')) {
 			/* N = normalize selection to −1 dBFS. */
 			do_normalize_selection (-1.f);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'L' || wparam == 'l')
+		           && !(GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)) {
+			/* Ctrl+L = lock / unlock selected region (L alone = loop). */
+			do_toggle_selection_locked ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'I' || wparam == 'i')) {
 			/* I = strip silence on selection (−40 dBFS threshold). */
 			do_strip_silence_selection ();
@@ -5854,9 +5890,10 @@ ShellWindow::draw_editor_pane ()
 			              _engine_snap.marker_count);
 		} else if (_engine_snap.has_selection) {
 			_snwprintf_s (caption, _TRUNCATE,
-			              L"sel T%d [%.1f–%.1f]  ·  trim/move  S/F  G=snap%s",
+			              L"sel T%d [%.1f–%.1f]%s  ·  trim/move  S/F  G=snap%s",
 			              _engine_snap.selection_track + 1,
 			              _engine_snap.selection_start_sec, _engine_snap.selection_end_sec,
+			              _engine_snap.selection_locked ? L" LOCK" : L"",
 			              _engine_snap.snap_enabled ? L" ON" : L"");
 		} else if (with_audio > 0) {
 			_snwprintf_s (caption, _TRUNCATE,
@@ -6288,6 +6325,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
 		{ L"V", L"Reverse selected audio region" },
 		{ L"N", L"Normalize selection to −1 dBFS" },
+		{ L"Ctrl+L", L"Lock / unlock selected region (blocks move/trim)" },
 		{ L"I", L"Strip silence (−40 dBFS threshold)" },
 		{ L"B", L"Consolidate / bounce selection in place" },
 		{ L"Z", L"Freeze / unfreeze focused audio track" },

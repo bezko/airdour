@@ -127,7 +127,8 @@ public:
 	                    bool smoke_midi_scale = false,
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
-	                    bool smoke_midi_pressure = false);
+	                    bool smoke_midi_pressure = false,
+	                    bool smoke_region_lock = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -232,6 +233,7 @@ private:
 	void do_pitch_shift_selection (float semitones = 1.f);
 	void do_reverse_selection ();
 	void do_normalize_selection (float target_dbfs = -1.f);
+	void do_toggle_selection_locked ();
 	void do_strip_silence_selection ();
 	void do_consolidate_selection ();
 	void do_toggle_freeze_track ();
