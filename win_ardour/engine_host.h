@@ -60,6 +60,8 @@ struct EngineSnapshot {
 	float        selection_end_sec;
 	float        selection_fade_in_sec; /* AudioRegion fade-in length */
 	float        selection_fade_out_sec;
+	static constexpr int kRegionNameLen = 32;
+	wchar_t      selection_region_name[kRegionNameLen]; /* Region::name for D2D caption */
 	bool         loop_active; /* auto-loop Location exists with positive length */
 	bool         loop_playing; /* Session get_play_loop() */
 	float        loop_start_sec;
@@ -520,6 +522,11 @@ public:
 	 */
 	bool select_region_at (int track, float time_sec);
 	void clear_region_selection ();
+	/**
+	 * Import → select → verify selection_region_name for D2D caption.
+	 * For --smoke-region-caption.
+	 */
+	bool smoke_region_caption ();
 
 	/** Remove selected region via reversible command; peaks refresh on next poll. */
 	bool delete_selected_region ();

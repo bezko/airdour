@@ -673,6 +673,7 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_region_name[0] = L'\0';
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -1968,6 +1969,7 @@ EngineHost::destroy_session ()
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
 	_snap.selection_end_sec = 0.f;
+	_snap.selection_region_name[0] = L'\0';
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -4897,6 +4899,7 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_region_name[0] = L'\0';
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -4925,6 +4928,8 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_track = _impl->selected_track;
 	_snap.selection_start_sec = (float)start / (float)sr;
 	_snap.selection_end_sec = (float)(start + len) / (float)sr;
+	copy_name_to_snap (_snap.selection_region_name, EngineSnapshot::kRegionNameLen,
+	                   region->name ());
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (ar) {
 		_snap.selection_fade_in_sec = (float)ar->fade_in_length ().samples () / (float)sr;
@@ -5081,6 +5086,50 @@ EngineHost::clear_region_selection ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_region_name[0] = L'\0';
+}
+
+bool
+EngineHost::smoke_region_caption ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-region-caption failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-caption FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!import_test_tone (0, 280.f, 1.0f) || !_snap.track_has_regions[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-caption FAILED (import)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f) || !_snap.has_selection) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-caption FAILED (select)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.selection_region_name[0] == L'\0') {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-caption FAILED (empty name)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-caption ok (%ls)\n",
+		              _snap.selection_region_name);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-region-caption ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-caption exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 bool
@@ -18640,6 +18689,12 @@ EngineHost::select_region_at (int track, float time_sec)
 void
 EngineHost::clear_region_selection ()
 {
+}
+
+bool
+EngineHost::smoke_region_caption ()
+{
+	return false;
 }
 
 bool

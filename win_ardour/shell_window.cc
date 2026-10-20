@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_region_caption)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -487,6 +488,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		/* Always scaffold a MIDI track + empty region so the piano-roll is live. */
 		_engine.ensure_midi_track ();
 		_engine.ensure_midi_region ();
+	}
+
+	if (ok && smoke_region_caption && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_region_caption ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_region_caption) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-caption FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
 	}
 
 	if (ok && smoke_plugin && _engine.snapshot ().session_ok) {
@@ -5903,6 +5917,29 @@ ShellWindow::draw_editor_pane ()
 		_rt->FillRectangle (lb, _brush_pane_edge);
 		_lanes[i].strip.draw (_rt, lb, _brush_peak, _brush_rms, _brush_body,
 		                      _brush_playhead, _brush_selection, _dpi_scale);
+
+		/* Selected region name caption (D2D, top-left of selection). */
+		if (_engine_snap.has_selection && _engine_snap.selection_track == i
+		    && _engine_snap.selection_region_name[0]
+		    && _engine_snap.selection_end_sec > _engine_snap.selection_start_sec) {
+			float x0 = _lanes[i].strip.x_at_time (lb, _engine_snap.selection_start_sec);
+			float x1 = _lanes[i].strip.x_at_time (lb, _engine_snap.selection_end_sec);
+			if (x1 > x0 + 8.f * _dpi_scale) {
+				float pad = 3.f * _dpi_scale;
+				D2D1_RECT_F cap = D2D1::RectF (
+					x0 + pad, lb.top + pad,
+					std::min (x1 - pad, x0 + 160.f * _dpi_scale),
+					lb.top + 16.f * _dpi_scale);
+				DWRITE_TEXT_ALIGNMENT ta_c = _fmt_meta->GetTextAlignment ();
+				_fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
+				_brush_brand->SetOpacity (0.9f);
+				_rt->DrawTextW (_engine_snap.selection_region_name,
+				                (UINT32)wcslen (_engine_snap.selection_region_name),
+				                _fmt_meta, cap, _brush_brand);
+				_brush_brand->SetOpacity (1.f);
+				_fmt_meta->SetTextAlignment (ta_c);
+			}
+		}
 
 		/* Marker hairlines across lanes. */
 		float lane_w = lb.right - lb.left;
