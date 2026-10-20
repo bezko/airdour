@@ -84,6 +84,7 @@ public:
 	                    bool smoke_mute_solo = false,
 	                    bool smoke_pan = false,
 	                    bool smoke_send = false,
+	                    bool smoke_aux_return = false,
 	                    bool smoke_automation = false,
 	                    bool smoke_edit = false,
 	                    bool smoke_snap = false,
@@ -143,6 +144,7 @@ private:
 		FxParam3, /* drag Mixer FX param 3 (EQ High) */
 		Pan, /* drag Mixer pan azimuth */
 		Send, /* drag Mixer aux send level */
+		AuxReturn, /* drag Monitor Aux return fader */
 		AutoWrite, /* click/drag Editor automation lane */
 		MidiCcWrite, /* click/drag MIDI CC7 automation lane */
 		FadeIn, /* drag selection fade-in handle */
@@ -278,6 +280,7 @@ private:
 	void do_toggle_monitor_mono ();
 	void do_toggle_monitor_cut ();
 	void sync_monitor_from_engine ();
+	void do_set_aux_return (float gain_0_1);
 	int  n_audio_lanes () const;
 	int  n_mixer_strips () const;
 	int  midi_mixer_index () const;

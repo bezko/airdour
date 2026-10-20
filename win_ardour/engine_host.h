@@ -178,6 +178,7 @@ struct EngineSnapshot {
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
 	bool         aux_bus_ok; /* Session Aux audio bus exists */
+	float        aux_return; /* Aux bus fader gain coeff 0..1 (unity=1) */
 	bool         midi_muted;
 	bool         midi_soloed;
 	bool         snap_enabled; /* Editor snap-to-grid */
@@ -373,6 +374,12 @@ public:
 
 	/** Send 0 → 0.75 → 0.25 on Audio 1. For --smoke-send. */
 	bool smoke_send ();
+
+	/** Aux bus return (wet) gain coeff 0..1. Double-click → unity. */
+	bool  set_aux_return (float gain_0_1);
+	float aux_return () const;
+	/** Ensure Aux → set 0.5 → set 1.0. For --smoke-aux-return. */
+	bool smoke_aux_return ();
 
 	/**
 	 * Track fader AutomationList (GainAutomation). Enable Play, write points,

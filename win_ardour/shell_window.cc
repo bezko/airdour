@@ -217,6 +217,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_mute_solo,
                             bool smoke_pan,
                             bool smoke_send,
+                            bool smoke_aux_return,
                             bool smoke_automation,
                             bool smoke_edit,
                             bool smoke_snap,
@@ -647,6 +648,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_send) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_aux_return && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_aux_return ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_monitor_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_aux_return) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-aux-return FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2404,6 +2420,21 @@ ShellWindow::sync_monitor_from_engine ()
 	_monitor.set_dim (_engine_snap.monitor_dim);
 	_monitor.set_mono (_engine_snap.monitor_mono);
 	_monitor.set_mute (_engine_snap.monitor_cut);
+	_monitor.set_aux_ok (_engine_snap.aux_bus_ok);
+	_monitor.set_aux_return (_engine_snap.aux_return);
+}
+
+void
+ShellWindow::do_set_aux_return (float gain_0_1)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.set_aux_return (gain_0_1);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_monitor_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
@@ -3844,6 +3875,10 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 	case WM_LBUTTONDBLCLK: {
 		float x, y;
 		client_from_lparam (lparam, &x, &y);
+		if (_monitor.hit_aux_return (x, y)) {
+			do_set_aux_return (1.f); /* unity */
+			return 0;
+		}
 		int lab = hit_mixer_label (x, y);
 		if (lab >= 0) {
 			const int mi = midi_mixer_index ();
@@ -4567,6 +4602,17 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		do_toggle_monitor_cut ();
 		return true;
 	}
+	if (mh == MonitorHit::AuxReturn) {
+		_drag = DragMode::AuxReturn;
+		_drag_index = -1;
+		if (_monitor.drag_aux_return_to (y)) {
+			do_set_aux_return (_monitor.aux_return ());
+		}
+		SetCapture (_hwnd);
+		SetCursor (LoadCursorW (nullptr, IDC_SIZENS));
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
 
 	if (hit_editor_ruler (x, y) && _engine.is_linked () && _engine_snap.session_ok) {
 		float time_sec = _lanes[0].strip.time_at_x (_editor_ruler, x);
@@ -5163,6 +5209,13 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 			_engine_snap = _engine.snapshot ();
 			sync_mixer_send_from_engine ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+		return true;
+	}
+
+	if (_drag == DragMode::AuxReturn) {
+		if (_monitor.drag_aux_return_to (y)) {
+			do_set_aux_return (_monitor.aux_return ());
 		}
 		return true;
 	}

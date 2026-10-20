@@ -21,10 +21,13 @@ MonitorStrip::MonitorStrip ()
 	, _dim_btn ()
 	, _mono_btn ()
 	, _mute_btn ()
+	, _aux_track ()
 	, _available (false)
+	, _aux_ok (false)
 	, _dim (false)
 	, _mono (false)
 	, _mute (false)
+	, _aux_return (1.f)
 {
 }
 
@@ -41,6 +44,55 @@ MonitorStrip::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	_mono_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
 	y = _mono_btn.bottom + gap;
 	_mute_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
+	y = _mute_btn.bottom + gap + 4.f * dpi_scale;
+	/* Thin vertical Aux return fader; label sits above the track. */
+	float label_h = 16.f * dpi_scale;
+	float track_top = y + label_h;
+	float track_bot = _strip.bottom - pad;
+	float track_w = 10.f * dpi_scale;
+	float cx = (_strip.left + _strip.right) * 0.5f;
+	if (track_bot > track_top + 24.f * dpi_scale) {
+		_aux_track = D2D1::RectF (cx - track_w * 0.5f, track_top,
+		                          cx + track_w * 0.5f, track_bot);
+	} else {
+		_aux_track = D2D1::RectF (0, 0, 0, 0);
+	}
+}
+
+void
+MonitorStrip::set_aux_return (float g)
+{
+	_aux_return = (g < 0.f) ? 0.f : ((g > 1.f) ? 1.f : g);
+}
+
+bool
+MonitorStrip::hit_aux_return (float x, float y) const
+{
+	if (!_aux_ok) {
+		return false;
+	}
+	float pad = 10.f;
+	return x >= _aux_track.left - pad && x <= _aux_track.right + pad
+	    && y >= _aux_track.top - pad && y <= _aux_track.bottom + pad;
+}
+
+bool
+MonitorStrip::drag_aux_return_to (float y)
+{
+	if (!_aux_ok) {
+		return false;
+	}
+	float h = _aux_track.bottom - _aux_track.top;
+	if (h < 1.f) {
+		return false;
+	}
+	float t = (_aux_track.bottom - y) / h;
+	float g = (t < 0.f) ? 0.f : ((t > 1.f) ? 1.f : t);
+	if (g == _aux_return) {
+		return false;
+	}
+	_aux_return = g;
+	return true;
 }
 
 MonitorHit
@@ -57,6 +109,9 @@ MonitorStrip::hit_test (float x, float y) const
 	}
 	if (contains (_mute_btn, x, y)) {
 		return MonitorHit::Mute;
+	}
+	if (hit_aux_return (x, y)) {
+		return MonitorHit::AuxReturn;
 	}
 	return MonitorHit::None;
 }
@@ -107,6 +162,26 @@ MonitorStrip::draw (ID2D1RenderTarget* rt,
 	} else {
 		rt->FillRectangle (_dim_btn, edge);
 		rt->DrawTextW (L"—", 1, fmt_meta, _dim_btn, body);
+	}
+
+	if (_aux_ok && _aux_track.bottom > _aux_track.top) {
+		float label_bot = _aux_track.top - 2.f * dpi_scale;
+		rt->DrawTextW (L"Aux", 3, fmt_meta,
+		               D2D1::RectF (_strip.left, label_bot - 14.f * dpi_scale,
+		                            _strip.right, label_bot),
+		               brand);
+		rt->FillRectangle (_aux_track, edge);
+		float h = _aux_track.bottom - _aux_track.top;
+		float fill_top = _aux_track.bottom - h * _aux_return;
+		rt->FillRectangle (
+			D2D1::RectF (_aux_track.left, fill_top, _aux_track.right, _aux_track.bottom),
+			accent);
+		float kn_y = fill_top;
+		float kn_h = 4.f * dpi_scale;
+		rt->FillRectangle (
+			D2D1::RectF (_aux_track.left - 3.f * dpi_scale, kn_y - kn_h * 0.5f,
+			             _aux_track.right + 3.f * dpi_scale, kn_y + kn_h * 0.5f),
+			brand);
 	}
 
 	fmt_meta->SetTextAlignment (ta_m);
