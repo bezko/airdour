@@ -14,6 +14,7 @@
 struct EngineMarkerSnap {
 	float        sec;
 	wchar_t      name[24];
+	bool         cd; /* Location::is_cd_marker */
 };
 
 struct EngineMidiDeviceSnap {
@@ -729,6 +730,14 @@ public:
 
 	/** Add IsMark at time_sec (name auto if empty). */
 	bool add_marker_at (float time_sec, const std::string& name = std::string ());
+	/**
+	 * Set/clear CD flag on nearest IsMark (Location::set_cd).
+	 * Ctrl+Alt+M toggles.
+	 */
+	bool set_marker_cd_near (float time_sec, bool cd, float slop_sec = 0.35f);
+	bool toggle_marker_cd_near (float time_sec, float slop_sec = 0.35f);
+	/** Add → set CD → assert → clear → remove. For --smoke-cd-marker. */
+	bool smoke_cd_marker ();
 	/** Remove nearest IsMark within slop_sec of time_sec. */
 	bool remove_marker_near (float time_sec, float slop_sec = 0.35f);
 	/** Locate transport to time_sec (optional snap to nearest mark within slop). */

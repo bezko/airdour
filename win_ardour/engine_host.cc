@@ -690,6 +690,7 @@ EngineHost::EngineHost ()
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
+		_snap.markers[i].cd = false;
 	}
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
@@ -7575,6 +7576,7 @@ EngineHost::refresh_locations_snap ()
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
+		_snap.markers[i].cd = false;
 	}
 	if (!_impl || !_impl->session) {
 		return;
@@ -7617,6 +7619,7 @@ EngineHost::refresh_locations_snap ()
 			_snap.markers[n].sec = (float)loc->start_sample () / (float)sr;
 			std::wstring wname = utf8_to_wide (loc->name ());
 			wcsncpy_s (_snap.markers[n].name, wname.c_str (), _TRUNCATE);
+			_snap.markers[n].cd = loc->is_cd_marker ();
 			++n;
 		}
 		_snap.marker_count = n;
@@ -9200,6 +9203,155 @@ EngineHost::add_marker_at (float time_sec, const std::string& name)
 		return false;
 	} catch (...) {
 		_snap.detail = L"marker add failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::set_marker_cd_near (float time_sec, bool cd, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		/* flags=0: any IsMark (CD flag adds IsCDMarker so != IsMark alone). */
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::Flags (0));
+		if (!hit) {
+			_snap.detail = L"no marker near playhead";
+			return false;
+		}
+		_impl->session->begin_reversible_command (cd ? "set CD marker" : "clear CD marker");
+		XMLNode& before = locs->get_state ();
+		hit->set_cd (cd, this);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = cd ? L"CD marker on" : L"CD marker off";
+		std::fprintf (stderr, "airdour_win_shell: marker CD %s @ %.2fs\n",
+		              cd ? "on" : "off", time_sec);
+		std::fflush (stderr);
+		return hit->is_cd_marker () == cd;
+	} catch (...) {
+		_snap.detail = L"CD marker failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_marker_cd_near (float time_sec, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::Flags (0));
+		if (!hit) {
+			_snap.detail = L"no marker near playhead";
+			return false;
+		}
+		return set_marker_cd_near (time_sec, !hit->is_cd_marker (), slop_sec);
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_cd_marker ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-cd-marker failed — no Session";
+		return false;
+	}
+	try {
+		if (!add_marker_at (1.75f, "cdMark")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_marker_cd_near (1.75f, true, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker FAILED (set CD)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		bool found = false;
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 1.75f) < 0.05f && _snap.markers[i].cd) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker FAILED (snap CD)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_marker_cd_near (1.75f, false, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker FAILED (clear CD)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		bool still = false;
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 1.75f) < 0.05f && _snap.markers[i].cd) {
+				still = true;
+				break;
+			}
+		}
+		if (still) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker FAILED (still CD)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!remove_marker_near (1.75f, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker FAILED (cleanup)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker ok (on→off)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-cd-marker ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
 		return false;
 	}
 }
@@ -17661,6 +17813,7 @@ EngineHost::EngineHost ()
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
+		_snap.markers[i].cd = false;
 	}
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
@@ -19209,6 +19362,29 @@ EngineHost::add_marker_at (float time_sec, const std::string& name)
 {
 	(void)time_sec;
 	(void)name;
+	return false;
+}
+
+bool
+EngineHost::set_marker_cd_near (float time_sec, bool cd, float slop_sec)
+{
+	(void)time_sec;
+	(void)cd;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::toggle_marker_cd_near (float time_sec, float slop_sec)
+{
+	(void)time_sec;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::smoke_cd_marker ()
+{
 	return false;
 }
 
