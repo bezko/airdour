@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_region_layer_cycle,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,22 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_region_layer_cycle && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_region_layer_cycle ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_region_layer_cycle) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-layer-cycle FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2536,6 +2553,22 @@ ShellWindow::do_remove_marker_at_playhead ()
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+
+void
+ShellWindow::do_cycle_region_layer ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.cycle_selected_region_layer ()) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	apply_region_selection_to_lanes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 void
 ShellWindow::sync_history_from_engine ()
 {
@@ -3642,6 +3675,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
 				do_toggle_punch ();
 			}
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && wparam == VK_OEM_6) {
+			/* Ctrl+Alt+Shift+] = cycle region layer top↔bottom. */
+			do_cycle_region_layer ();
 		} else if (wparam == VK_OEM_4) { /* [ */
 			if (_engine.is_linked () && _engine_snap.session_ok) {
 				if (GetKeyState (VK_SHIFT) & 0x8000) {
@@ -6284,6 +6323,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+S / O / E", L"Save / Open browse / Export" },
 		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
+		{ L"Ctrl+Alt+Shift+]", L"Cycle region layer top↔bottom" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
 		{ L"V", L"Reverse selected audio region" },
