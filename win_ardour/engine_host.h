@@ -442,6 +442,26 @@ public:
 	/** Clear → 3 bend points → Play. For --smoke-midi-bend. */
 	bool smoke_midi_bend ();
 
+	/**
+	 * MidiModel channel-pressure AutomationList (0..127; UI maps 0..1).
+	 */
+	bool ensure_midi_pressure_automation (int channel = 0);
+	bool write_midi_pressure_automation (float time_sec, float value_0_1, int channel = 0);
+	bool clear_midi_pressure_automation (int channel = 0);
+	bool fill_midi_pressure_automation_curve (float view_start_sec,
+	                                          float view_span_sec,
+	                                          float* y_0_1,
+	                                          size_t n,
+	                                          int channel = 0);
+	int  fill_midi_pressure_automation_points (float view_start_sec,
+	                                           float view_span_sec,
+	                                           float* x_norm,
+	                                           float* y_0_1,
+	                                           int max_n,
+	                                           int channel = 0);
+	/** Clear → 3 pressure points → Play. For --smoke-midi-pressure. */
+	bool smoke_midi_pressure ();
+
 	/** Clear PeakMeter max-peak / clip latch on Audio track (0..kMeters-1). */
 	bool clear_track_meter_clip (int track);
 
