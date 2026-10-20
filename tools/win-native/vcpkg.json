@@ -1,0 +1,71 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "airdour-win64-deps",
+  "version-string": "0.7.0",
+  "description": "MSVC headless/core deps for Airdour. Includes overlay glibmm-2.4 + sigc++-2.0 (not stock vcpkg glibmm 2.68+/sigc++3). GTK2 chrome omitted; optional feature gtk-libs for MSVC GTK3/Cairo (libs only, not product UI).",
+  "dependencies": [
+    "glib",
+    "libsigcpp2",
+    "glibmm24",
+    "libxml2",
+    "libsndfile",
+    "curl",
+    "libarchive",
+    "liblo",
+    "taglib",
+    "vamp-sdk",
+    "rubberband",
+    {
+      "name": "fftw3",
+      "features": ["threads"]
+    },
+    {
+      "name": "aubio",
+      "default-features": false
+    },
+    "lilv",
+    "pthreads",
+    "boost-uuid",
+    "boost-tokenizer",
+    "boost-bind",
+    "boost-smart-ptr",
+    "boost-multiprecision",
+    "boost-type-traits",
+    "boost-ptr-container",
+    "boost-format",
+    "boost-optional",
+    "boost-pool",
+    "boost-algorithm",
+    "boost-property-tree",
+    "boost-rational",
+    "boost-intrusive",
+    "boost-dynamic-bitset",
+    {
+      "name": "getopt-win32",
+      "platform": "windows"
+    },
+    {
+      "name": "pkgconf",
+      "host": true
+    }
+  ],
+  "features": {
+    "cxx-glib-modern-incompatible": {
+      "description": "Stock vcpkg glibmm (2.68+/2.90) + libsigcpp 3.x — incompatible with Ardour. Prefer overlay ports libsigcpp2 + glibmm24 instead.",
+      "dependencies": [
+        "glibmm",
+        "libsigcpp"
+      ]
+    },
+    "gtk-libs": {
+      "description": "MSVC GTK3 + Cairo/Pango (as libraries). For non-UI reuse (libs/canvas helpers, LV2 offloads). NOT product chrome — Airdour UI stays Win32+D2D.",
+      "dependencies": [
+        "gtk3",
+        "cairo",
+        "pango"
+      ]
+    }
+  },
+  "default-features": [],
+  "supports": "windows & x64 & !uwp"
+}

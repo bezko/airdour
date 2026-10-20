@@ -681,6 +681,17 @@ public:
 	 */
 	virtual float dsp_load () const = 0;
 
+	/**
+	 * Optional process-cycle timing (microseconds) and underrun count.
+	 * Default zeros; WASAPI shared fills these for laptop perf smoke.
+	 */
+	virtual void process_callback_stats (uint64_t& last_us, uint64_t& max_us,
+	                                     uint64_t& avg_us, uint64_t& count,
+	                                     uint64_t& xruns) const
+	{
+		last_us = max_us = avg_us = count = xruns = 0;
+	}
+
 	/* Transport Control (JACK is the only audio API that currently offers
 	 * the concept of shared transport control)
 	 */

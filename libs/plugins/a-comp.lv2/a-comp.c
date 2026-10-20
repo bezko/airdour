@@ -23,6 +23,11 @@
 #include <string.h>
 #include <stdbool.h>
 
+/* Airdour Windows-only: DSP path has no Cairo. Drop inline-display (LV2_EXTENDED). */
+#if defined(LV2_EXTENDED) && defined(AIRDOUR_WINDOWS_ONLY)
+#undef LV2_EXTENDED
+#endif
+
 #ifdef LV2_EXTENDED
 #include <cairo/cairo.h>
 #include "ardour/lv2_extensions.h"

@@ -2059,8 +2059,25 @@ PluginManager::vst3_refresh (bool cache_only)
 #ifdef __APPLE__
 	vst3_discover_from_path ("~/Library/Audio/Plug-Ins/VST3:/Library/Audio/Plug-Ins/VST3:/Network/Library/Audio/Plug-ins/VST3", cache_only);
 #elif defined PLATFORM_WINDOWS
+	/* Steinberg system dirs (+ x86 Common Files + per-user Programs\Common\VST3).
+	 * Extra roots via Config plugin-path-vst3 / env VST3_PATH. */
+	Searchpath win_vst3;
 	std::string prog = PBD::get_win_special_folder_path (CSIDL_PROGRAM_FILES);
-	vst3_discover_from_path (Glib::build_filename (prog, "Common Files", "VST3"), cache_only);
+	if (!prog.empty ()) {
+		win_vst3 += Glib::build_filename (prog, "Common Files", "VST3");
+		win_vst3 += Glib::build_filename (prog, "VST3");
+	}
+	std::string prog_x86 = PBD::get_win_special_folder_path (CSIDL_PROGRAM_FILESX86);
+	if (!prog_x86.empty ()) {
+		win_vst3 += Glib::build_filename (prog_x86, "Common Files", "VST3");
+	}
+	{
+		const char* local = g_getenv ("LOCALAPPDATA");
+		if (local && *local) {
+			win_vst3 += Glib::build_filename (local, "Programs", "Common", "VST3");
+		}
+	}
+	vst3_discover_from_path (win_vst3.to_string (), cache_only);
 #else
 	vst3_discover_from_path ("~/.vst3:/usr/lib64/vst3:/usr/lib/vst3:/usr/local/lib64/vst3:/usr/local/lib/vst3", cache_only);
 #endif

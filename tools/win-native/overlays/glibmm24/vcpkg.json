@@ -1,0 +1,21 @@
+{
+  "name": "glibmm24",
+  "version": "2.66.8",
+  "description": "glibmm 2.66 (pkg-config: glibmm-2.4 / giomm-2.4) for Ardour libpbd. Not stock vcpkg glibmm 2.68+/sigc++3.",
+  "homepage": "https://www.gtkmm.org/",
+  "license": "LGPL-2.1-or-later",
+  "supports": "!uwp & !xbox & !(windows & !mingw & static)",
+  "dependencies": [
+    "gettext",
+    "glib",
+    "libffi",
+    "libiconv",
+    "libsigcpp2",
+    "pcre2",
+    {
+      "name": "vcpkg-tool-meson",
+      "host": true
+    },
+    "zlib"
+  ]
+}

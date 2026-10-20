@@ -340,6 +340,8 @@ if any(arg in ('dist', 'distcheck') for arg in sys.argv[1:]):
 top = '.'
 out = 'build'
 
+# Full multiplatform children list (upstream). Windows-only builds filter this
+# via windows_only_children() once AIRDOUR_WINDOWS_ONLY is defined.
 children = [
         # patched 3rd party libs
         'libs/clearlooks-newer',
@@ -386,6 +388,8 @@ children = [
         'libs/plugins/a-exp.lv2',
         'libs/plugins/a-delay.lv2',
         'libs/plugins/a-eq.lv2',
+        'libs/plugins/a-limiter.lv2',
+        'libs/plugins/a-gate.lv2',
         'libs/plugins/a-reverb.lv2',
         'libs/plugins/a-fluidsynth.lv2',
         #'libs/plugins/a-vapor.lv2',
@@ -411,6 +415,39 @@ children = [
         'libs/ardouralsautil',
         'libs/auscan',
 ]
+
+# Paths dropped from the default Windows-only product graph (Airdour).
+# Never require libs/tk, gtk2_ardour, or Cairo canvas for win_shell / hardour.
+# GUI is Win32+D2D (`win_ardour`); GTK control surfaces need ytk/gtkmm2ext — out.
+_WINDOWS_ONLY_EXCLUDE = set([
+        'libs/vfork',
+        'libs/ardouralsautil',
+        'libs/auscan',
+        # GTK2 / bundled ytk — dead end on MSVC; product GUI is win_ardour
+        'libs/clearlooks-newer',
+        'libs/tk/ztk',
+        'libs/tk/ydk-pixbuf',
+        'libs/tk/ydk',
+        'libs/tk/ytk',
+        'libs/tk/ztkmm',
+        'libs/tk/ydkmm',
+        'libs/tk/ytkmm',
+        'libs/tk/suil',
+        'libs/gtkmm2ext',
+        'libs/canvas',
+        'libs/widgets',
+        'libs/waveview',
+        'gtk2_ardour',
+        # Hardware surfaces link libgtkmm2ext / libytkmm / cairomm — not on D2D path.
+        # control_protocol lives under libs/ctrl-interface (kept).
+        'libs/surfaces',
+        # Cairo UI LV2 plugins — need cairo; headless graph skips them.
+        # a-comp / a-eq / a-delay / a-limiter / a-gate are DSP-only (no Cairo) so they stay in the Windows-only build.
+        'libs/plugins/a-exp.lv2',
+])
+
+def windows_only_children():
+        return [c for c in children if c not in _WINDOWS_ONLY_EXCLUDE]
 
 i18n_children = [
         'gtk2_ardour',
@@ -575,11 +612,13 @@ int main() { return 0; }''',
         cxx_flags.append('--stdlib=libc++')
         linker_flags.append('--stdlib=libc++')
 
-    if conf.options.cxx17 or platform == "darwin":
+    # MSVC + modern PBD (std::optional etc.) needs /std:c++17; darwin already did.
+    need_cxx17 = conf.options.cxx17 or platform == "darwin" or Options.options.dist_target == 'msvc'
+    if need_cxx17:
         conf.check_cxx(cxxflags=flags_dict['cxx17'])
         cxx_flags += flags_dict['cxx17']
 
-    if conf.options.cxx17 or platform == "darwin":
+    if need_cxx17:
         if platform == "darwin":
             # Mavericks and later changed the syntax to be used when including Carbon headers,
             # from requiring a full path to requiring just the header name.
@@ -777,9 +816,10 @@ int main() { return 0; }''',
     compiler_flags.extend(
         ('-DBOOST_SYSTEM_NO_DEPRECATED', '-D_ISOC9X_SOURCE',
          '-D_LARGEFILE64_SOURCE', '-D_FILE_OFFSET_BITS=64'))
-    cxx_flags.extend(
-        ('-D__STDC_LIMIT_MACROS', '-D__STDC_FORMAT_MACROS',
-         '-DCANVAS_DEBUG'))
+    cxx_flags.extend(('-D__STDC_LIMIT_MACROS', '-D__STDC_FORMAT_MACROS'))
+    # Canvas debug macros only when Cairo canvas is in the build graph.
+    if not conf.is_defined('AIRDOUR_WINDOWS_ONLY'):
+        cxx_flags.append('-DCANVAS_DEBUG')
 
     # Do not use Boost.System library
     cxx_flags.append('-DBOOST_ERROR_CODE_HEADER_ONLY')
@@ -842,7 +882,11 @@ def options(opt):
     opt.add_option('--arch', type='string', action='store', dest='arch',
                     help='Architecture-specific compiler FLAGS')
     opt.add_option('--with-backends', type='string', action='store', default='', dest='with_backends',
-                    help='Specify which backend modules are to be included(jack,alsa,portaudio,coreaudio,pulseaudio)')
+                    help='Specify which backend modules are to be included(jack,alsa,portaudio,coreaudio,pulseaudio,wasapi,dummy)')
+    opt.add_option('--windows-only', action='store_true', default=False, dest='windows_only',
+                    help='Airdour: force Windows-only product graph (WASAPI shared + dummy; drop Linux/mac helpers)')
+    opt.add_option('--with-portaudio-bridge', action='store_true', default=False, dest='with_portaudio_bridge',
+                    help='Airdour: keep PortAudio backend as temporary bridge alongside WASAPI')
     opt.add_option('--backtrace', action='store_true', default=False, dest='backtrace',
                     help='Compile with -rdynamic -- allow obtaining backtraces from within Ardour')
     opt.add_option('--no-carbon', action='store_true', default=False, dest='nocarbon',
@@ -975,7 +1019,8 @@ def configure(conf):
     if Options.options.dist_target == 'msvc':
         conf.env['MSVC_TARGETS'] = ['x64']
         conf.load('msvc')
-        conf.find_program('llvm-nm', var = 'llvm_nm')
+        # Optional: gendef.py no-ops without llvm-nm. Required only when generating .def from DLLs.
+        conf.find_program('llvm-nm', var = 'llvm_nm', mandatory = False)
         conf.load('gendef', tooldir = 'tools')
 
     if Options.options.debug and not Options.options.keepflags:
@@ -1249,11 +1294,8 @@ int main () { int x = SFC_RF64_AUTO_DOWNGRADE; return 0; }
         conf.env.append_value('LIB', 'intl')
         # TODO this should only be necessary for a debug build
         conf.env.append_value('LIB', 'dbghelp')
-
-        # work around GdkDrawable BitBlt performance issue on windows
-        # see http://gareus.org/wiki/ardour_windows_gdk_and_cairo
-        conf.env.append_value('CFLAGS', '-DUSE_CAIRO_IMAGE_SURFACE')
-        conf.env.append_value('CXXFLAGS', '-DUSE_CAIRO_IMAGE_SURFACE')
+        # No USE_CAIRO_IMAGE_SURFACE: Airdour mingw/msvc is AIRDOUR_WINDOWS_ONLY
+        # (no gtk2_ardour / Cairo canvas). GTK Gdk BitBlt workaround does not apply.
         conf.define ('WINDOWS', 1)
 
         have_ptw_semaphore = conf.check_cc(fragment = '''
@@ -1289,10 +1331,7 @@ int main () { return 0; }
         conf.env.append_value('CXXFLAGS', '-DCOMPILER_MSVC')
         conf.env.append_value('CFLAGS', '-D_USE_MATH_DEFINES')
         conf.env.append_value('CXXFLAGS', '-D_USE_MATH_DEFINES')
-        # work around GdkDrawable BitBlt performance issue on windows
-        # see http://gareus.org/wiki/ardour_windows_gdk_and_cairo
-        conf.env.append_value('CFLAGS', '-DUSE_CAIRO_IMAGE_SURFACE')
-        conf.env.append_value('CXXFLAGS', '-DUSE_CAIRO_IMAGE_SURFACE')
+        # No USE_CAIRO_IMAGE_SURFACE on MSVC Windows-only (no GTK/Cairo canvas).
         if conf.env['DEBUG']:
             conf.env.append_value('LIB', 'pthreadVC3d')
         else:
@@ -1322,9 +1361,11 @@ int main () { __int128 x = 0; return 0; }
         conf.env.append_value('CFLAGS', "-DCOMPILER_INT128_SUPPORT")
 
 
-    # always use localized gtk2
-    conf.define('YTK', 1)
-    conf.define('HAVE_SUIL', 1)
+    # Bundled YTK/SUIL are for the GTK UI stack. MSVC / --windows-only headless
+    # excludes libs/tk/suil — do not claim HAVE_SUIL or libardour will include suil.h.
+    if Options.options.dist_target != 'msvc' and not Options.options.windows_only:
+        conf.define('YTK', 1)
+        conf.define('HAVE_SUIL', 1)
 
     # Tell everyone that this is a waf build
 
@@ -1416,20 +1457,34 @@ int main () { __int128 x = 0; return 0; }
 
     backends = opts.with_backends.split(',')
 
+    # Airdour: treat mingw/msvc dist targets as Windows-only unless explicitly disabled.
+    windows_only = opts.windows_only or Options.options.dist_target in ('mingw', 'msvc')
+    if windows_only:
+        conf.define('AIRDOUR_WINDOWS_ONLY', 1)
+        conf.env['AIRDOUR_WINDOWS_ONLY'] = True
+        conf.env.append_value('CFLAGS', '-DAIRDOUR_WINDOWS_ONLY=1')
+        conf.env.append_value('CXXFLAGS', '-DAIRDOUR_WINDOWS_ONLY=1')
+
     if backends == ['']:
         backends = ['dummy']
-        autowaf.check_pkg(conf, 'jack', uselib_store='JACK', atleast_version='1.9.10', mandatory=False)
-        if conf.is_defined('HAVE_JACK'):
-            backends += ['jack']
-        if conf.is_defined('HAVE_PULSEAUDIO'):
-            backends += ['pulseaudio']
+        if windows_only:
+            # Product audio path: native WASAPI shared mode.
+            backends += ['wasapi']
+            if opts.with_portaudio_bridge:
+                backends += ['portaudio']
+        else:
+            autowaf.check_pkg(conf, 'jack', uselib_store='JACK', atleast_version='1.9.10', mandatory=False)
+            if conf.is_defined('HAVE_JACK'):
+                backends += ['jack']
+            if conf.is_defined('HAVE_PULSEAUDIO'):
+                backends += ['pulseaudio']
 
-        if re.search ("linux", sys.platform) is not None and Options.options.dist_target != 'mingw':
-            backends += ['alsa']
-        if sys.platform == 'darwin':
-            backends += ['coreaudio']
-        if Options.options.dist_target == 'mingw' or Options.options.dist_target == 'msvc':
-            backends += ['portaudio']
+            if re.search ("linux", sys.platform) is not None and Options.options.dist_target != 'mingw':
+                backends += ['alsa']
+            if sys.platform == 'darwin':
+                backends += ['coreaudio']
+            if Options.options.dist_target == 'mingw' or Options.options.dist_target == 'msvc':
+                backends += ['portaudio']
 
     if 'dummy' not in backends:
         backends += ['dummy']
@@ -1439,6 +1494,7 @@ int main () { __int128 x = 0; return 0; }
     conf.env['BUILD_ALSABACKEND'] = any('alsa' in b for b in backends)
     conf.env['BUILD_DUMMYBACKEND'] = any('dummy' in b for b in backends)
     conf.env['BUILD_PABACKEND'] = any('portaudio' in b for b in backends)
+    conf.env['BUILD_WASAPIBACKEND'] = any('wasapi' in b for b in backends)
     conf.env['BUILD_CORECRAPPITA'] = any('coreaudio' in b for b in backends)
     conf.env['BUILD_PULSEAUDIO'] = any('pulseaudio' in b for b in backends)
 
@@ -1447,6 +1503,7 @@ int main () { __int128 x = 0; return 0; }
             or conf.env['BUILD_ALSABACKEND']
             or conf.env['BUILD_DUMMYBACKEND']
             or conf.env['BUILD_PABACKEND']
+            or conf.env['BUILD_WASAPIBACKEND']
             or conf.env['BUILD_CORECRAPPITA']
             or conf.env['BUILD_PULSEAUDIO']):
         conf.fatal("Must configure and build at least one backend")
@@ -1497,7 +1554,9 @@ int main () { __int128 x = 0; return 0; }
     if not (Options.options.dist_target == 'mingw' or Options.options.dist_target == 'msvc'):
         conf.env.append_value('LIB', 'm')
 
-    for i in children:
+    # waf ConfigSet: env.get is not dict.get (returns [] for key "get") — use is_defined.
+    config_children = windows_only_children() if conf.is_defined('AIRDOUR_WINDOWS_ONLY') else children
+    for i in config_children:
         conf.recurse(i)
 
     # Fix utterly braindead FLAC include path to not smash assert.h
@@ -1542,6 +1601,8 @@ const char* const ardour_config_info = "\\n\\
     write_config_text('Aubio',                 conf.is_defined('HAVE_AUBIO'))
     write_config_text('AudioUnits',            conf.is_defined('AUDIOUNIT_SUPPORT'))
     write_config_text('Build target',          conf.env['build_target'])
+    write_config_text('Airdour Windows-only',  conf.is_defined('AIRDOUR_WINDOWS_ONLY'))
+    write_config_text('WASAPI backend',        conf.env['BUILD_WASAPIBACKEND'])
     write_config_text('Canvas Test UI',        conf.is_defined('CANVASTESTUI'))
     write_config_text('Beatbox test app',      conf.is_defined('BEATBOX'))
     write_config_text('CoreAudio',             conf.is_defined('HAVE_COREAUDIO'))
@@ -1603,7 +1664,10 @@ const char* const ardour_config_info = "\\n\\
     config_text.close ()
     print('')
 
-    if Options.options.dist_target == 'mingw' or Options.options.dist_target == 'msvc':
+    # gtk2_ardour/windows_icon.rc is only for the GTK frontend (excluded on
+    # AIRDOUR_WINDOWS_ONLY). win_ardour uses its own Win32 resources if needed.
+    if ((Options.options.dist_target == 'mingw' or Options.options.dist_target == 'msvc')
+            and not conf.is_defined('AIRDOUR_WINDOWS_ONLY')):
         create_resource_file(Options.options.program_name)
 
 def build(bld):
@@ -1653,16 +1717,27 @@ def build(bld):
         obj.chmod        = Utils.O755
         obj.install_path = bld.env['LIBDIR']
 
-    for i in children:
+    build_children = windows_only_children() if bld.is_defined('AIRDOUR_WINDOWS_ONLY') else children
+    for i in build_children:
         bld.recurse(i)
 
     if bld.env['build_target'] == 'msvc': #For using .def generator
-        gendef_targets = ['libydk-pixbuf', 'libydk', 'libytk', 'libztkmm', 'libydkmm', 'libytkmm', 'libaaf']
+        # GTK/ytk targets omitted when AIRDOUR_WINDOWS_ONLY excludes the tk tree.
+        gendef_targets = ['libaaf']
+        if not bld.is_defined('AIRDOUR_WINDOWS_ONLY'):
+            gendef_targets = [
+                'libydk-pixbuf', 'libydk', 'libytk', 'libztkmm',
+                'libydkmm', 'libytkmm', 'libaaf',
+            ]
         if not Options.options.use_lld:
             gendef_targets += ['libardourvampplugins', 'libardourvamppyin']
 
         for name in gendef_targets:
-            tgen = bld.get_tgen_by_name(name) # Waf 'features' can be a list or a space separated string depending on the target
+            try:
+                tgen = bld.get_tgen_by_name(name)
+            except Exception:
+                continue
+            # Waf 'features' can be a list or a space separated string depending on the target
             if isinstance(tgen.features, list):
                 tgen.features.append('gendef')
             else:

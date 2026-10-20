@@ -9,7 +9,6 @@ def options(opt):
 def configure(conf):
     autowaf.check_pkg(conf, 'lv2', atleast_version='1.0.0',
                       uselib_store='LV2_1_0_0')
-    autowaf.check_pkg(conf, 'cairo', uselib_store='CAIRO', atleast_version='1.12.0')
 
 def build(bld):
     bundle = 'a-eq.lv2'
@@ -25,7 +24,7 @@ def build(bld):
         obj.chmod = Utils.O644
         obj.LIB_EXT = module_ext
 
-    # Build plugin library
+    # DSP-only (no Cairo / LV2_EXTENDED inline UI). Matches a-reverb / a-comp.
     obj = bld(features     = 'c cshlib',
               source       = 'a-eq.c',
               name         = 'a-eq',
@@ -33,7 +32,6 @@ def build(bld):
               includes     = [ '../../ardour' ],
               target       = '../../LV2/%s/a-eq' % bundle,
               install_path = '${LV2DIR}/%s' % bundle,
-              uselib       = 'CAIRO',
               use          = 'LV2_1_0_0'
               )
     obj.env.cshlib_PATTERN = module_pat

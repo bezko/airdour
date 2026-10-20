@@ -45,6 +45,7 @@ tags
 waf3-*
 .lock-waf*
 /build/
+/build-rel/
 /.cache
 /doc/html/
 /doc/latex/
@@ -152,3 +153,19 @@ waf3-*
 
 # misc custom files git should ignore
 /local
+
+# Windows-native MSVC local build / vcpkg
+/build-win64/
+/build-win64-*/
+/build-win64-logs/
+/tools/win-native/vcpkg_installed/
+/tools/win-native/canvas-cxx-spike/vcpkg_installed/
+/build-gtk-lib-probe/
+
+
+# Local release packaging output
+/dist/
+
+# Inno Setup bootstrap cache (downloaded compiler installer)
+/tools/win-native/installer/cache/
+

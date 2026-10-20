@@ -1,0 +1,119 @@
+# Airdour — Windows MSVC CI (win64 only)
+#
+# Product path: AIRDOUR_WINDOWS_ONLY / WASAPI shared.
+# This job compiles the WasapiIO smoke library (Windows SDK only) and
+# configures the cmake/win64 spine. Full headless/GUI link is staged later
+# once an MSVC dependency prefix (vcpkg) is wired — see tools/win-native/README.md.
+
+name: Windows MSVC CI
+
+on:
+  push:
+    branches:
+      - master
+      - main
+      - "cursor/**"
+  pull_request:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: windows-msvc-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  wasapi-smoke:
+    name: WASAPI I/O smoke (MSVC x64)
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Configure cmake/win64 (WASAPI + Win shell)
+        run: |
+          cmake -S cmake/win64 -B build-win64 `
+            -G "Visual Studio 17 2022" -A x64 `
+            -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON `
+            -DAIRDOUR_BUILD_WIN_SHELL=ON
+        shell: pwsh
+
+      - name: Build wasapi_io_smoke
+        run: cmake --build build-win64 --config Release --target wasapi_io_smoke -j $env:NUMBER_OF_PROCESSORS
+        shell: pwsh
+
+      - name: Build airdour_win_shell
+        run: cmake --build build-win64 --config Release --target airdour_win_shell -j $env:NUMBER_OF_PROCESSORS
+        shell: pwsh
+
+      - name: Smoke airdour_win_shell (--timeout 2)
+        run: |
+          $exe = Get-ChildItem -Path build-win64 -Recurse -Filter "airdour_win_shell.exe" | Select-Object -First 1
+          if (-not $exe) { throw "airdour_win_shell.exe not found" }
+          & $exe.FullName --timeout 2
+          if ($LASTEXITCODE -ne 0) { throw "win_shell smoke exit $LASTEXITCODE" }
+        shell: pwsh
+
+      - name: Write BUILD_STATUS
+        run: |
+          $lib = Get-ChildItem -Path build-win64 -Recurse -Filter "airdour_wasapi_io.lib" | Select-Object -First 1
+          $gui = Get-ChildItem -Path build-win64 -Recurse -Filter "airdour_win_shell.exe" | Select-Object -First 1
+          .\tools\win-native\ci\Write-BuildStatus.ps1 `
+            -OutFile build-win64\BUILD_STATUS.txt `
+            -GitSha "${{ github.sha }}" `
+            -GitRef "${{ github.ref }}" `
+            -WasapiSmokePath $(if ($lib) { $lib.FullName } else { "" }) `
+            -WinShellPath $(if ($gui) { $gui.FullName } else { "" })
+          Get-Content build-win64\BUILD_STATUS.txt
+        shell: pwsh
+
+      - name: Upload CI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: airdour-win64-ci-${{ github.sha }}
+          path: |
+            build-win64/**/airdour_wasapi_io.lib
+            build-win64/**/airdour_win_shell.exe
+            build-win64/BUILD_STATUS.txt
+            libs/backends/wasapi/**
+            win_ardour/**
+            cmake/win64/**
+            tools/win-native/**
+          if-no-files-found: error
+          retention-days: 14
+
+  # Placeholder job documenting the next CI stage (deps). Does not fail the workflow.
+  deps-notes:
+    name: Deps bootstrap notes
+    runs-on: windows-2022
+    needs: wasapi-smoke
+    steps:
+      - name: Document vcpkg expectations
+        shell: pwsh
+        run: |
+          Write-Host @"
+          Next CI stage (laptop-proven path first):
+            - tools/win-native/Install-HeadlessDeps.ps1 + vcpkg.json (glib, libxml2, sndfile, curl, archive, pthreads, boost-*, …)
+            - cmake -DAIRDOUR_BUILD_DEPS_HEADLESS_SMOKE=ON with CMAKE_TOOLCHAIN_FILE=vcpkg.cmake
+            - then overlay glibmm-2.4 + sigc++-2.0 (stock vcpkg glibmm/libsigcpp are WRONG generation)
+            - then libpbd → libardour → hardour (dummy + WASAPI)
+
+          Blocked / out of scope:
+            - GTK2-on-MSVC (dead end; GUI is win_ardour Direct2D)
+            - No ASIO/DirectSound in product path
+            - Full gtk2_ardour port (not planned)
+          "@
