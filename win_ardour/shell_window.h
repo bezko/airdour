@@ -90,6 +90,7 @@ public:
 	                    bool smoke_punch = false,
 	                    bool smoke_tempo = false,
 	                    bool smoke_click = false,
+	                    bool smoke_click_toggle = false,
 	                    bool smoke_tracks = false,
 	                    bool smoke_rename = false,
 	                    bool smoke_group = false,

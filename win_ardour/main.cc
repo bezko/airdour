@@ -18,7 +18,7 @@
  *                         [--smoke-perf] [--smoke-vst3] [--smoke-mute-solo]
  *                         [--smoke-pan] [--smoke-send] [--smoke-automation]
  *                         [--smoke-edit] [--smoke-snap] [--smoke-punch]
- *                         [--smoke-tempo] [--smoke-click] [--smoke-tracks]
+ *                         [--smoke-tempo] [--smoke-click] [--smoke-click-toggle] [--smoke-tracks]
  *                         [--smoke-rename] [--smoke-group] [--smoke-monitor]
  *                         [--smoke-locate] [--smoke-zoom] [--smoke-history]
  *                         [--smoke-prefs] [--smoke-recent] [--smoke-recovery]
@@ -147,6 +147,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_punch = parse_flag (argc, argv, L"--smoke-punch");
 	bool smoke_tempo = parse_flag (argc, argv, L"--smoke-tempo");
 	bool smoke_click = parse_flag (argc, argv, L"--smoke-click");
+	bool smoke_click_toggle = parse_flag (argc, argv, L"--smoke-click-toggle");
 	bool smoke_tracks = parse_flag (argc, argv, L"--smoke-tracks");
 	bool smoke_rename = parse_flag (argc, argv, L"--smoke-rename");
 	bool smoke_group = parse_flag (argc, argv, L"--smoke-group");
@@ -212,7 +213,7 @@ wmain (int argc, wchar_t** argv)
 		                         smoke_plugin, smoke_perf, session_path, period,
 		                         smoke_vst3, smoke_mute_solo, smoke_pan, smoke_send,
 		                         smoke_automation, smoke_edit, smoke_snap, smoke_punch,
-		                         smoke_tempo, smoke_click, smoke_tracks,
+		                         smoke_tempo, smoke_click, smoke_click_toggle, smoke_tracks,
 		                         smoke_rename, smoke_group, smoke_monitor,
 		                         smoke_locate, smoke_zoom, smoke_history,
 		                         smoke_prefs, smoke_recent, smoke_recovery,

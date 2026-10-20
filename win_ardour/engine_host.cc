@@ -8085,6 +8085,50 @@ EngineHost::smoke_click ()
 	}
 }
 
+
+bool
+EngineHost::smoke_click_toggle ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-click-toggle failed — no Session";
+		return false;
+	}
+	try {
+		set_clicking (false);
+		if (_snap.click_enabled || Config->get_clicking ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-click-toggle FAILED (start off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!toggle_clicking () || !_snap.click_enabled || !Config->get_clicking ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-click-toggle FAILED (on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!toggle_clicking () || _snap.click_enabled || Config->get_clicking ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-click-toggle FAILED (off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!toggle_clicking () || !_snap.click_enabled || !Config->get_clicking ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-click-toggle FAILED (on2)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		set_clicking (false);
+		std::fprintf (stderr, "airdour_win_shell: smoke-click-toggle ok (off→on→off→on)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-click-toggle ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-click-toggle exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::add_audio_track ()
 {
@@ -19039,6 +19083,12 @@ EngineHost::toggle_clicking ()
 
 bool
 EngineHost::smoke_click ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_click_toggle ()
 {
 	return false;
 }

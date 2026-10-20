@@ -791,6 +791,8 @@ public:
 	 * For --smoke-click. Does not roll transport.
 	 */
 	bool smoke_click ();
+	/** toggle_clicking off→on→off→on. For --smoke-click-toggle. */
+	bool smoke_click_toggle ();
 
 	/** Create one more Audio track (up to kMeters). Aux send attached. */
 	bool add_audio_track ();
