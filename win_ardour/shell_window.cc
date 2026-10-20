@@ -6062,6 +6062,20 @@ ShellWindow::draw_midi_lane ()
 			                _brush_body);
 		}
 		float vh = vel.bottom - vel.top;
+		const float vel_w = std::max (1.f, vel.right - vel.left);
+		CairoMidiNoteBlit vel_blits[EngineSnapshot::kMaxMidiNotes];
+		size_t vel_blit_n = 0;
+		const bool use_cairo_vel = CairoWaveBlit::available ()
+		    && _engine_snap.midi_note_count > 0;
+		bool have_sel = false;
+		if (_drag == DragMode::MidiVelocity) {
+			for (int j = 0; j < _engine_snap.midi_note_count; ++j) {
+				if (_engine_snap.midi_notes[j].selected) {
+					have_sel = true;
+					break;
+				}
+			}
+		}
 		for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
 			const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
 			float x0 = _lanes[0].strip.x_at_time (r, n.start_sec);
@@ -6074,22 +6088,32 @@ ShellWindow::draw_midi_lane ()
 			}
 			int show_v = n.velocity;
 			if (_drag == DragMode::MidiVelocity
-			    && (n.selected || _engine_snap.midi_selected_note_id < 0)) {
-				/* Preview drag value for selected (or all when none selected). */
-				bool have_sel = false;
-				for (int j = 0; j < _engine_snap.midi_note_count; ++j) {
-					if (_engine_snap.midi_notes[j].selected) {
-						have_sel = true;
-						break;
-					}
-				}
-				if (!have_sel || n.selected) {
-					show_v = _midi_vel_drag;
-				}
+			    && (!have_sel || n.selected)) {
+				show_v = _midi_vel_drag;
 			}
 			float bar_h = vh * ((float)show_v / 127.f);
 			if (bar_h < 1.f * _dpi_scale && show_v > 0) {
 				bar_h = 1.f * _dpi_scale;
+			}
+			if (use_cairo_vel && vel_blit_n < (size_t)EngineSnapshot::kMaxMidiNotes) {
+				CairoMidiNoteBlit& b = vel_blits[vel_blit_n++];
+				b.x0 = (x0 - vel.left) / vel_w;
+				b.x1 = (x1 - vel.left) / vel_w;
+				b.y0 = (vh - bar_h) / vh;
+				b.y1 = 1.f;
+				if (n.selected) {
+					b.r = kAccent.r;
+					b.g = kAccent.g;
+					b.b = kAccent.b;
+					b.a = 0.90f;
+				} else {
+					b.r = kMidi.r;
+					b.g = kMidi.g;
+					b.b = kMidi.b;
+					b.a = 0.55f;
+				}
+				b.selected = false; /* no gold stroke on vel bars */
+				continue;
 			}
 			ID2D1SolidColorBrush* brush = n.selected ? _brush_accent : _brush_midi;
 			if (!brush) {
@@ -6098,6 +6122,9 @@ ShellWindow::draw_midi_lane ()
 			brush->SetOpacity (n.selected ? 0.9f : 0.55f);
 			_rt->FillRectangle (D2D1::RectF (x0, vel.bottom - bar_h, x1, vel.bottom), brush);
 			brush->SetOpacity (1.f);
+		}
+		if (use_cairo_vel && vel_blit_n > 0) {
+			CairoWaveBlit::blit_midi_notes (_rt, vel, vel_blits, vel_blit_n, _dpi_scale);
 		}
 		if (_drag == DragMode::MidiVelocity && _fmt_meta && _brush_brand) {
 			wchar_t vlab[24];
