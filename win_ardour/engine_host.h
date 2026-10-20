@@ -14,6 +14,10 @@
 struct EngineMarkerSnap {
 	float        sec;
 	wchar_t      name[24];
+	bool         scene;
+	int32_t      program;
+	int32_t      bank;
+	int32_t      channel; /* MIDISceneChange channel 0..15, or -1 */
 };
 
 struct EngineMidiDeviceSnap {
@@ -729,6 +733,14 @@ public:
 
 	/** Add IsMark at time_sec (name auto if empty). */
 	bool add_marker_at (float time_sec, const std::string& name = std::string ());
+	bool add_scene_marker_at (float time_sec, int program = 0,
+	                         const std::string& name = std::string (),
+	                         int bank = 0, int channel = 0);
+	bool remove_scene_marker_near (float time_sec, float slop_sec = 0.35f);
+	/** Cycle MIDISceneChange channel 0..15. Ctrl+Alt+Shift+C. */
+	bool cycle_scene_channel_near (float time_sec, float slop_sec = 0.35f);
+	/** Add ch0 → cycle → assert ch1 → remove. For --smoke-scene-channel. */
+	bool smoke_scene_channel ();
 	/** Remove nearest IsMark within slop_sec of time_sec. */
 	bool remove_marker_near (float time_sec, float slop_sec = 0.35f);
 	/** Locate transport to time_sec (optional snap to nearest mark within slop). */

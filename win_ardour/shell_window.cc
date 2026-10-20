@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_scene_channel,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,18 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_scene_channel && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_scene_channel ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_scene_channel) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-scene-channel FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2536,6 +2549,22 @@ ShellWindow::do_remove_marker_at_playhead ()
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+
+void
+ShellWindow::do_cycle_scene_channel ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.cycle_scene_channel_near (_playhead_sec)) {
+		MessageBoxW (_hwnd, L"No scene marker near playhead to cycle channel.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 void
 ShellWindow::sync_history_from_engine ()
 {
@@ -3684,7 +3713,15 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_undo ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Y' || wparam == 'y')) {
 			do_redo ();
-		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'C' || wparam == 'c')) {
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && (wparam == 'C' || wparam == 'c')) {
+			/* Ctrl+Alt+Shift+C = cycle scene MIDI channel. */
+			do_cycle_scene_channel ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'C' || wparam == 'c')) {
 			do_copy_midi_notes ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'X' || wparam == 'x')) {
 			do_cut_midi_notes ();
@@ -6306,6 +6343,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
+		{ L"Ctrl+Alt+Shift+C", L"Cycle scene marker MIDI channel 0..15" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
