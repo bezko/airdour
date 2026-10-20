@@ -529,7 +529,11 @@ public:
 	/** Split at current transport playhead. */
 	bool split_at_playhead (int track = -1);
 
-	/** Set fade-in/out length (seconds) on selected AudioRegion; activates fades. */
+	/**
+	 * Set fade-in/out length (seconds) on selected AudioRegion; activates fades.
+	 * When an abutting neighbor exists, sync the complementary fade length so
+	 * live handle drags keep the crossfade pair matched.
+	 */
 	bool set_selected_fade_in_sec (float sec);
 	bool set_selected_fade_out_sec (float sec);
 	/**
@@ -646,6 +650,12 @@ public:
 	 * For --smoke-edit.
 	 */
 	bool smoke_edit ();
+
+	/**
+	 * Import → split → fade-out drag syncs neighbor fade-in.
+	 * For --smoke-crossfade-handles.
+	 */
+	bool smoke_crossfade_handles ();
 
 	/**
 	 * Import tone → select → stretch 1.5×; verify length ~1.5× source.

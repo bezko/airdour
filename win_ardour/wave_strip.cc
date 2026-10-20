@@ -455,6 +455,25 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 					geo->Release ();
 				}
 			}
+			/* Tip caps — visible grab targets at fade wedge tips. */
+			float tip_r = std::max (2.5f, 3.5f * dpi_scale);
+			selection_brush->SetOpacity (0.95f);
+			if (fi > 0.001f) {
+				float nf = (_sel_start_sec + fi - _view_start_sec) / span;
+				nf = std::max (0.f, std::min (1.f, nf));
+				float tx = bounds.left + nf * w;
+				float ty = bounds.top + tip_r;
+				rt->FillEllipse (D2D1::Ellipse (D2D1::Point2F (tx, ty), tip_r, tip_r),
+				                 selection_brush);
+			}
+			if (fo > 0.001f) {
+				float nf = (_sel_end_sec - fo - _view_start_sec) / span;
+				nf = std::max (0.f, std::min (1.f, nf));
+				float tx = bounds.left + nf * w;
+				float ty = bounds.top + tip_r;
+				rt->FillEllipse (D2D1::Ellipse (D2D1::Point2F (tx, ty), tip_r, tip_r),
+				                 selection_brush);
+			}
 			selection_brush->SetOpacity (1.f);
 		}
 	}

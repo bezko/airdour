@@ -5218,6 +5218,33 @@ EngineHost::split_at_playhead (int track)
 	return split_at (t, track);
 }
 
+namespace {
+
+std::shared_ptr<AudioRegion>
+shell_find_abut_neighbor (std::shared_ptr<Playlist> pl,
+                          std::shared_ptr<AudioRegion> ar,
+                          bool after)
+{
+	if (!pl || !ar) {
+		return {};
+	}
+	/* find_next_region uses strict < / >; after a split the next clip's Start
+	 * equals our end_position, so searching from end_position misses it.
+	 * Search from our Start instead (exclude self via > / <). */
+	std::shared_ptr<Region> r;
+	if (after) {
+		r = pl->find_next_region (ar->position (), Start, 1);
+	} else {
+		r = pl->find_next_region (ar->position (), Start, -1);
+	}
+	if (!r || r == ar) {
+		return {};
+	}
+	return std::dynamic_pointer_cast<AudioRegion> (r);
+}
+
+} /* anonymous */
+
 bool
 EngineHost::set_selected_fade_in_sec (float sec)
 {
@@ -5237,19 +5264,40 @@ EngineHost::set_selected_fade_in_sec (float sec)
 		}
 		sec = std::max (0.f, sec);
 		samplecnt_t samples = (samplecnt_t)std::llround ((double)sec * (double)sr);
+		samples = ar->verify_xfade_bounds (samples, true);
 		samplecnt_t max_len = ar->length_samples () / 2;
 		if (samples > max_len) {
 			samples = max_len;
 		}
+
+		std::shared_ptr<Playlist> pl = ar->playlist ();
+		int track = _impl->selected_track;
+		if (!pl && track >= 0 && track < (int)_impl->tracks.size () && _impl->tracks[track]) {
+			pl = _impl->tracks[track]->playlist ();
+		}
+		std::shared_ptr<AudioRegion> neighbor = shell_find_abut_neighbor (pl, ar, false);
+
 		_impl->session->begin_reversible_command ("fade in");
 		ar->clear_changes ();
 		ar->set_fade_in_active (true);
 		ar->set_fade_in (FadeLinear, samples);
 		_impl->session->add_command (new StatefulDiffCommand (ar));
+		if (neighbor) {
+			samplecnt_t nf = samples;
+			samplecnt_t nhalf = neighbor->length_samples () / 2;
+			if (nf > nhalf) {
+				nf = std::max ((samplecnt_t)1, nhalf);
+			}
+			nf = neighbor->verify_xfade_bounds (nf, false);
+			neighbor->clear_changes ();
+			neighbor->set_fade_out_active (true);
+			neighbor->set_fade_out (FadeLinear, nf);
+			_impl->session->add_command (new StatefulDiffCommand (neighbor));
+		}
 		_impl->session->commit_reversible_command ();
 		refresh_selection_snap ();
 		refresh_history_flags ();
-		_snap.detail = L"fade-in set";
+		_snap.detail = neighbor ? L"fade-in + neighbor out" : L"fade-in set";
 		return true;
 	} catch (...) {
 		_snap.detail = L"fade-in failed";
@@ -5276,19 +5324,40 @@ EngineHost::set_selected_fade_out_sec (float sec)
 		}
 		sec = std::max (0.f, sec);
 		samplecnt_t samples = (samplecnt_t)std::llround ((double)sec * (double)sr);
+		samples = ar->verify_xfade_bounds (samples, false);
 		samplecnt_t max_len = ar->length_samples () / 2;
 		if (samples > max_len) {
 			samples = max_len;
 		}
+
+		std::shared_ptr<Playlist> pl = ar->playlist ();
+		int track = _impl->selected_track;
+		if (!pl && track >= 0 && track < (int)_impl->tracks.size () && _impl->tracks[track]) {
+			pl = _impl->tracks[track]->playlist ();
+		}
+		std::shared_ptr<AudioRegion> neighbor = shell_find_abut_neighbor (pl, ar, true);
+
 		_impl->session->begin_reversible_command ("fade out");
 		ar->clear_changes ();
 		ar->set_fade_out_active (true);
 		ar->set_fade_out (FadeLinear, samples);
 		_impl->session->add_command (new StatefulDiffCommand (ar));
+		if (neighbor) {
+			samplecnt_t nf = samples;
+			samplecnt_t nhalf = neighbor->length_samples () / 2;
+			if (nf > nhalf) {
+				nf = std::max ((samplecnt_t)1, nhalf);
+			}
+			nf = neighbor->verify_xfade_bounds (nf, true);
+			neighbor->clear_changes ();
+			neighbor->set_fade_in_active (true);
+			neighbor->set_fade_in (FadeLinear, nf);
+			_impl->session->add_command (new StatefulDiffCommand (neighbor));
+		}
 		_impl->session->commit_reversible_command ();
 		refresh_selection_snap ();
 		refresh_history_flags ();
-		_snap.detail = L"fade-out set";
+		_snap.detail = neighbor ? L"fade-out + neighbor in" : L"fade-out set";
 		return true;
 	} catch (...) {
 		_snap.detail = L"fade-out failed";
@@ -5325,16 +5394,10 @@ EngineHost::apply_selected_crossfade (float length_sec)
 		if (!pl) {
 			pl = _impl->tracks[track]->playlist ();
 		}
-		std::shared_ptr<AudioRegion> neighbor;
-		if (pl) {
-			/* Prefer region that starts at/after our end (next clip). */
-			std::shared_ptr<Region> next = pl->find_next_region (ar->end_position (), Start, 1);
-			if (!next) {
-				next = pl->find_next_region (ar->position (), Start, -1);
-			}
-			if (next && next != region) {
-				neighbor = std::dynamic_pointer_cast<AudioRegion> (next);
-			}
+		/* Prefer abutting next clip; fall back to previous. */
+		std::shared_ptr<AudioRegion> neighbor = shell_find_abut_neighbor (pl, ar, true);
+		if (!neighbor) {
+			neighbor = shell_find_abut_neighbor (pl, ar, false);
 		}
 
 		_impl->session->begin_reversible_command ("crossfade / fades");
@@ -6858,6 +6921,99 @@ EngineHost::smoke_edit ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-edit exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_crossfade_handles ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-crossfade-handles failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-handles FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 220.f, 3.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-handles FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!split_at (1.0f, 0)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-handles FAILED (split)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (track_region_count (0) < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-handles FAILED (need 2 regions)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.5f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-handles FAILED (select left)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!apply_selected_crossfade (0.08f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-handles FAILED (crossfade)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		/* Drag-style length change on left fade-out should sync right fade-in. */
+		if (!set_selected_fade_out_sec (0.12f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-handles FAILED (set fade-out)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (_snap.selection_fade_out_sec < 0.10f || _snap.selection_fade_out_sec > 0.14f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-crossfade-handles FAILED (fade_out=%.3f)\n",
+			              _snap.selection_fade_out_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 1.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-handles FAILED (select right)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (_snap.selection_fade_in_sec < 0.10f || _snap.selection_fade_in_sec > 0.14f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-crossfade-handles FAILED (neighbor fade_in=%.3f)\n",
+			              _snap.selection_fade_in_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-crossfade-handles ok "
+		              "(left out=%.0fms → right in=%.0fms)\n",
+		              0.12f * 1000.f, _snap.selection_fade_in_sec * 1000.f);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-crossfade-handles ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-handles exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -18851,6 +19007,12 @@ EngineHost::track_region_count (int track) const
 
 bool
 EngineHost::smoke_edit ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_crossfade_handles ()
 {
 	return false;
 }
