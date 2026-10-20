@@ -204,11 +204,13 @@ struct EngineSnapshot {
 	wchar_t      midi_track_name[kTrackNameLen];
 	float        track_gain[kMeters]; /* Route gain_control mirror after reorder */
 	bool         track_in_group[kMeters]; /* member of Session RouteGroup */
+	bool         track_selected[kMeters]; /* CoreSelection selected */
 	int          group_member_count; /* 0 = no shell group */
 	bool         group_active; /* RouteGroup::is_active */
 	bool         group_shares_mute;
 	bool         group_shares_solo;
 	bool         group_shares_gain;
+	bool         group_shares_select;
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
 	bool         monitor_ok; /* Session monitor_out + MonitorProcessor */
@@ -831,8 +833,8 @@ public:
 
 	/**
 	 * Create/replace the shell Session RouteGroup ("Group 1") from audio
-	 * indices (≥2). Shares mute + solo + gain when active. Honest scope:
-	 * one group, no VCA/subgroup/recenable.
+	 * indices (≥2). Shares mute + solo + gain + select when active.
+	 * Honest scope: one group, no VCA/subgroup.
 	 */
 	bool create_route_group (const int* indices, int n);
 	/** Remove shell RouteGroup members (and drop empty group). */
@@ -841,9 +843,21 @@ public:
 	bool toggle_route_group_active ();
 
 	/**
+	 * CoreSelection select (SelectionSet). When group shares select, peers
+	 * follow. Click mixer label / --smoke-group-select.
+	 */
+	bool select_audio_track (int track);
+	bool clear_track_selection ();
+
+	/**
 	 * Group Audio 0+1; mute/solo/gain propagate; clear. For --smoke-group.
 	 */
 	bool smoke_group ();
+	/**
+	 * Group Audio 0+1; select propagates; clear isolates.
+	 * For --smoke-group-select.
+	 */
+	bool smoke_group_select ();
 
 	/**
 	 * Ensure Session monitor bus + MonitorProcessor (add_monitor_section).
@@ -1283,6 +1297,7 @@ private:
 	void refresh_freeze_flags ();
 	void refresh_record_flags ();
 	void refresh_mute_solo_flags ();
+	void refresh_selection_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_send_flags ();

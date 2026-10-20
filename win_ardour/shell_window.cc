@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_group_select)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -864,6 +865,20 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_group_select && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_group_select ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_group_from_engine ();
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_group_select) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-select FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_monitor && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_monitor ()) {
 			_smoke_failed = true;
@@ -1172,6 +1187,8 @@ ShellWindow::sync_mixer_group_from_engine ()
 		bool in = (i < na && i < EngineSnapshot::kMeters && _engine_snap.track_in_group[i]);
 		_mixers[i].set_in_group (in);
 		_mixers[i].set_group_picked (_group_pick[i]);
+		bool sel = (i < na && i < EngineSnapshot::kMeters && _engine_snap.track_selected[i]);
+		_mixers[i].set_selected (sel);
 	}
 	_transport.set_group_active (_engine_snap.group_member_count >= 2
 	                             && _engine_snap.group_active);
@@ -4704,12 +4721,19 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				return true;
 			}
 			_focus_audio_track = lab;
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				_engine.select_audio_track (lab);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_group_from_engine ();
+			}
 			_drag = DragMode::TrackReorderPending;
 			_drag_index = lab;
 			_pan_down_x = x;
 			_pan_down_y = y;
 			_pan_last_x = x;
 			SetCapture (_hwnd);
+			InvalidateRect (_hwnd, nullptr, FALSE);
 			return true;
 		}
 	}
@@ -6315,7 +6339,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
-		{ L"U", L"Apply / clear track group" },
+		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·select)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },

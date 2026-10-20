@@ -46,6 +46,7 @@ MixerStrip::MixerStrip ()
 	, _midi_strip (false)
 	, _in_group (false)
 	, _group_picked (false)
+	, _selected (false)
 {
 	wcsncpy_s (_label, L"Track", _TRUNCATE);
 	_fx_label[0] = L'\0';
@@ -464,6 +465,12 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 			               brand);
 			fmt_meta->SetTextAlignment (ta_g);
 		}
+	}
+	/* Selection wash (group select share lights peers). */
+	if (_selected) {
+		accent->SetOpacity (0.18f);
+		rt->FillRectangle (_strip, accent);
+		accent->SetOpacity (1.f);
 	}
 
 	DWRITE_TEXT_ALIGNMENT ta = fmt_title->GetTextAlignment ();

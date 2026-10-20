@@ -68,6 +68,9 @@ public:
 	bool in_group () const { return _in_group; }
 	void set_group_picked (bool picked) { _group_picked = picked; }
 	bool group_picked () const { return _group_picked; }
+	/** CoreSelection selected (group select share may light peers). */
+	void set_selected (bool selected) { _selected = selected; }
+	bool selected () const { return _selected; }
 
 	/** True when strip has a non-empty FX label (insert/bypass is live). */
 	bool has_fx () const { return _fx_label[0] != L'\0'; }
@@ -143,4 +146,5 @@ private:
 	bool        _midi_strip;
 	bool        _in_group;
 	bool        _group_picked;
+	bool        _selected;
 };
