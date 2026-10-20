@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_input_monitor)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -621,6 +622,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_mute_solo) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_input_monitor && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_input_monitor ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_monitor_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_input_monitor) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-input-monitor FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1195,6 +1209,18 @@ ShellWindow::sync_mixer_arm_from_engine ()
 		_mixers[mi].set_armed (false);
 	}
 	_transport.set_record_armed (_engine_snap.session_record_armed);
+}
+
+void
+ShellWindow::sync_mixer_monitor_from_engine ()
+{
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < kMixerStripsMax; ++i) {
+		_mixers[i].set_monitor_choice (0);
+	}
+	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
+		_mixers[i].set_monitor_choice (_engine_snap.track_monitor_choice[i]);
+	}
 }
 
 void
@@ -3827,6 +3853,24 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				layout_panes ();
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'O' || wparam == 'o')) {
+			/* Alt+Shift+O — cycle focused strip monitor Auto→In→Disk. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				int ti = _focus_audio_track;
+				if (ti < 0) {
+					ti = 0;
+				}
+				if (ti < n_audio_lanes ()) {
+					_engine.cycle_track_monitor_choice (ti);
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_mixer_monitor_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+				}
+			}
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'U' || wparam == 'u')) {
 			do_apply_or_clear_group ();
 		}
@@ -4009,6 +4053,18 @@ ShellWindow::hit_mixer_arm (float x, float y) const
 	const int na = n_audio_lanes ();
 	for (int i = 0; i < na; ++i) {
 		if (_mixers[i].hit_arm (x, y)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int
+ShellWindow::hit_mixer_mon (float x, float y) const
+{
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < na; ++i) {
+		if (_mixers[i].hit_mon (x, y)) {
 			return i;
 		}
 	}
@@ -4731,6 +4787,18 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_arm_from_engine ();
 			}
+		}
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	int mon = hit_mixer_mon (x, y);
+	if (mon >= 0) {
+		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
+			_engine.cycle_track_monitor_choice (mon);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_monitor_from_engine ();
 		}
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
@@ -5667,6 +5735,7 @@ ShellWindow::on_tick ()
 	}
 	sync_mixer_fx_from_engine ();
 	sync_mixer_mute_solo_from_engine ();
+	sync_mixer_monitor_from_engine ();
 	sync_mixer_pan_from_engine ();
 	sync_mixer_send_from_engine ();
 	sync_monitor_from_engine ();
@@ -6316,6 +6385,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"U", L"Apply / clear track group" },
+		{ L"Mon / Alt+Shift+O", L"Cycle monitor Auto → In → Disk" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },

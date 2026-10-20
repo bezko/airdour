@@ -127,7 +127,8 @@ public:
 	                    bool smoke_midi_scale = false,
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
-	                    bool smoke_midi_pressure = false);
+	                    bool smoke_midi_pressure = false,
+	                    bool smoke_input_monitor = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -289,6 +290,7 @@ private:
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
 	void sync_mixer_arm_from_engine ();
+	void sync_mixer_monitor_from_engine ();
 	void sync_mixer_mute_solo_from_engine ();
 	void sync_mixer_pan_from_engine ();
 	void sync_mixer_send_from_engine ();
@@ -320,6 +322,7 @@ private:
 	int  hit_editor_lane (float x, float y) const;
 	int  hit_mixer_fader (float x, float y) const;
 	int  hit_mixer_arm (float x, float y) const;
+	int  hit_mixer_mon (float x, float y) const;
 	int  hit_mixer_mute (float x, float y) const;
 	int  hit_mixer_solo (float x, float y) const;
 	int  hit_mixer_pan (float x, float y) const;

@@ -24,6 +24,7 @@ MixerStrip::MixerStrip ()
 	, _label_rc ()
 	, _track ()
 	, _arm_btn ()
+	, _mon_btn ()
 	, _mute_btn ()
 	, _solo_btn ()
 	, _pan_track ()
@@ -39,6 +40,7 @@ MixerStrip::MixerStrip ()
 	, _fx_param2 (0.16f)
 	, _fx_param3 (0.5f)
 	, _armed (false)
+	, _monitor_choice (0)
 	, _muted (false)
 	, _soloed (false)
 	, _fx_bypassed (false)
@@ -136,17 +138,20 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 	float ms_h = 22.f * dpi_scale;
 	float gap = 4.f * dpi_scale;
 
+	float mid = (_strip.left + _strip.right) * 0.5f;
 	if (_midi_strip) {
 		_arm_btn = D2D1::RectF (0, 0, 0, 0);
+		_mon_btn = D2D1::RectF (0, 0, 0, 0);
 		_pan_track = D2D1::RectF (0, 0, 0, 0);
 		_send_track = D2D1::RectF (0, 0, 0, 0);
 	} else {
 		_arm_btn = D2D1::RectF (
-			_strip.left + pad, y, _strip.right - pad, y + arm_h);
+			_strip.left + pad, y, mid - gap * 0.5f, y + arm_h);
+		_mon_btn = D2D1::RectF (
+			mid + gap * 0.5f, y, _strip.right - pad, y + arm_h);
 		y = _arm_btn.bottom + gap;
 	}
 
-	float mid = (_strip.left + _strip.right) * 0.5f;
 	_mute_btn = D2D1::RectF (_strip.left + pad, y, mid - gap * 0.5f, y + ms_h);
 	_solo_btn = D2D1::RectF (mid + gap * 0.5f, y, _strip.right - pad, y + ms_h);
 	y = _mute_btn.bottom + gap;
@@ -246,6 +251,21 @@ MixerStrip::hit_arm (float x, float y) const
 		return false;
 	}
 	return contains (_arm_btn, x, y);
+}
+
+bool
+MixerStrip::hit_mon (float x, float y) const
+{
+	if (_midi_strip) {
+		return false;
+	}
+	return contains (_mon_btn, x, y);
+}
+
+void
+MixerStrip::set_monitor_choice (int choice_0_1_2)
+{
+	_monitor_choice = (choice_0_1_2 < 0) ? 0 : ((choice_0_1_2 > 2) ? 2 : choice_0_1_2);
 }
 
 bool
@@ -478,8 +498,16 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 
 	if (!_midi_strip) {
 		rt->FillRectangle (_arm_btn, _armed ? accent : edge);
-		const wchar_t* arm_label = _armed ? L"R · armed" : L"R · arm";
+		const wchar_t* arm_label = _armed ? L"R" : L"Arm";
 		rt->DrawTextW (arm_label, (UINT32)wcslen (arm_label), fmt_meta, _arm_btn, brand);
+
+		/* Mon — Auto / In / Disk cycle (MonitorControl). */
+		const bool mon_forced = _monitor_choice != 0;
+		rt->FillRectangle (_mon_btn, mon_forced ? accent : edge);
+		const wchar_t* mon_label =
+			(_monitor_choice == 1) ? L"In"
+			: (_monitor_choice == 2) ? L"Disk" : L"Auto";
+		rt->DrawTextW (mon_label, (UINT32)wcslen (mon_label), fmt_meta, _mon_btn, brand);
 	}
 
 	/* Mute — lit body wash when muted (includes solo-mute of others). */

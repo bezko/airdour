@@ -174,6 +174,8 @@ struct EngineSnapshot {
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
+	/** MonitorChoice: 0=Auto 1=Input 2=Disk (MonitorCue unused in shell). */
+	int          track_monitor_choice[kMeters];
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
@@ -339,6 +341,15 @@ public:
 	/** Arm / disarm a track for recording (Session rec-enable control). */
 	bool set_track_armed (int track, bool armed);
 	bool toggle_track_armed (int track);
+
+	/**
+	 * Track input monitor choice (MonitorControl): Auto / Input / Disk.
+	 * For Mon button / Alt+Shift+O / --smoke-input-monitor.
+	 */
+	bool set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk);
+	bool cycle_track_monitor_choice (int track = 0);
+	/** Auto → Input → Disk → Auto on Audio 1. */
+	bool smoke_input_monitor ();
 
 	/**
 	 * Route mute/solo (audio tracks 0..kMeters-1).
@@ -1282,6 +1293,7 @@ private:
 	void refresh_region_flags ();
 	void refresh_freeze_flags ();
 	void refresh_record_flags ();
+	void refresh_monitor_choice_flags ();
 	void refresh_mute_solo_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
