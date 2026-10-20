@@ -1108,6 +1108,12 @@ public:
 	 */
 	bool paste_midi_notes (float at_sec = -1.f);
 	bool has_midi_clipboard () const;
+	/**
+	 * Duplicate selected MIDI notes immediately after the selection span
+	 * (copy → paste at selection_end). Leaves originals; selects first new note.
+	 * For Ctrl+D / --smoke-midi-duplicate.
+	 */
+	bool duplicate_selected_midi_notes ();
 
 	/**
 	 * Humanize selected notes (or all if none selected): bounded random
@@ -1201,6 +1207,8 @@ public:
 	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.
 	 */
 	bool smoke_midi_clipboard ();
+	/** Add note @0, duplicate → note @length, verify count=2. For --smoke-midi-duplicate. */
+	bool smoke_midi_duplicate ();
 
 	/**
 	 * Add notes, humanize with fixed seed, verify bounded jitter.

@@ -10,6 +10,7 @@
  *                         [--smoke-midi] [--smoke-midi-edit] [--smoke-midi-quantize]
  *                         [--smoke-midi-transpose] [--smoke-midi-velocity]
  *                         [--smoke-midi-length] [--smoke-midi-clipboard]
+ *                         [--smoke-midi-duplicate]
  *                         [--smoke-midi-humanize] [--smoke-midi-step]
  *                         [--smoke-midi-chord] [--smoke-midi-arp]
  *                         [--smoke-midi-scale] [--smoke-midi-cc]
@@ -128,6 +129,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_midi_velocity = parse_flag (argc, argv, L"--smoke-midi-velocity");
 	bool smoke_midi_length = parse_flag (argc, argv, L"--smoke-midi-length");
 	bool smoke_midi_clipboard = parse_flag (argc, argv, L"--smoke-midi-clipboard");
+	bool smoke_midi_duplicate = parse_flag (argc, argv, L"--smoke-midi-duplicate");
 	bool smoke_midi_humanize = parse_flag (argc, argv, L"--smoke-midi-humanize");
 	bool smoke_midi_step = parse_flag (argc, argv, L"--smoke-midi-step");
 	bool smoke_midi_chord = parse_flag (argc, argv, L"--smoke-midi-chord");
@@ -223,7 +225,8 @@ wmain (int argc, wchar_t** argv)
 	                         smoke_spectrum, smoke_correlation, smoke_loudness,
 	                         smoke_midi_quantize, smoke_midi_transpose,
 	                         smoke_midi_velocity, smoke_midi_length,
-	                         smoke_midi_clipboard, smoke_midi_humanize,
+	                         smoke_midi_clipboard, smoke_midi_duplicate,
+	                         smoke_midi_humanize,
 	                         smoke_midi_step, smoke_midi_chord,
 	                         smoke_midi_arp, smoke_midi_scale,
 	                         smoke_midi_cc, smoke_midi_bend,

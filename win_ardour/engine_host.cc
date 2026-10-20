@@ -15719,6 +15719,162 @@ EngineHost::paste_midi_notes (float at_sec)
 }
 
 bool
+EngineHost::duplicate_selected_midi_notes ()
+{
+	refresh_midi_notes_snap ();
+	if (_snap.midi_note_count <= 0) {
+		_snap.detail = L"MIDI duplicate: no notes";
+		return false;
+	}
+	bool have_sel = false;
+	float t0 = 1.0e9f;
+	float t1 = -1.0e9f;
+	for (int i = 0; i < _snap.midi_note_count; ++i) {
+		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+		if (!n.selected) {
+			continue;
+		}
+		have_sel = true;
+		if (n.start_sec < t0) {
+			t0 = n.start_sec;
+		}
+		float end = n.start_sec + n.length_sec;
+		if (end > t1) {
+			t1 = end;
+		}
+	}
+	if (!have_sel || t1 <= t0) {
+		_snap.detail = L"MIDI duplicate: nothing selected";
+		return false;
+	}
+	float span = t1 - t0;
+	if (span < 0.05f) {
+		span = 0.05f;
+	}
+	/* Prefer one snap unit when Snap is on and span is tiny. */
+	if (_snap.snap_enabled) {
+		float unit = snap_unit_sec ();
+		if (unit > span) {
+			span = unit;
+		}
+	}
+	if (!copy_selected_midi_notes ()) {
+		return false;
+	}
+	float paste_at = t0 + span;
+	if (_snap.snap_enabled) {
+		paste_at = snap_time (paste_at);
+	}
+	if (!paste_midi_notes (paste_at)) {
+		_snap.detail = L"MIDI duplicate: paste failed";
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: MIDI duplicate (span=%.3f paste_at=%.3f)\n",
+	              span, paste_at);
+	std::fflush (stderr);
+	_snap.detail = L"MIDI notes duplicated";
+	return true;
+}
+
+bool
+EngineHost::smoke_midi_duplicate ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-duplicate failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Clear existing notes. */
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for duplicate smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+			}
+			if (!ensure_midi_region (16.f)) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate FAILED (re-region)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		const float len = 0.5f;
+		if (!add_midi_note (60, 0.0f, len, 100)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count != 1 || !_snap.midi_notes[0].selected) {
+			/* Select the only note. */
+			if (_snap.midi_note_count >= 1) {
+				_impl->selected_midi_note_id = _snap.midi_notes[0].id;
+				refresh_midi_notes_snap ();
+			}
+		}
+		if (!duplicate_selected_midi_notes ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate FAILED (dup)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate FAILED (count=%d)\n",
+			              _snap.midi_note_count);
+			std::fflush (stderr);
+			return false;
+		}
+		bool found_orig = false;
+		bool found_dup = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			if (n.pitch != 60) {
+				continue;
+			}
+			if (n.start_sec >= -0.01f && n.start_sec <= 0.05f) {
+				found_orig = true;
+			}
+			if (n.start_sec >= len - 0.05f && n.start_sec <= len + 0.15f) {
+				found_dup = true;
+			}
+		}
+		if (!found_orig || !found_dup) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-duplicate FAILED (orig=%d dup=%d count=%d)\n",
+			              found_orig ? 1 : 0, found_dup ? 1 : 0, _snap.midi_note_count);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-duplicate ok (notes=%d paste≈%.2fs)\n",
+		              _snap.midi_note_count, len);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-duplicate ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::smoke_midi_clipboard ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
@@ -20011,6 +20167,18 @@ EngineHost::paste_midi_notes (float at_sec)
 
 bool
 EngineHost::smoke_midi_clipboard ()
+{
+	return false;
+}
+
+bool
+EngineHost::duplicate_selected_midi_notes ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_duplicate ()
 {
 	return false;
 }

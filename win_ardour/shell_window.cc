@@ -253,6 +253,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_velocity,
                             bool smoke_midi_length,
                             bool smoke_midi_clipboard,
+                            bool smoke_midi_duplicate,
                             bool smoke_midi_humanize,
                             bool smoke_midi_step,
                             bool smoke_midi_chord,
@@ -393,6 +394,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_clipboard) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi_duplicate && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_duplicate ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_duplicate) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi_humanize && _engine.snapshot ().session_ok) {
@@ -2898,6 +2908,19 @@ ShellWindow::do_paste_midi_notes ()
 }
 
 void
+ShellWindow::do_duplicate_midi_notes ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.duplicate_selected_midi_notes ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_humanize_midi_notes (float strength)
 {
 	if (!_engine.is_linked ()) {
@@ -3690,6 +3713,8 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_cut_midi_notes ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'V' || wparam == 'v')) {
 			do_paste_midi_notes ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'D' || wparam == 'd')) {
+			do_duplicate_midi_notes ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
 			do_save_session ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
@@ -6296,7 +6321,7 @@ ShellWindow::draw_help_overlay ()
 		{ L". / ,  Shift", L"MIDI transpose ±1 · ±12 (T+/T−)" },
 		{ L"↑ / ↓  Shift", L"MIDI velocity ±1 · ±8 (V+/V−)" },
 		{ L"Alt+←/→  Shift", L"MIDI note length ± (L+/L−; snap unit)" },
-		{ L"Ctrl+C / X / V", L"MIDI note copy · cut · paste (at playhead)" },
+		{ L"Ctrl+C / X / V / D", L"MIDI note copy · cut · paste · duplicate" },
 		{ L"H / Shift+H", L"MIDI humanize · 2× strength (Hum)" },
 		{ L"F4 / Step", L"MIDI step-record · Z/Q piano · ←→ rest" },
 		{ L"F5 / Chd", L"MIDI chord Off→Maj→Min · multi-key latch" },

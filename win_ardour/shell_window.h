@@ -120,6 +120,7 @@ public:
 	                    bool smoke_midi_velocity = false,
 	                    bool smoke_midi_length = false,
 	                    bool smoke_midi_clipboard = false,
+	                    bool smoke_midi_duplicate = false,
 	                    bool smoke_midi_humanize = false,
 	                    bool smoke_midi_step = false,
 	                    bool smoke_midi_chord = false,
@@ -245,6 +246,7 @@ private:
 	void do_copy_midi_notes ();
 	void do_cut_midi_notes ();
 	void do_paste_midi_notes ();
+	void do_duplicate_midi_notes ();
 	void do_humanize_midi_notes (float strength = 1.f);
 	void do_toggle_midi_step ();
 	void do_cycle_midi_chord ();
