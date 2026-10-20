@@ -215,6 +215,10 @@ struct EngineSnapshot {
 	bool         monitor_dim; /* MonitorProcessor::dim_all */
 	bool         monitor_mono;
 	bool         monitor_cut; /* cut_all = monitor mute */
+	bool         master_fx_ok; /* ACE Limiter on master_out (post-fader) */
+	bool         master_fx_bypassed;
+	float        master_fx_ceiling_db; /* −20..0 */
+	std::wstring master_fx_name;
 	float        transport_sec;
 	float        transport_speed; /* Session actual_speed (−N..+N); 1 = play */
 	int          bbt_bars; /* TempoMap BBT at playhead (1-based) */
@@ -850,6 +854,16 @@ public:
 	 * Honest GTK MonitorSection equivalent for dim / mono / cut.
 	 */
 	bool ensure_monitor_section ();
+
+	/**
+	 * ACE Limiter on Session master_out (post-fader bus insert).
+	 * Bypass + Ceiling for Monitor strip / --smoke-master-fx.
+	 */
+	bool insert_master_fx ();
+	bool toggle_master_fx_bypass ();
+	bool set_master_fx_bypassed (bool bypassed);
+	bool set_master_fx_ceiling_db (float db);
+	bool smoke_master_fx ();
 	bool set_monitor_dim (bool enable);
 	bool toggle_monitor_dim ();
 	bool set_monitor_mono (bool enable);
@@ -1288,6 +1302,7 @@ private:
 	void refresh_send_flags ();
 	void refresh_group_flags ();
 	void refresh_monitor_flags ();
+	void refresh_master_fx_snap ();
 	bool ensure_aux_sends ();
 	void refresh_history_flags ();
 	void refresh_selection_snap ();

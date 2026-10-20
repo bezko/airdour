@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_master_fx)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -473,6 +474,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_pressure) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-pressure FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_master_fx && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_master_fx ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_master_fx) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-master-fx FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -2404,6 +2414,8 @@ ShellWindow::sync_monitor_from_engine ()
 	_monitor.set_dim (_engine_snap.monitor_dim);
 	_monitor.set_mono (_engine_snap.monitor_mono);
 	_monitor.set_mute (_engine_snap.monitor_cut);
+	_monitor.set_master_lim_ok (_engine_snap.master_fx_ok);
+	_monitor.set_master_lim_bypassed (_engine_snap.master_fx_bypassed);
 }
 
 void
@@ -2439,6 +2451,19 @@ ShellWindow::do_toggle_monitor_cut ()
 		return;
 	}
 	_engine.toggle_monitor_cut ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_monitor_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_toggle_master_fx ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.toggle_master_fx_bypass ();
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_monitor_from_engine ();
@@ -4567,6 +4592,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		do_toggle_monitor_cut ();
 		return true;
 	}
+	if (mh == MonitorHit::MasterLim) {
+		do_toggle_master_fx ();
+		return true;
+	}
 
 	if (hit_editor_ruler (x, y) && _engine.is_linked () && _engine_snap.session_ok) {
 		float time_sec = _lanes[0].strip.time_at_x (_editor_ruler, x);
@@ -6283,6 +6312,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+Z / Y", L"Undo / Redo" },
 		{ L"Ctrl+S / O / E", L"Save / Open browse / Export" },
 		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
+		{ L"MLim (Monitor)", L"Master ACE Limiter bypass toggle" },
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },

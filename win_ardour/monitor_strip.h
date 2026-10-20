@@ -21,7 +21,8 @@ enum class MonitorHit {
 	None,
 	Dim,
 	Mono,
-	Mute
+	Mute,
+	MasterLim
 };
 
 class MonitorStrip
@@ -40,6 +41,11 @@ public:
 	bool mono () const { return _mono; }
 	void set_mute (bool on) { _mute = on; }
 	bool mute () const { return _mute; }
+
+	void set_master_lim_ok (bool ok) { _master_lim_ok = ok; }
+	bool master_lim_ok () const { return _master_lim_ok; }
+	void set_master_lim_bypassed (bool on) { _master_lim_bypassed = on; }
+	bool master_lim_bypassed () const { return _master_lim_bypassed; }
 
 	MonitorHit hit_test (float x, float y) const;
 
@@ -60,8 +66,11 @@ private:
 	D2D1_RECT_F _dim_btn;
 	D2D1_RECT_F _mono_btn;
 	D2D1_RECT_F _mute_btn;
+	D2D1_RECT_F _lim_btn;
 	bool        _available;
 	bool        _dim;
 	bool        _mono;
 	bool        _mute;
+	bool        _master_lim_ok;
+	bool        _master_lim_bypassed;
 };

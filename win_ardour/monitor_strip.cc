@@ -21,10 +21,13 @@ MonitorStrip::MonitorStrip ()
 	, _dim_btn ()
 	, _mono_btn ()
 	, _mute_btn ()
+	, _lim_btn ()
 	, _available (false)
 	, _dim (false)
 	, _mono (false)
 	, _mute (false)
+	, _master_lim_ok (false)
+	, _master_lim_bypassed (false)
 {
 }
 
@@ -41,6 +44,8 @@ MonitorStrip::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	_mono_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
 	y = _mono_btn.bottom + gap;
 	_mute_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
+	y = _mute_btn.bottom + gap;
+	_lim_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
 }
 
 MonitorHit
@@ -57,6 +62,9 @@ MonitorStrip::hit_test (float x, float y) const
 	}
 	if (contains (_mute_btn, x, y)) {
 		return MonitorHit::Mute;
+	}
+	if (_master_lim_ok && contains (_lim_btn, x, y)) {
+		return MonitorHit::MasterLim;
 	}
 	return MonitorHit::None;
 }
@@ -104,6 +112,10 @@ MonitorStrip::draw (ID2D1RenderTarget* rt,
 		draw_btn (_dim_btn, L"Dim", _dim);
 		draw_btn (_mono_btn, L"Mono", _mono);
 		draw_btn (_mute_btn, L"Mute", _mute);
+		if (_master_lim_ok) {
+			/* Lit when limiter is active (not bypassed). */
+			draw_btn (_lim_btn, L"MLim", !_master_lim_bypassed);
+		}
 	} else {
 		rt->FillRectangle (_dim_btn, edge);
 		rt->DrawTextW (L"—", 1, fmt_meta, _dim_btn, body);
