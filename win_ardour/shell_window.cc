@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_playhead_nudge,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,23 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_playhead_nudge && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_playhead_nudge ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			_playhead_sec = _engine_snap.transport_sec;
+			sync_transport_clock_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_playhead_nudge) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-playhead-nudge FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2536,6 +2554,23 @@ ShellWindow::do_remove_marker_at_playhead ()
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+
+void
+ShellWindow::do_nudge_playhead (int direction)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.nudge_playhead (direction)) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_playhead_sec = _engine_snap.transport_sec;
+	sync_transport_clock_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 void
 ShellWindow::sync_history_from_engine ()
 {
@@ -3729,8 +3764,13 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'H' || wparam == 'h')) {
 			/* H = humanize; Shift+H = 2× strength. */
 			do_humanize_midi_notes ((GetKeyState (VK_SHIFT) & 0x8000) ? 2.f : 1.f);
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == VK_OEM_COMMA || wparam == VK_OEM_PERIOD)) {
+			/* Alt+, /. = nudge playhead by snap unit. */
+			do_nudge_playhead (wparam == VK_OEM_PERIOD ? 1 : -1);
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
-
+		           && !(GetKeyState (VK_MENU) & 0x8000)
 		           && (wparam == VK_OEM_PERIOD || wparam == VK_OEM_COMMA)) {
 			/* . / , = MIDI transpose +1 / −1; Shift = ±12 (octave). */
 			int st = (wparam == VK_OEM_PERIOD) ? 1 : -1;
@@ -6306,6 +6346,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
+		{ L"Alt+, / .", L"Nudge playhead by snap unit" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },

@@ -9251,6 +9251,96 @@ EngineHost::remove_marker_near (float time_sec, float slop_sec)
 	}
 }
 
+
+bool
+EngineHost::nudge_playhead (int direction)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (direction == 0) {
+		return false;
+	}
+	float unit = snap_unit_sec ();
+	if (unit < 0.001f) {
+		unit = 0.5f;
+	}
+	float t = _snap.transport_sec + (direction > 0 ? unit : -unit);
+	if (t < 0.f) {
+		t = 0.f;
+	}
+	if (!locate_to (t, false, 0.f)) {
+		return false;
+	}
+	std::fprintf (stderr, "airdour_win_shell: playhead nudge %s → %.3fs (unit=%.3f)\n",
+	              direction > 0 ? "+" : "-", _snap.transport_sec, unit);
+	std::fflush (stderr);
+	_snap.detail = L"playhead nudged";
+	return true;
+}
+
+bool
+EngineHost::smoke_playhead_nudge ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-playhead-nudge failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		const int dens_was = _snap.snap_density;
+		set_snap_enabled (true);
+		set_snap_density (1); /* beat @ 120 BPM = 0.5s */
+		float unit = snap_unit_sec ();
+		if (std::fabs (unit - 0.5f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-playhead-nudge FAILED (unit=%.3f)\n",
+			              unit);
+			std::fflush (stderr);
+			set_snap_density (dens_was);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_to (1.0f, false, 0.f)
+		    || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-playhead-nudge FAILED (start)\n");
+			std::fflush (stderr);
+			set_snap_density (dens_was);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!nudge_playhead (1)
+		    || std::fabs (_snap.transport_sec - 1.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-playhead-nudge FAILED (+ got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_density (dens_was);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!nudge_playhead (-1)
+		    || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-playhead-nudge FAILED (- got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_density (dens_was);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-playhead-nudge ok (1.0->1.5->1.0)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-playhead-nudge ok";
+		set_snap_density (dens_was);
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-playhead-nudge exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::locate_to (float time_sec, bool snap_to_marker, float slop_sec)
 {
@@ -19226,6 +19316,19 @@ EngineHost::locate_to (float time_sec, bool snap_to_marker, float slop_sec)
 	(void)time_sec;
 	(void)snap_to_marker;
 	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::nudge_playhead (int direction)
+{
+	(void)direction;
+	return false;
+}
+
+bool
+EngineHost::smoke_playhead_nudge ()
+{
 	return false;
 }
 

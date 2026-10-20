@@ -733,6 +733,10 @@ public:
 	bool remove_marker_near (float time_sec, float slop_sec = 0.35f);
 	/** Locate transport to time_sec (optional snap to nearest mark within slop). */
 	bool locate_to (float time_sec, bool snap_to_marker = false, float slop_sec = 0.35f);
+	/** Nudge transport by ±snap_unit_sec. Alt+, /. */
+	bool nudge_playhead (int direction);
+	/** Locate 1.0 → +beat → −beat. For --smoke-playhead-nudge. */
+	bool smoke_playhead_nudge ();
 	/**
 	 * Continuous scrub locate (no mark snap). Same Session request_locate path.
 	 * Used while dragging the editor ruler.

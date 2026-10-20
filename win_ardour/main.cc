@@ -20,7 +20,8 @@
  *                         [--smoke-edit] [--smoke-snap] [--smoke-punch]
  *                         [--smoke-tempo] [--smoke-click] [--smoke-tracks]
  *                         [--smoke-rename] [--smoke-group] [--smoke-monitor]
- *                         [--smoke-locate] [--smoke-zoom] [--smoke-history]
+ *                         [--smoke-locate] [--smoke-playhead-nudge]
+ *                         [--smoke-zoom] [--smoke-history]
  *                         [--smoke-prefs] [--smoke-recent] [--smoke-recovery]
  *                         [--smoke-limiter] [--smoke-gate] [--smoke-spectrum]
  *                         [--smoke-correlation] [--smoke-loudness]
@@ -152,6 +153,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_group = parse_flag (argc, argv, L"--smoke-group");
 	bool smoke_monitor = parse_flag (argc, argv, L"--smoke-monitor");
 	bool smoke_locate = parse_flag (argc, argv, L"--smoke-locate");
+	bool smoke_playhead_nudge = parse_flag (argc, argv, L"--smoke-playhead-nudge");
 	bool smoke_zoom = parse_flag (argc, argv, L"--smoke-zoom");
 	bool smoke_history = parse_flag (argc, argv, L"--smoke-history");
 	bool smoke_prefs = parse_flag (argc, argv, L"--smoke-prefs");
@@ -214,7 +216,7 @@ wmain (int argc, wchar_t** argv)
 		                         smoke_automation, smoke_edit, smoke_snap, smoke_punch,
 		                         smoke_tempo, smoke_click, smoke_tracks,
 		                         smoke_rename, smoke_group, smoke_monitor,
-		                         smoke_locate, smoke_zoom, smoke_history,
+		                         smoke_locate, smoke_playhead_nudge, smoke_zoom, smoke_history,
 		                         smoke_prefs, smoke_recent, smoke_recovery,
 		                         smoke_stretch, smoke_pitch, smoke_reverse,
 		                         smoke_normalize, smoke_strip_silence,
