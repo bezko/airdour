@@ -16,6 +16,12 @@ struct EngineMarkerSnap {
 	wchar_t      name[24];
 };
 
+struct EngineSkipSnap {
+	float        start_sec;
+	float        end_sec;
+	wchar_t      name[24];
+};
+
 struct EngineMidiDeviceSnap {
 	wchar_t name[64];
 	bool    input; /* true = capture / in; false = playback / out (best-effort) */
@@ -33,6 +39,7 @@ struct EngineMidiNoteSnap {
 struct EngineSnapshot {
 	static constexpr int kMeters = 6; /* max audio tracks (Editor lanes / meters) */
 	static constexpr int kMaxMarkers = 8;
+	static constexpr int kMaxSkips = 8;
 	static constexpr int kMaxMidiDevices = 16;
 	static constexpr int kMaxMidiNotes = 96;
 
@@ -70,6 +77,8 @@ struct EngineSnapshot {
 	float        punch_end_sec;
 	int          marker_count;
 	EngineMarkerSnap markers[kMaxMarkers];
+	int          skip_count; /* IsSkip range locations (transport skip) */
+	EngineSkipSnap skips[kMaxSkips];
 	bool         midi_ok; /* backend MIDI option active / ports present */
 	bool         midi_track_ok; /* Session has at least one MidiTrack */
 	bool         midi_region_ok; /* playlist has a MidiRegion for editing */
@@ -729,6 +738,16 @@ public:
 
 	/** Add IsMark at time_sec (name auto if empty). */
 	bool add_marker_at (float time_sec, const std::string& name = std::string ());
+	/**
+	 * Add IsRangeMarker|IsSkip|IsSkipping [start..end].
+	 * Ctrl+Shift+K copies editor selection here.
+	 */
+	bool add_skip_range (float start_sec, float end_sec,
+	                     const std::string& name = std::string ());
+	bool add_skip_range_from_selection ();
+	bool remove_skip_range_near (float time_sec, float slop_sec = 0.35f);
+	/** Import → select → skip from selection → assert → remove. For --smoke-skip-range. */
+	bool smoke_skip_range ();
 	/** Remove nearest IsMark within slop_sec of time_sec. */
 	bool remove_marker_near (float time_sec, float slop_sec = 0.35f);
 	/** Locate transport to time_sec (optional snap to nearest mark within slop). */

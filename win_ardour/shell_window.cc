@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_skip_range,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,22 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_skip_range && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_skip_range ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_skip_range) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-skip-range FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2536,6 +2553,27 @@ ShellWindow::do_remove_marker_at_playhead ()
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+
+void
+ShellWindow::do_skip_range_from_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		MessageBoxW (_hwnd, L"Select a region first for a skip range.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+		return;
+	}
+	if (!_engine.add_skip_range_from_selection ()) {
+		MessageBoxW (_hwnd, L"Could not create skip range from selection.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 void
 ShellWindow::sync_history_from_engine ()
 {
@@ -3740,6 +3778,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_transpose_midi_notes (st);
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'C' || wparam == 'c')) {
 			do_toggle_count_in ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'K' || wparam == 'k')) {
+			/* Ctrl+Shift+K = skip range ← selection. */
+			do_skip_range_from_selection ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'K' || wparam == 'k')) {
 			do_toggle_click ();
 		} else if (wparam == VK_OEM_MINUS || wparam == VK_SUBTRACT) {
@@ -5721,6 +5765,28 @@ ShellWindow::draw_editor_ruler ()
 		}
 	}
 
+
+	for (int i = 0; i < _engine_snap.skip_count; ++i) {
+		float n0 = (_engine_snap.skips[i].start_sec - view0) / span;
+		float n1 = (_engine_snap.skips[i].end_sec - view0) / span;
+		n0 = std::max (0.f, std::min (1.f, n0));
+		n1 = std::max (0.f, std::min (1.f, n1));
+		if (n1 > n0 && _brush_punch) {
+			_brush_punch->SetOpacity (0.22f);
+			_rt->FillRectangle (
+				D2D1::RectF (rr.left + n0 * w, rr.top, rr.left + n1 * w, rr.bottom),
+				_brush_punch);
+			_brush_punch->SetOpacity (1.f);
+			const wchar_t* name = _engine_snap.skips[i].name;
+			if (name[0]) {
+				_rt->DrawTextW (name, (UINT32)wcslen (name), _fmt_meta,
+				                D2D1::RectF (rr.left + n0 * w + 2.f * _dpi_scale, rr.top,
+				                             rr.left + n1 * w, rr.bottom),
+				                _brush_punch);
+			}
+		}
+	}
+
 	for (int i = 0; i < _engine_snap.marker_count; ++i) {
 		float n = (_engine_snap.markers[i].sec - view0) / span;
 		if (n < 0.f || n > 1.f) {
@@ -6306,6 +6372,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
+		{ L"Ctrl+Shift+K", L"Skip range ← selection" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
