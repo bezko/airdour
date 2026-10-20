@@ -2884,6 +2884,76 @@ EngineHost::clear_track_meter_clip (int track)
 	}
 }
 
+bool
+EngineHost::clear_all_meter_clips ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		collect_tracks ();
+		int n = 0;
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (clear_track_meter_clip (i)) {
+				++n;
+			} else {
+				_snap.meter_clip[i] = false;
+			}
+		}
+		std::fprintf (stderr, "airdour_win_shell: cleared meter clips (%d tracks)\n", n);
+		std::fflush (stderr);
+		_snap.detail = L"all meter clips cleared";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_clear_meter_clips ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-clear-meter-clips failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-clear-meter-clips FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Seed snap clip flags then clear PeakMeters + snap. */
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			_snap.meter_clip[i] = true;
+		}
+		if (!clear_all_meter_clips ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-clear-meter-clips FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (_snap.meter_clip[i]) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-clear-meter-clips FAILED (clip still on %d)\n",
+				              i);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-meter-clips ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-clear-meter-clips ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-meter-clips exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 void
 EngineHost::refresh_region_flags ()
 {
@@ -18533,6 +18603,18 @@ bool
 EngineHost::clear_track_meter_clip (int track)
 {
 	(void)track;
+	return false;
+}
+
+bool
+EngineHost::clear_all_meter_clips ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_clear_meter_clips ()
+{
 	return false;
 }
 

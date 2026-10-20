@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_clear_meter_clips)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -487,6 +488,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		/* Always scaffold a MIDI track + empty region so the piano-roll is live. */
 		_engine.ensure_midi_track ();
 		_engine.ensure_midi_region ();
+	}
+
+	if (ok && smoke_clear_meter_clips && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_clear_meter_clips ()) {
+			_smoke_failed = true;
+		} else {
+			for (int i = 0; i < kMixerStripsMax; ++i) {
+				_mixers[i].clear_meter_clip ();
+			}
+		}
+		std::fflush (stderr);
+	} else if (smoke_clear_meter_clips) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-meter-clips FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
 	}
 
 	if (ok && smoke_plugin && _engine.snapshot ().session_ok) {
@@ -4800,18 +4816,34 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
-	/* Click meter → clear peak-hold clip latch (PeakMeter::reset_max). */
+	/* Click meter → clear peak-hold clip latch (PeakMeter::reset_max).
+	 * Alt+click → clear every strip's clip latch. */
 	int meter_i = hit_mixer_meter (x, y);
-	if (meter_i >= 0 && _mixers[meter_i].meter_clipped ()) {
-		_mixers[meter_i].clear_meter_clip ();
-		if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
-		    && _engine.snapshot ().session_ok) {
-			_engine.clear_track_meter_clip (meter_i);
-			_engine.poll ();
-			_engine_snap = _engine.snapshot ();
+	if (meter_i >= 0) {
+		const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
+		if (alt) {
+			for (int i = 0; i < kMixerStripsMax; ++i) {
+				_mixers[i].clear_meter_clip ();
+			}
+			if (_engine.is_linked () && _engine.snapshot ().session_ok) {
+				_engine.clear_all_meter_clips ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+			}
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
 		}
-		InvalidateRect (_hwnd, nullptr, FALSE);
-		return true;
+		if (_mixers[meter_i].meter_clipped ()) {
+			_mixers[meter_i].clear_meter_clip ();
+			if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
+			    && _engine.snapshot ().session_ok) {
+				_engine.clear_track_meter_clip (meter_i);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+			}
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
 	}
 
 	int fxpi3 = hit_mixer_fx_param3 (x, y);
@@ -6316,6 +6348,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"U", L"Apply / clear track group" },
+		{ L"Alt+click meter", L"Clear all PeakMeter clip latches" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
