@@ -16,6 +16,7 @@
  *                         [--smoke-midi-bend] [--smoke-midi-pressure]
  *                         [--smoke-crossfade-handles]
  *                         [--smoke-crossfade-shape]
+ *                         [--smoke-fade-shape-expand]
  *                         [--smoke-plugin]
  *                         [--smoke-perf] [--smoke-vst3] [--smoke-mute-solo]
  *                         [--smoke-pan] [--smoke-send] [--smoke-automation]
@@ -140,6 +141,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_midi_pressure = parse_flag (argc, argv, L"--smoke-midi-pressure");
 	bool smoke_crossfade_handles = parse_flag (argc, argv, L"--smoke-crossfade-handles");
 	bool smoke_crossfade_shape = parse_flag (argc, argv, L"--smoke-crossfade-shape");
+	bool smoke_fade_shape_expand = parse_flag (argc, argv, L"--smoke-fade-shape-expand");
 	bool smoke_plugin = parse_flag (argc, argv, L"--smoke-plugin");
 	bool smoke_vst3 = parse_flag (argc, argv, L"--smoke-vst3");
 	bool smoke_mute_solo = parse_flag (argc, argv, L"--smoke-mute-solo");
@@ -232,7 +234,7 @@ wmain (int argc, wchar_t** argv)
 	                         smoke_midi_arp, smoke_midi_scale,
 	                         smoke_midi_cc, smoke_midi_bend,
 	                         smoke_midi_pressure, smoke_crossfade_handles,
-	                         smoke_crossfade_shape)) {
+	                         smoke_crossfade_shape, smoke_fade_shape_expand)) {
 			const char* be = backend.empty () ? "(prefs/Dummy)" : backend.c_str ();
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", be);
 		} else {

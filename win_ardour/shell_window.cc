@@ -262,7 +262,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_bend,
                             bool smoke_midi_pressure,
                             bool smoke_crossfade_handles,
-                            bool smoke_crossfade_shape)
+                            bool smoke_crossfade_shape,
+                            bool smoke_fade_shape_expand)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -493,6 +494,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_crossfade_shape) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-shape FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_fade_shape_expand && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_fade_shape_expand ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_fade_shape_expand) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-fade-shape-expand FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -3732,7 +3742,7 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
 			do_split_at_playhead ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'F' || wparam == 'f')) {
-			/* F = apply crossfade; Shift+F = cycle Linear ↔ EqualPower. */
+			/* F = apply crossfade; Shift+F = cycle Linear→EqualPower→Fast→Slow→Symmetric. */
 			if (GetKeyState (VK_SHIFT) & 0x8000) {
 				do_cycle_fade_shape ();
 			} else {
@@ -6325,7 +6335,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+Z / Y", L"Undo / Redo" },
 		{ L"Ctrl+S / O / E", L"Save / Open browse / Export" },
 		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
-		{ L"S / F / Shift+F / Del", L"Split · Fade · Fade shape · Delete" },
+		{ L"S / F / Shift+F / Del", L"Split · Fade · Fade shapes · Delete" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
 		{ L"V", L"Reverse selected audio region" },

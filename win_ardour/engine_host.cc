@@ -464,7 +464,7 @@ public:
 	std::vector<std::shared_ptr<AudioTrack> > tracks;
 	std::shared_ptr<Route> aux_bus; /* Aux destination for mixer sends */
 	std::shared_ptr<RouteGroup> shell_group; /* optional mute/solo/gain link */
-	FadeShape       shell_fade_shape; /* Linear ↔ ConstantPower for selection fades */
+	FadeShape       shell_fade_shape; /* Linear→EqualPower→Fast→Slow→Symmetric */
 	std::shared_ptr<MidiTrack> midi_track;
 	std::shared_ptr<MidiRegion> midi_region;
 	int             selected_track;
@@ -4900,8 +4900,17 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
-	_snap.selection_fade_shape =
-		(_impl && _impl->shell_fade_shape == FadeConstantPower) ? 1 : 0;
+	if (_impl) {
+		switch (_impl->shell_fade_shape) {
+		case FadeConstantPower: _snap.selection_fade_shape = 1; break;
+		case FadeFast:          _snap.selection_fade_shape = 2; break;
+		case FadeSlow:          _snap.selection_fade_shape = 3; break;
+		case FadeSymmetric:     _snap.selection_fade_shape = 4; break;
+		default:                _snap.selection_fade_shape = 0; break;
+		}
+	} else {
+		_snap.selection_fade_shape = 0;
+	}
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -5466,9 +5475,14 @@ EngineHost::cycle_selected_fade_shape ()
 		return false;
 	}
 	try {
-		const FadeShape next = (_impl->shell_fade_shape == FadeLinear)
-			? FadeConstantPower
-			: FadeLinear;
+		FadeShape next = FadeLinear;
+		switch (_impl->shell_fade_shape) {
+		case FadeLinear:         next = FadeConstantPower; break;
+		case FadeConstantPower:  next = FadeFast; break;
+		case FadeFast:           next = FadeSlow; break;
+		case FadeSlow:           next = FadeSymmetric; break;
+		default:                 next = FadeLinear; break;
+		}
 		_impl->shell_fade_shape = next;
 
 		std::shared_ptr<Playlist> pl = ar->playlist ();
@@ -5497,11 +5511,17 @@ EngineHost::cycle_selected_fade_shape ()
 		_impl->session->commit_reversible_command ();
 		refresh_selection_snap ();
 		refresh_history_flags ();
-		_snap.detail = (next == FadeConstantPower)
-			? L"fade shape EqualPower"
-			: L"fade shape Linear";
-		std::fprintf (stderr, "airdour_win_shell: fade shape → %s\n",
-		              next == FadeConstantPower ? "ConstantPower" : "Linear");
+		const wchar_t* detail = L"fade shape Linear";
+		const char* name = "Linear";
+		switch (next) {
+		case FadeConstantPower: detail = L"fade shape EqualPower"; name = "EqualPower"; break;
+		case FadeFast:          detail = L"fade shape Fast"; name = "Fast"; break;
+		case FadeSlow:          detail = L"fade shape Slow"; name = "Slow"; break;
+		case FadeSymmetric:     detail = L"fade shape Symmetric"; name = "Symmetric"; break;
+		default: break;
+		}
+		_snap.detail = detail;
+		std::fprintf (stderr, "airdour_win_shell: fade shape → %s\n", name);
 		std::fflush (stderr);
 		return true;
 	} catch (...) {
@@ -7126,6 +7146,17 @@ EngineHost::smoke_crossfade_shape ()
 			set_snap_enabled (snap_was);
 			return false;
 		}
+		/* Full tour back to Linear (EqualPower→Fast→Slow→Symmetric→Linear). */
+		for (int expect = 2; expect <= 4; ++expect) {
+			if (!cycle_selected_fade_shape () || _snap.selection_fade_shape != expect) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-crossfade-shape FAILED (want %d got %d)\n",
+				              expect, _snap.selection_fade_shape);
+				std::fflush (stderr);
+				set_snap_enabled (snap_was);
+				return false;
+			}
+		}
 		if (!cycle_selected_fade_shape () || _snap.selection_fade_shape != 0) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-shape FAILED (→Linear shape=%d)\n",
 			              _snap.selection_fade_shape);
@@ -7133,7 +7164,7 @@ EngineHost::smoke_crossfade_shape ()
 			set_snap_enabled (snap_was);
 			return false;
 		}
-		std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-shape ok (Linear↔EqualPower)\n");
+		std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-shape ok (5-shape tour)\n");
 		std::fflush (stderr);
 		_snap.detail = L"smoke-crossfade-shape ok";
 		set_snap_enabled (snap_was);
@@ -7145,6 +7176,20 @@ EngineHost::smoke_crossfade_shape ()
 	} catch (...) {
 		return false;
 	}
+}
+
+bool
+EngineHost::smoke_fade_shape_expand ()
+{
+	/* Same path as crossfade-shape; dedicated flag for the expand PR. */
+	if (!smoke_crossfade_shape ()) {
+		_snap.detail = L"smoke-fade-shape-expand failed";
+		return false;
+	}
+	std::fprintf (stderr, "airdour_win_shell: smoke-fade-shape-expand ok\n");
+	std::fflush (stderr);
+	_snap.detail = L"smoke-fade-shape-expand ok";
+	return true;
 }
 
 bool
@@ -19151,6 +19196,12 @@ EngineHost::smoke_crossfade_handles ()
 
 bool
 EngineHost::smoke_crossfade_shape ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_fade_shape_expand ()
 {
 	return false;
 }

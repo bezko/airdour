@@ -60,7 +60,7 @@ struct EngineSnapshot {
 	float        selection_end_sec;
 	float        selection_fade_in_sec; /* AudioRegion fade-in length */
 	float        selection_fade_out_sec;
-	/** Selection fade shape: 0=Linear 1=ConstantPower (EqualPower). */
+	/** Selection fade shape: 0=Linear 1=EqualPower 2=Fast 3=Slow 4=Symmetric. */
 	int          selection_fade_shape;
 	bool         loop_active; /* auto-loop Location exists with positive length */
 	bool         loop_playing; /* Session get_play_loop() */
@@ -544,8 +544,9 @@ public:
 	 */
 	bool apply_selected_crossfade (float length_sec = 0.08f);
 	/**
-	 * Cycle selection (+ abutting neighbor) fade shape Linear ↔ ConstantPower.
-	 * Shift+F / --smoke-crossfade-shape.
+	 * Cycle selection (+ abutting neighbor) fade shape
+	 * Linear → EqualPower → Fast → Slow → Symmetric → Linear.
+	 * Shift+F / --smoke-crossfade-shape / --smoke-fade-shape-expand.
 	 */
 	bool cycle_selected_fade_shape ();
 
@@ -669,6 +670,11 @@ public:
 	 * For --smoke-crossfade-shape.
 	 */
 	bool smoke_crossfade_shape ();
+	/**
+	 * Full Linear→EqualPower→Fast→Slow→Symmetric→Linear tour.
+	 * For --smoke-fade-shape-expand.
+	 */
+	bool smoke_fade_shape_expand ();
 
 	/**
 	 * Import tone → select → stretch 1.5×; verify length ~1.5× source.

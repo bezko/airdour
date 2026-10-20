@@ -129,7 +129,8 @@ public:
 	                    bool smoke_midi_bend = false,
 	                    bool smoke_midi_pressure = false,
 	                    bool smoke_crossfade_handles = false,
-	                    bool smoke_crossfade_shape = false);
+	                    bool smoke_crossfade_shape = false,
+	                    bool smoke_fade_shape_expand = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
