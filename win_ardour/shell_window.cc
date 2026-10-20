@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_auto_state)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -660,6 +661,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_automation) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-automation FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_auto_state && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_auto_state ()) {
+			_smoke_failed = true;
+		} else {
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_auto_state) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-auto-state FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1146,13 +1160,7 @@ ShellWindow::sync_track_labels_from_engine ()
 		}
 		_mixers[mi].set_midi_strip (true);
 	}
-	if (na > 0 && _engine_snap.track_name[0][0] != L'\0') {
-		wchar_t auto_lab[48];
-		_snwprintf_s (auto_lab, _TRUNCATE, L"Gain · %s", _engine_snap.track_name[0]);
-		_auto_lane.set_label (auto_lab);
-	} else {
-		_auto_lane.set_label (L"Gain · Audio 1");
-	}
+	refresh_automation_lane ();
 }
 
 void
@@ -1231,15 +1239,46 @@ ShellWindow::sync_mixer_send_from_engine ()
 	}
 }
 
+const wchar_t*
+ShellWindow::gain_auto_state_label (int state_0_3)
+{
+	switch (state_0_3) {
+	case 1:
+		return L"Play";
+	case 2:
+		return L"Write";
+	case 3:
+		return L"Touch";
+	default:
+		return L"Off";
+	}
+}
+
+void
+ShellWindow::do_cycle_gain_auto_state ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.cycle_track_gain_auto_state (0);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	refresh_automation_lane ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 void
 ShellWindow::refresh_automation_lane ()
 {
+	const wchar_t* st = gain_auto_state_label (_engine_snap.track_gain_auto_state[0]);
 	if (_engine_snap.track_name[0][0] != L'\0') {
-		wchar_t auto_lab[48];
-		_snwprintf_s (auto_lab, _TRUNCATE, L"Gain · %s", _engine_snap.track_name[0]);
+		wchar_t auto_lab[56];
+		_snwprintf_s (auto_lab, _TRUNCATE, L"Gain · %s · %s", st, _engine_snap.track_name[0]);
 		_auto_lane.set_label (auto_lab);
 	} else {
-		_auto_lane.set_label (L"Gain · Audio 1");
+		wchar_t auto_lab[40];
+		_snwprintf_s (auto_lab, _TRUNCATE, L"Gain · %s · Audio 1", st);
+		_auto_lane.set_label (auto_lab);
 	}
 	float view0 = _lanes[0].strip.view_start_sec ();
 	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
@@ -3598,6 +3637,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else {
 				do_toggle_midi_scale ();
 			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'Y' || wparam == 'y')) {
+			/* Alt+Shift+Y — cycle gain automation Off→Play→Write→Touch. */
+			do_cycle_gain_auto_state ();
 		} else if (wparam == VK_F8) {
 			/* F8 — cycle MIDI CC lane controller Volume→Mod→Expr. */
 			cycle_midi_cc_controller ();
@@ -6303,6 +6348,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
 		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
+		{ L"Alt+Shift+Y", L"Cycle gain auto Off→Play→Write→Touch" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },

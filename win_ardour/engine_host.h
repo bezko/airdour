@@ -174,6 +174,8 @@ struct EngineSnapshot {
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
+	/** Gain AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
+	int          track_gain_auto_state[kMeters];
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
@@ -381,6 +383,12 @@ public:
 	bool ensure_track_gain_automation (int track = 0);
 	bool write_track_gain_automation (int track, float time_sec, float value_0_1);
 	bool clear_track_gain_automation (int track = 0);
+	/**
+	 * Gain AutoState: 0=Off 1=Play 2=Write 3=Touch.
+	 * Alt+Shift+Y / --smoke-auto-state.
+	 */
+	bool set_track_gain_auto_state (int track, int state_0_off_1_play_2_write_3_touch);
+	bool cycle_track_gain_auto_state (int track = 0);
 	/** Fill y_0_1[n] by evaluating the list across [view_start, view_start+span]. */
 	bool fill_gain_automation_curve (int track,
 	                                 float view_start_sec,
@@ -396,6 +404,8 @@ public:
 	                                  int max_n);
 	/** Clear → 3 points → Play. For --smoke-automation. */
 	bool smoke_automation ();
+	/** Cycle Off→Play→Write→Touch→Off on Audio 1. For --smoke-auto-state. */
+	bool smoke_auto_state ();
 
 	/**
 	 * MidiModel CC AutomationList (region automation, BeatTime). Default CC7
@@ -1283,6 +1293,7 @@ private:
 	void refresh_freeze_flags ();
 	void refresh_record_flags ();
 	void refresh_mute_solo_flags ();
+	void refresh_gain_auto_state_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_send_flags ();
