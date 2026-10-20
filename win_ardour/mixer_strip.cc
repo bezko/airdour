@@ -32,6 +32,7 @@ MixerStrip::MixerStrip ()
 	, _fx_param_track ()
 	, _fx_param_track2 ()
 	, _fx_param_track3 ()
+	, _meter_type (0)
 	, _gain (0.85f)
 	, _pan (0.5f)
 	, _send (0.f)
@@ -223,6 +224,12 @@ bool
 MixerStrip::hit_meter (float x, float y) const
 {
 	return _meter.hit (x, y);
+}
+
+void
+MixerStrip::set_meter_type (int type_0_1)
+{
+	_meter_type = (type_0_1 == 1) ? 1 : 0;
 }
 
 bool
@@ -600,6 +607,17 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 	}
 
 	_meter.draw (rt, accent, edge, meter_hot, dpi_scale);
+	if (!_midi_strip) {
+		const wchar_t* mt = (_meter_type == 1) ? L"K14" : L"Pk";
+		const D2D1_RECT_F& mb = _meter.bounds ();
+		DWRITE_TEXT_ALIGNMENT ta_mt = fmt_meta->GetTextAlignment ();
+		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
+		rt->DrawTextW (mt, (UINT32)wcslen (mt), fmt_meta,
+		               D2D1::RectF (mb.left - 4.f * dpi_scale, mb.bottom + 1.f * dpi_scale,
+		                            mb.right + 4.f * dpi_scale, mb.bottom + 14.f * dpi_scale),
+		               body);
+		fmt_meta->SetTextAlignment (ta_mt);
+	}
 
 	wchar_t db[48];
 	float db_v = (_gain <= 0.0001f) ? -96.f : (20.f * log10f (_gain));

@@ -169,6 +169,7 @@ struct EngineSnapshot {
 	float        gain; /* track 0 stub/session gain */
 	float        meter_peak[kMeters]; /* linear 0..1 */
 	bool         meter_clip[kMeters]; /* ≥0 dBFS / PeakMeter MeterMaxPeak */
+	int          track_meter_type[kMeters]; /* 0=Peak 1=K14 */
 	bool         track_has_regions[kMeters];
 	bool         track_armed[kMeters];
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
@@ -464,6 +465,16 @@ public:
 
 	/** Clear PeakMeter max-peak / clip latch on Audio track (0..kMeters-1). */
 	bool clear_track_meter_clip (int track);
+
+	/**
+	 * Route meter ballistics: 0=Peak 1=K14. Ctrl+click meter cycles.
+	 * For --smoke-meter-type.
+	 */
+	bool set_track_meter_type (int track, int type_0_1);
+	int  track_meter_type (int track) const;
+	bool cycle_track_meter_type (int track);
+	/** Peak → K14 → Peak; leave Peak. */
+	bool smoke_meter_type ();
 
 	/** Session-level record enable (maybe_enable_record / disable_record). */
 	bool set_session_record (bool enable);
@@ -1286,6 +1297,7 @@ private:
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_send_flags ();
+	void refresh_meter_type_flags ();
 	void refresh_group_flags ();
 	void refresh_monitor_flags ();
 	bool ensure_aux_sends ();

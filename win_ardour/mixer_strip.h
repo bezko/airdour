@@ -92,6 +92,9 @@ public:
 	bool        meter_clipped () const { return _meter.clipped (); }
 	bool        hit_meter (float x, float y) const;
 	LevelMeter& meter () { return _meter; }
+	/** 0=Peak 1=K14 — badge near meter. */
+	void set_meter_type (int type_0_1);
+	int  meter_type () const { return _meter_type; }
 
 	bool hit_fader (float x, float y) const;
 	bool hit_label (float x, float y) const;
@@ -129,6 +132,7 @@ private:
 	D2D1_RECT_F _fx_param_track2;
 	D2D1_RECT_F _fx_param_track3;
 	LevelMeter  _meter;
+	int         _meter_type; /* 0=Peak 1=K14 */
 	float       _gain;
 	float       _pan;
 	float       _send;

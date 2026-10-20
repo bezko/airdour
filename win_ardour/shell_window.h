@@ -82,6 +82,7 @@ public:
 	                    unsigned period_frames = 0,
 	                    bool smoke_vst3 = false,
 	                    bool smoke_mute_solo = false,
+	                    bool smoke_meter_type = false,
 	                    bool smoke_pan = false,
 	                    bool smoke_send = false,
 	                    bool smoke_automation = false,
