@@ -15,6 +15,8 @@
  *                         [--smoke-midi-scale] [--smoke-midi-cc]
  *                         [--smoke-midi-bend] [--smoke-midi-pressure]
  *                         [--smoke-pan-automation] [--smoke-auto-lane-unify]
+ *                         [--smoke-auto-state] [--smoke-pan-auto-state]
+ *                         [--smoke-send-auto-state] [--smoke-auto-state-unify]
  *                         [--smoke-plugin]
  *                         [--smoke-perf] [--smoke-vst3] [--smoke-mute-solo]
  *                         [--smoke-pan] [--smoke-send] [--smoke-automation]
@@ -139,6 +141,10 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_midi_pressure = parse_flag (argc, argv, L"--smoke-midi-pressure");
 	bool smoke_pan_automation = parse_flag (argc, argv, L"--smoke-pan-automation");
 	bool smoke_auto_lane_unify = parse_flag (argc, argv, L"--smoke-auto-lane-unify");
+	bool smoke_auto_state = parse_flag (argc, argv, L"--smoke-auto-state");
+	bool smoke_pan_auto_state = parse_flag (argc, argv, L"--smoke-pan-auto-state");
+	bool smoke_send_auto_state = parse_flag (argc, argv, L"--smoke-send-auto-state");
+	bool smoke_auto_state_unify = parse_flag (argc, argv, L"--smoke-auto-state-unify");
 	bool smoke_plugin = parse_flag (argc, argv, L"--smoke-plugin");
 	bool smoke_vst3 = parse_flag (argc, argv, L"--smoke-vst3");
 	bool smoke_mute_solo = parse_flag (argc, argv, L"--smoke-mute-solo");
@@ -231,7 +237,9 @@ wmain (int argc, wchar_t** argv)
 	                         smoke_midi_arp, smoke_midi_scale,
 	                         smoke_midi_cc, smoke_midi_bend,
 	                         smoke_midi_pressure, smoke_pan_automation,
-	                         smoke_auto_lane_unify)) {
+	                         smoke_auto_lane_unify, smoke_auto_state,
+	                         smoke_pan_auto_state, smoke_send_auto_state,
+	                         smoke_auto_state_unify)) {
 			const char* be = backend.empty () ? "(prefs/Dummy)" : backend.c_str ();
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", be);
 		} else {

@@ -263,7 +263,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_bend,
                             bool smoke_midi_pressure,
                             bool smoke_pan_automation,
-                            bool smoke_auto_lane_unify)
+                            bool smoke_auto_lane_unify,
+                            bool smoke_auto_state,
+                            bool smoke_pan_auto_state,
+                            bool smoke_send_auto_state,
+                            bool smoke_auto_state_unify)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -692,6 +696,61 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_auto_lane_unify) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-auto-lane-unify FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_auto_state && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_auto_state ()) {
+			_smoke_failed = true;
+		} else {
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_auto_state) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-auto-state FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_pan_auto_state && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_pan_auto_state ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_pan_from_engine ();
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_pan_auto_state) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-pan-auto-state FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_send_auto_state && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_send_auto_state ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_send_from_engine ();
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_send_auto_state) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-auto-state FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_auto_state_unify && _engine.snapshot ().session_ok) {
+		_auto_lane_kind = 0;
+		if (!_engine.smoke_auto_state_unify ()) {
+			_smoke_failed = true;
+		} else {
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_auto_state_unify) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-auto-state-unify FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1271,22 +1330,64 @@ ShellWindow::cycle_auto_lane_kind ()
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+const wchar_t*
+ShellWindow::auto_state_label (int state_0_3)
+{
+	switch (state_0_3) {
+	case 1:
+		return L"Play";
+	case 2:
+		return L"Write";
+	case 3:
+		return L"Touch";
+	default:
+		return L"Off";
+	}
+}
+
+void
+ShellWindow::do_cycle_auto_state ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	switch (_auto_lane_kind) {
+	case 1:
+		_engine.cycle_track_pan_auto_state (0);
+		break;
+	case 2:
+		_engine.cycle_track_send_auto_state (0);
+		break;
+	default:
+		_engine.cycle_track_gain_auto_state (0);
+		break;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	refresh_automation_lane ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 void
 ShellWindow::refresh_automation_lane ()
 {
 	const wchar_t* kind = L"Gain";
+	int st_i = _engine_snap.track_gain_auto_state[0];
 	if (_auto_lane_kind == 1) {
 		kind = L"Pan";
+		st_i = _engine_snap.track_pan_auto_state[0];
 	} else if (_auto_lane_kind == 2) {
 		kind = L"Send";
+		st_i = _engine_snap.track_send_auto_state[0];
 	}
+	const wchar_t* st = auto_state_label (st_i);
 	if (_engine_snap.track_name[0][0] != L'\0') {
-		wchar_t auto_lab[48];
-		_snwprintf_s (auto_lab, _TRUNCATE, L"%s · %s", kind, _engine_snap.track_name[0]);
+		wchar_t auto_lab[64];
+		_snwprintf_s (auto_lab, _TRUNCATE, L"%s · %s · %s", kind, st, _engine_snap.track_name[0]);
 		_auto_lane.set_label (auto_lab);
 	} else {
-		wchar_t auto_lab[32];
-		_snwprintf_s (auto_lab, _TRUNCATE, L"%s · Audio 1", kind);
+		wchar_t auto_lab[48];
+		_snwprintf_s (auto_lab, _TRUNCATE, L"%s · %s · Audio 1", kind, st);
 		_auto_lane.set_label (auto_lab);
 	}
 	float view0 = _lanes[0].strip.view_start_sec ();
@@ -3680,6 +3781,14 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && (wparam == 'A' || wparam == 'a')) {
 			/* Alt+Shift+A — cycle editor auto lane Gain → Pan → Send. */
 			cycle_auto_lane_kind ();
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'Y' || wparam == 'y'
+		               || wparam == 'P' || wparam == 'p'
+		               || wparam == 'Q' || wparam == 'q')) {
+			/* Alt+Shift+Y — cycle AutoState for current lane (P/Q redirect). */
+			do_cycle_auto_state ();
 		} else if (wparam == VK_F8) {
 			/* F8 — cycle MIDI CC lane controller Volume→Mod→Expr. */
 			cycle_midi_cc_controller ();
@@ -6397,6 +6506,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
 		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
 		{ L"Alt+Shift+A / Shift+click auto", L"Cycle Gain→Pan→Send automation lane" },
+		{ L"Alt+Shift+Y", L"Cycle auto Off→Play→Write→Touch (current lane)" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
