@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_midi_note_pressure)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -473,6 +474,18 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_pressure) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-pressure FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi_note_pressure && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_note_pressure ()) {
+			_smoke_failed = true;
+		} else {
+			_midi_cc_number = -3;
+			refresh_midi_cc_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_note_pressure) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-note-pressure FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -1308,6 +1321,8 @@ ShellWindow::midi_cc_label () const
 		return L"Bend";
 	case -2:
 		return L"Pressure";
+	case -3:
+		return L"PolyAT · C4";
 	default:
 		return L"CC7 · Volume";
 	}
@@ -1324,6 +1339,8 @@ ShellWindow::cycle_midi_cc_controller ()
 		_midi_cc_number = -1; /* pitch bend */
 	} else if (_midi_cc_number == -1) {
 		_midi_cc_number = -2; /* channel pressure */
+	} else if (_midi_cc_number == -2) {
+		_midi_cc_number = -3; /* note pressure (poly AT) note 60 */
 	} else {
 		_midi_cc_number = 7;
 	}
@@ -1333,6 +1350,8 @@ ShellWindow::cycle_midi_cc_controller ()
 			_engine.ensure_midi_bend_automation ();
 		} else if (_midi_cc_number == -2) {
 			_engine.ensure_midi_pressure_automation ();
+		} else if (_midi_cc_number == -3) {
+			_engine.ensure_midi_note_pressure_automation (60);
 		} else {
 			_engine.ensure_midi_cc_automation (_midi_cc_number);
 		}
@@ -1354,6 +1373,8 @@ ShellWindow::refresh_midi_cc_lane ()
 			_engine.fill_midi_bend_automation_curve (view0, span, curve, n);
 		} else if (_midi_cc_number == -2) {
 			_engine.fill_midi_pressure_automation_curve (view0, span, curve, n);
+		} else if (_midi_cc_number == -3) {
+			_engine.fill_midi_note_pressure_automation_curve (view0, span, curve, n, 60);
 		} else {
 			_engine.fill_midi_cc_automation_curve (
 				view0, span, curve, n, _midi_cc_number);
@@ -1381,6 +1402,9 @@ ShellWindow::refresh_midi_cc_lane ()
 		} else if (_midi_cc_number == -2) {
 			npt = _engine.fill_midi_pressure_automation_points (
 				view0, span, px, py, (int)AutomationLane::kMaxPoints);
+		} else if (_midi_cc_number == -3) {
+			npt = _engine.fill_midi_note_pressure_automation_points (
+				view0, span, px, py, (int)AutomationLane::kMaxPoints, 60);
 		} else {
 			npt = _engine.fill_midi_cc_automation_points (
 				view0, span, px, py, (int)AutomationLane::kMaxPoints,
@@ -1408,6 +1432,8 @@ ShellWindow::write_midi_cc_at (float x, float y)
 		ok = _engine.write_midi_bend_automation (time_sec, value);
 	} else if (_midi_cc_number == -2) {
 		ok = _engine.write_midi_pressure_automation (time_sec, value);
+	} else if (_midi_cc_number == -3) {
+		ok = _engine.write_midi_note_pressure_automation (time_sec, value, 60);
 	} else {
 		ok = _engine.write_midi_cc_automation (time_sec, value, _midi_cc_number);
 	}
@@ -4976,6 +5002,8 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			_engine.ensure_midi_bend_automation ();
 		} else if (_midi_cc_number == -2) {
 			_engine.ensure_midi_pressure_automation ();
+		} else if (_midi_cc_number == -3) {
+			_engine.ensure_midi_note_pressure_automation (60);
 		} else {
 			_engine.ensure_midi_cc_automation (_midi_cc_number);
 		}
@@ -6302,7 +6330,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F5 / Chd", L"MIDI chord Off→Maj→Min · multi-key latch" },
 		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
-		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
+		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure→PolyAT" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
