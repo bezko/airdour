@@ -9080,6 +9080,46 @@ EngineHost::smoke_tempo ()
 	}
 }
 
+
+bool
+EngineHost::smoke_count_in ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-count-in failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_count_in (false) || _snap.count_in_enabled
+		    || _impl->session->config.get_count_in ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-count-in FAILED (start off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!toggle_count_in () || !_snap.count_in_enabled
+		    || !_impl->session->config.get_count_in ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-count-in FAILED (on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!toggle_count_in () || _snap.count_in_enabled
+		    || _impl->session->config.get_count_in ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-count-in FAILED (off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-count-in ok (off→on→off)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-count-in ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-count-in exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_punch ()
 {
@@ -19020,6 +19060,12 @@ EngineHost::toggle_count_in ()
 
 bool
 EngineHost::smoke_tempo ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_count_in ()
 {
 	return false;
 }

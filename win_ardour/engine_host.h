@@ -785,6 +785,8 @@ public:
 	 * toggle count-in; restore 120 + count-in off. For --smoke-tempo.
 	 */
 	bool smoke_tempo ();
+	/** toggle_count_in off→on→off; verify config. For --smoke-count-in. */
+	bool smoke_count_in ();
 
 	/**
 	 * Toggle Config clicking off→on; verify snapshot + Config.
