@@ -95,6 +95,7 @@ public:
 	                    bool smoke_group = false,
 	                    bool smoke_monitor = false,
 	                    bool smoke_locate = false,
+	                    bool smoke_zoom_session = false,
 	                    bool smoke_zoom = false,
 	                    bool smoke_history = false,
 	                    bool smoke_prefs = false,
@@ -301,6 +302,7 @@ private:
 	void reset_shared_view ();
 	void fit_shared_range (float start_sec, float end_sec);
 	void do_fit_session ();
+	void do_zoom_to_session ();
 	void do_fit_selection ();
 	void do_fit_all_regions ();
 	void do_scroll_editor (float delta_widths);

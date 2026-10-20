@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_zoom_session,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,42 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_zoom_session && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_zoom_session ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			float before = _lanes[0].strip.view_span_sec ();
+			float s0 = 0.f, e0 = 0.f;
+			float want = 2.f;
+			if (_engine.session_extent_sec (&s0, &e0) && e0 > s0) {
+				want = e0 - s0;
+			}
+			do_zoom_to_session ();
+			float span = _lanes[0].strip.view_span_sec ();
+			/* fit_range pad_frac=0.06 → span ≈ want * 1.12 */
+			float expect = want * 1.12f;
+			if (span < expect * 0.85f || span > expect * 1.25f + 0.3f) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-zoom-session FAILED (span=%.2f want≈%.2f before=%.2f)\n",
+				              span, expect, before);
+				_smoke_failed = true;
+			} else {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-zoom-session ok (span=%.2fs)\n",
+				              span);
+			}
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_zoom_session) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-session FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1970,6 +2007,13 @@ ShellWindow::do_fit_session ()
 	/* Fallback: default 0..8s window. */
 	fit_shared_range (0.f, WaveStrip::kDefaultSpanSec);
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+
+void
+ShellWindow::do_zoom_to_session ()
+{
+	do_fit_session ();
 }
 
 void
@@ -3572,6 +3616,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			transport_toggle ();
 		} else if (wparam == VK_DELETE || wparam == VK_BACK) {
 			do_delete_selection ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && wparam == VK_HOME) {
+			/* Ctrl+Alt+Home = zoom editor to session extent. */
+			do_zoom_to_session ();
 		} else if (wparam == VK_HOME || wparam == '0') {
 			reset_shared_view ();
 			refresh_editor_view_after_nav ();
@@ -6309,6 +6358,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
+		{ L"Ctrl+Alt+Home", L"Zoom editor to session extent" },
 		{ L"Home / 0", L"Follow transport (reset view)" },
 		{ L"← →  Shift+←→", L"Scroll editor · larger step" },
 		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
