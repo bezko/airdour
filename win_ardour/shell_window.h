@@ -87,6 +87,7 @@ public:
 	                    bool smoke_automation = false,
 	                    bool smoke_edit = false,
 	                    bool smoke_snap = false,
+	                    bool smoke_snap_density = false,
 	                    bool smoke_punch = false,
 	                    bool smoke_tempo = false,
 	                    bool smoke_click = false,

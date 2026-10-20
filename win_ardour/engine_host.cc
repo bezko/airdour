@@ -6733,6 +6733,80 @@ EngineHost::smoke_snap ()
 	}
 }
 
+
+bool
+EngineHost::smoke_snap_density ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-snap-density failed — no Session";
+		return false;
+	}
+	try {
+		set_snap_enabled (true);
+		set_snap_density (0); /* bar */
+		if (_snap.snap_density != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap-density FAILED (start dens=%d)\n",
+			              _snap.snap_density);
+			std::fflush (stderr);
+			return false;
+		}
+		/* bar @ 120 BPM = 2.0s → 1.1 snaps to 0 or 2 */
+		float s_bar = snap_time (1.1f);
+		if (std::fabs (s_bar - 0.0f) > 0.08f && std::fabs (s_bar - 2.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap-density FAILED (bar 1.1→%.3f)\n",
+			              s_bar);
+			std::fflush (stderr);
+			return false;
+		}
+		cycle_snap_density (); /* → beat */
+		if (_snap.snap_density != 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap-density FAILED (beat dens=%d)\n",
+			              _snap.snap_density);
+			std::fflush (stderr);
+			return false;
+		}
+		float s_beat = snap_time (1.1f);
+		if (std::fabs (s_beat - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap-density FAILED (beat 1.1→%.3f)\n",
+			              s_beat);
+			std::fflush (stderr);
+			return false;
+		}
+		cycle_snap_density (); /* → 1/2 */
+		if (_snap.snap_density != 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap-density FAILED (1/2 dens=%d)\n",
+			              _snap.snap_density);
+			std::fflush (stderr);
+			return false;
+		}
+		cycle_snap_density (); /* → 1/4 */
+		if (_snap.snap_density != 3) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap-density FAILED (1/4 dens=%d)\n",
+			              _snap.snap_density);
+			std::fflush (stderr);
+			return false;
+		}
+		cycle_snap_density (); /* → bar */
+		if (_snap.snap_density != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap-density FAILED (wrap dens=%d)\n",
+			              _snap.snap_density);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-snap-density ok (0→1→2→3→0)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-snap-density ok";
+		set_snap_enabled (false);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-snap-density exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_edit ()
 {
@@ -18899,6 +18973,12 @@ EngineHost::smoke_freeze ()
 
 bool
 EngineHost::smoke_snap ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_snap_density ()
 {
 	return false;
 }

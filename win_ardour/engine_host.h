@@ -694,6 +694,8 @@ public:
 	 * For --smoke-snap.
 	 */
 	bool smoke_snap ();
+	/** Cycle density bar→beat→1/2→1/4→bar via cycle_snap_density. For --smoke-snap-density. */
+	bool smoke_snap_density ();
 
 	/**
 	 * Import a test tone, undo it (regions gone), redo (regions back), undo again.
