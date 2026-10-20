@@ -91,6 +91,7 @@ public:
 	                    bool smoke_tempo = false,
 	                    bool smoke_click = false,
 	                    bool smoke_tracks = false,
+	                    bool smoke_stereo_track = false,
 	                    bool smoke_rename = false,
 	                    bool smoke_group = false,
 	                    bool smoke_monitor = false,

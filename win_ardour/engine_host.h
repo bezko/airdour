@@ -174,6 +174,7 @@ struct EngineSnapshot {
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
+	bool         track_stereo[kMeters]; /* ≥2 audio inputs (Equal-Power width capable) */
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
@@ -794,8 +795,18 @@ public:
 
 	/** Create one more Audio track (up to kMeters). Aux send attached. */
 	bool add_audio_track ();
+	/**
+	 * Create stereo Audio track (2in2out Equal-Power) so pan_width_control is live.
+	 * Shift+click +A.
+	 */
+	bool add_stereo_audio_track ();
 	/** Create MIDI track if missing (ensure_midi_track). */
 	bool add_midi_track ();
+	/**
+	 * Add stereo → assert 2in + pan_width → remove; restore mono count.
+	 * For --smoke-stereo-track.
+	 */
+	bool smoke_stereo_track ();
 	/**
 	 * Remove audio track at index. Keeps ≥1 audio.
 	 * If require_empty_or_selected: only when empty or currently selected.
