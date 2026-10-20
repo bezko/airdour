@@ -14,6 +14,7 @@
 struct EngineMarkerSnap {
 	float        sec;
 	wchar_t      name[24];
+	bool         locked; /* Location::locked — blocks move */
 };
 
 struct EngineMidiDeviceSnap {
@@ -729,6 +730,14 @@ public:
 
 	/** Add IsMark at time_sec (name auto if empty). */
 	bool add_marker_at (float time_sec, const std::string& name = std::string ());
+	/**
+	 * Lock/unlock nearest IsMark within slop_sec (Location::lock/unlock).
+	 * Ctrl+Shift+M toggles.
+	 */
+	bool set_marker_locked_near (float time_sec, bool locked, float slop_sec = 0.35f);
+	bool toggle_marker_locked_near (float time_sec, float slop_sec = 0.35f);
+	/** Add → lock → assert → unlock → remove. For --smoke-marker-lock. */
+	bool smoke_marker_lock ();
 	/** Remove nearest IsMark within slop_sec of time_sec. */
 	bool remove_marker_near (float time_sec, float slop_sec = 0.35f);
 	/** Locate transport to time_sec (optional snap to nearest mark within slop). */
