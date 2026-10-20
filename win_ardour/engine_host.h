@@ -177,6 +177,8 @@ struct EngineSnapshot {
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
+	float        track_send_pan[kMeters]; /* send pan azimuth 0=L … 0.5=C … 1=R */
+	bool         track_send_pan_ok[kMeters]; /* send pan_azimuth_control present */
 	bool         aux_bus_ok; /* Session Aux audio bus exists */
 	bool         midi_muted;
 	bool         midi_soloed;
@@ -373,6 +375,15 @@ public:
 
 	/** Send 0 → 0.75 → 0.25 on Audio 1. For --smoke-send. */
 	bool smoke_send ();
+
+	/**
+	 * Aux send pan azimuth 0=L … 0.5=C … 1=R via Send pannable.
+	 * Shift+drag send.
+	 */
+	bool  set_track_send_pan (int track, float pan_0_1);
+	float track_send_pan (int track) const;
+	/** L → R → C on Audio 1 send. For --smoke-send-pan. */
+	bool smoke_send_pan ();
 
 	/**
 	 * Track fader AutomationList (GainAutomation). Enable Play, write points,

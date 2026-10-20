@@ -59,6 +59,13 @@ public:
 	bool  hit_send (float x, float y) const;
 	bool  drag_send_to (float x);
 
+	/** Aux send pan azimuth 0..1 when send panner present. Shift+drag send. */
+	void  set_send_pan (float pan_0_1);
+	float send_pan () const { return _send_pan; }
+	void  set_send_pan_ok (bool ok) { _send_pan_ok = ok; }
+	bool  send_pan_ok () const { return _send_pan_ok; }
+	bool  drag_send_pan_to (float x);
+
 	/** MIDI strip: hide rec-arm / FX / pan / send chrome; keep M/S + fader + meter. */
 	void set_midi_strip (bool midi) { _midi_strip = midi; }
 	bool is_midi_strip () const { return _midi_strip; }
@@ -132,6 +139,8 @@ private:
 	float       _gain;
 	float       _pan;
 	float       _send;
+	float       _send_pan;
+	bool        _send_pan_ok;
 	float       _fx_param;
 	float       _fx_param2;
 	float       _fx_param3;

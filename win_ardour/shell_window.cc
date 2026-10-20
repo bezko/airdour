@@ -217,6 +217,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_mute_solo,
                             bool smoke_pan,
                             bool smoke_send,
+                            bool smoke_send_pan,
                             bool smoke_automation,
                             bool smoke_edit,
                             bool smoke_snap,
@@ -647,6 +648,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_send) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_send_pan && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_send_pan ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_send_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_send_pan) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1228,6 +1242,8 @@ ShellWindow::sync_mixer_send_from_engine ()
 	const int na = n_audio_lanes ();
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_send (_engine_snap.track_send[i]);
+		_mixers[i].set_send_pan (_engine_snap.track_send_pan[i]);
+		_mixers[i].set_send_pan_ok (_engine_snap.track_send_pan_ok[i]);
 	}
 }
 
@@ -4786,13 +4802,26 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	int send_i = hit_mixer_send (x, y);
 	if (send_i >= 0) {
-		_drag = DragMode::Send;
-		_drag_index = send_i;
-		if (_mixers[send_i].drag_send_to (x)) {
-			_engine.set_track_send (send_i, _mixers[send_i].send ());
-			_engine.poll ();
-			_engine_snap = _engine.snapshot ();
-			sync_mixer_send_from_engine ();
+		const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
+		if (shift && _mixers[send_i].send_pan_ok ()) {
+			/* Shift+drag send → aux send pan azimuth. */
+			_drag = DragMode::SendPan;
+			_drag_index = send_i;
+			if (_mixers[send_i].drag_send_pan_to (x)) {
+				_engine.set_track_send_pan (send_i, _mixers[send_i].send_pan ());
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_send_from_engine ();
+			}
+		} else {
+			_drag = DragMode::Send;
+			_drag_index = send_i;
+			if (_mixers[send_i].drag_send_to (x)) {
+				_engine.set_track_send (send_i, _mixers[send_i].send ());
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_send_from_engine ();
+			}
 		}
 		SetCapture (_hwnd);
 		SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
@@ -5159,6 +5188,18 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 	if (_drag == DragMode::Send && _drag_index >= 0 && _drag_index < kTracks) {
 		if (_mixers[_drag_index].drag_send_to (x)) {
 			_engine.set_track_send (_drag_index, _mixers[_drag_index].send ());
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_send_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+		return true;
+	}
+
+	if (_drag == DragMode::SendPan && _drag_index >= 0 && _drag_index < kTracks) {
+		if (_mixers[_drag_index].drag_send_pan_to (x)) {
+			_engine.set_track_send_pan (
+				_drag_index, _mixers[_drag_index].send_pan ());
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
 			sync_mixer_send_from_engine ();

@@ -49,6 +49,8 @@
 #include "ardour/route.h"
 #include "ardour/internal_send.h"
 #include "ardour/send.h"
+#include "ardour/panner_shell.h"
+#include "ardour/pannable.h"
 #include "ardour/audio_backend.h"
 #include "ardour/chan_count.h"
 #include "ardour/location.h"
@@ -598,6 +600,8 @@ EngineHost::EngineHost ()
 		_snap.track_pan[i] = 0.5f;
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
+		_snap.track_send_pan[i] = 0.5f;
+		_snap.track_send_pan_ok[i] = false;
 		_snap.track_gain[i] = _track_gain[i];
 		_snap.track_name[i][0] = L'\0';
 		_snap.track_in_group[i] = false;
@@ -3433,6 +3437,8 @@ EngineHost::refresh_send_flags ()
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
+		_snap.track_send_pan[i] = 0.5f;
+		_snap.track_send_pan_ok[i] = false;
 	}
 	if (!_impl || !_impl->session) {
 		return;
@@ -3454,6 +3460,12 @@ EngineHost::refresh_send_flags ()
 			_snap.track_send_ok[i] = true;
 			float g = (float)send->gain_control ()->get_value ();
 			_snap.track_send[i] = std::max (0.f, std::min (1.f, g));
+			if (send->panner_shell () && send->panner_shell ()->pannable ()
+			    && send->panner_shell ()->pannable ()->pan_azimuth_control) {
+				_snap.track_send_pan_ok[i] = true;
+				_snap.track_send_pan[i] = (float)send->panner_shell ()
+					->pannable ()->pan_azimuth_control->get_value ();
+			}
 		}
 	} catch (...) {
 	}
@@ -3601,6 +3613,107 @@ EngineHost::smoke_send ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_send_pan (int track, float pan_0_1)
+{
+	pan_0_1 = std::max (0.f, std::min (1.f, pan_0_1));
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (!ensure_aux_sends ()) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track] || !_impl->aux_bus) {
+		return false;
+	}
+	try {
+		std::shared_ptr<Send> send =
+			_impl->tracks[track]->internal_send_for (_impl->aux_bus);
+		if (!send || !send->panner_shell () || !send->panner_shell ()->pannable ()
+		    || !send->panner_shell ()->pannable ()->pan_azimuth_control) {
+			std::fprintf (stderr, "airdour_win_shell: send pan missing on Audio %d\n",
+			              track + 1);
+			std::fflush (stderr);
+			return false;
+		}
+		std::shared_ptr<AutomationControl> pan =
+			send->panner_shell ()->pannable ()->pan_azimuth_control;
+		_impl->session->set_control (pan, (double)pan_0_1, Controllable::NoGroup);
+		wait_until ([&] () {
+			refresh_send_flags ();
+			return _snap.track_send_pan_ok[track]
+			    && std::fabs (_snap.track_send_pan[track] - pan_0_1) < 0.02f;
+		}, 300);
+		_snap.detail = L"track send pan set";
+		return _snap.track_send_pan_ok[track]
+		    && std::fabs (_snap.track_send_pan[track] - pan_0_1) < 0.02f;
+	} catch (...) {
+		return false;
+	}
+}
+
+float
+EngineHost::track_send_pan (int track) const
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return 0.5f;
+	}
+	return _snap.track_send_pan[track];
+}
+
+bool
+EngineHost::smoke_send_pan ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-send-pan failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_aux_sends () || !_snap.aux_bus_ok || !_snap.track_send_ok[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (no Aux/send)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_send_flags ();
+		if (!_snap.track_send_pan_ok[0]) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-send-pan FAILED "
+			              "(no send pan_azimuth — check panner DLLs)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send_pan (0, 0.0f) || _snap.track_send_pan[0] > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (L got=%.3f)\n",
+			              _snap.track_send_pan[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send_pan (0, 1.0f) || _snap.track_send_pan[0] < 0.95f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (R got=%.3f)\n",
+			              _snap.track_send_pan[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send_pan (0, 0.5f)
+		    || _snap.track_send_pan[0] < 0.45f || _snap.track_send_pan[0] > 0.55f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (C got=%.3f)\n",
+			              _snap.track_send_pan[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-pan ok (Audio1 send L→R→C)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-send-pan ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-pan exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17565,6 +17678,8 @@ EngineHost::EngineHost ()
 		_snap.track_frozen[i] = false;
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
+		_snap.track_send_pan[i] = 0.5f;
+		_snap.track_send_pan_ok[i] = false;
 		_snap.track_gain[i] = _track_gain[i];
 		_snap.track_name[i][0] = L'\0';
 		_snap.track_in_group[i] = false;
@@ -18261,6 +18376,27 @@ EngineHost::track_send (int track) const
 
 bool
 EngineHost::smoke_send ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_track_send_pan (int track, float pan_0_1)
+{
+	(void)track;
+	(void)pan_0_1;
+	return false;
+}
+
+float
+EngineHost::track_send_pan (int track) const
+{
+	(void)track;
+	return 0.5f;
+}
+
+bool
+EngineHost::smoke_send_pan ()
 {
 	return false;
 }
