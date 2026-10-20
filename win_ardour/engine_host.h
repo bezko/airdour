@@ -723,6 +723,11 @@ public:
 	bool set_punch_end (float end_sec);
 	/** Copy current auto-loop range into punch (creates punch if needed). */
 	bool copy_loop_to_punch ();
+	/**
+	 * Copy current region selection start..end into punch range.
+	 * For Ctrl+Shift+P / --smoke-punch-selection.
+	 */
+	bool copy_selection_to_punch ();
 	/** Arm/disarm Session punch-in + punch-out (record only inside range). */
 	bool set_punch_enabled (bool enable);
 	bool toggle_punch_enabled ();
@@ -779,6 +784,8 @@ public:
 	 * For --smoke-punch. Does not roll transport.
 	 */
 	bool smoke_punch ();
+	/** Import → select → copy_selection_to_punch; verify range. */
+	bool smoke_punch_selection ();
 
 	/**
 	 * Set BPM 60 then 140; verify snap beat spacing follows TempoMap;
