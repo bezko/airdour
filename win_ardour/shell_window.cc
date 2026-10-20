@@ -86,6 +86,8 @@ enable_dpi_awareness ()
 	}
 }
 
+bool run_rename_dialog (HWND parent, wchar_t* name, size_t name_chars);
+
 } // namespace
 
 ShellWindow::ShellWindow ()
@@ -938,6 +940,173 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
+	run_smoke_check (ok, "marker-navigate", [this]() { return _engine.smoke_marker_navigate (); });
+	run_smoke_check (ok, "marker-rename", [this]() { return _engine.smoke_marker_rename (); });
+	run_smoke_check (ok, "marker-lock", [this]() { return _engine.smoke_marker_lock (); });
+	run_smoke_check (ok, "cd-marker", [this]() { return _engine.smoke_cd_marker (); });
+	run_smoke_check (ok, "range-marker", [this]() { return _engine.smoke_range_marker (); });
+	run_smoke_check (ok, "region-sync", [this]() { return _engine.smoke_region_sync (); });
+	run_smoke_check (ok, "scene-channel", [this]() { return _engine.smoke_scene_channel (); });
+	run_smoke_check (ok, "cue-navigate", [this]() { return _engine.smoke_cue_navigate (); });
+	run_smoke_check (ok, "section-rename", [this]() { return _engine.smoke_section_rename (); });
+	run_smoke_check (ok, "punch-navigate", [this]() { return _engine.smoke_punch_navigate (); });
+	run_smoke_check (ok, "session-extent-navigate", [this]() { return _engine.smoke_session_extent_navigate (); });
+	run_smoke_check (ok, "loop-navigate", [this]() { return _engine.smoke_loop_navigate (); });
+	run_smoke_check (ok, "playhead-nudge", [this]() { return _engine.smoke_playhead_nudge (); });
+	run_smoke_check (ok, "zoom-punch", [this]() {
+		if (!_engine.smoke_zoom_punch ()) return false;
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_transport_punch_from_engine ();
+		float before = _lanes[0].strip.view_span_sec ();
+		do_zoom_to_punch ();
+		float span = _lanes[0].strip.view_span_sec ();
+		if (span < 1.8f || span > 2.8f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-punch FAILED (span=%.2f before=%.2f)\n", span, before);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-punch ok (span=%.2fs)\n", span);
+		layout_panes ();
+		return true;
+	});
+	run_smoke_check (ok, "zoom-loop", [this]() {
+		if (!_engine.smoke_zoom_loop ()) return false;
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_transport_loop_from_engine ();
+		apply_loop_to_lanes ();
+		float before = _lanes[0].strip.view_span_sec ();
+		do_zoom_to_loop ();
+		float span = _lanes[0].strip.view_span_sec ();
+		if (span < 1.8f || span > 2.8f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-loop FAILED (span=%.2f before=%.2f)\n", span, before);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-loop ok (span=%.2fs)\n", span);
+		layout_panes ();
+		return true;
+	});
+	run_smoke_check (ok, "zoom-selection", [this]() {
+		if (!_engine.smoke_zoom_selection ()) return false;
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		float before = _lanes[0].strip.view_span_sec ();
+		float want = _engine_snap.selection_end_sec - _engine_snap.selection_start_sec;
+		do_zoom_to_selection ();
+		float span = _lanes[0].strip.view_span_sec ();
+		float expect = want * 1.12f;
+		if (span < expect * 0.85f || span > expect * 1.25f + 0.3f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection FAILED (span=%.2f want≈%.2f before=%.2f)\n", span, expect, before);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection ok (span=%.2fs)\n", span);
+		layout_panes ();
+		return true;
+	});
+	run_smoke_check (ok, "zoom-session", [this]() {
+		if (!_engine.smoke_zoom_session ()) return false;
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		float before = _lanes[0].strip.view_span_sec ();
+		float s0 = 0.f, e0 = 0.f;
+		float want = 2.f;
+		if (_engine.session_extent_sec (&s0, &e0) && e0 > s0) {
+			want = e0 - s0;
+		}
+		do_zoom_to_session ();
+		float span = _lanes[0].strip.view_span_sec ();
+		float expect = want * 1.12f;
+		if (span < expect * 0.85f || span > expect * 1.25f + 0.3f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-session FAILED (span=%.2f want≈%.2f before=%.2f)\n", span, expect, before);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-session ok (span=%.2fs)\n", span);
+		layout_panes ();
+		return true;
+	});
+	run_smoke_check (ok, "zoom-regions", [this]() {
+		if (!_engine.smoke_zoom_regions ()) return false;
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		float before = _lanes[0].strip.view_span_sec ();
+		float s0 = 0.f, e0 = 0.f;
+		float want = 2.f;
+		if (_engine.regions_extent_sec (&s0, &e0) && e0 > s0) {
+			want = e0 - s0;
+		}
+		do_zoom_to_regions ();
+		float span = _lanes[0].strip.view_span_sec ();
+		float expect = want * 1.12f;
+		if (span < expect * 0.85f || span > expect * 1.25f + 0.3f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-regions FAILED (span=%.2f want≈%.2f before=%.2f)\n", span, expect, before);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-regions ok (span=%.2fs)\n", span);
+		layout_panes ();
+		return true;
+	});
+	run_smoke_check (ok, "center-playhead", [this]() {
+		if (!_engine.smoke_center_playhead ()) return false;
+		_engine_snap = _engine.snapshot ();
+		_playhead_sec = _engine_snap.transport_sec;
+		sync_transport_clock_from_engine ();
+		_lanes[0].strip.set_view_window (0.f, 2.f);
+		apply_shared_view (0);
+		float before_mid = _lanes[0].strip.view_start_sec () + 0.5f * _lanes[0].strip.view_span_sec ();
+		do_center_on_playhead ();
+		float span = _lanes[0].strip.view_span_sec ();
+		float mid = _lanes[0].strip.view_start_sec () + 0.5f * span;
+		float ph = _playhead_sec;
+		if (std::fabs (mid - ph) > std::max (0.15f, span * 0.12f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-center-playhead FAILED (mid=%.3f ph=%.3f before_mid=%.3f)\n", mid, ph, before_mid);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-center-playhead ok (mid=%.3f ph=%.3f)\n", mid, ph);
+		layout_panes ();
+		return true;
+	});
+	run_smoke_check (ok, "zoom-playhead", [this]() {
+		if (!_engine.smoke_zoom_playhead ()) return false;
+		_engine_snap = _engine.snapshot ();
+		_playhead_sec = _engine_snap.transport_sec;
+		sync_transport_clock_from_engine ();
+		_lanes[0].strip.set_view_window (0.f, 8.f);
+		apply_shared_view (0);
+		float before = _lanes[0].strip.view_span_sec ();
+		do_zoom_around_playhead (1.15f);
+		float span = _lanes[0].strip.view_span_sec ();
+		float start = _lanes[0].strip.view_start_sec ();
+		float mid = start + 0.5f * span;
+		if (span >= before * 0.98f || span < before / 1.15f * 0.85f
+		    || std::fabs (mid - _playhead_sec) > std::max (0.2f, span * 0.15f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-playhead FAILED (span=%.3f before=%.3f mid=%.3f ph=%.3f)\n", span, before, mid, _playhead_sec);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-playhead ok (span=%.3f→%.3f mid=%.3f)\n", before, span, mid);
+		layout_panes ();
+		return true;
+	});
+	run_smoke_check (ok, "scroll-playhead", [this]() {
+		if (!_engine.smoke_scroll_playhead ()) return false;
+		_engine_snap = _engine.snapshot ();
+		_playhead_sec = _engine_snap.transport_sec;
+		sync_transport_clock_from_engine ();
+		_lanes[0].strip.set_view_window (0.f, 2.f);
+		apply_shared_view (0);
+		do_scroll_playhead_into_view ();
+		float start = _lanes[0].strip.view_start_sec ();
+		float span = _lanes[0].strip.view_span_sec ();
+		float end = start + span;
+		float ph = _playhead_sec;
+		if (ph < start || ph > end) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-scroll-playhead FAILED (ph=%.3f view=[%.3f..%.3f])\n", ph, start, end);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-scroll-playhead ok (ph=%.3f view=[%.3f..%.3f])\n", ph, start, end);
+		layout_panes ();
+		return true;
+	});
 
 	if (ok && smoke_zoom && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_zoom ()) {
@@ -2058,6 +2227,460 @@ ShellWindow::do_locate_selection_end ()
 		sync_transport_clock_from_engine ();
 		InvalidateRect (_hwnd, nullptr, FALSE);
 	}
+}
+
+void
+ShellWindow::do_locate_next_marker ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (_engine.locate_next_marker ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_playhead_sec = _engine_snap.transport_sec;
+		sync_transport_clock_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_locate_prev_marker ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (_engine.locate_prev_marker ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_playhead_sec = _engine_snap.transport_sec;
+		sync_transport_clock_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_rename_marker_at_playhead ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	wchar_t name[32] = L"mark";
+	for (int i = 0; i < _engine_snap.marker_count; ++i) {
+		if (std::fabs (_engine_snap.markers[i].sec - _playhead_sec) < 0.35f) {
+			wcsncpy_s (name, _engine_snap.markers[i].name, _TRUNCATE);
+			break;
+		}
+	}
+	if (!run_rename_dialog (_hwnd, name, 32)) {
+		return;
+	}
+	char utf8[128];
+	WideCharToMultiByte (CP_UTF8, 0, name, -1, utf8, sizeof (utf8), nullptr, nullptr);
+	if (!_engine.rename_marker_near (_playhead_sec, utf8)) {
+		MessageBoxW (_hwnd, L"No marker near playhead to rename.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_toggle_marker_lock_at_playhead ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.toggle_marker_locked_near (_playhead_sec)) {
+		MessageBoxW (_hwnd, L"No marker near playhead to lock.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_toggle_marker_cd_at_playhead ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.toggle_marker_cd_near (_playhead_sec)) {
+		MessageBoxW (_hwnd, L"No marker near playhead for CD flag.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_range_marker_from_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		MessageBoxW (_hwnd, L"Select a region first for a range marker.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+		return;
+	}
+	if (!_engine.add_range_marker_from_selection ()) {
+		MessageBoxW (_hwnd, L"Could not create range marker from selection.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_region_sync_at_playhead ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	bool ok;
+	if (GetKeyState (VK_SHIFT) & 0x8000) {
+		ok = _engine.clear_selection_sync ();
+		if (!ok) {
+			MessageBoxW (_hwnd, L"Select a region to clear sync.",
+			             L"Airdour", MB_OK | MB_ICONWARNING);
+		}
+	} else {
+		ok = _engine.set_selection_sync_at_playhead ();
+		if (!ok) {
+			MessageBoxW (_hwnd,
+			             L"Select a region and put the playhead inside it to set sync.",
+			             L"Airdour", MB_OK | MB_ICONWARNING);
+		}
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_cycle_scene_channel ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.cycle_scene_channel_near (_playhead_sec)) {
+		MessageBoxW (_hwnd, L"No scene marker near playhead to cycle channel.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_locate_next_cue ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.locate_next_cue ()) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_playhead_sec = _engine_snap.transport_sec;
+	sync_transport_clock_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_locate_prev_cue ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.locate_prev_cue ()) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_playhead_sec = _engine_snap.transport_sec;
+	sync_transport_clock_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_rename_section_at_playhead ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	wchar_t name[32] = L"section";
+	for (int i = 0; i < _engine_snap.marker_count; ++i) {
+		if (_engine_snap.markers[i].section
+		    && std::fabs (_engine_snap.markers[i].sec - _playhead_sec) < 0.35f) {
+			wcsncpy_s (name, _engine_snap.markers[i].name, _TRUNCATE);
+			break;
+		}
+	}
+	if (!run_rename_dialog (_hwnd, name, 32)) {
+		return;
+	}
+	char utf8[128];
+	WideCharToMultiByte (CP_UTF8, 0, name, -1, utf8, sizeof (utf8), nullptr, nullptr);
+	if (!_engine.rename_section_near (_playhead_sec, utf8)) {
+		MessageBoxW (_hwnd, L"No section marker near playhead to rename.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_locate_punch_in ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.locate_punch_in ()) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_playhead_sec = _engine_snap.transport_sec;
+	sync_transport_clock_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_locate_punch_out ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.locate_punch_out ()) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_playhead_sec = _engine_snap.transport_sec;
+	sync_transport_clock_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_locate_session_start ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.locate_session_start ()) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_playhead_sec = _engine_snap.transport_sec;
+	sync_transport_clock_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_locate_session_end ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.locate_session_end ()) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_playhead_sec = _engine_snap.transport_sec;
+	sync_transport_clock_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_locate_loop_start ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.locate_loop_start ()) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_playhead_sec = _engine_snap.transport_sec;
+	sync_transport_clock_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_locate_loop_end ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.locate_loop_end ()) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_playhead_sec = _engine_snap.transport_sec;
+	sync_transport_clock_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_zoom_to_punch ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (!_engine_snap.punch_range_ok
+	    || _engine_snap.punch_end_sec <= _engine_snap.punch_start_sec) {
+		return;
+	}
+	fit_shared_range (_engine_snap.punch_start_sec, _engine_snap.punch_end_sec);
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_zoom_to_loop ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (!_engine_snap.loop_active
+	    || _engine_snap.loop_end_sec <= _engine_snap.loop_start_sec) {
+		return;
+	}
+	fit_shared_range (_engine_snap.loop_start_sec, _engine_snap.loop_end_sec);
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_zoom_to_selection ()
+{
+	do_fit_selection ();
+}
+
+void
+ShellWindow::do_nudge_playhead (int direction)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.nudge_playhead (direction)) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_playhead_sec = _engine_snap.transport_sec;
+	sync_transport_clock_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_zoom_to_session ()
+{
+	do_fit_session ();
+}
+
+void
+ShellWindow::do_zoom_to_regions ()
+{
+	do_fit_all_regions ();
+}
+
+void
+ShellWindow::do_center_on_playhead ()
+{
+	float span = _lanes[0].strip.view_span_sec ();
+	if (span < 0.05f) {
+		span = WaveStrip::kDefaultSpanSec;
+	}
+	/* Shell playhead is UI source of truth (async Session locate may lag). */
+	float ph = _playhead_sec;
+	if (ph < 0.f) {
+		ph = 0.f;
+	}
+	float start = ph - span * 0.5f;
+	if (start < 0.f) {
+		start = 0.f;
+	}
+	_lanes[0].strip.set_view_window (start, span);
+	apply_shared_view (0);
+	refresh_editor_view_after_nav ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_zoom_around_playhead (float factor)
+{
+	if (factor <= 0.f) {
+		return;
+	}
+	float span = _lanes[0].strip.view_span_sec ();
+	if (span < 0.05f) {
+		span = WaveStrip::kDefaultSpanSec;
+	}
+	float start = _lanes[0].strip.view_start_sec ();
+	float ph = _playhead_sec;
+	if (ph < 0.f) {
+		ph = 0.f;
+	}
+	float norm = (ph - start) / span;
+	if (norm < 0.f) {
+		norm = 0.f;
+	}
+	if (norm > 1.f) {
+		norm = 1.f;
+	}
+	_lanes[0].strip.zoom_at (factor, norm);
+	apply_shared_view (0);
+	refresh_editor_view_after_nav ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_scroll_playhead_into_view ()
+{
+	float span = _lanes[0].strip.view_span_sec ();
+	if (span < 0.05f) {
+		span = WaveStrip::kDefaultSpanSec;
+	}
+	float start = _lanes[0].strip.view_start_sec ();
+	float ph = _playhead_sec;
+	if (ph < 0.f) {
+		ph = 0.f;
+	}
+	float end = start + span;
+	/* Already visible with a little margin — no-op. */
+	if (ph >= start + span * 0.05f && ph <= end - span * 0.05f) {
+		return;
+	}
+	float new_start;
+	if (ph < start) {
+		/* Scroll left: playhead at 25% into the window. */
+		new_start = ph - span * 0.25f;
+	} else {
+		/* Scroll right: playhead at 75% into the window. */
+		new_start = ph - span * 0.75f;
+	}
+	if (new_start < 0.f) {
+		new_start = 0.f;
+	}
+	_lanes[0].strip.set_view_window (new_start, span);
+	apply_shared_view (0);
+	refresh_editor_view_after_nav ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
@@ -3632,7 +4255,23 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && (GetKeyState (VK_SHIFT) & 0x8000)) {
 			/* Ctrl+Shift+O — recent sessions menu. */
 			toggle_recent_menu ();
-		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && wparam == VK_OEM_COMMA) {
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == VK_OEM_COMMA || wparam == VK_OEM_PERIOD)) {
+			/* Ctrl+Alt+,/. = prev/next cue marker. */
+			if (wparam == VK_OEM_PERIOD) {
+				do_locate_next_cue ();
+			} else {
+				do_locate_prev_cue ();
+			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == VK_OEM_COMMA || wparam == VK_OEM_PERIOD)) {
+			/* Alt+, /. = nudge playhead by snap unit. */
+			do_nudge_playhead (wparam == VK_OEM_PERIOD ? 1 : -1);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && wparam == VK_OEM_COMMA) {
 			/* Ctrl+, — Preferences. */
 			toggle_prefs ();
 		} else if (wparam == VK_F3) {
@@ -3655,6 +4294,31 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && !(GetKeyState (VK_CONTROL) & 0x8000)) {
 			/* Shift+End = locate to selection end. */
 			do_locate_selection_end ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == '0' || wparam == VK_NUMPAD0)) {
+			/* Ctrl+Alt+0 = center editor view on playhead (keep zoom). */
+			do_center_on_playhead ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && (wparam == '0' || wparam == VK_NUMPAD0)) {
+			/* Ctrl+Shift+0 = scroll view to keep playhead visible (keep zoom). */
+			do_scroll_playhead_into_view ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && wparam == VK_HOME) {
+			/* Ctrl+Alt+Home = zoom editor to session extent. */
+			do_zoom_to_session ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && wparam == VK_HOME) {
+			/* Ctrl+Home = locate session start. */
+			do_locate_session_start ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && wparam == VK_END) {
+			/* Ctrl+End = locate session end. */
+			do_locate_session_end ();
 		} else if (wparam == VK_HOME || wparam == '0') {
 			reset_shared_view ();
 			refresh_editor_view_after_nav ();
@@ -3703,28 +4367,77 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && !(GetKeyState (VK_MENU) & 0x8000)
 		           && step_piano_pitch_for_key (wparam) >= 0) {
 			do_step_piano_key_down ((uint8_t)step_piano_pitch_for_key (wparam));
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == VK_LEFT || wparam == VK_RIGHT)) {
+			/* Ctrl+Alt+←/→ = previous / next marker. */
+			if (wparam == VK_RIGHT) {
+				do_locate_next_marker ();
+			} else {
+				do_locate_prev_marker ();
+			}
 		} else if (wparam == VK_LEFT) {
 			float step = (GetKeyState (VK_SHIFT) & 0x8000) ? 0.5f : 0.15f;
 			do_scroll_editor (-step);
 		} else if (wparam == VK_RIGHT) {
 			float step = (GetKeyState (VK_SHIFT) & 0x8000) ? 0.5f : 0.15f;
 			do_scroll_editor (step);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'A' || wparam == 'a')) {
+			/* Ctrl+Alt+A = zoom editor to all regions. */
+			do_zoom_to_regions ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'A' || wparam == 'a')) {
 			if (GetKeyState (VK_SHIFT) & 0x8000) {
 				do_fit_session ();
 			} else {
 				do_fit_all_regions ();
 			}
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'E' || wparam == 'e')) {
+			/* Ctrl+Alt+E = zoom editor to selection. */
+			do_zoom_to_selection ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')
 		           && !(GetKeyState (VK_MENU) & 0x8000)) {
 			/* E = fit selection (Ctrl+E remains export). */
 			do_fit_selection ();
 		} else if (wparam == 'L' || wparam == 'l') {
-			do_toggle_loop ();
+			if ((GetKeyState (VK_CONTROL) & 0x8000)
+			    && (GetKeyState (VK_MENU) & 0x8000)) {
+				/* Ctrl+Alt+L = zoom editor to loop range. */
+				do_zoom_to_loop ();
+			} else {
+				do_toggle_loop ();
+			}
 		} else if (wparam == 'P' || wparam == 'p') {
-			if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
+			if ((GetKeyState (VK_CONTROL) & 0x8000)
+			    && (GetKeyState (VK_MENU) & 0x8000)) {
+				/* Ctrl+Alt+P = zoom editor to punch range. */
+				do_zoom_to_punch ();
+			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
 				do_toggle_punch ();
 			}
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && wparam == VK_OEM_4) {
+			/* Ctrl+Alt+[ = locate punch in. */
+			do_locate_punch_in ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && wparam == VK_OEM_6) {
+			/* Ctrl+Alt+] = locate punch out. */
+			do_locate_punch_out ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && wparam == VK_OEM_4) {
+			/* Ctrl+[ = locate loop start. */
+			do_locate_loop_start ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && wparam == VK_OEM_6) {
+			/* Ctrl+] = locate loop end. */
+			do_locate_loop_end ();
 		} else if (wparam == VK_OEM_4) { /* [ */
 			if (_engine.is_linked () && _engine_snap.session_ok) {
 				if (GetKeyState (VK_SHIFT) & 0x8000) {
@@ -3758,21 +4471,45 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			}
 		} else if (wparam == 'M' || wparam == 'm') {
-			if (GetKeyState (VK_SHIFT) & 0x8000) {
+			if ((GetKeyState (VK_CONTROL) & 0x8000)
+			    && (GetKeyState (VK_SHIFT) & 0x8000)) {
+				/* Ctrl+Shift+M = lock/unlock marker at playhead. */
+				do_toggle_marker_lock_at_playhead ();
+			} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+			           && (GetKeyState (VK_MENU) & 0x8000)) {
+				/* Ctrl+Alt+M = toggle CD flag on marker at playhead. */
+				do_toggle_marker_cd_at_playhead ();
+			} else if (GetKeyState (VK_SHIFT) & 0x8000) {
 				do_remove_marker_at_playhead ();
 			} else {
 				do_add_marker_at_playhead ();
 			}
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Z' || wparam == 'z')) {
 			do_undo ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'Y' || wparam == 'y')) {
+			/* Ctrl+Alt+Y = sync at playhead; Shift clears. */
+			do_region_sync_at_playhead ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Y' || wparam == 'y')) {
 			do_redo ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && (wparam == 'C' || wparam == 'c')) {
+			/* Ctrl+Alt+Shift+C = cycle scene MIDI channel. */
+			do_cycle_scene_channel ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'C' || wparam == 'c')) {
 			do_copy_midi_notes ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'X' || wparam == 'x')) {
 			do_cut_midi_notes ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'V' || wparam == 'v')) {
 			do_paste_midi_notes ();
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && (wparam == 'S' || wparam == 's')) {
+			/* Alt+Shift+S = rename nearest section marker. */
+			do_rename_section_at_playhead ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
 			do_save_session ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
@@ -3782,6 +4519,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'T' || wparam == 't')) {
 			/* T = stretch 1.5×; Shift+T = compress 0.75× (pitch unchanged). */
 			do_stretch_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? 0.75f : 1.5f);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'R' || wparam == 'r')) {
+			/* Ctrl+Shift+R = range marker ← selection. */
+			do_range_marker_from_selection ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'R' || wparam == 'r')) {
 			/* R = pitch +1 st; Shift+R = −1 st (duration held). */
 			do_pitch_shift_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? -1.f : 1.f);
@@ -3834,6 +4577,16 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			prompt_open_session (); /* Ctrl+O browse; Ctrl+Shift+O = recent menu */
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')) {
 			prompt_export_wav ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == VK_OEM_PLUS || wparam == VK_ADD)) {
+			/* Ctrl+Alt+= = zoom in around playhead. */
+			do_zoom_around_playhead (1.15f);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == VK_OEM_MINUS || wparam == VK_SUBTRACT)) {
+			/* Ctrl+Alt+− = zoom out around playhead. */
+			do_zoom_around_playhead (1.f / 1.15f);
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == VK_OEM_PLUS || wparam == VK_ADD)) {
 			_lanes[0].strip.zoom_at (1.15f, 0.5f);
 			apply_shared_view (0);
@@ -3845,7 +4598,13 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			refresh_editor_view_after_nav ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		} else if (wparam == VK_F2) {
-			do_rename_focused_track ();
+			if ((GetKeyState (VK_MENU) & 0x8000)
+			    && (GetKeyState (VK_SHIFT) & 0x8000)) {
+				/* Alt+Shift+F2 = rename marker at playhead. */
+				do_rename_marker_at_playhead ();
+			} else {
+				do_rename_focused_track ();
+			}
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_UP) {
 			do_move_audio_track (-1);
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_DOWN) {
@@ -6389,6 +7148,26 @@ ShellWindow::draw_help_overlay ()
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
+		{ L"Ctrl+Alt+←/→", L"Previous / next marker" },
+		{ L"Ctrl+Shift+M", L"Lock / unlock marker at playhead" },
+		{ L"Ctrl+Alt+M", L"Toggle CD flag on marker at playhead" },
+		{ L"Ctrl+Shift+R", L"Range marker ← selection" },
+		{ L"Ctrl+Alt+Y", L"Region sync at playhead (Shift=clear)" },
+		{ L"Ctrl+Alt+Shift+C", L"Cycle scene marker MIDI channel 0..15" },
+		{ L"Ctrl+Alt+,/.", L"Previous / next cue marker" },
+		{ L"Alt+Shift+S", L"Rename nearest section marker" },
+		{ L"Ctrl+Alt+[ / ]", L"Locate punch in / out" },
+		{ L"Ctrl+[ / ]", L"Locate loop start / end" },
+		{ L"Ctrl+Home / End", L"Locate session start / end" },
+		{ L"Alt+, / .", L"Nudge playhead by snap unit" },
+		{ L"Ctrl+Alt+P", L"Zoom editor to punch range" },
+		{ L"Ctrl+Alt+L", L"Zoom editor to loop range" },
+		{ L"Ctrl+Alt+E", L"Zoom editor to selection" },
+		{ L"Ctrl+Alt+Home", L"Zoom editor to session extent" },
+		{ L"Ctrl+Alt+A", L"Zoom editor to all regions" },
+		{ L"Ctrl+Alt+0", L"Center view on playhead (keep zoom)" },
+		{ L"Ctrl+Shift+0", L"Scroll playhead into view (keep zoom)" },
+		{ L"Ctrl+Alt+±", L"Zoom around playhead" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },

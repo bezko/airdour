@@ -14,6 +14,21 @@
 struct EngineMarkerSnap {
 	float        sec;
 	wchar_t      name[24];
+	bool         locked; /* Location::locked — blocks move */
+	bool         cd; /* Location::is_cd_marker */
+	bool         scene;
+	int32_t      program;
+	int32_t      bank;
+	int32_t      channel; /* MIDISceneChange channel 0..15, or -1 */
+	bool         cue; /* Location::is_cue_marker */
+	int32_t      cue_id; /* TriggerBox cue slot when cue */
+	bool         section; /* Location::is_section */
+};
+
+struct EngineRangeSnap {
+	float        start_sec;
+	float        end_sec;
+	wchar_t      name[24];
 };
 
 struct EngineMidiDeviceSnap {
@@ -60,6 +75,8 @@ struct EngineSnapshot {
 	float        selection_end_sec;
 	float        selection_fade_in_sec; /* AudioRegion fade-in length */
 	float        selection_fade_out_sec;
+	bool         selection_sync_marked; /* Region::sync_marked */
+	float        selection_sync_sec; /* absolute session time of sync point */
 	bool         loop_active; /* auto-loop Location exists with positive length */
 	bool         loop_playing; /* Session get_play_loop() */
 	float        loop_start_sec;
@@ -68,6 +85,9 @@ struct EngineSnapshot {
 	bool         punch_enabled; /* Session punch-in and/or punch-out armed */
 	float        punch_start_sec;
 	float        punch_end_sec;
+	static constexpr int kMaxRanges = 8;
+	int          range_count; /* IsRangeMarker locations */
+	EngineRangeSnap ranges[kMaxRanges];
 	int          marker_count;
 	EngineMarkerSnap markers[kMaxMarkers];
 	bool         midi_ok; /* backend MIDI option active / ports present */
@@ -736,6 +756,65 @@ public:
 	/** Locate transport to selected region start / exclusive end. */
 	bool locate_to_selection_start ();
 	bool locate_to_selection_end ();
+
+bool locate_next_marker ();
+	bool locate_prev_marker ();
+	bool smoke_marker_navigate ();
+	bool rename_marker_near (float time_sec, const std::string& name,
+	                         float slop_sec = 0.35f);
+	bool smoke_marker_rename ();
+	bool set_marker_locked_near (float time_sec, bool locked, float slop_sec = 0.35f);
+	bool toggle_marker_locked_near (float time_sec, float slop_sec = 0.35f);
+	bool smoke_marker_lock ();
+	bool set_marker_cd_near (float time_sec, bool cd, float slop_sec = 0.35f);
+	bool toggle_marker_cd_near (float time_sec, float slop_sec = 0.35f);
+	bool smoke_cd_marker ();
+	bool add_range_marker (float start_sec, float end_sec,
+	                       const std::string& name = std::string ());
+	bool add_range_marker_from_selection ();
+	bool remove_range_marker_near (float time_sec, float slop_sec = 0.35f);
+	bool smoke_range_marker ();
+	bool set_selection_sync_at (float time_sec);
+	bool set_selection_sync_at_playhead ();
+	bool clear_selection_sync ();
+	bool smoke_region_sync ();
+	bool add_scene_marker_at (float time_sec, int program = 0,
+	                         const std::string& name = std::string (),
+	                         int bank = 0, int channel = 0);
+	bool remove_scene_marker_near (float time_sec, float slop_sec = 0.35f);
+	bool cycle_scene_channel_near (float time_sec, float slop_sec = 0.35f);
+	bool smoke_scene_channel ();
+	bool add_cue_marker_at (float time_sec, int32_t cue_id = 1,
+	                        const std::string& name = std::string ());
+	bool remove_cue_marker_near (float time_sec, float slop_sec = 0.35f);
+	bool locate_next_cue ();
+	bool locate_prev_cue ();
+	bool smoke_cue_navigate ();
+	bool add_section_marker_at (float time_sec,
+	                           const std::string& name = std::string ());
+	bool remove_section_marker_near (float time_sec, float slop_sec = 0.35f);
+	bool rename_section_near (float time_sec, const std::string& name,
+	                          float slop_sec = 0.35f);
+	bool smoke_section_rename ();
+	bool locate_punch_in ();
+	bool locate_punch_out ();
+	bool smoke_punch_navigate ();
+	bool locate_session_start ();
+	bool locate_session_end ();
+	bool smoke_session_extent_navigate ();
+	bool locate_loop_start ();
+	bool locate_loop_end ();
+	bool smoke_loop_navigate ();
+	bool smoke_zoom_punch ();
+	bool smoke_zoom_loop ();
+	bool smoke_zoom_selection ();
+	bool nudge_playhead (int direction);
+	bool smoke_playhead_nudge ();
+	bool smoke_zoom_session ();
+	bool smoke_zoom_regions ();
+	bool smoke_center_playhead ();
+	bool smoke_zoom_playhead ();
+	bool smoke_scroll_playhead ();
 	/**
 	 * Continuous scrub locate (no mark snap). Same Session request_locate path.
 	 * Used while dragging the editor ruler.

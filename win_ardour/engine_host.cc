@@ -52,6 +52,7 @@
 #include "ardour/audio_backend.h"
 #include "ardour/chan_count.h"
 #include "ardour/location.h"
+#include "ardour/midi_scene_change.h"
 #include "ardour/midi_model.h"
 #include "ardour/midi_region.h"
 #include "ardour/midi_source.h"
@@ -673,6 +674,8 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_sync_marked = false;
+	_snap.selection_sync_sec = 0.f;
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -4897,6 +4900,8 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_sync_marked = false;
+	_snap.selection_sync_sec = 0.f;
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -4925,6 +4930,12 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_track = _impl->selected_track;
 	_snap.selection_start_sec = (float)start / (float)sr;
 	_snap.selection_end_sec = (float)(start + len) / (float)sr;
+	_snap.selection_sync_marked = region->sync_marked ();
+	if (_snap.selection_sync_marked) {
+		_snap.selection_sync_sec = (float)region->sync_position ().samples () / (float)sr;
+	} else {
+		_snap.selection_sync_sec = _snap.selection_start_sec;
+	}
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (ar) {
 		_snap.selection_fade_in_sec = (float)ar->fade_in_length ().samples () / (float)sr;
@@ -5081,6 +5092,8 @@ EngineHost::clear_region_selection ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_sync_marked = false;
+	_snap.selection_sync_sec = 0.f;
 }
 
 bool
@@ -7575,6 +7588,21 @@ EngineHost::refresh_locations_snap ()
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
+		_snap.markers[i].locked = false;
+		_snap.markers[i].cd = false;
+		_snap.markers[i].scene = false;
+		_snap.markers[i].program = -1;
+		_snap.markers[i].bank = -1;
+		_snap.markers[i].channel = -1;
+		_snap.markers[i].cue = false;
+		_snap.markers[i].cue_id = 0;
+		_snap.markers[i].section = false;
+	}
+	_snap.range_count = 0;
+	for (int ri = 0; ri < EngineSnapshot::kMaxRanges; ++ri) {
+		_snap.ranges[ri].start_sec = 0.f;
+		_snap.ranges[ri].end_sec = 0.f;
+		_snap.ranges[ri].name[0] = L'\0';
 	}
 	if (!_impl || !_impl->session) {
 		return;
@@ -7617,9 +7645,44 @@ EngineHost::refresh_locations_snap ()
 			_snap.markers[n].sec = (float)loc->start_sample () / (float)sr;
 			std::wstring wname = utf8_to_wide (loc->name ());
 			wcsncpy_s (_snap.markers[n].name, wname.c_str (), _TRUNCATE);
+			_snap.markers[n].locked = loc->locked ();
+			_snap.markers[n].cd = loc->is_cd_marker ();
+			_snap.markers[n].scene = loc->is_scene ();
+			_snap.markers[n].program = -1;
+			_snap.markers[n].bank = -1;
+			_snap.markers[n].channel = -1;
+			if (loc->is_scene () && loc->scene_change ()) {
+				std::shared_ptr<MIDISceneChange> msc =
+					std::dynamic_pointer_cast<MIDISceneChange> (loc->scene_change ());
+				if (msc) {
+					_snap.markers[n].program = msc->program ();
+					_snap.markers[n].bank = msc->bank ();
+					_snap.markers[n].channel = msc->channel ();
+				}
+			}
+			_snap.markers[n].cue = loc->is_cue_marker ();
+			_snap.markers[n].cue_id = loc->is_cue_marker () ? loc->cue_id () : 0;
+			_snap.markers[n].section = loc->is_section ();
 			++n;
 		}
 		_snap.marker_count = n;
+		int rn = 0;
+		for (Locations::LocationList::const_iterator it = list.begin ();
+		     it != list.end () && rn < EngineSnapshot::kMaxRanges; ++it) {
+			Location* loc = *it;
+			if (!loc || !loc->is_range_marker () || loc->is_hidden ()) {
+				continue;
+			}
+			if (loc->end_sample () <= loc->start_sample ()) {
+				continue;
+			}
+			_snap.ranges[rn].start_sec = (float)loc->start_sample () / (float)sr;
+			_snap.ranges[rn].end_sec = (float)loc->end_sample () / (float)sr;
+			std::wstring wname = utf8_to_wide (loc->name ());
+			wcsncpy_s (_snap.ranges[rn].name, wname.c_str (), _TRUNCATE);
+			++rn;
+		}
+		_snap.range_count = rn;
 	} catch (...) {
 	}
 }
@@ -9553,6 +9616,2233 @@ EngineHost::smoke_locate_selection ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate-selection exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::locate_next_marker ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		samplepos_t here = (samplepos_t)std::llround ((double)_snap.transport_sec * (double)sr);
+		if (here < 0) {
+			here = 0;
+		}
+		timepos_t pos = locs->first_mark_after_flagged (
+			timepos_t (here), false, Location::IsMark);
+		if (pos == timepos_t::max (Temporal::AudioTime)) {
+			_snap.detail = L"no next marker";
+			return false;
+		}
+		return locate_to ((float)pos.samples () / (float)sr, false, 0.f);
+	} catch (...) {
+		_snap.detail = L"next marker failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::locate_prev_marker ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		samplepos_t here = (samplepos_t)std::llround ((double)_snap.transport_sec * (double)sr);
+		if (here < 1) {
+			_snap.detail = L"no prev marker";
+			return false;
+		}
+		timepos_t pos = locs->first_mark_before_flagged (
+			timepos_t (here), false, Location::IsMark);
+		if (pos == timepos_t::max (Temporal::AudioTime)) {
+			_snap.detail = L"no prev marker";
+			return false;
+		}
+		return locate_to ((float)pos.samples () / (float)sr, false, 0.f);
+	} catch (...) {
+		_snap.detail = L"prev marker failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_marker_navigate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-marker-navigate failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		if (!add_marker_at (1.0f, "nav-a") || !add_marker_at (2.0f, "nav-b")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate FAILED (add)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_to (0.5f, false, 0.f)
+		    || std::fabs (_snap.transport_sec - 0.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate FAILED (start 0.5)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_next_marker () || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate FAILED (next→1 got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_next_marker () || std::fabs (_snap.transport_sec - 2.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate FAILED (next→2 got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_prev_marker () || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate FAILED (prev→1 got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		remove_marker_near (1.0f, 0.2f);
+		remove_marker_near (2.0f, 0.2f);
+		locate_to (0.f, false, 0.f);
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate ok (0.5→1→2→1)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-marker-navigate ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::rename_marker_near (float time_sec, const std::string& name, float slop_sec)
+{
+	if (!_impl || !_impl->session || name.empty ()) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop), Location::IsMark);
+		if (!hit) {
+			_snap.detail = L"no marker near playhead";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("rename marker");
+		XMLNode& before = locs->get_state ();
+		hit->set_name (name);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"marker renamed";
+		std::fprintf (stderr, "airdour_win_shell: renamed marker → \"%s\" @ %.2fs\n",
+		              name.c_str (), time_sec);
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		_snap.detail = L"marker rename failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_marker_rename ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-marker-rename failed — no Session";
+		return false;
+	}
+	try {
+		if (!add_marker_at (1.5f, "oldMark")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-rename FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!rename_marker_near (1.5f, "newMark", 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-rename FAILED (rename)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		bool found = false;
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 1.5f) < 0.05f
+			    && wcscmp (_snap.markers[i].name, L"newMark") == 0) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-rename FAILED (snap name)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!remove_marker_near (1.5f, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-rename FAILED (cleanup)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-rename ok (oldMark→newMark)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-marker-rename ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-rename exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_marker_locked_near (float time_sec, bool locked, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::IsMark);
+		if (!hit) {
+			_snap.detail = L"no marker near playhead";
+			return false;
+		}
+		_impl->session->begin_reversible_command (locked ? "lock marker" : "unlock marker");
+		XMLNode& before = locs->get_state ();
+		if (locked) {
+			hit->lock ();
+		} else {
+			hit->unlock ();
+		}
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = locked ? L"marker locked" : L"marker unlocked";
+		std::fprintf (stderr, "airdour_win_shell: marker %s @ %.2fs\\n",
+		              locked ? "locked" : "unlocked", time_sec);
+		std::fflush (stderr);
+		return hit->locked () == locked;
+	} catch (...) {
+		_snap.detail = L"marker lock failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_marker_locked_near (float time_sec, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::IsMark);
+		if (!hit) {
+			_snap.detail = L"no marker near playhead";
+			return false;
+		}
+		return set_marker_locked_near (time_sec, !hit->locked (), slop_sec);
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_marker_lock ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-marker-lock failed — no Session";
+		return false;
+	}
+	try {
+		if (!add_marker_at (1.25f, "lockMark")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (add)\\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_marker_locked_near (1.25f, true, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (lock)\\n");
+			std::fflush (stderr);
+			return false;
+		}
+		bool found_locked = false;
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 1.25f) < 0.05f && _snap.markers[i].locked) {
+				found_locked = true;
+				break;
+			}
+		}
+		if (!found_locked) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (snap locked)\\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_marker_locked_near (1.25f, false, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (unlock)\\n");
+			std::fflush (stderr);
+			return false;
+		}
+		bool still_locked = false;
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 1.25f) < 0.05f && _snap.markers[i].locked) {
+				still_locked = true;
+				break;
+			}
+		}
+		if (still_locked) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (still locked)\\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!remove_marker_near (1.25f, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (cleanup)\\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock ok (lock→unlock)\\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-marker-lock ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock exception: %s\\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_marker_cd_near (float time_sec, bool cd, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		/* flags=0: any IsMark (CD flag adds IsCDMarker so != IsMark alone). */
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::Flags (0));
+		if (!hit) {
+			_snap.detail = L"no marker near playhead";
+			return false;
+		}
+		_impl->session->begin_reversible_command (cd ? "set CD marker" : "clear CD marker");
+		XMLNode& before = locs->get_state ();
+		hit->set_cd (cd, this);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = cd ? L"CD marker on" : L"CD marker off";
+		std::fprintf (stderr, "airdour_win_shell: marker CD %s @ %.2fs\n",
+		              cd ? "on" : "off", time_sec);
+		std::fflush (stderr);
+		return hit->is_cd_marker () == cd;
+	} catch (...) {
+		_snap.detail = L"CD marker failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_marker_cd_near (float time_sec, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::Flags (0));
+		if (!hit) {
+			_snap.detail = L"no marker near playhead";
+			return false;
+		}
+		return set_marker_cd_near (time_sec, !hit->is_cd_marker (), slop_sec);
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_cd_marker ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-cd-marker failed — no Session";
+		return false;
+	}
+	try {
+		if (!add_marker_at (1.75f, "cdMark")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_marker_cd_near (1.75f, true, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker FAILED (set CD)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		bool found = false;
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 1.75f) < 0.05f && _snap.markers[i].cd) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker FAILED (snap CD)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_marker_cd_near (1.75f, false, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker FAILED (clear CD)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		bool still = false;
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 1.75f) < 0.05f && _snap.markers[i].cd) {
+				still = true;
+				break;
+			}
+		}
+		if (still) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker FAILED (still CD)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!remove_marker_near (1.75f, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker FAILED (cleanup)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker ok (on→off)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-cd-marker ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-cd-marker exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::add_range_marker (float start_sec, float end_sec, const std::string& name)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (end_sec < start_sec) {
+		float t = start_sec;
+		start_sec = end_sec;
+		end_sec = t;
+	}
+	if (end_sec - start_sec < 0.02f) {
+		_snap.detail = L"range marker — too short";
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		if (start_sec < 0.f) {
+			start_sec = 0.f;
+		}
+		samplepos_t start_s = (samplepos_t)std::llround ((double)start_sec * (double)sr);
+		samplepos_t end_s = (samplepos_t)std::llround ((double)end_sec * (double)sr);
+		if (end_s <= start_s) {
+			end_s = start_s + sr / 10;
+		}
+		std::string range_name = name;
+		if (range_name.empty ()) {
+			locs->next_available_name (range_name, "range");
+		}
+		Location* location = new Location (
+			*_impl->session,
+			timepos_t (start_s),
+			timepos_t (end_s),
+			range_name,
+			Location::IsRangeMarker);
+
+		_impl->session->begin_reversible_command ("add range marker");
+		XMLNode& before = locs->get_state ();
+		locs->add (location, true);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"range marker added";
+		std::fprintf (stderr, "airdour_win_shell: range \"%s\" [%.2f..%.2f]s (count=%d)\n",
+		              range_name.c_str (), start_sec, end_sec, _snap.range_count);
+		std::fflush (stderr);
+		return _snap.range_count > 0;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: add_range_marker: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"range marker failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"range marker failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::add_range_marker_from_selection ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_selection_snap ();
+	if (!_snap.has_selection
+	    || _snap.selection_end_sec <= _snap.selection_start_sec + 0.02f) {
+		_snap.detail = L"range from selection — select a region";
+		return false;
+	}
+	const bool snap_was = _snap.snap_enabled;
+	set_snap_enabled (false);
+	bool ok = add_range_marker (_snap.selection_start_sec, _snap.selection_end_sec, "Range");
+	set_snap_enabled (snap_was);
+	if (ok) {
+		_snap.detail = L"range from selection";
+	}
+	return ok;
+}
+
+bool
+EngineHost::remove_range_marker_near (float time_sec, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = nullptr;
+		samplecnt_t best = slop + 1;
+		const Locations::LocationList& list = locs->list ();
+		for (Locations::LocationList::const_iterator it = list.begin ();
+		     it != list.end (); ++it) {
+			Location* loc = *it;
+			if (!loc || !loc->is_range_marker () || loc->is_hidden ()) {
+				continue;
+			}
+			samplecnt_t d = (samplecnt_t)std::llabs ((long long)loc->start_sample () - (long long)sample);
+			if (d <= slop && d < best) {
+				best = d;
+				hit = loc;
+			}
+		}
+		if (!hit) {
+			_snap.detail = L"no range marker near";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("remove range marker");
+		XMLNode& before = locs->get_state ();
+		locs->remove (hit);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"range marker removed";
+		std::fprintf (stderr, "airdour_win_shell: removed range near %.2fs (count=%d)\n",
+		              time_sec, _snap.range_count);
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		_snap.detail = L"range remove failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_range_marker ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-range-marker failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 1.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.3f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float s0 = _snap.selection_start_sec;
+		float e0 = _snap.selection_end_sec;
+		if (e0 - s0 < 0.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (len=%.3f)\n",
+			              e0 - s0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		const int n0 = _snap.range_count;
+		if (!add_range_marker_from_selection () || _snap.range_count != n0 + 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (add → %d)\n",
+			              _snap.range_count);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		bool found = false;
+		for (int i = 0; i < _snap.range_count; ++i) {
+			if (std::fabs (_snap.ranges[i].start_sec - s0) < 0.05f
+			    && std::fabs (_snap.ranges[i].end_sec - e0) < 0.05f) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (snap bounds)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!remove_range_marker_near (s0, 0.35f) || _snap.range_count != n0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (remove → %d)\n",
+			              _snap.range_count);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-range-marker ok [%.3f..%.3f]\n",
+		              s0, e0);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-range-marker ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-range-marker exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_selection_sync_at (float time_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"sync — select a region";
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		samplepos_t ph = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplepos_t r0 = region->position_sample ();
+		samplepos_t r1 = r0 + region->length_samples ();
+		if (ph < r0 || ph > r1) {
+			_snap.detail = L"sync — time outside region";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("set region sync");
+		region->clear_changes ();
+		/* Force a property change when unmarked sync already equals start. */
+		if (!region->sync_marked ()) {
+			samplepos_t nudge = (ph + 1 <= r1) ? ph + 1 : ((ph > r0) ? ph - 1 : ph);
+			if (nudge != ph) {
+				region->set_sync_position (timepos_t (nudge));
+			}
+		}
+		region->set_sync_position (timepos_t (ph));
+		_impl->session->add_command (new StatefulDiffCommand (region));
+		_impl->session->commit_reversible_command ();
+
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+
+		std::fprintf (stderr, "airdour_win_shell: region sync @ %.3fs (marked=%d)\n",
+		              _snap.selection_sync_sec, _snap.selection_sync_marked ? 1 : 0);
+		std::fflush (stderr);
+		_snap.detail = L"region sync set";
+		return _snap.selection_sync_marked;
+	} catch (...) {
+		_snap.detail = L"sync set failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::set_selection_sync_at_playhead ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	/* locate_to updates _snap.transport_sec synchronously; transport_sample may lag. */
+	float t = _snap.transport_sec;
+	samplecnt_t sr = _impl->session->sample_rate ();
+	if (sr > 0) {
+		samplepos_t live = _impl->session->transport_sample ();
+		float live_sec = (float)live / (float)sr;
+		if (std::fabs (live_sec - t) < 0.05f) {
+			t = live_sec;
+		}
+	}
+	return set_selection_sync_at (t);
+}
+
+bool
+EngineHost::clear_selection_sync ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"sync clear — select a region";
+		return false;
+	}
+	try {
+		if (!region->sync_marked ()) {
+			refresh_selection_snap ();
+			_snap.detail = L"sync already clear";
+			return true;
+		}
+		_impl->session->begin_reversible_command ("clear region sync");
+		region->clear_changes ();
+		region->clear_sync_position ();
+		_impl->session->add_command (new StatefulDiffCommand (region));
+		_impl->session->commit_reversible_command ();
+
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+
+		std::fprintf (stderr, "airdour_win_shell: region sync cleared\n");
+		std::fflush (stderr);
+		_snap.detail = L"region sync cleared";
+		return !_snap.selection_sync_marked;
+	} catch (...) {
+		_snap.detail = L"sync clear failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_region_sync ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-region-sync failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 1.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.3f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float s0 = _snap.selection_start_sec;
+		float e0 = _snap.selection_end_sec;
+		float mid = s0 + 0.40f;
+		if (mid >= e0 - 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (len)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_to (mid, false, 0.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (locate)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::shared_ptr<Region> region = _impl->selected_region.lock ();
+		if (!region) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (no region)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!set_selection_sync_at (mid)
+		    || !region->sync_marked ()
+		    || !_snap.selection_sync_marked
+		    || std::fabs (_snap.selection_sync_sec - mid) > 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-sync FAILED (set sync=%.3f want=%.3f marked=%d)\n",
+			              _snap.selection_sync_sec, mid, _snap.selection_sync_marked ? 1 : 0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!clear_selection_sync ()
+		    || region->sync_marked ()
+		    || _snap.selection_sync_marked) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (clear)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-sync ok @ %.3fs\n", mid);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-region-sync ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-sync exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::add_scene_marker_at (float time_sec, int program, const std::string& name,
+                                 int bank, int channel)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (program < 0) {
+		program = 0;
+	}
+	if (program > 127) {
+		program = 127;
+	}
+	if (bank < 0) {
+		bank = 0;
+	}
+	if (channel < 0) {
+		channel = 0;
+	}
+	if (channel > 15) {
+		channel = 15;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		if (time_sec < 0.f) {
+			time_sec = 0.f;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		std::string marker_name = name;
+		if (marker_name.empty ()) {
+			locs->next_available_name (marker_name, "scene");
+		}
+		timepos_t where (sample);
+		Location* location = new Location (
+			*_impl->session, where, where, marker_name, Location::IsMark);
+		std::shared_ptr<MIDISceneChange> msc (new MIDISceneChange (channel, bank, program));
+		location->set_scene_change (msc);
+		_impl->session->begin_reversible_command ("add scene marker");
+		XMLNode& before = locs->get_state ();
+		locs->add (location, true);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"scene marker added";
+		return true;
+	} catch (...) {
+		_snap.detail = L"scene marker failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::remove_scene_marker_near (float time_sec, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::Flags (0));
+		if (!hit || !hit->is_scene ()) {
+			_snap.detail = L"no scene marker near";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("remove scene marker");
+		XMLNode& before = locs->get_state ();
+		locs->remove (hit);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"scene marker removed";
+		return true;
+	} catch (...) {
+		_snap.detail = L"scene remove failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::cycle_scene_channel_near (float time_sec, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::Flags (0));
+		if (!hit || !hit->is_scene () || !hit->scene_change ()) {
+			_snap.detail = L"no scene marker near for channel";
+			return false;
+		}
+		std::shared_ptr<MIDISceneChange> msc =
+			std::dynamic_pointer_cast<MIDISceneChange> (hit->scene_change ());
+		if (!msc) {
+			_snap.detail = L"scene has no MIDI channel";
+			return false;
+		}
+		int ch = msc->channel ();
+		if (ch < 0) {
+			ch = 0;
+		}
+		int next = (ch + 1) % 16;
+		_impl->session->begin_reversible_command ("cycle scene channel");
+		XMLNode& before = locs->get_state ();
+		msc->set_channel (next);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		std::fprintf (stderr, "airdour_win_shell: scene channel %d → %d\n", ch, next);
+		std::fflush (stderr);
+		_snap.detail = L"scene channel cycled";
+		return true;
+	} catch (...) {
+		_snap.detail = L"scene channel cycle failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_scene_channel ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-scene-channel failed — no Session";
+		return false;
+	}
+	try {
+		if (!add_scene_marker_at (2.0f, 0, "sceneCh", 0, 0)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-scene-channel FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		int ch0 = -1;
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 2.0f) < 0.05f && _snap.markers[i].scene) {
+				ch0 = _snap.markers[i].channel;
+				break;
+			}
+		}
+		if (ch0 != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-scene-channel FAILED (ch0=%d)\n", ch0);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_scene_channel_near (2.0f, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-scene-channel FAILED (cycle)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		int ch1 = -1;
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 2.0f) < 0.05f && _snap.markers[i].scene) {
+				ch1 = _snap.markers[i].channel;
+				break;
+			}
+		}
+		if (ch1 != 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-scene-channel FAILED (ch1=%d)\n", ch1);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!remove_scene_marker_near (2.0f, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-scene-channel FAILED (remove)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-scene-channel ok (0→1)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-scene-channel ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-scene-channel exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::add_cue_marker_at (float time_sec, int32_t cue_id, const std::string& name)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (cue_id < 0) {
+		cue_id = 0;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		if (time_sec < 0.f) {
+			time_sec = 0.f;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		std::string marker_name = name;
+		if (marker_name.empty ()) {
+			locs->next_available_name (marker_name, "cue");
+		}
+		timepos_t where (sample);
+		Location* location = new Location (
+			*_impl->session, where, where, marker_name,
+			Location::Flags (Location::IsMark | Location::IsCueMarker),
+			cue_id);
+
+		_impl->session->begin_reversible_command ("add cue marker");
+		XMLNode& before = locs->get_state ();
+		locs->add (location, true);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"cue marker added";
+		return true;
+	} catch (...) {
+		_snap.detail = L"cue marker failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::remove_cue_marker_near (float time_sec, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::Flags (0));
+		if (!hit || !hit->is_cue_marker ()) {
+			_snap.detail = L"no cue marker near";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("remove cue marker");
+		XMLNode& before = locs->get_state ();
+		locs->remove (hit);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"cue marker removed";
+		return true;
+	} catch (...) {
+		_snap.detail = L"cue remove failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::locate_next_cue ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		samplepos_t here = (samplepos_t)std::llround ((double)_snap.transport_sec * (double)sr);
+		if (here < 0) {
+			here = 0;
+		}
+		timepos_t pos = locs->first_mark_after_flagged (
+			timepos_t (here), false, Location::IsCueMarker);
+		if (pos == timepos_t::max (Temporal::AudioTime)) {
+			_snap.detail = L"no next cue";
+			return false;
+		}
+		return locate_to ((float)pos.samples () / (float)sr, false, 0.f);
+	} catch (...) {
+		_snap.detail = L"next cue failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::locate_prev_cue ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		samplepos_t here = (samplepos_t)std::llround ((double)_snap.transport_sec * (double)sr);
+		if (here < 1) {
+			_snap.detail = L"no prev cue";
+			return false;
+		}
+		timepos_t pos = locs->first_mark_before_flagged (
+			timepos_t (here), false, Location::IsCueMarker);
+		if (pos == timepos_t::max (Temporal::AudioTime)) {
+			_snap.detail = L"no prev cue";
+			return false;
+		}
+		return locate_to ((float)pos.samples () / (float)sr, false, 0.f);
+	} catch (...) {
+		_snap.detail = L"prev cue failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_cue_navigate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-cue-navigate failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		if (!add_cue_marker_at (1.0f, 1, "cue-nav-a")
+		    || !add_cue_marker_at (2.0f, 2, "cue-nav-b")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cue-navigate FAILED (add)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_to (0.5f, false, 0.f)
+		    || std::fabs (_snap.transport_sec - 0.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cue-navigate FAILED (start)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_next_cue () || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cue-navigate FAILED (next->1 got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_next_cue () || std::fabs (_snap.transport_sec - 2.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cue-navigate FAILED (next->2 got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_prev_cue () || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cue-navigate FAILED (prev->1 got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		remove_cue_marker_near (1.0f, 0.2f);
+		remove_cue_marker_near (2.0f, 0.2f);
+		locate_to (0.f, false, 0.f);
+		std::fprintf (stderr, "airdour_win_shell: smoke-cue-navigate ok (0.5->1->2->1)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-cue-navigate ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-cue-navigate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::add_section_marker_at (float time_sec, const std::string& name)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		if (time_sec < 0.f) {
+			time_sec = 0.f;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		std::string marker_name = name;
+		if (marker_name.empty ()) {
+			locs->next_available_name (marker_name, "section");
+		}
+		timepos_t where (sample);
+		Location* location = new Location (
+			*_impl->session, where, where, marker_name,
+			Location::Flags (Location::IsMark | Location::IsSection));
+		_impl->session->begin_reversible_command ("add section marker");
+		XMLNode& before = locs->get_state ();
+		locs->add (location, true);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"section marker added";
+		return true;
+	} catch (...) {
+		_snap.detail = L"section marker failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::remove_section_marker_near (float time_sec, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::Flags (0));
+		if (!hit || !hit->is_section ()) {
+			_snap.detail = L"no section marker near";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("remove section marker");
+		XMLNode& before = locs->get_state ();
+		locs->remove (hit);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"section marker removed";
+		return true;
+	} catch (...) {
+		_snap.detail = L"section remove failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::rename_section_near (float time_sec, const std::string& name, float slop_sec)
+{
+	if (!_impl || !_impl->session || name.empty ()) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::Flags (0));
+		if (!hit || !hit->is_section ()) {
+			_snap.detail = L"no section near playhead";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("rename section");
+		XMLNode& before = locs->get_state ();
+		hit->set_name (name);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"section renamed";
+		std::fprintf (stderr, "airdour_win_shell: renamed section -> \"%s\" @ %.2fs\n",
+		              name.c_str (), time_sec);
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		_snap.detail = L"section rename failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_section_rename ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-section-rename failed — no Session";
+		return false;
+	}
+	try {
+		if (!add_section_marker_at (1.5f, "oldSec")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-section-rename FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!rename_section_near (1.5f, "newSec", 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-section-rename FAILED (rename)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		bool found = false;
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 1.5f) < 0.05f
+			    && _snap.markers[i].section
+			    && wcscmp (_snap.markers[i].name, L"newSec") == 0) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-section-rename FAILED (snap name)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!remove_section_marker_near (1.5f, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-section-rename FAILED (cleanup)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-section-rename ok (oldSec->newSec)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-section-rename ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-section-rename exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::locate_punch_in ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_locations_snap ();
+	if (!_snap.punch_range_ok) {
+		_snap.detail = L"no punch range";
+		return false;
+	}
+	return locate_to (_snap.punch_start_sec, false, 0.f);
+}
+
+bool
+EngineHost::locate_punch_out ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_locations_snap ();
+	if (!_snap.punch_range_ok) {
+		_snap.detail = L"no punch range";
+		return false;
+	}
+	return locate_to (_snap.punch_end_sec, false, 0.f);
+}
+
+bool
+EngineHost::smoke_punch_navigate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-punch-navigate failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		if (!set_punch_range (0.5f, 2.5f) || !_snap.punch_range_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch-navigate FAILED (set)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_to (0.0f, false, 0.f)
+		    || std::fabs (_snap.transport_sec) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch-navigate FAILED (start)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_punch_in () || std::fabs (_snap.transport_sec - 0.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch-navigate FAILED (in got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_punch_out () || std::fabs (_snap.transport_sec - 2.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch-navigate FAILED (out got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		locate_to (0.f, false, 0.f);
+		std::fprintf (stderr, "airdour_win_shell: smoke-punch-navigate ok (0->0.5->2.5)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-punch-navigate ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-punch-navigate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::locate_session_start ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	float s = 0.f;
+	float e = 0.f;
+	if (!session_extent_sec (&s, &e)) {
+		_snap.detail = L"no session extent";
+		return false;
+	}
+	return locate_to (s, false, 0.f);
+}
+
+bool
+EngineHost::locate_session_end ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	float s = 0.f;
+	float e = 0.f;
+	if (!session_extent_sec (&s, &e)) {
+		_snap.detail = L"no session extent";
+		return false;
+	}
+	return locate_to (e, false, 0.f);
+}
+
+bool
+EngineHost::smoke_session_extent_navigate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-session-extent-navigate failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		float s0 = 0.f;
+		float e0 = 0.f;
+		if (!session_extent_sec (&s0, &e0) || (e0 - s0) < 0.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-session-extent-navigate FAILED (extent)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float mid = s0 + (e0 - s0) * 0.5f;
+		if (!locate_to (mid, false, 0.f)
+		    || std::fabs (_snap.transport_sec - mid) > 0.12f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-session-extent-navigate FAILED (mid)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_session_start ()
+		    || std::fabs (_snap.transport_sec - s0) > 0.12f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-session-extent-navigate FAILED (start got=%.3f want=%.3f)\n",
+			              _snap.transport_sec, s0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_session_end ()
+		    || std::fabs (_snap.transport_sec - e0) > 0.12f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-session-extent-navigate FAILED (end got=%.3f want=%.3f)\n",
+			              _snap.transport_sec, e0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		locate_to (s0, false, 0.f);
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-session-extent-navigate ok (%.2f->%.2f)\n",
+		              s0, e0);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-session-extent-navigate ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-session-extent-navigate exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::locate_loop_start ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_locations_snap ();
+	if (!_snap.loop_active) {
+		_snap.detail = L"no loop range";
+		return false;
+	}
+	return locate_to (_snap.loop_start_sec, false, 0.f);
+}
+
+bool
+EngineHost::locate_loop_end ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_locations_snap ();
+	if (!_snap.loop_active) {
+		_snap.detail = L"no loop range";
+		return false;
+	}
+	return locate_to (_snap.loop_end_sec, false, 0.f);
+}
+
+bool
+EngineHost::smoke_loop_navigate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-loop-navigate failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		if (!set_loop_range (0.5f, 2.5f) || !_snap.loop_active) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop-navigate FAILED (set)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_to (0.0f, false, 0.f)
+		    || std::fabs (_snap.transport_sec) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop-navigate FAILED (start)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_loop_start () || std::fabs (_snap.transport_sec - 0.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop-navigate FAILED (in got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_loop_end () || std::fabs (_snap.transport_sec - 2.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop-navigate FAILED (out got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		locate_to (0.f, false, 0.f);
+		std::fprintf (stderr, "airdour_win_shell: smoke-loop-navigate ok (0->0.5->2.5)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-loop-navigate ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-loop-navigate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_zoom_punch ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-zoom-punch failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_punch_range (0.5f, 2.5f) || !_snap.punch_range_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-punch FAILED (set)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (std::fabs (_snap.punch_start_sec - 0.5f) > 0.05f
+		    || std::fabs (_snap.punch_end_sec - 2.5f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-punch FAILED (snap)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-punch range ok [0.50..2.50]\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-zoom-punch range ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-punch exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_zoom_loop ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-zoom-loop failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_loop_range (0.5f, 2.5f) || !_snap.loop_active) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-loop FAILED (set)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (std::fabs (_snap.loop_start_sec - 0.5f) > 0.05f
+		    || std::fabs (_snap.loop_end_sec - 2.5f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-loop FAILED (snap)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-loop range ok [0.50..2.50]\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-zoom-loop range ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-loop exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_zoom_selection ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-zoom-selection failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 220.f, 2.0f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.5f) || !_snap.has_selection) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float len = _snap.selection_end_sec - _snap.selection_start_sec;
+		if (len < 1.5f || len > 2.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection FAILED (len=%.3f)\n",
+			              len);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-zoom-selection range ok [%.2f..%.2f]\n",
+		              _snap.selection_start_sec, _snap.selection_end_sec);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-zoom-selection range ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::nudge_playhead (int direction)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (direction == 0) {
+		return false;
+	}
+	float unit = snap_unit_sec ();
+	if (unit < 0.001f) {
+		unit = 0.5f;
+	}
+	float t = _snap.transport_sec + (direction > 0 ? unit : -unit);
+	if (t < 0.f) {
+		t = 0.f;
+	}
+	if (!locate_to (t, false, 0.f)) {
+		return false;
+	}
+	std::fprintf (stderr, "airdour_win_shell: playhead nudge %s → %.3fs (unit=%.3f)\n",
+	              direction > 0 ? "+" : "-", _snap.transport_sec, unit);
+	std::fflush (stderr);
+	_snap.detail = L"playhead nudged";
+	return true;
+}
+
+bool
+EngineHost::smoke_playhead_nudge ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-playhead-nudge failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		const int dens_was = _snap.snap_density;
+		set_snap_enabled (true);
+		set_snap_density (1); /* beat @ 120 BPM = 0.5s */
+		float unit = snap_unit_sec ();
+		if (std::fabs (unit - 0.5f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-playhead-nudge FAILED (unit=%.3f)\n",
+			              unit);
+			std::fflush (stderr);
+			set_snap_density (dens_was);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_to (1.0f, false, 0.f)
+		    || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-playhead-nudge FAILED (start)\n");
+			std::fflush (stderr);
+			set_snap_density (dens_was);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!nudge_playhead (1)
+		    || std::fabs (_snap.transport_sec - 1.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-playhead-nudge FAILED (+ got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_density (dens_was);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!nudge_playhead (-1)
+		    || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-playhead-nudge FAILED (- got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_density (dens_was);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-playhead-nudge ok (1.0->1.5->1.0)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-playhead-nudge ok";
+		set_snap_density (dens_was);
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-playhead-nudge exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_zoom_session ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-zoom-session failed — no Session";
+		return false;
+	}
+	try {
+		if (!_snap.track_has_regions[0]) {
+			if (!import_test_tone (0, 220.f, 2.f) || !_snap.track_has_regions[0]) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-zoom-session FAILED (import)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		float s0 = 0.f, e0 = 0.f;
+		if (!session_extent_sec (&s0, &e0) || (e0 - s0) < 0.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-session FAILED (extent %.2f..%.2f)\n",
+			              s0, e0);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-zoom-session range ok [%.2f..%.2f]\n",
+		              s0, e0);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-zoom-session range ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-session exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_zoom_regions ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-zoom-regions failed — no Session";
+		return false;
+	}
+	try {
+		if (!_snap.track_has_regions[0]) {
+			if (!import_test_tone (0, 220.f, 2.f) || !_snap.track_has_regions[0]) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-zoom-regions FAILED (import)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		float s1 = 0.f, e1 = 0.f;
+		if (!regions_extent_sec (&s1, &e1) || (e1 - s1) < 0.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-regions FAILED (extent %.2f..%.2f)\n",
+			              s1, e1);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-zoom-regions range ok [%.2f..%.2f]\n",
+		              s1, e1);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-zoom-regions range ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-regions exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_center_playhead ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-center-playhead failed — no Session";
+		return false;
+	}
+	try {
+		if (!locate_to (5.0f, false, 0.f)
+		    || std::fabs (_snap.transport_sec - 5.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-center-playhead FAILED (locate got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-center-playhead locate ok (5.00s)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-center-playhead locate ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-center-playhead exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_zoom_playhead ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-zoom-playhead failed — no Session";
+		return false;
+	}
+	try {
+		if (!locate_to (4.0f, false, 0.f)
+		    || std::fabs (_snap.transport_sec - 4.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-playhead FAILED (locate got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-playhead locate ok (4.00s)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-zoom-playhead locate ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-playhead exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_scroll_playhead ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-scroll-playhead failed — no Session";
+		return false;
+	}
+	try {
+		if (!locate_to (10.0f, false, 0.f)
+		    || std::fabs (_snap.transport_sec - 10.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-scroll-playhead FAILED (locate got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-scroll-playhead locate ok (10.00s)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-scroll-playhead locate ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-scroll-playhead exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -19377,6 +21667,354 @@ EngineHost::smoke_locate ()
 
 bool
 EngineHost::smoke_locate_selection ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_next_marker ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_prev_marker ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_marker_navigate ()
+{
+	return false;
+}
+
+bool
+EngineHost::rename_marker_near (float time_sec, const std::string& name, float slop_sec)
+{
+	(void)time_sec;
+	(void)name;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::smoke_marker_rename ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_marker_locked_near (float time_sec, bool locked, float slop_sec)
+{
+	(void)time_sec;
+	(void)locked;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::toggle_marker_locked_near (float time_sec, float slop_sec)
+{
+	(void)time_sec;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::smoke_marker_lock ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_marker_cd_near (float time_sec, bool cd, float slop_sec)
+{
+	(void)time_sec;
+	(void)cd;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::toggle_marker_cd_near (float time_sec, float slop_sec)
+{
+	(void)time_sec;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::smoke_cd_marker ()
+{
+	return false;
+}
+
+bool
+EngineHost::add_range_marker (float start_sec, float end_sec, const std::string& name)
+{
+	(void)start_sec;
+	(void)end_sec;
+	(void)name;
+	return false;
+}
+
+bool
+EngineHost::add_range_marker_from_selection ()
+{
+	return false;
+}
+
+bool
+EngineHost::remove_range_marker_near (float time_sec, float slop_sec)
+{
+	(void)time_sec;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::smoke_range_marker ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_selection_sync_at (float time_sec)
+{
+	(void)time_sec;
+	return false;
+}
+
+bool
+EngineHost::set_selection_sync_at_playhead ()
+{
+	return false;
+}
+
+bool
+EngineHost::clear_selection_sync ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_region_sync ()
+{
+	return false;
+}
+
+bool
+EngineHost::add_scene_marker_at (float time_sec, int program, const std::string& name,
+                                 int bank, int channel)
+{
+	(void)time_sec;
+	(void)program;
+	(void)name;
+	(void)bank;
+	(void)channel;
+	return false;
+}
+
+bool
+EngineHost::remove_scene_marker_near (float time_sec, float slop_sec)
+{
+	(void)time_sec;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::cycle_scene_channel_near (float time_sec, float slop_sec)
+{
+	(void)time_sec;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::smoke_scene_channel ()
+{
+	return false;
+}
+
+bool
+EngineHost::add_cue_marker_at (float time_sec, int32_t cue_id, const std::string& name)
+{
+	(void)time_sec;
+	(void)cue_id;
+	(void)name;
+	return false;
+}
+
+bool
+EngineHost::remove_cue_marker_near (float time_sec, float slop_sec)
+{
+	(void)time_sec;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::locate_next_cue ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_prev_cue ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_cue_navigate ()
+{
+	return false;
+}
+
+bool
+EngineHost::add_section_marker_at (float time_sec, const std::string& name)
+{
+	(void)time_sec;
+	(void)name;
+	return false;
+}
+
+bool
+EngineHost::remove_section_marker_near (float time_sec, float slop_sec)
+{
+	(void)time_sec;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::rename_section_near (float time_sec, const std::string& name, float slop_sec)
+{
+	(void)time_sec;
+	(void)name;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::smoke_section_rename ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_punch_in ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_punch_out ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_punch_navigate ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_session_start ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_session_end ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_session_extent_navigate ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_loop_start ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_loop_end ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_loop_navigate ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_zoom_punch ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_zoom_loop ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_zoom_selection ()
+{
+	return false;
+}
+
+bool
+EngineHost::nudge_playhead (int direction)
+{
+	(void)direction;
+	return false;
+}
+
+bool
+EngineHost::smoke_playhead_nudge ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_zoom_session ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_zoom_regions ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_center_playhead ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_zoom_playhead ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_scroll_playhead ()
 {
 	return false;
 }
