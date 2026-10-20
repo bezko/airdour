@@ -673,6 +673,8 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_fade_in_active = false;
+	_snap.selection_fade_out_active = false;
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -4897,6 +4899,8 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_fade_in_active = false;
+	_snap.selection_fade_out_active = false;
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -4929,6 +4933,8 @@ EngineHost::refresh_selection_snap ()
 	if (ar) {
 		_snap.selection_fade_in_sec = (float)ar->fade_in_length ().samples () / (float)sr;
 		_snap.selection_fade_out_sec = (float)ar->fade_out_length ().samples () / (float)sr;
+		_snap.selection_fade_in_active = ar->fade_in_active ();
+		_snap.selection_fade_out_active = ar->fade_out_active ();
 	}
 }
 
@@ -5081,6 +5087,8 @@ EngineHost::clear_region_selection ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_fade_in_active = false;
+	_snap.selection_fade_out_active = false;
 }
 
 bool
@@ -5378,6 +5386,122 @@ EngineHost::apply_selected_crossfade (float length_sec)
 		return false;
 	} catch (...) {
 		_snap.detail = L"crossfade failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::set_selected_fade_active (bool active)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (!ar) {
+		_snap.detail = L"fade-active — select an audio region";
+		return false;
+	}
+	try {
+		_impl->session->begin_reversible_command (
+			active ? "fade active on" : "fade active off");
+		ar->clear_changes ();
+		ar->set_fade_in_active (active);
+		ar->set_fade_out_active (active);
+		_impl->session->add_command (new StatefulDiffCommand (ar));
+		_impl->session->commit_reversible_command ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+		_snap.detail = active ? L"fades active" : L"fades inactive";
+		return _snap.selection_fade_in_active == active
+		    && _snap.selection_fade_out_active == active;
+	} catch (...) {
+		_snap.detail = L"fade-active failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_selected_fade_active ()
+{
+	refresh_selection_snap ();
+	bool either = _snap.selection_fade_in_active || _snap.selection_fade_out_active;
+	return set_selected_fade_active (!either);
+}
+
+bool
+EngineHost::smoke_fade_active ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-fade-active failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-active FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!import_test_tone (0, 220.f, 2.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-active FAILED (import)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!select_region_at (0, 0.5f) || !_snap.has_selection) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-active FAILED (select)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!apply_selected_crossfade (0.08f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-active FAILED (apply fades)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_snap.selection_fade_in_active || !_snap.selection_fade_out_active) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-active FAILED (not active after apply)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		float fi = _snap.selection_fade_in_sec;
+		float fo = _snap.selection_fade_out_sec;
+		if (fi < 0.05f || fo < 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-active FAILED (len in=%.3f out=%.3f)\n",
+			              fi, fo);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_selected_fade_active (false)
+		    || _snap.selection_fade_in_active || _snap.selection_fade_out_active) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-active FAILED (deactivate)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (std::fabs (_snap.selection_fade_in_sec - fi) > 0.01f
+		    || std::fabs (_snap.selection_fade_out_sec - fo) > 0.01f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-fade-active FAILED "
+			              "(lengths cleared in=%.3f out=%.3f)\n",
+			              _snap.selection_fade_in_sec, _snap.selection_fade_out_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_selected_fade_active (true)
+		    || !_snap.selection_fade_in_active || !_snap.selection_fade_out_active) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-active FAILED (reactivate)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-fade-active ok (on→off→on, lens kept)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-fade-active ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-fade-active exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
 		return false;
 	}
 }
@@ -17629,6 +17753,8 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_fade_in_active = false;
+	_snap.selection_fade_out_active = false;
 	_snap.snap_enabled = false;
 	_snap.midi_step_enabled = false;
 	_snap.midi_chord_quality = 0;
@@ -18681,6 +18807,25 @@ bool
 EngineHost::apply_selected_crossfade (float length_sec)
 {
 	(void)length_sec;
+	return false;
+}
+
+bool
+EngineHost::set_selected_fade_active (bool active)
+{
+	(void)active;
+	return false;
+}
+
+bool
+EngineHost::toggle_selected_fade_active ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_fade_active ()
+{
 	return false;
 }
 

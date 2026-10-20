@@ -60,6 +60,8 @@ struct EngineSnapshot {
 	float        selection_end_sec;
 	float        selection_fade_in_sec; /* AudioRegion fade-in length */
 	float        selection_fade_out_sec;
+	bool         selection_fade_in_active;
+	bool         selection_fade_out_active;
 	bool         loop_active; /* auto-loop Location exists with positive length */
 	bool         loop_playing; /* Session get_play_loop() */
 	float        loop_start_sec;
@@ -537,6 +539,15 @@ public:
 	 * complementary fade so the abut/overlap reads as a crossfade.
 	 */
 	bool apply_selected_crossfade (float length_sec = 0.08f);
+
+	/**
+	 * Enable/disable selected AudioRegion fade in+out without clearing lengths.
+	 * Ctrl+F toggles both. Lengths stay in snap while inactive.
+	 */
+	bool set_selected_fade_active (bool active);
+	bool toggle_selected_fade_active ();
+	/** Apply fades → deactivate → reactivate. For --smoke-fade-active. */
+	bool smoke_fade_active ();
 
 	/**
 	 * Trim selected region front/end to absolute time (seconds).

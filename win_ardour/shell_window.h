@@ -86,6 +86,7 @@ public:
 	                    bool smoke_send = false,
 	                    bool smoke_automation = false,
 	                    bool smoke_edit = false,
+	                    bool smoke_fade_active = false,
 	                    bool smoke_snap = false,
 	                    bool smoke_punch = false,
 	                    bool smoke_tempo = false,
@@ -228,6 +229,7 @@ private:
 	void do_delete_selection ();
 	void do_split_at_playhead ();
 	void do_apply_crossfade ();
+	void do_toggle_fade_active ();
 	void do_stretch_selection (float time_ratio = 1.5f);
 	void do_pitch_shift_selection (float semitones = 1.f);
 	void do_reverse_selection ();

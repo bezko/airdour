@@ -219,6 +219,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_send,
                             bool smoke_automation,
                             bool smoke_edit,
+                            bool smoke_fade_active,
                             bool smoke_snap,
                             bool smoke_punch,
                             bool smoke_tempo,
@@ -673,6 +674,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_edit) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_fade_active && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_fade_active ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_fade_active) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-fade-active FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2030,8 +2044,10 @@ ShellWindow::apply_region_selection_to_lanes ()
 			active,
 			_engine_snap.selection_start_sec,
 			_engine_snap.selection_end_sec,
-			active ? _engine_snap.selection_fade_in_sec : 0.f,
-			active ? _engine_snap.selection_fade_out_sec : 0.f);
+			(active && _engine_snap.selection_fade_in_active)
+				? _engine_snap.selection_fade_in_sec : 0.f,
+			(active && _engine_snap.selection_fade_out_active)
+				? _engine_snap.selection_fade_out_sec : 0.f);
 	}
 }
 
@@ -2645,6 +2661,23 @@ ShellWindow::do_apply_crossfade ()
 		return;
 	}
 	if (_engine.apply_selected_crossfade (0.08f)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_toggle_fade_active ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.toggle_selected_fade_active ()) {
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 		apply_region_selection_to_lanes ();
@@ -3694,8 +3727,13 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_save_session ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
 			do_split_at_playhead ();
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'F' || wparam == 'f')) {
-			do_apply_crossfade ();
+		} else if ((wparam == 'F' || wparam == 'f')) {
+			if (GetKeyState (VK_CONTROL) & 0x8000) {
+				/* Ctrl+F = toggle fade in/out active (lengths kept). */
+				do_toggle_fade_active ();
+			} else {
+				do_apply_crossfade ();
+			}
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'T' || wparam == 't')) {
 			/* T = stretch 1.5×; Shift+T = compress 0.75× (pitch unchanged). */
 			do_stretch_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? 0.75f : 1.5f);
