@@ -5128,6 +5128,72 @@ EngineHost::delete_selected_region ()
 	}
 }
 
+bool
+EngineHost::duplicate_selected_region ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	int track = _impl->selected_track;
+	if (!region || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"duplicate — select a region";
+		return false;
+	}
+	try {
+		std::shared_ptr<Playlist> pl = region->playlist ();
+		if (!pl) {
+			pl = _impl->tracks[track]->playlist ();
+		}
+		if (!pl) {
+			_snap.detail = L"duplicate — no playlist";
+			return false;
+		}
+
+		PropertyList plist;
+		plist.add (Properties::whole_file, false);
+		std::shared_ptr<Region> copy = RegionFactory::create (region, plist);
+		if (!copy) {
+			_snap.detail = L"duplicate — RegionFactory failed";
+			return false;
+		}
+
+		/* Abut immediately after the original (position + length). */
+		timepos_t at = region->position () + region->length ();
+
+		_impl->session->begin_reversible_command ("duplicate region");
+		pl->clear_changes ();
+		pl->clear_owned_changes ();
+		pl->add_region (copy, at);
+		std::vector<Command*> cmds;
+		pl->rdiff (cmds);
+		_impl->session->add_commands (cmds);
+		_impl->session->add_command (new StatefulDiffCommand (pl));
+		_impl->session->commit_reversible_command ();
+
+		_impl->selected_track = track;
+		_impl->selected_region = copy;
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: duplicated region track=%d → start=%.3fs\n",
+		              track, _snap.selection_start_sec);
+		std::fflush (stderr);
+		_snap.detail = L"region duplicated";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: duplicate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"duplicate exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"duplicate failed";
+		return false;
+	}
+}
+
 int
 EngineHost::track_region_count (int track) const
 {
@@ -6858,6 +6924,93 @@ EngineHost::smoke_edit ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-edit exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_region_duplicate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-region-duplicate failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-duplicate FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 0.8f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-duplicate FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-duplicate FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		int n0 = track_region_count (0);
+		float end0 = _snap.selection_end_sec;
+		float len0 = _snap.selection_end_sec - _snap.selection_start_sec;
+		if (n0 < 1 || len0 < 0.1f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-duplicate FAILED (n=%d len=%.3f)\n",
+			              n0, len0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!duplicate_selected_region ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-duplicate FAILED (dup)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		int n1 = track_region_count (0);
+		if (n1 != n0 + 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-duplicate FAILED (count %d→%d)\n",
+			              n0, n1);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (std::fabs (_snap.selection_start_sec - end0) > 0.03f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-duplicate FAILED (start=%.3f expect≈%.3f)\n",
+			              _snap.selection_start_sec, end0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float len1 = _snap.selection_end_sec - _snap.selection_start_sec;
+		if (std::fabs (len1 - len0) > 0.03f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-duplicate FAILED (len %.3f→%.3f)\n",
+			              len0, len1);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-region-duplicate ok (count %d→%d start=%.2f len=%.2f)\n",
+		              n0, n1, _snap.selection_start_sec, len1);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-region-duplicate ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-duplicate exception: %s\n",
+		              e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -18649,6 +18802,12 @@ EngineHost::delete_selected_region ()
 }
 
 bool
+EngineHost::duplicate_selected_region ()
+{
+	return false;
+}
+
+bool
 EngineHost::split_at (float time_sec, int track)
 {
 	(void)time_sec;
@@ -18851,6 +19010,12 @@ EngineHost::track_region_count (int track) const
 
 bool
 EngineHost::smoke_edit ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_region_duplicate ()
 {
 	return false;
 }

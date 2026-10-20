@@ -524,6 +524,12 @@ public:
 	/** Remove selected region via reversible command; peaks refresh on next poll. */
 	bool delete_selected_region ();
 
+	/**
+	 * Duplicate selected region immediately after it (same playlist).
+	 * RegionFactory copy + Playlist::add_region; selects the new region.
+	 */
+	bool duplicate_selected_region ();
+
 	/** Split playlist region(s) at time_sec on track (−1 = selection track or 0). */
 	bool split_at (float time_sec, int track = -1);
 	/** Split at current transport playhead. */
@@ -646,6 +652,12 @@ public:
 	 * For --smoke-edit.
 	 */
 	bool smoke_edit ();
+
+	/**
+	 * Import tone → select → duplicate → 2 regions; selection starts at old end.
+	 * For --smoke-region-duplicate.
+	 */
+	bool smoke_region_duplicate ();
 
 	/**
 	 * Import tone → select → stretch 1.5×; verify length ~1.5× source.
