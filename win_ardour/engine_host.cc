@@ -691,6 +691,12 @@ EngineHost::EngineHost ()
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
 	}
+	_snap.range_count = 0;
+	for (int ri = 0; ri < EngineSnapshot::kMaxRanges; ++ri) {
+		_snap.ranges[ri].start_sec = 0.f;
+		_snap.ranges[ri].end_sec = 0.f;
+		_snap.ranges[ri].name[0] = L'\0';
+	}
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
 	_snap.midi_region_ok = false;
@@ -7576,6 +7582,12 @@ EngineHost::refresh_locations_snap ()
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
 	}
+	_snap.range_count = 0;
+	for (int ri = 0; ri < EngineSnapshot::kMaxRanges; ++ri) {
+		_snap.ranges[ri].start_sec = 0.f;
+		_snap.ranges[ri].end_sec = 0.f;
+		_snap.ranges[ri].name[0] = L'\0';
+	}
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -7620,6 +7632,23 @@ EngineHost::refresh_locations_snap ()
 			++n;
 		}
 		_snap.marker_count = n;
+		int rn = 0;
+		for (Locations::LocationList::const_iterator it = list.begin ();
+		     it != list.end () && rn < EngineSnapshot::kMaxRanges; ++it) {
+			Location* loc = *it;
+			if (!loc || !loc->is_range_marker () || loc->is_hidden ()) {
+				continue;
+			}
+			if (loc->end_sample () <= loc->start_sample ()) {
+				continue;
+			}
+			_snap.ranges[rn].start_sec = (float)loc->start_sample () / (float)sr;
+			_snap.ranges[rn].end_sec = (float)loc->end_sample () / (float)sr;
+			std::wstring wname = utf8_to_wide (loc->name ());
+			wcsncpy_s (_snap.ranges[rn].name, wname.c_str (), _TRUNCATE);
+			++rn;
+		}
+		_snap.range_count = rn;
 	} catch (...) {
 	}
 }
@@ -9142,6 +9171,244 @@ EngineHost::smoke_punch ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-punch exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+
+bool
+EngineHost::add_range_marker (float start_sec, float end_sec, const std::string& name)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (end_sec < start_sec) {
+		float t = start_sec;
+		start_sec = end_sec;
+		end_sec = t;
+	}
+	if (end_sec - start_sec < 0.02f) {
+		_snap.detail = L"range marker — too short";
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		if (start_sec < 0.f) {
+			start_sec = 0.f;
+		}
+		samplepos_t start_s = (samplepos_t)std::llround ((double)start_sec * (double)sr);
+		samplepos_t end_s = (samplepos_t)std::llround ((double)end_sec * (double)sr);
+		if (end_s <= start_s) {
+			end_s = start_s + sr / 10;
+		}
+		std::string range_name = name;
+		if (range_name.empty ()) {
+			locs->next_available_name (range_name, "range");
+		}
+		Location* location = new Location (
+			*_impl->session,
+			timepos_t (start_s),
+			timepos_t (end_s),
+			range_name,
+			Location::IsRangeMarker);
+
+		_impl->session->begin_reversible_command ("add range marker");
+		XMLNode& before = locs->get_state ();
+		locs->add (location, true);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"range marker added";
+		std::fprintf (stderr, "airdour_win_shell: range \"%s\" [%.2f..%.2f]s (count=%d)\n",
+		              range_name.c_str (), start_sec, end_sec, _snap.range_count);
+		std::fflush (stderr);
+		return _snap.range_count > 0;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: add_range_marker: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"range marker failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"range marker failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::add_range_marker_from_selection ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_selection_snap ();
+	if (!_snap.has_selection
+	    || _snap.selection_end_sec <= _snap.selection_start_sec + 0.02f) {
+		_snap.detail = L"range from selection — select a region";
+		return false;
+	}
+	const bool snap_was = _snap.snap_enabled;
+	set_snap_enabled (false);
+	bool ok = add_range_marker (_snap.selection_start_sec, _snap.selection_end_sec, "Range");
+	set_snap_enabled (snap_was);
+	if (ok) {
+		_snap.detail = L"range from selection";
+	}
+	return ok;
+}
+
+bool
+EngineHost::remove_range_marker_near (float time_sec, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = nullptr;
+		samplecnt_t best = slop + 1;
+		const Locations::LocationList& list = locs->list ();
+		for (Locations::LocationList::const_iterator it = list.begin ();
+		     it != list.end (); ++it) {
+			Location* loc = *it;
+			if (!loc || !loc->is_range_marker () || loc->is_hidden ()) {
+				continue;
+			}
+			samplecnt_t d = (samplecnt_t)std::llabs ((long long)loc->start_sample () - (long long)sample);
+			if (d <= slop && d < best) {
+				best = d;
+				hit = loc;
+			}
+		}
+		if (!hit) {
+			_snap.detail = L"no range marker near";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("remove range marker");
+		XMLNode& before = locs->get_state ();
+		locs->remove (hit);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"range marker removed";
+		std::fprintf (stderr, "airdour_win_shell: removed range near %.2fs (count=%d)\n",
+		              time_sec, _snap.range_count);
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		_snap.detail = L"range remove failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_range_marker ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-range-marker failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 1.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.3f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float s0 = _snap.selection_start_sec;
+		float e0 = _snap.selection_end_sec;
+		if (e0 - s0 < 0.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (len=%.3f)\n",
+			              e0 - s0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		const int n0 = _snap.range_count;
+		if (!add_range_marker_from_selection () || _snap.range_count != n0 + 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (add → %d)\n",
+			              _snap.range_count);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		bool found = false;
+		for (int i = 0; i < _snap.range_count; ++i) {
+			if (std::fabs (_snap.ranges[i].start_sec - s0) < 0.05f
+			    && std::fabs (_snap.ranges[i].end_sec - e0) < 0.05f) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (snap bounds)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!remove_range_marker_near (s0, 0.35f) || _snap.range_count != n0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (remove → %d)\n",
+			              _snap.range_count);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-range-marker ok [%.3f..%.3f]\n",
+		              s0, e0);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-range-marker ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-range-marker exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17662,6 +17929,12 @@ EngineHost::EngineHost ()
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
 	}
+	_snap.range_count = 0;
+	for (int ri = 0; ri < EngineSnapshot::kMaxRanges; ++ri) {
+		_snap.ranges[ri].start_sec = 0.f;
+		_snap.ranges[ri].end_sec = 0.f;
+		_snap.ranges[ri].name[0] = L'\0';
+	}
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
 	_snap.midi_region_ok = false;
@@ -19209,6 +19482,35 @@ EngineHost::add_marker_at (float time_sec, const std::string& name)
 {
 	(void)time_sec;
 	(void)name;
+	return false;
+}
+
+bool
+EngineHost::add_range_marker (float start_sec, float end_sec, const std::string& name)
+{
+	(void)start_sec;
+	(void)end_sec;
+	(void)name;
+	return false;
+}
+
+bool
+EngineHost::add_range_marker_from_selection ()
+{
+	return false;
+}
+
+bool
+EngineHost::remove_range_marker_near (float time_sec, float slop_sec)
+{
+	(void)time_sec;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::smoke_range_marker ()
+{
 	return false;
 }
 

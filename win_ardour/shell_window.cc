@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_range_marker,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_range_marker && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_range_marker ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_range_marker) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-range-marker FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2537,6 +2553,26 @@ ShellWindow::do_remove_marker_at_playhead ()
 }
 
 void
+ShellWindow::do_range_marker_from_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		MessageBoxW (_hwnd, L"Select a region first for a range marker.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+		return;
+	}
+	if (!_engine.add_range_marker_from_selection ()) {
+		MessageBoxW (_hwnd, L"Could not create range marker from selection.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::sync_history_from_engine ()
 {
 	_history.set_available (_engine_snap.session_ok);
@@ -3699,6 +3735,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'T' || wparam == 't')) {
 			/* T = stretch 1.5×; Shift+T = compress 0.75× (pitch unchanged). */
 			do_stretch_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? 0.75f : 1.5f);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'R' || wparam == 'r')) {
+			/* Ctrl+Shift+R = range marker ← selection. */
+			do_range_marker_from_selection ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'R' || wparam == 'r')) {
 			/* R = pitch +1 st; Shift+R = −1 st (duration held). */
 			do_pitch_shift_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? -1.f : 1.f);
@@ -5721,6 +5763,27 @@ ShellWindow::draw_editor_ruler ()
 		}
 	}
 
+	for (int i = 0; i < _engine_snap.range_count; ++i) {
+		float n0 = (_engine_snap.ranges[i].start_sec - view0) / span;
+		float n1 = (_engine_snap.ranges[i].end_sec - view0) / span;
+		n0 = std::max (0.f, std::min (1.f, n0));
+		n1 = std::max (0.f, std::min (1.f, n1));
+		if (n1 > n0 && _brush_marker) {
+			_brush_marker->SetOpacity (0.28f);
+			_rt->FillRectangle (
+				D2D1::RectF (rr.left + n0 * w, rr.top, rr.left + n1 * w, rr.bottom),
+				_brush_marker);
+			_brush_marker->SetOpacity (1.f);
+			const wchar_t* name = _engine_snap.ranges[i].name;
+			if (name[0]) {
+				_rt->DrawTextW (name, (UINT32)wcslen (name), _fmt_meta,
+				                D2D1::RectF (rr.left + n0 * w + 2.f * _dpi_scale, rr.top,
+				                             rr.left + n1 * w, rr.bottom),
+				                _brush_marker);
+			}
+		}
+	}
+
 	for (int i = 0; i < _engine_snap.marker_count; ++i) {
 		float n = (_engine_snap.markers[i].sec - view0) / span;
 		if (n < 0.f || n > 1.f) {
@@ -6306,6 +6369,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
+		{ L"Ctrl+Shift+R", L"Range marker ← selection" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
