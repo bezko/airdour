@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_send_reset)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -647,6 +648,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_send) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_send_reset && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_send_reset ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_send_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_send_reset) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-reset FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -3844,6 +3858,17 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 	case WM_LBUTTONDBLCLK: {
 		float x, y;
 		client_from_lparam (lparam, &x, &y);
+		/* Double-click aux send → 0 (before rename hit). */
+		int si = hit_mixer_send (x, y);
+		if (si >= 0 && _engine.is_linked () && _engine_snap.session_ok) {
+			_mixers[si].set_send (0.f);
+			_engine.set_track_send (si, 0.f);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_send_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return 0;
+		}
 		int lab = hit_mixer_label (x, y);
 		if (lab >= 0) {
 			const int mi = midi_mixer_index ();
@@ -6314,6 +6339,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
 		{ L"F2", L"Rename focused track" },
+		{ L"Dbl-click send", L"Reset aux send → 0 (off)" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"U", L"Apply / clear track group" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
