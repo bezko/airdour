@@ -520,6 +520,8 @@ public:
 	 */
 	bool select_region_at (int track, float time_sec);
 	void clear_region_selection ();
+	/** Import+select then clear; verify !has_selection. For --smoke-clear-selection. */
+	bool smoke_clear_selection ();
 
 	/** Remove selected region via reversible command; peaks refresh on next poll. */
 	bool delete_selected_region ();

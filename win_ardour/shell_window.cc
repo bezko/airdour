@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_clear_selection,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,28 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_clear_selection && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_clear_selection ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			apply_region_selection_to_lanes ();
+			if (_engine_snap.has_selection) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-clear-selection FAILED (UI still selected)\n");
+				_smoke_failed = true;
+			} else {
+				std::fprintf (stderr, "airdour_win_shell: smoke-clear-selection UI ok\n");
+			}
+		}
+		std::fflush (stderr);
+	} else if (smoke_clear_selection) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-selection FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2786,6 +2809,23 @@ ShellWindow::do_toggle_freeze_track ()
 	}
 }
 
+
+void
+ShellWindow::do_clear_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	_engine.clear_region_selection ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	apply_region_selection_to_lanes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 void
 ShellWindow::do_toggle_snap ()
 {
@@ -3549,6 +3589,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else if (_help_visible) {
 				_help_visible = false;
 				InvalidateRect (_hwnd, nullptr, FALSE);
+			} else if (_engine_snap.has_selection) {
+				/* Esc = clear region selection (quit via Alt+F4 / second Esc). */
+				do_clear_selection ();
 			} else {
 				PostQuitMessage (0);
 			}
@@ -6284,6 +6327,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+S / O / E", L"Save / Open browse / Export" },
 		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
+		{ L"Esc", L"Clear region selection (then quit)" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
 		{ L"V", L"Reverse selected audio region" },

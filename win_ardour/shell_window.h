@@ -95,6 +95,7 @@ public:
 	                    bool smoke_group = false,
 	                    bool smoke_monitor = false,
 	                    bool smoke_locate = false,
+	                    bool smoke_clear_selection = false,
 	                    bool smoke_zoom = false,
 	                    bool smoke_history = false,
 	                    bool smoke_prefs = false,
@@ -226,6 +227,7 @@ private:
 	void do_undo_to_index (int index);
 	void sync_history_from_engine ();
 	void do_delete_selection ();
+	void do_clear_selection ();
 	void do_split_at_playhead ();
 	void do_apply_crossfade ();
 	void do_stretch_selection (float time_ratio = 1.5f);
