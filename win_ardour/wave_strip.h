@@ -1,8 +1,10 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Wave strip — Direct2D peak/RMS + canvas zoom/pan (not Cairo WaveView).
- * Peaks come from Session playlist readouts (or stay empty). No synthetic fill.
+ * Wave strip — Direct2D peak/RMS + canvas zoom/pan.
+ * When AIRDOUR_HAVE_CAIRO: peaks inked offline via Cairo ImageSurface → D2D
+ * bitmap (libs/canvas pattern; no GTK windows). Else native FillRectangle.
+ * Peaks come from Session playlist readouts (or stay empty).
  */
 
 #pragma once

@@ -3,6 +3,7 @@
  */
 
 #include "shell_window.h"
+#include "cairo_wave_blit.h"
 
 #include <algorithm>
 #include <cmath>
@@ -260,8 +261,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_cairo_wave)
 {
+	/* Offline Cairo→D2D WaveStrip path — no engine / GTK windows required. */
+	if (smoke_cairo_wave) {
+		if (!CairoWaveBlit::available ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-cairo-wave FAILED (AIRDOUR_HAVE_CAIRO off — run Install-HeadlessDeps -WithGtkLibs)\n");
+			_smoke_failed = true;
+			std::fflush (stderr);
+		} else if (!CairoWaveBlit::smoke_offline ()) {
+			_smoke_failed = true;
+		}
+	}
+
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
 		_engine_snap = _engine.snapshot ();
@@ -475,7 +489,12 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-pressure FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
+	}
+
+	if (ok && smoke_midi && _engine.snapshot ().session_ok
+	    && !smoke_midi_pressure && !smoke_midi_bend && !smoke_midi_cc
+	    && !smoke_midi_scale && !smoke_midi_arp && !smoke_midi_chord
+	    && !smoke_midi_step) {
 		if (_engine.smoke_midi ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi ok\n");
 		} else {
