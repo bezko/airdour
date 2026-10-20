@@ -39,6 +39,7 @@ MixerStrip::MixerStrip ()
 	, _fx_param2 (0.16f)
 	, _fx_param3 (0.5f)
 	, _armed (false)
+	, _record_safe (false)
 	, _muted (false)
 	, _soloed (false)
 	, _fx_bypassed (false)
@@ -478,7 +479,9 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 
 	if (!_midi_strip) {
 		rt->FillRectangle (_arm_btn, _armed ? accent : edge);
-		const wchar_t* arm_label = _armed ? L"R · armed" : L"R · arm";
+		const wchar_t* arm_label =
+			_record_safe ? L"R · Rs"
+			: (_armed ? L"R · armed" : L"R · arm");
 		rt->DrawTextW (arm_label, (UINT32)wcslen (arm_label), fmt_meta, _arm_btn, brand);
 	}
 

@@ -171,6 +171,7 @@ struct EngineSnapshot {
 	bool         meter_clip[kMeters]; /* ≥0 dBFS / PeakMeter MeterMaxPeak */
 	bool         track_has_regions[kMeters];
 	bool         track_armed[kMeters];
+	bool         track_record_safe[kMeters]; /* Track::rec_safe_control latch */
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
@@ -339,6 +340,18 @@ public:
 	/** Arm / disarm a track for recording (Session rec-enable control). */
 	bool set_track_armed (int track, bool armed);
 	bool toggle_track_armed (int track);
+
+	/**
+	 * Record-safe latch (Track::rec_safe_control). When safe, arm is refused.
+	 * Ctrl+click Arm. Enabling safe while armed also disarms.
+	 */
+	bool set_track_record_safe (int track, bool safe);
+	bool toggle_track_record_safe (int track);
+	/**
+	 * Unsafe → safe (arm refused) → clear → arm ok → leave unsafe.
+	 * For --smoke-record-safe.
+	 */
+	bool smoke_record_safe ();
 
 	/**
 	 * Route mute/solo (audio tracks 0..kMeters-1).

@@ -41,6 +41,9 @@ public:
 
 	void set_armed (bool armed) { _armed = armed; }
 	bool armed () const { return _armed; }
+	/** Record-safe latch (Rs badge on Arm). */
+	void set_record_safe (bool safe) { _record_safe = safe; }
+	bool record_safe () const { return _record_safe; }
 
 	void set_muted (bool muted) { _muted = muted; }
 	bool muted () const { return _muted; }
@@ -136,6 +139,7 @@ private:
 	float       _fx_param2;
 	float       _fx_param3;
 	bool        _armed;
+	bool        _record_safe;
 	bool        _muted;
 	bool        _soloed;
 	bool        _fx_bypassed;
