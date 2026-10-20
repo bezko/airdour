@@ -100,6 +100,17 @@ public:
 	                       float r, float g, float b, float a);
 
 	/**
+	 * Scatter points in normalized dest coords (0..1) — e.g. goniometer.
+	 */
+	static bool blit_points (ID2D1RenderTarget* rt,
+	                         const D2D1_RECT_F& dest,
+	                         const float* x_norm,
+	                         const float* y_norm,
+	                         size_t n,
+	                         float dpi_scale,
+	                         float r, float g, float b, float a);
+
+	/**
 	 * Headless smoke: peaks + curve + fades + notes ink; no HWND / GTK.
 	 * For --smoke-cairo-wave.
 	 */
@@ -149,6 +160,12 @@ public:
 	static bool blit_bars (ID2D1RenderTarget*, const D2D1_RECT_F&,
 	                       const float*, size_t, float,
 	                       float, float, float, float)
+	{
+		return false;
+	}
+	static bool blit_points (ID2D1RenderTarget*, const D2D1_RECT_F&,
+	                         const float*, const float*, size_t, float,
+	                         float, float, float, float)
 	{
 		return false;
 	}

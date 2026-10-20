@@ -537,6 +537,53 @@ CairoWaveBlit::blit_bars (ID2D1RenderTarget* rt,
 }
 
 bool
+CairoWaveBlit::blit_points (ID2D1RenderTarget* rt,
+                            const D2D1_RECT_F& dest,
+                            const float* x_norm,
+                            const float* y_norm,
+                            size_t n,
+                            float dpi_scale,
+                            float r, float g, float b, float a)
+{
+	if (!rt || !x_norm || !y_norm || n == 0) {
+		return false;
+	}
+	int width = 0;
+	int height = 0;
+	if (!dims_ok (dest.right - dest.left, dest.bottom - dest.top, &width, &height, 1024, 1024)) {
+		return false;
+	}
+
+	cairo_surface_t* surface =
+	    cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, height);
+	if (!surface || cairo_surface_status (surface) != CAIRO_STATUS_SUCCESS) {
+		if (surface) {
+			cairo_surface_destroy (surface);
+		}
+		return false;
+	}
+
+	cairo_t* cr = cairo_create (surface);
+	surface_clear (cr);
+	const double radius = std::max (1.2, 1.5 * (double)dpi_scale);
+	cairo_set_source_rgba (cr, r, g, b, a);
+	cairo_set_antialias (cr, CAIRO_ANTIALIAS_DEFAULT);
+	for (size_t i = 0; i < n; ++i) {
+		float xn = std::max (0.f, std::min (1.f, x_norm[i]));
+		float yn = std::max (0.f, std::min (1.f, y_norm[i]));
+		double x = (double)xn * (double)width;
+		double y = (double)yn * (double)height;
+		cairo_arc (cr, x, y, radius, 0, 2.0 * 3.14159265358979323846);
+		cairo_fill (cr);
+	}
+	cairo_destroy (cr);
+
+	bool ok = blit_surface_to_d2d (rt, dest, surface);
+	cairo_surface_destroy (surface);
+	return ok;
+}
+
+bool
 CairoWaveBlit::smoke_offline ()
 {
 	uint32_t total_ink = 0;
