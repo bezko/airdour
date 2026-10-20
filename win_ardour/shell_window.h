@@ -95,6 +95,7 @@ public:
 	                    bool smoke_group = false,
 	                    bool smoke_monitor = false,
 	                    bool smoke_locate = false,
+	                    bool smoke_marker_rename = false,
 	                    bool smoke_zoom = false,
 	                    bool smoke_history = false,
 	                    bool smoke_prefs = false,
@@ -287,6 +288,7 @@ private:
 	void draw_editor_grid ();
 	void draw_punch_overlay ();
 	void do_add_marker_at_playhead ();
+	void do_rename_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
 	void sync_mixer_arm_from_engine ();
 	void sync_mixer_mute_solo_from_engine ();

@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_marker_rename,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,17 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_marker_rename && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_marker_rename ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_marker_rename) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-rename FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2525,6 +2537,33 @@ ShellWindow::do_add_marker_at_playhead ()
 }
 
 void
+ShellWindow::do_rename_marker_at_playhead ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	wchar_t name[32] = L"mark";
+	for (int i = 0; i < _engine_snap.marker_count; ++i) {
+		if (std::fabs (_engine_snap.markers[i].sec - _playhead_sec) < 0.35f) {
+			wcsncpy_s (name, _engine_snap.markers[i].name, _TRUNCATE);
+			break;
+		}
+	}
+	if (!run_rename_dialog (_hwnd, name, 32)) {
+		return;
+	}
+	char utf8[128];
+	WideCharToMultiByte (CP_UTF8, 0, name, -1, utf8, sizeof (utf8), nullptr, nullptr);
+	if (!_engine.rename_marker_near (_playhead_sec, utf8)) {
+		MessageBoxW (_hwnd, L"No marker near playhead to rename.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_remove_marker_at_playhead ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -3762,7 +3801,13 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			refresh_editor_view_after_nav ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		} else if (wparam == VK_F2) {
-			do_rename_focused_track ();
+			if ((GetKeyState (VK_MENU) & 0x8000)
+			    && (GetKeyState (VK_SHIFT) & 0x8000)) {
+				/* Alt+Shift+F2 = rename marker at playhead. */
+				do_rename_marker_at_playhead ();
+			} else {
+				do_rename_focused_track ();
+			}
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_UP) {
 			do_move_audio_track (-1);
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_DOWN) {

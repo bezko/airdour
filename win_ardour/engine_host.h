@@ -729,8 +729,13 @@ public:
 
 	/** Add IsMark at time_sec (name auto if empty). */
 	bool add_marker_at (float time_sec, const std::string& name = std::string ());
+	/** Rename nearest IsMark within slop_sec of time_sec (Location::set_name). */
+	bool rename_marker_near (float time_sec, const std::string& name,
+	                         float slop_sec = 0.35f);
 	/** Remove nearest IsMark within slop_sec of time_sec. */
 	bool remove_marker_near (float time_sec, float slop_sec = 0.35f);
+	/** Add → rename → assert snap name → remove. For --smoke-marker-rename. */
+	bool smoke_marker_rename ();
 	/** Locate transport to time_sec (optional snap to nearest mark within slop). */
 	bool locate_to (float time_sec, bool snap_to_marker = false, float slop_sec = 0.35f);
 	/**

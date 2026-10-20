@@ -9205,6 +9205,102 @@ EngineHost::add_marker_at (float time_sec, const std::string& name)
 }
 
 bool
+EngineHost::rename_marker_near (float time_sec, const std::string& name, float slop_sec)
+{
+	if (!_impl || !_impl->session || name.empty ()) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop), Location::IsMark);
+		if (!hit) {
+			_snap.detail = L"no marker near playhead";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("rename marker");
+		XMLNode& before = locs->get_state ();
+		hit->set_name (name);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"marker renamed";
+		std::fprintf (stderr, "airdour_win_shell: renamed marker → \"%s\" @ %.2fs\n",
+		              name.c_str (), time_sec);
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		_snap.detail = L"marker rename failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_marker_rename ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-marker-rename failed — no Session";
+		return false;
+	}
+	try {
+		if (!add_marker_at (1.5f, "oldMark")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-rename FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!rename_marker_near (1.5f, "newMark", 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-rename FAILED (rename)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		bool found = false;
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 1.5f) < 0.05f
+			    && wcscmp (_snap.markers[i].name, L"newMark") == 0) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-rename FAILED (snap name)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!remove_marker_near (1.5f, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-rename FAILED (cleanup)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-rename ok (oldMark→newMark)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-marker-rename ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-rename exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::remove_marker_near (float time_sec, float slop_sec)
 {
 	if (!_impl || !_impl->session) {
@@ -19209,6 +19305,21 @@ EngineHost::add_marker_at (float time_sec, const std::string& name)
 {
 	(void)time_sec;
 	(void)name;
+	return false;
+}
+
+bool
+EngineHost::rename_marker_near (float time_sec, const std::string& name, float slop_sec)
+{
+	(void)time_sec;
+	(void)name;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::smoke_marker_rename ()
+{
 	return false;
 }
 
