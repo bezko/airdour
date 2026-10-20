@@ -7855,6 +7855,31 @@ EngineHost::copy_loop_to_punch ()
 }
 
 bool
+EngineHost::copy_selection_to_loop ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_selection_snap ();
+	if (!_snap.has_selection
+	    || _snap.selection_end_sec <= _snap.selection_start_sec + 0.02f) {
+		_snap.detail = L"loop from selection — select a region";
+		return false;
+	}
+	const bool snap_was = _snap.snap_enabled;
+	set_snap_enabled (false);
+	bool ok = set_loop_range (_snap.selection_start_sec, _snap.selection_end_sec);
+	set_snap_enabled (snap_was);
+	if (ok) {
+		_snap.detail = L"loop from selection";
+		std::fprintf (stderr, "airdour_win_shell: loop ← selection [%.3f..%.3f]s\n",
+		              _snap.loop_start_sec, _snap.loop_end_sec);
+		std::fflush (stderr);
+	}
+	return ok;
+}
+
+bool
 EngineHost::set_punch_enabled (bool enable)
 {
 	if (!_impl || !_impl->session) {
@@ -9659,6 +9684,76 @@ EngineHost::smoke_loop_markers ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-loop exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_loop_selection ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-loop-selection failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop-selection FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 1.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop-selection FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.3f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop-selection FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float s0 = _snap.selection_start_sec;
+		float e0 = _snap.selection_end_sec;
+		if (e0 - s0 < 0.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop-selection FAILED (len=%.3f)\n",
+			              e0 - s0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!copy_selection_to_loop () || !_snap.loop_active) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop-selection FAILED (copy)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (std::fabs (_snap.loop_start_sec - s0) > 0.05f
+		    || std::fabs (_snap.loop_end_sec - e0) > 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-loop-selection FAILED "
+			              "(loop %.3f..%.3f sel %.3f..%.3f)\n",
+			              _snap.loop_start_sec, _snap.loop_end_sec, s0, e0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-selection ok [%.3f..%.3f]\n",
+		              _snap.loop_start_sec, _snap.loop_end_sec);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-loop-selection ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-loop-selection exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -18973,6 +19068,12 @@ EngineHost::copy_loop_to_punch ()
 }
 
 bool
+EngineHost::copy_selection_to_loop ()
+{
+	return false;
+}
+
+bool
 EngineHost::set_punch_enabled (bool enable)
 {
 	(void)enable;
@@ -19292,6 +19393,12 @@ EngineHost::smoke_zoom ()
 
 bool
 EngineHost::smoke_loop_markers ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_loop_selection ()
 {
 	return false;
 }

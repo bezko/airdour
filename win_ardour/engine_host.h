@@ -723,6 +723,11 @@ public:
 	bool set_punch_end (float end_sec);
 	/** Copy current auto-loop range into punch (creates punch if needed). */
 	bool copy_loop_to_punch ();
+	/**
+	 * Copy current region selection start..end into auto-loop range.
+	 * For Ctrl+Shift+L / --smoke-loop-selection.
+	 */
+	bool copy_selection_to_loop ();
 	/** Arm/disarm Session punch-in + punch-out (record only inside range). */
 	bool set_punch_enabled (bool enable);
 	bool toggle_punch_enabled ();
@@ -773,6 +778,8 @@ public:
 	 * Does not enable loop-play (avoids forced roll during --timeout).
 	 */
 	bool smoke_loop_markers ();
+	/** Import → select → copy_selection_to_loop; verify range. */
+	bool smoke_loop_selection ();
 
 	/**
 	 * Set punch 0.5–2.5s, enable punch-in/out, verify snapshot; disable.

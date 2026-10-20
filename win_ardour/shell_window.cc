@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_loop_selection)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -789,6 +790,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_punch) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-punch FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_loop_selection && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_loop_selection ()) {
+			_smoke_failed = true;
+		} else {
+			sync_transport_loop_from_engine ();
+			apply_loop_to_lanes ();
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_loop_selection) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-loop-selection FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2058,6 +2074,24 @@ ShellWindow::do_toggle_loop ()
 	sync_transport_loop_from_engine ();
 	apply_loop_to_lanes ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_loop_from_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.copy_selection_to_loop ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_transport_loop_from_engine ();
+		apply_loop_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
 }
 
 void
@@ -3637,7 +3671,14 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			/* E = fit selection (Ctrl+E remains export). */
 			do_fit_selection ();
 		} else if (wparam == 'L' || wparam == 'l') {
-			do_toggle_loop ();
+			if ((GetKeyState (VK_CONTROL) & 0x8000)
+			    && (GetKeyState (VK_SHIFT) & 0x8000)
+			    && !(GetKeyState (VK_MENU) & 0x8000)) {
+				/* Ctrl+Shift+L = loop range ← selection. */
+				do_loop_from_selection ();
+			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
+				do_toggle_loop ();
+			}
 		} else if (wparam == 'P' || wparam == 'p') {
 			if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
 				do_toggle_punch ();
@@ -6304,6 +6345,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
 		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
 		{ L"L / P", L"Loop · Punch" },
+		{ L"Ctrl+Shift+L", L"Loop range ← selection" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
 		{ L"C / K", L"Count-in · Click (metronome)" },

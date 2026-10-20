@@ -127,7 +127,8 @@ public:
 	                    bool smoke_midi_scale = false,
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
-	                    bool smoke_midi_pressure = false);
+	                    bool smoke_midi_pressure = false,
+	                    bool smoke_loop_selection = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -262,6 +263,7 @@ private:
 	/** Map computer key → MIDI pitch when step-record is on; −1 if not a piano key. */
 	int  step_piano_pitch_for_key (WPARAM wparam) const;
 	void do_toggle_loop ();
+	void do_loop_from_selection ();
 	void do_toggle_punch ();
 	void do_toggle_count_in ();
 	void do_toggle_click ();
