@@ -4192,9 +4192,30 @@ EngineHost::smoke_midi_cc ()
 			std::fflush (stderr);
 			return false;
 		}
+		/* CC64 sustain — F8 cycle entry. */
+		if (!clear_midi_cc_automation (64)
+		    || !write_midi_cc_automation (0.5f, 1.0f, 64)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc FAILED (CC64 write)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::shared_ptr<AutomationList> al64 = midi_cc_alist (_impl->midi_region, 64, 0);
+		if (!al64 || al64->empty ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc FAILED (CC64 empty)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		Temporal::Beats half_b = Temporal::Beats::from_double (0.5 * beats_per_sec);
+		float cc64 = (float)al64->eval (timepos_t (half_b));
+		if (cc64 < 120.f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc FAILED (CC64 eval=%.3f)\n",
+			              cc64);
+			std::fflush (stderr);
+			return false;
+		}
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-midi-cc ok (CC7 pts=%u eval@2s=%.1f Play; CC1@1s=%.1f)\n",
-		              (unsigned)al->size (), mid, cc1);
+		              "airdour_win_shell: smoke-midi-cc ok (CC7 pts=%u eval@2s=%.1f Play; CC1@1s=%.1f; CC64@0.5s=%.1f)\n",
+		              (unsigned)al->size (), mid, cc1, cc64);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-midi-cc ok";
 		return true;

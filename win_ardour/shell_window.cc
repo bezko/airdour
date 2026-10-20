@@ -1317,6 +1317,8 @@ ShellWindow::midi_cc_label () const
 		return L"CC1 · Mod";
 	case 11:
 		return L"CC11 · Expr";
+	case 64:
+		return L"CC64 · Sustain";
 	case -1:
 		return L"Bend";
 	case -2:
@@ -1336,6 +1338,8 @@ ShellWindow::cycle_midi_cc_controller ()
 	} else if (_midi_cc_number == 1) {
 		_midi_cc_number = 11;
 	} else if (_midi_cc_number == 11) {
+		_midi_cc_number = 64; /* sustain pedal */
+	} else if (_midi_cc_number == 64) {
 		_midi_cc_number = -1; /* pitch bend */
 	} else if (_midi_cc_number == -1) {
 		_midi_cc_number = -2; /* channel pressure */
@@ -6330,7 +6334,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F5 / Chd", L"MIDI chord Off→Maj→Min · multi-key latch" },
 		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
-		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure→PolyAT" },
+		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→CC64→Bend→Pressure→PolyAT" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
