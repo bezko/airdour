@@ -205,6 +205,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_record,
                             bool smoke_save_load,
                             bool smoke_export,
+                            bool smoke_export_stems,
                             bool smoke_undo,
                             bool smoke_loop,
                             bool smoke_midi,
@@ -320,7 +321,23 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			std::fprintf (stderr, "airdour_win_shell: smoke-export ok → %s\n", exported.c_str ());
 		} else {
 			std::fprintf (stderr, "airdour_win_shell: smoke-export FAILED\n");
+			_smoke_failed = true;
 		}
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_export_stems && _engine.snapshot ().session_ok) {
+		int nstems = 0;
+		if (_engine.smoke_export_stems (&nstems)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-export-stems ok (count=%d)\n", nstems);
+		} else {
+			std::fprintf (stderr, "airdour_win_shell: smoke-export-stems FAILED\n");
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_export_stems) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-export-stems FAILED (no session)\n");
+		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
@@ -1542,6 +1559,29 @@ ShellWindow::prompt_export_wav ()
 		std::fprintf (stderr, "airdour_win_shell: export dialog ok\n");
 	} else {
 		std::fprintf (stderr, "airdour_win_shell: export dialog failed\n");
+	}
+	std::fflush (stderr);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_export_stems ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	int n = 0;
+	if (_engine.export_stems (std::string (), &n)) {
+		std::fprintf (stderr, "airdour_win_shell: stems export ok (count=%d)\n", n);
+	} else {
+		std::fprintf (stderr, "airdour_win_shell: stems export failed\n");
 	}
 	std::fflush (stderr);
 	_engine.poll ();
@@ -3750,7 +3790,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && !(GetKeyState (VK_SHIFT) & 0x8000)) {
 			prompt_open_session (); /* Ctrl+O browse; Ctrl+Shift+O = recent menu */
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')) {
-			prompt_export_wav ();
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
+				do_export_stems (); /* Ctrl+Shift+E = stems */
+			} else {
+				prompt_export_wav ();
+			}
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == VK_OEM_PLUS || wparam == VK_ADD)) {
 			_lanes[0].strip.zoom_at (1.15f, 0.5f);
 			apply_shared_view (0);
@@ -4335,7 +4379,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 	if (th == TransportHit::Export) {
-		prompt_export_wav ();
+		if (GetKeyState (VK_SHIFT) & 0x8000) {
+			do_export_stems ();
+		} else {
+			prompt_export_wav ();
+		}
 		return true;
 	}
 	if (th == TransportHit::Loop) {
@@ -6282,6 +6330,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+,", L"Preferences" },
 		{ L"Ctrl+Z / Y", L"Undo / Redo" },
 		{ L"Ctrl+S / O / E", L"Save / Open browse / Export" },
+		{ L"Ctrl+Shift+E · Shift+Export", L"Export stems (per-track WAVs)" },
 		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },

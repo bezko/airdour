@@ -2337,7 +2337,8 @@ EngineHost::compute_export_range (int64_t* start_sample, int64_t* end_sample) co
 }
 
 bool
-EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample, int64_t end_sample)
+EngineHost::export_route_index_wav (int track_index, const std::string& outfile,
+                                    int64_t start_sample, int64_t end_sample)
 {
 	_snap.export_ok = false;
 	_snap.export_path.clear ();
@@ -2360,9 +2361,19 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 		}
 	}
 
-	std::shared_ptr<Route> master = _impl->session->master_out ();
-	if (!master || !master->output ()) {
-		_snap.detail = L"export failed — no master out";
+	std::shared_ptr<Route> route;
+	if (track_index < 0) {
+		route = _impl->session->master_out ();
+	} else {
+		collect_tracks ();
+		if (track_index >= (int)_impl->tracks.size () || !_impl->tracks[track_index]) {
+			_snap.detail = L"export failed — bad track";
+			return false;
+		}
+		route = _impl->tracks[track_index];
+	}
+	if (!route || !route->output ()) {
+		_snap.detail = L"export failed — no route out";
 		return false;
 	}
 
@@ -2373,7 +2384,7 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 
 	std::string out = outfile;
 	std::string folder;
-	std::string basename = "airdour_export";
+	std::string basename = (track_index < 0) ? "airdour_export" : "airdour_stem";
 	if (out.empty ()) {
 		folder = _impl->session->session_directory ().export_path ();
 		out = path_join (folder, basename + ".wav");
@@ -2398,7 +2409,8 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 		}
 	}
 
-	std::fprintf (stderr, "airdour_win_shell: export range %lld..%lld → %s\n",
+	std::fprintf (stderr, "airdour_win_shell: export%s range %lld..%lld → %s\n",
+	              (track_index < 0) ? "" : " stem",
 	              (long long)start_sample, (long long)end_sample, out.c_str ());
 	std::fflush (stderr);
 
@@ -2457,15 +2469,15 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 		tsp->set_name (basename);
 		tsp->set_realtime (false);
 
-		IO* master_out = master->output ().get ();
-		for (uint32_t n = 0; n < master_out->n_ports ().n_audio (); ++n) {
+		IO* route_out = route->output ().get ();
+		for (uint32_t n = 0; n < route_out->n_ports ().n_audio (); ++n) {
 			PortExportChannel* channel = new PortExportChannel ();
-			channel->add_port (master_out->audio (n));
+			channel->add_port (route_out->audio (n));
 			ExportChannelPtr chan_ptr (channel);
 			ccp->register_channel (chan_ptr);
 		}
 		if (ccp->get_n_chans () == 0) {
-			_snap.detail = L"export failed — no master channels";
+			_snap.detail = L"export failed — no audio channels";
 			return false;
 		}
 
@@ -2545,6 +2557,129 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 		_snap.detail = L"export unknown failure";
 		return false;
 	}
+}
+
+bool
+EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample, int64_t end_sample)
+{
+	return export_route_index_wav (-1, outfile, start_sample, end_sample);
+}
+
+bool
+EngineHost::export_stems (const std::string& folder_in, int* out_count)
+{
+	if (out_count) {
+		*out_count = 0;
+	}
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"export stems failed — no Session";
+		return false;
+	}
+	collect_tracks ();
+	refresh_region_flags ();
+
+	int64_t start_sample = 0;
+	int64_t end_sample = 0;
+	if (!compute_export_range (&start_sample, &end_sample) || end_sample <= start_sample) {
+		_snap.detail = L"export stems failed — empty range";
+		return false;
+	}
+
+	std::string folder = folder_in;
+	if (folder.empty ()) {
+		folder = path_join (_impl->session->session_directory ().export_path (), "stems");
+	}
+	{
+		std::wstring wfolder = utf8_path_to_wide (folder);
+		if (!wfolder.empty ()) {
+			CreateDirectoryW (wfolder.c_str (), nullptr);
+		}
+	}
+
+	int written = 0;
+	const int n = (int)_impl->tracks.size ();
+	for (int i = 0; i < n && i < EngineSnapshot::kMeters; ++i) {
+		if (!_impl->tracks[i]) {
+			continue;
+		}
+		if (!_snap.track_has_regions[i]) {
+			continue;
+		}
+		/* Sanitize track name for filename. */
+		char name_utf8[96];
+		WideCharToMultiByte (CP_UTF8, 0, _snap.track_name[i], -1, name_utf8,
+		                     (int)sizeof (name_utf8), nullptr, nullptr);
+		std::string safe;
+		for (const char* p = name_utf8; *p; ++p) {
+			char c = *p;
+			if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+			    || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+				safe.push_back (c);
+			} else if (c == ' ') {
+				safe.push_back ('_');
+			}
+		}
+		if (safe.empty ()) {
+			char buf[32];
+			std::snprintf (buf, sizeof (buf), "Audio%d", i + 1);
+			safe = buf;
+		}
+		char fname[128];
+		std::snprintf (fname, sizeof (fname), "stem_%02d_%s.wav", i + 1, safe.c_str ());
+		std::string path = path_join (folder, fname);
+		if (!export_route_index_wav (i, path, start_sample, end_sample)) {
+			std::fprintf (stderr, "airdour_win_shell: stem FAILED track %d\n", i);
+			std::fflush (stderr);
+			continue;
+		}
+		++written;
+	}
+
+	if (out_count) {
+		*out_count = written;
+	}
+	if (written <= 0) {
+		_snap.detail = L"export stems failed — none written";
+		return false;
+	}
+	_snap.detail = L"export stems ok";
+	std::fprintf (stderr, "airdour_win_shell: export stems ok (count=%d) → %s\n",
+	              written, folder.c_str ());
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+EngineHost::smoke_export_stems (int* out_count)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (!import_test_tone (0, 440.f, 1.2f)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-export-stems FAILED (tone0)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!import_test_tone (1, 330.f, 1.0f)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-export-stems FAILED (tone1)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	refresh_region_flags ();
+	int count = 0;
+	std::string folder = path_join (_impl->session->session_directory ().export_path (),
+	                                "stems_smoke");
+	if (!export_stems (folder, &count) || count < 2) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-export-stems FAILED (count=%d)\n", count);
+		std::fflush (stderr);
+		return false;
+	}
+	if (out_count) {
+		*out_count = count;
+	}
+	std::fprintf (stderr, "airdour_win_shell: smoke-export-stems ok (count=%d)\n", count);
+	std::fflush (stderr);
+	return true;
 }
 
 bool
@@ -18592,6 +18727,36 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 	(void)outfile;
 	(void)start_sample;
 	(void)end_sample;
+	return false;
+}
+
+bool
+EngineHost::export_route_index_wav (int track_index, const std::string& outfile,
+                                    int64_t start_sample, int64_t end_sample)
+{
+	(void)track_index;
+	(void)outfile;
+	(void)start_sample;
+	(void)end_sample;
+	return false;
+}
+
+bool
+EngineHost::export_stems (const std::string& folder_in, int* out_count)
+{
+	(void)folder_in;
+	if (out_count) {
+		*out_count = 0;
+	}
+	return false;
+}
+
+bool
+EngineHost::smoke_export_stems (int* out_count)
+{
+	if (out_count) {
+		*out_count = 0;
+	}
 	return false;
 }
 

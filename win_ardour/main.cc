@@ -6,7 +6,8 @@
  * Usage:
  *   airdour_win_shell.exe [--timeout N] [--backend Dummy|WASAPI] [--no-engine]
  *                         [--smoke-import] [--smoke-record] [--smoke-save-load]
- *                         [--smoke-export] [--smoke-undo] [--smoke-loop]
+ *                         [--smoke-export] [--smoke-export-stems]
+ *                         [--smoke-undo] [--smoke-loop]
  *                         [--smoke-midi] [--smoke-midi-edit] [--smoke-midi-quantize]
  *                         [--smoke-midi-transpose] [--smoke-midi-velocity]
  *                         [--smoke-midi-length] [--smoke-midi-clipboard]
@@ -119,6 +120,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_record = parse_flag (argc, argv, L"--smoke-record");
 	bool smoke_save_load = parse_flag (argc, argv, L"--smoke-save-load");
 	bool smoke_export = parse_flag (argc, argv, L"--smoke-export");
+	bool smoke_export_stems = parse_flag (argc, argv, L"--smoke-export-stems");
 	bool smoke_undo = parse_flag (argc, argv, L"--smoke-undo");
 	bool smoke_loop = parse_flag (argc, argv, L"--smoke-loop");
 	bool smoke_midi = parse_flag (argc, argv, L"--smoke-midi");
@@ -207,7 +209,7 @@ wmain (int argc, wchar_t** argv)
 
 	if (!no_engine) {
 		if (shell.attach_engine (backend, timeout, smoke_import, smoke_record,
-		                         smoke_save_load, smoke_export, smoke_undo,
+		                         smoke_save_load, smoke_export, smoke_export_stems, smoke_undo,
 		                         smoke_loop, smoke_midi, smoke_midi_edit,
 		                         smoke_plugin, smoke_perf, session_path, period,
 		                         smoke_vst3, smoke_mute_solo, smoke_pan, smoke_send,

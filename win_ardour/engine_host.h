@@ -502,6 +502,16 @@ public:
 	                         int64_t start_sample = 0,
 	                         int64_t end_sample = 0);
 
+	/**
+	 * Export each audio track's output to a separate WAV under folder
+	 * (default: session export/stems/). Returns count of stems written.
+	 * For Shift+Export / --smoke-export-stems.
+	 */
+	bool export_stems (const std::string& folder = std::string (),
+	                   int* out_count = nullptr);
+	/** Import tones on Audio 1+2, export stems, verify ≥2 WAVs. */
+	bool smoke_export_stems (int* out_count = nullptr);
+
 	/** Convenience: export after ensuring content; for --smoke-export. */
 	bool smoke_export_wav (std::string* out_path = nullptr);
 
@@ -1296,6 +1306,11 @@ private:
 	void collect_tracks ();
 	void update_session_path_snap ();
 	bool compute_export_range (int64_t* start_sample, int64_t* end_sample) const;
+	/** Bounce route outs to WAV. track_index −1 = master_out. */
+	bool export_route_index_wav (int track_index,
+	                             const std::string& outfile,
+	                             int64_t start_sample,
+	                             int64_t end_sample);
 	bool configure_backend_midi ();
 	void refresh_midi_notes_snap ();
 	void rebuild_arp_pitches ();

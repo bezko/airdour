@@ -72,6 +72,7 @@ public:
 	                    bool smoke_record = false,
 	                    bool smoke_save_load = false,
 	                    bool smoke_export = false,
+	                    bool smoke_export_stems = false,
 	                    bool smoke_undo = false,
 	                    bool smoke_loop = false,
 	                    bool smoke_midi = false,
@@ -221,6 +222,7 @@ private:
 	void maybe_show_recovery_prompt ();
 	void apply_recovery_hit (RecoveryHit hit);
 	void prompt_export_wav ();
+	void do_export_stems ();
 	void do_undo ();
 	void do_redo ();
 	void do_undo_to_index (int index);
