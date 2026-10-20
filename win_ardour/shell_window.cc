@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_export_selection)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -320,7 +321,22 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			std::fprintf (stderr, "airdour_win_shell: smoke-export ok → %s\n", exported.c_str ());
 		} else {
 			std::fprintf (stderr, "airdour_win_shell: smoke-export FAILED\n");
+			_smoke_failed = true;
 		}
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_export_selection && _engine.snapshot ().session_ok) {
+		std::string exported;
+		if (!_engine.smoke_export_selection (&exported)) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_export_selection) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-export-selection FAILED (no session)\n");
+		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
@@ -1542,6 +1558,77 @@ ShellWindow::prompt_export_wav ()
 		std::fprintf (stderr, "airdour_win_shell: export dialog ok\n");
 	} else {
 		std::fprintf (stderr, "airdour_win_shell: export dialog failed\n");
+	}
+	std::fflush (stderr);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_export_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		std::fprintf (stderr, "airdour_win_shell: export selection — no selection\n");
+		std::fflush (stderr);
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	if (_engine.export_selection_wav ()) {
+		std::fprintf (stderr, "airdour_win_shell: export selection ok\n");
+	} else {
+		std::fprintf (stderr, "airdour_win_shell: export selection failed\n");
+	}
+	std::fflush (stderr);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::prompt_export_selection_wav ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		std::fprintf (stderr, "airdour_win_shell: export selection — select a region first\n");
+		std::fflush (stderr);
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+
+	wchar_t path[MAX_PATH] = L"airdour_export_selection.wav";
+	OPENFILENAMEW ofn = {};
+	ofn.lStructSize = sizeof (ofn);
+	ofn.hwndOwner = _hwnd;
+	ofn.lpstrFilter = L"WAV audio (*.wav)\0*.wav\0All files (*.*)\0*.*\0";
+	ofn.lpstrFile = path;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+	ofn.lpstrTitle = L"Airdour — export selection WAV";
+	ofn.lpstrDefExt = L"wav";
+	if (!GetSaveFileNameW (&ofn)) {
+		return;
+	}
+
+	char utf8[MAX_PATH * 4];
+	WideCharToMultiByte (CP_UTF8, 0, path, -1, utf8, sizeof (utf8), nullptr, nullptr);
+	if (_engine.export_selection_wav (utf8)) {
+		std::fprintf (stderr, "airdour_win_shell: export selection dialog ok\n");
+	} else {
+		std::fprintf (stderr, "airdour_win_shell: export selection dialog failed\n");
 	}
 	std::fflush (stderr);
 	_engine.poll ();
@@ -3749,6 +3836,10 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'O' || wparam == 'o')
 		           && !(GetKeyState (VK_SHIFT) & 0x8000)) {
 			prompt_open_session (); /* Ctrl+O browse; Ctrl+Shift+O = recent menu */
+		} else if ((GetKeyState (VK_MENU) & 0x8000) && (wparam == 'E' || wparam == 'e')
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)) {
+			/* Alt+E = export selection (Ctrl+E remains full-session export). */
+			prompt_export_selection_wav ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')) {
 			prompt_export_wav ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == VK_OEM_PLUS || wparam == VK_ADD)) {
@@ -4335,7 +4426,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 	if (th == TransportHit::Export) {
-		prompt_export_wav ();
+		if ((GetKeyState (VK_SHIFT) & 0x8000) && _engine_snap.has_selection) {
+			prompt_export_selection_wav ();
+		} else {
+			prompt_export_wav ();
+		}
 		return true;
 	}
 	if (th == TransportHit::Loop) {
@@ -6282,6 +6377,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+,", L"Preferences" },
 		{ L"Ctrl+Z / Y", L"Undo / Redo" },
 		{ L"Ctrl+S / O / E", L"Save / Open browse / Export" },
+		{ L"Alt+E / Shift+Export", L"Export selection time range" },
 		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },

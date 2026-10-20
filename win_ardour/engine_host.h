@@ -502,8 +502,16 @@ public:
 	                         int64_t start_sample = 0,
 	                         int64_t end_sample = 0);
 
+	/**
+	 * Bounce master over the current region selection time range.
+	 * For Alt+E / Shift+Export / --smoke-export-selection.
+	 */
+	bool export_selection_wav (const std::string& outfile = std::string ());
+
 	/** Convenience: export after ensuring content; for --smoke-export. */
 	bool smoke_export_wav (std::string* out_path = nullptr);
+	/** Import → select → export selection range; verify WAV. */
+	bool smoke_export_selection (std::string* out_path = nullptr);
 
 	/** Session history undo/redo (Ctrl+Z / Ctrl+Y). */
 	bool undo (uint32_t n = 1);

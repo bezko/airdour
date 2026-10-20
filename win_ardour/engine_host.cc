@@ -2548,6 +2548,51 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 }
 
 bool
+EngineHost::export_selection_wav (const std::string& outfile)
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"export selection — no Session";
+		return false;
+	}
+	refresh_selection_snap ();
+	if (!_snap.has_selection
+	    || _snap.selection_end_sec <= _snap.selection_start_sec) {
+		_snap.detail = L"export selection — select a region";
+		return false;
+	}
+	samplecnt_t sr = _impl->session->sample_rate ();
+	if (sr <= 0 && _impl->engine) {
+		sr = (samplecnt_t)_impl->engine->sample_rate ();
+	}
+	if (sr <= 0) {
+		sr = 48000;
+	}
+	int64_t start = (int64_t)std::llround ((double)_snap.selection_start_sec * (double)sr);
+	int64_t end = (int64_t)std::llround ((double)_snap.selection_end_sec * (double)sr);
+	if (end <= start) {
+		_snap.detail = L"export selection — empty range";
+		return false;
+	}
+
+	std::string path = outfile;
+	if (path.empty ()) {
+		std::string folder = _impl->session->session_directory ().export_path ();
+		path = path_join (folder, "airdour_export_selection.wav");
+	}
+
+	std::fprintf (stderr,
+	              "airdour_win_shell: export selection [%.3f–%.3f]s → %s\n",
+	              _snap.selection_start_sec, _snap.selection_end_sec, path.c_str ());
+	std::fflush (stderr);
+
+	if (!export_session_wav (path, start, end)) {
+		return false;
+	}
+	_snap.detail = L"export selection ok";
+	return true;
+}
+
+bool
 EngineHost::smoke_export_wav (std::string* out_path)
 {
 	if (!_impl || !_impl->session) {
@@ -2568,6 +2613,79 @@ EngineHost::smoke_export_wav (std::string* out_path)
 		*out_path = _last_export_path;
 	}
 	return true;
+}
+
+bool
+EngineHost::smoke_export_selection (std::string* out_path)
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-export-selection failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-export-selection FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 1.5f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-export-selection FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.3f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-export-selection FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float len = _snap.selection_end_sec - _snap.selection_start_sec;
+		if (len < 0.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-export-selection FAILED (len=%.3f)\n",
+			              len);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::string folder = _impl->session->session_directory ().export_path ();
+		std::string path = path_join (folder, "airdour_smoke_export_selection.wav");
+		if (!export_selection_wav (path) || !_snap.export_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-export-selection FAILED (export)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::wstring wpath = utf8_path_to_wide (_last_export_path.empty () ? path : _last_export_path);
+		WIN32_FILE_ATTRIBUTE_DATA fad = {};
+		if (!GetFileAttributesExW (wpath.c_str (), GetFileExInfoStandard, &fad)
+		    || fad.nFileSizeLow < 256) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-export-selection FAILED (file missing/small)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-export-selection ok (%.3fs → %u bytes)\n",
+		              len, (unsigned)fad.nFileSizeLow);
+		std::fflush (stderr);
+		if (out_path) {
+			*out_path = _last_export_path;
+		}
+		_snap.detail = L"smoke-export-selection ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-export-selection exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 std::string
@@ -18596,7 +18714,21 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 }
 
 bool
+EngineHost::export_selection_wav (const std::string& outfile)
+{
+	(void)outfile;
+	return false;
+}
+
+bool
 EngineHost::smoke_export_wav (std::string* out_path)
+{
+	(void)out_path;
+	return false;
+}
+
+bool
+EngineHost::smoke_export_selection (std::string* out_path)
 {
 	(void)out_path;
 	return false;

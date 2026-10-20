@@ -127,7 +127,8 @@ public:
 	                    bool smoke_midi_scale = false,
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
-	                    bool smoke_midi_pressure = false);
+	                    bool smoke_midi_pressure = false,
+	                    bool smoke_export_selection = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -221,6 +222,8 @@ private:
 	void maybe_show_recovery_prompt ();
 	void apply_recovery_hit (RecoveryHit hit);
 	void prompt_export_wav ();
+	void prompt_export_selection_wav ();
+	void do_export_selection ();
 	void do_undo ();
 	void do_redo ();
 	void do_undo_to_index (int index);
