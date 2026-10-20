@@ -363,6 +363,13 @@ public:
 	/** Pan azimuth 0=L … 0.5=C … 1=R via Route::pan_azimuth_control. */
 	bool  set_track_pan (int track, float pan_0_1);
 	float track_pan (int track) const;
+	/**
+	 * Center every audio track pan (0.5, NoGroup).
+	 * For Alt+click pan / --smoke-pan-reset-all.
+	 */
+	bool reset_all_pans ();
+	/** Pan L/R then reset_all → verify center. For --smoke-pan-reset-all. */
+	bool smoke_pan_reset_all ();
 
 	/** Pan L → C → R on Audio 1. For --smoke-pan. */
 	bool smoke_pan ();
