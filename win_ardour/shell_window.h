@@ -127,7 +127,8 @@ public:
 	                    bool smoke_midi_scale = false,
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
-	                    bool smoke_midi_pressure = false);
+	                    bool smoke_midi_pressure = false,
+	                    bool smoke_region_rename = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -272,6 +273,7 @@ private:
 	void do_move_audio_track (int delta);
 	void prompt_rename_track (int audio_index, bool midi);
 	void do_rename_focused_track ();
+	void prompt_rename_selected_region ();
 	void do_toggle_group_pick (int audio_index);
 	void do_apply_or_clear_group ();
 	void do_toggle_monitor_dim ();

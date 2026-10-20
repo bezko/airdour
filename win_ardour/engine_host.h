@@ -60,6 +60,8 @@ struct EngineSnapshot {
 	float        selection_end_sec;
 	float        selection_fade_in_sec; /* AudioRegion fade-in length */
 	float        selection_fade_out_sec;
+	static constexpr int kRegionNameLen = 32;
+	wchar_t      selection_region_name[kRegionNameLen]; /* selected Region::name */
 	bool         loop_active; /* auto-loop Location exists with positive length */
 	bool         loop_playing; /* Session get_play_loop() */
 	float        loop_start_sec;
@@ -528,6 +530,14 @@ public:
 	bool split_at (float time_sec, int track = -1);
 	/** Split at current transport playhead. */
 	bool split_at_playhead (int track = -1);
+
+	/**
+	 * Rename selected Region (Region::set_name). Empty name rejected.
+	 * For Shift+F2 / --smoke-region-rename.
+	 */
+	bool set_selected_region_name (const std::string& name);
+	/** Import → select → rename → verify. For --smoke-region-rename. */
+	bool smoke_region_rename ();
 
 	/** Set fade-in/out length (seconds) on selected AudioRegion; activates fades. */
 	bool set_selected_fade_in_sec (float sec);

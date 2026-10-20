@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_region_rename)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -487,6 +488,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		/* Always scaffold a MIDI track + empty region so the piano-roll is live. */
 		_engine.ensure_midi_track ();
 		_engine.ensure_midi_region ();
+	}
+
+	if (ok && smoke_region_rename && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_region_rename ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_region_rename) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-rename FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
 	}
 
 	if (ok && smoke_plugin && _engine.snapshot ().session_ok) {
@@ -2386,6 +2400,34 @@ ShellWindow::do_rename_focused_track ()
 }
 
 void
+ShellWindow::prompt_rename_selected_region ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok
+	    || !_engine_snap.has_selection) {
+		return;
+	}
+	wchar_t name[EngineSnapshot::kRegionNameLen];
+	if (_engine_snap.selection_region_name[0]) {
+		wcsncpy_s (name, _engine_snap.selection_region_name, _TRUNCATE);
+	} else {
+		wcsncpy_s (name, L"Region", _TRUNCATE);
+	}
+	if (!run_rename_dialog (_hwnd, name, EngineSnapshot::kRegionNameLen)) {
+		return;
+	}
+	char utf8[128];
+	WideCharToMultiByte (CP_UTF8, 0, name, -1, utf8, sizeof (utf8), nullptr, nullptr);
+	if (!_engine.set_selected_region_name (utf8)) {
+		MessageBoxW (_hwnd, L"Could not rename region (empty name or no selection).",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	apply_region_selection_to_lanes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_toggle_group_pick (int audio_index)
 {
 	if (audio_index < 0 || audio_index >= kTracksMax || audio_index >= n_audio_lanes ()) {
@@ -3762,7 +3804,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			refresh_editor_view_after_nav ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		} else if (wparam == VK_F2) {
-			do_rename_focused_track ();
+			if ((GetKeyState (VK_SHIFT) & 0x8000)
+			    && _engine_snap.has_selection) {
+				prompt_rename_selected_region ();
+			} else {
+				do_rename_focused_track ();
+			}
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_UP) {
 			do_move_audio_track (-1);
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_DOWN) {
@@ -6314,6 +6361,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
 		{ L"F2", L"Rename focused track" },
+		{ L"Shift+F2", L"Rename selected region" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"U", L"Apply / clear track group" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },

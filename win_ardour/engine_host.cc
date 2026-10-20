@@ -673,6 +673,7 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_region_name[0] = L'\0';
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -1968,6 +1969,7 @@ EngineHost::destroy_session ()
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
 	_snap.selection_end_sec = 0.f;
+	_snap.selection_region_name[0] = L'\0';
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -4897,6 +4899,7 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_region_name[0] = L'\0';
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -4925,6 +4928,8 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_track = _impl->selected_track;
 	_snap.selection_start_sec = (float)start / (float)sr;
 	_snap.selection_end_sec = (float)(start + len) / (float)sr;
+	copy_name_to_snap (_snap.selection_region_name, EngineSnapshot::kRegionNameLen,
+	                   region->name ());
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (ar) {
 		_snap.selection_fade_in_sec = (float)ar->fade_in_length ().samples () / (float)sr;
@@ -5081,6 +5086,110 @@ EngineHost::clear_region_selection ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_region_name[0] = L'\0';
+}
+
+bool
+EngineHost::set_selected_region_name (const std::string& name)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (name.empty ()) {
+		_snap.detail = L"region rename — empty name";
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"region rename — no selection";
+		return false;
+	}
+	try {
+		if (region->name () == name) {
+			refresh_selection_snap ();
+			_snap.detail = L"region name unchanged";
+			return true;
+		}
+		_impl->session->begin_reversible_command ("rename region");
+		region->clear_changes ();
+		if (!region->set_name (name)) {
+			_impl->session->abort_reversible_command ();
+			_snap.detail = L"region rename failed";
+			return false;
+		}
+		_impl->session->add_command (new StatefulDiffCommand (region));
+		_impl->session->commit_reversible_command ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+		std::fprintf (stderr, "airdour_win_shell: region rename → %s\n", name.c_str ());
+		std::fflush (stderr);
+		_snap.detail = L"region renamed";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: region rename exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"region rename exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"region rename failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_region_rename ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-region-rename failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-rename FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!import_test_tone (0, 330.f, 1.2f) || !_snap.track_has_regions[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-rename FAILED (import)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f) || !_snap.has_selection) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-rename FAILED (select)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const std::string before = wide_to_utf8 (_snap.selection_region_name);
+		if (!set_selected_region_name ("SmokeClip")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-rename FAILED (rename)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const std::string after = wide_to_utf8 (_snap.selection_region_name);
+		if (after != "SmokeClip") {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-rename FAILED (name=%s)\n",
+			              after.c_str ());
+			std::fflush (stderr);
+			return false;
+		}
+		if (!before.empty () && !set_selected_region_name (before)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-rename FAILED (restore)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-rename ok (%s → SmokeClip)\n",
+		              before.empty () ? "?" : before.c_str ());
+		std::fflush (stderr);
+		_snap.detail = L"smoke-region-rename ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-rename exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 bool
@@ -18640,6 +18749,19 @@ EngineHost::select_region_at (int track, float time_sec)
 void
 EngineHost::clear_region_selection ()
 {
+}
+
+bool
+EngineHost::set_selected_region_name (const std::string& name)
+{
+	(void)name;
+	return false;
+}
+
+bool
+EngineHost::smoke_region_rename ()
+{
+	return false;
 }
 
 bool
