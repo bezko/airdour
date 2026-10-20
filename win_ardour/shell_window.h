@@ -127,7 +127,8 @@ public:
 	                    bool smoke_midi_scale = false,
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
-	                    bool smoke_midi_pressure = false);
+	                    bool smoke_midi_pressure = false,
+	                    bool smoke_locate_selection = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -302,6 +303,8 @@ private:
 	void fit_shared_range (float start_sec, float end_sec);
 	void do_fit_session ();
 	void do_fit_selection ();
+	void do_locate_selection_start ();
+	void do_locate_selection_end ();
 	void do_fit_all_regions ();
 	void do_scroll_editor (float delta_widths);
 	void refresh_editor_view_after_nav ();
