@@ -59,7 +59,7 @@ public:
 	bool  hit_send (float x, float y) const;
 	bool  drag_send_to (float x);
 
-	/** MIDI strip: hide rec-arm / FX / pan / send chrome; keep M/S + fader + meter. */
+	/** MIDI strip: hide FX / pan / send chrome; keep Arm + M/S + fader + meter. */
 	void set_midi_strip (bool midi) { _midi_strip = midi; }
 	bool is_midi_strip () const { return _midi_strip; }
 

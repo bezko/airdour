@@ -180,6 +180,7 @@ struct EngineSnapshot {
 	bool         aux_bus_ok; /* Session Aux audio bus exists */
 	bool         midi_muted;
 	bool         midi_soloed;
+	bool         midi_armed; /* MidiTrack rec_enable_control */
 	bool         snap_enabled; /* Editor snap-to-grid */
 	bool         midi_step_enabled; /* Step-record: keys/click place at playhead */
 	int          midi_chord_quality; /* 0=off 1=maj (R+4+7) 2=min (R+3+7) */
@@ -354,6 +355,12 @@ public:
 	bool toggle_midi_muted ();
 	bool set_midi_soloed (bool soloed);
 	bool toggle_midi_soloed ();
+
+	/** MIDI track rec-enable (Arm on MIDI mixer strip). */
+	bool set_midi_armed (bool armed);
+	bool toggle_midi_armed ();
+	/** Off → on → off. For --smoke-midi-arm. */
+	bool smoke_midi_arm ();
 
 	/**
 	 * Mute/solo Audio 1 + MIDI round-trip; clear. For --smoke-mute-solo.

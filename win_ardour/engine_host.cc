@@ -633,6 +633,7 @@ EngineHost::EngineHost ()
 	}
 	_snap.aux_bus_ok = false;
 	_snap.midi_muted = false;
+	_snap.midi_armed = false;
 	_snap.midi_soloed = false;
 	_snap.snap_enabled = false;
 	_snap.midi_step_enabled = false;
@@ -3076,6 +3077,7 @@ EngineHost::refresh_record_flags ()
 {
 	_snap.session_record_armed = false;
 	_snap.session_recording = false;
+	_snap.midi_armed = false;
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_armed[i] = false;
 	}
@@ -3091,6 +3093,10 @@ EngineHost::refresh_record_flags ()
 				_snap.track_armed[i] =
 					_impl->tracks[i]->rec_enable_control ()->get_value () >= 0.5;
 			}
+		}
+		if (_impl->midi_track && _impl->midi_track->rec_enable_control ()) {
+			_snap.midi_armed =
+				_impl->midi_track->rec_enable_control ()->get_value () >= 0.5;
 		}
 	} catch (...) {
 	}
@@ -3305,6 +3311,87 @@ EngineHost::toggle_midi_soloed ()
 {
 	refresh_mute_solo_flags ();
 	return set_midi_soloed (!_snap.midi_soloed);
+}
+
+bool
+EngineHost::set_midi_armed (bool armed)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	ensure_midi_track ();
+	if (!_impl->midi_track || !_impl->midi_track->rec_enable_control ()) {
+		return false;
+	}
+	try {
+		_impl->midi_track->rec_enable_control ()->set_value (
+			armed ? 1.0 : 0.0, Controllable::NoGroup);
+		wait_until ([&] () {
+			refresh_record_flags ();
+			return _snap.midi_armed == armed;
+		}, 400);
+		refresh_record_flags ();
+		std::fprintf (stderr, "airdour_win_shell: MIDI armed=%d\n", armed ? 1 : 0);
+		std::fflush (stderr);
+		_snap.detail = armed ? L"MIDI armed" : L"MIDI disarmed";
+		return _snap.midi_armed == armed;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: midi-arm: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_midi_armed ()
+{
+	refresh_record_flags ();
+	return set_midi_armed (!_snap.midi_armed);
+}
+
+bool
+EngineHost::smoke_midi_arm ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-midi-arm failed — no Session";
+		return false;
+	}
+	try {
+		ensure_midi_track ();
+		if (!_impl->midi_track || !_impl->midi_track->rec_enable_control ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-arm FAILED (no MIDI)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_midi_armed (false) || _snap.midi_armed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-arm FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_midi_armed (true) || !_snap.midi_armed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-arm FAILED (arm)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_midi_armed (false) || _snap.midi_armed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-arm FAILED (disarm)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-arm ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-arm ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-arm exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 void
@@ -18197,6 +18284,25 @@ EngineHost::set_midi_soloed (bool soloed)
 
 bool
 EngineHost::toggle_midi_soloed ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_midi_armed (bool armed)
+{
+	(void)armed;
+	return false;
+}
+
+bool
+EngineHost::toggle_midi_armed ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_arm ()
 {
 	return false;
 }

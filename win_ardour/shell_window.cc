@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_midi_arm)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -621,6 +622,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_mute_solo) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_midi_arm && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_arm ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_arm_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_arm) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-arm FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1192,7 +1206,7 @@ ShellWindow::sync_mixer_arm_from_engine ()
 		_mixers[i].set_armed (_engine_snap.track_armed[i]);
 	}
 	if (mi >= 0 && mi < kMixerStripsMax) {
-		_mixers[mi].set_armed (false);
+		_mixers[mi].set_armed (_engine_snap.midi_armed);
 	}
 	_transport.set_record_armed (_engine_snap.session_record_armed);
 }
@@ -4006,8 +4020,8 @@ ShellWindow::hit_editor_lane (float x, float y) const
 int
 ShellWindow::hit_mixer_arm (float x, float y) const
 {
-	const int na = n_audio_lanes ();
-	for (int i = 0; i < na; ++i) {
+	const int n = n_mixer_strips ();
+	for (int i = 0; i < n; ++i) {
 		if (_mixers[i].hit_arm (x, y)) {
 			return i;
 		}
@@ -4725,6 +4739,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		if (_engine.is_linked ()) {
 			if (!_engine.start ()) {
 				_engine_snap = _engine.snapshot ();
+			} else if (arm == midi_mixer_index ()) {
+				_engine.toggle_midi_armed ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_arm_from_engine ();
 			} else {
 				_engine.toggle_track_armed (arm);
 				_engine.poll ();
@@ -6292,6 +6311,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"B", L"Consolidate / bounce selection in place" },
 		{ L"Z", L"Freeze / unfreeze focused audio track" },
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
+		{ L"MIDI Arm", L"Rec-enable MIDI strip (R · arm)" },
 		{ L"Q / Qnt", L"Quantize MIDI notes to snap grid" },
 		{ L". / ,  Shift", L"MIDI transpose ±1 · ±12 (T+/T−)" },
 		{ L"↑ / ↓  Shift", L"MIDI velocity ±1 · ±8 (V+/V−)" },
