@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_group_color)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -864,6 +865,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_group_color && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_group_color ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_group_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_group_color) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-color FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_monitor && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_monitor ()) {
 			_smoke_failed = true;
@@ -1172,6 +1186,11 @@ ShellWindow::sync_mixer_group_from_engine ()
 		bool in = (i < na && i < EngineSnapshot::kMeters && _engine_snap.track_in_group[i]);
 		_mixers[i].set_in_group (in);
 		_mixers[i].set_group_picked (_group_pick[i]);
+		uint32_t rgba = 0;
+		if (in && _engine_snap.group_shares_color) {
+			rgba = _engine_snap.group_rgba;
+		}
+		_mixers[i].set_group_rgba (rgba);
 	}
 	_transport.set_group_active (_engine_snap.group_member_count >= 2
 	                             && _engine_snap.group_active);
@@ -2493,6 +2512,22 @@ ShellWindow::do_apply_or_clear_group ()
 	sync_mixer_group_from_engine ();
 	sync_mixer_gains_from_engine ();
 	sync_mixer_mute_solo_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_cycle_group_color ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (_engine_snap.group_member_count < 2) {
+		return;
+	}
+	_engine.cycle_route_group_color ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_group_from_engine ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
@@ -3827,6 +3862,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				layout_panes ();
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'C' || wparam == 'c')) {
+			/* Alt+Shift+C — cycle RouteGroup color palette. */
+			do_cycle_group_color ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'U' || wparam == 'u')) {
 			do_apply_or_clear_group ();
 		}
@@ -6316,6 +6357,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"U", L"Apply / clear track group" },
+		{ L"Alt+Shift+C", L"Cycle track group color (G bar)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },

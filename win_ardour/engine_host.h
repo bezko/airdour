@@ -209,6 +209,8 @@ struct EngineSnapshot {
 	bool         group_shares_mute;
 	bool         group_shares_solo;
 	bool         group_shares_gain;
+	bool         group_shares_color;
+	uint32_t     group_rgba; /* RouteGroup color RRGGBBAA when shares color */
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
 	bool         monitor_ok; /* Session monitor_out + MonitorProcessor */
@@ -831,19 +833,24 @@ public:
 
 	/**
 	 * Create/replace the shell Session RouteGroup ("Group 1") from audio
-	 * indices (≥2). Shares mute + solo + gain when active. Honest scope:
-	 * one group, no VCA/subgroup/recenable.
+	 * indices (≥2). Shares mute + solo + gain + color when active.
+	 * Honest scope: one group, no VCA/subgroup.
 	 */
 	bool create_route_group (const int* indices, int n);
 	/** Remove shell RouteGroup members (and drop empty group). */
 	bool clear_route_group ();
 	bool set_route_group_active (bool enable);
 	bool toggle_route_group_active ();
+	/** Group color (RRGGBBAA). Alt+Shift+C / --smoke-group-color. */
+	bool set_route_group_rgba (uint32_t rgba);
+	bool cycle_route_group_color ();
 
 	/**
 	 * Group Audio 0+1; mute/solo/gain propagate; clear. For --smoke-group.
 	 */
 	bool smoke_group ();
+	/** Create group; cycle palette; restore. For --smoke-group-color. */
+	bool smoke_group_color ();
 
 	/**
 	 * Ensure Session monitor bus + MonitorProcessor (add_monitor_section).

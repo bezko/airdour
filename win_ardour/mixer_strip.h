@@ -13,6 +13,8 @@
 #define NOMINMAX
 #endif
 
+#include <cstdint>
+
 #include <windows.h>
 #include <d2d1.h>
 #include <dwrite.h>
@@ -68,6 +70,9 @@ public:
 	bool in_group () const { return _in_group; }
 	void set_group_picked (bool picked) { _group_picked = picked; }
 	bool group_picked () const { return _group_picked; }
+	/** Group color RRGGBBAA when RouteGroup shares color (0 = use accent). */
+	void set_group_rgba (uint32_t rgba) { _group_rgba = rgba; }
+	uint32_t group_rgba () const { return _group_rgba; }
 
 	/** True when strip has a non-empty FX label (insert/bypass is live). */
 	bool has_fx () const { return _fx_label[0] != L'\0'; }
@@ -143,4 +148,5 @@ private:
 	bool        _midi_strip;
 	bool        _in_group;
 	bool        _group_picked;
+	uint32_t    _group_rgba;
 };
