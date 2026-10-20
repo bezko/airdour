@@ -106,6 +106,7 @@ public:
 	                    bool smoke_normalize = false,
 	                    bool smoke_region_envelope = false,
 	                    bool smoke_region_envelope_nudge = false,
+	                    bool smoke_region_envelope_drag = false,
 	                    bool smoke_strip_silence = false,
 	                    bool smoke_consolidate = false,
 	                    bool smoke_freeze = false,
@@ -149,6 +150,7 @@ private:
 		MidiCcWrite, /* click/drag MIDI CC7 automation lane */
 		FadeIn, /* drag selection fade-in handle */
 		FadeOut, /* drag selection fade-out handle */
+		EnvelopeMid, /* drag selected region envelope mid gain */
 		TrimFront, /* drag selected region left edge */
 		TrimEnd, /* drag selected region right edge */
 		RegionMovePending, /* click on selection body; may become move */
@@ -236,6 +238,9 @@ private:
 	void do_normalize_selection (float target_dbfs = -1.f);
 	void do_ensure_region_envelope ();
 	void do_nudge_region_envelope_mid (float delta_coeff);
+	void do_set_region_envelope_mid (float coeff_0_1);
+	bool hit_region_envelope_mid (float x, float y, int* out_lane) const;
+	bool envelope_mid_from_y (int lane, float y, float* out_coeff) const;
 	void do_strip_silence_selection ();
 	void do_consolidate_selection ();
 	void do_toggle_freeze_track ();

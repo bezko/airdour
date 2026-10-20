@@ -588,6 +588,13 @@ public:
 	 * Ensures envelope first. Ctrl+Alt+↑/↓. For --smoke-region-envelope-nudge.
 	 */
 	bool nudge_selected_region_envelope_mid (float delta_coeff);
+	/**
+	 * Absolute mid-point gain coeff (0.02..1). Ensures envelope first.
+	 * Shared by drag + --smoke-region-envelope-drag.
+	 */
+	bool set_selected_region_envelope_mid (float coeff_0_1);
+	/** Eval mid gain coeff on selected region envelope (or −1 if unavailable). */
+	float selected_region_envelope_mid () const;
 
 	/**
 	 * Strip silence from selected AudioRegion (find_silence + StripSilence Filter).
@@ -697,6 +704,12 @@ public:
 	 * For --smoke-region-envelope-nudge.
 	 */
 	bool smoke_region_envelope_nudge ();
+
+	/**
+	 * Ensure → set mid 0.70 → assert → set mid 0.35 restore.
+	 * For --smoke-region-envelope-drag.
+	 */
+	bool smoke_region_envelope_drag ();
 
 	/**
 	 * Import gated tone (silence gaps) → strip silence → ≥2 regions.

@@ -6096,8 +6096,32 @@ EngineHost::fill_selected_region_envelope_curve (float* y_0_1, size_t n)
 	}
 }
 
+float
+EngineHost::selected_region_envelope_mid () const
+{
+	if (!_impl || !_impl->session) {
+		return -1.f;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (!ar || !ar->envelope_active () || !ar->envelope () || ar->envelope ()->size () < 3) {
+		return -1.f;
+	}
+	try {
+		samplecnt_t len = ar->length_samples ();
+		if (len < 3) {
+			return -1.f;
+		}
+		samplecnt_t mid = len / 2;
+		float v = (float)ar->envelope ()->eval (timepos_t ((samplepos_t)mid));
+		return std::max (0.f, std::min (1.f, v));
+	} catch (...) {
+		return -1.f;
+	}
+}
+
 bool
-EngineHost::nudge_selected_region_envelope_mid (float delta_coeff)
+EngineHost::set_selected_region_envelope_mid (float coeff_0_1)
 {
 	if (!_impl || !_impl->session) {
 		return false;
@@ -6105,7 +6129,7 @@ EngineHost::nudge_selected_region_envelope_mid (float delta_coeff)
 	std::shared_ptr<Region> region = _impl->selected_region.lock ();
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (!ar) {
-		_snap.detail = L"envelope nudge — select an audio region";
+		_snap.detail = L"envelope mid — select an audio region";
 		return false;
 	}
 	if (!ar->envelope_active () || !ar->envelope () || ar->envelope ()->size () < 3) {
@@ -6121,13 +6145,12 @@ EngineHost::nudge_selected_region_envelope_mid (float delta_coeff)
 		std::shared_ptr<AutomationList> env = ar->envelope ();
 		samplecnt_t len = ar->length_samples ();
 		if (len < 3) {
-			_snap.detail = L"envelope nudge — region too short";
+			_snap.detail = L"envelope mid — region too short";
 			return false;
 		}
 		samplecnt_t mid = len / 2;
-		float cur = (float)env->eval (timepos_t ((samplepos_t)mid));
-		float nv = std::max (0.02f, std::min (1.f, cur + delta_coeff));
-		_impl->session->begin_reversible_command ("envelope nudge");
+		float nv = std::max (0.02f, std::min (1.f, coeff_0_1));
+		_impl->session->begin_reversible_command ("envelope mid");
 		ar->clear_changes ();
 		env->freeze ();
 		env->add (timepos_t ((samplepos_t)mid), (double)nv, true, true);
@@ -6136,18 +6159,35 @@ EngineHost::nudge_selected_region_envelope_mid (float delta_coeff)
 		_impl->session->commit_reversible_command ();
 		refresh_selection_snap ();
 		refresh_history_flags ();
-		_snap.detail = L"envelope mid nudged";
+		_snap.detail = L"envelope mid set";
 		float got = (float)env->eval (timepos_t ((samplepos_t)mid));
 		return std::fabs (got - nv) < 0.05f;
 	} catch (std::exception& e) {
-		std::fprintf (stderr, "airdour_win_shell: envelope nudge exception: %s\n", e.what ());
+		std::fprintf (stderr, "airdour_win_shell: envelope mid exception: %s\n", e.what ());
 		std::fflush (stderr);
-		_snap.detail = L"envelope nudge exception";
+		_snap.detail = L"envelope mid exception";
 		return false;
 	} catch (...) {
-		_snap.detail = L"envelope nudge failed";
+		_snap.detail = L"envelope mid failed";
 		return false;
 	}
+}
+
+bool
+EngineHost::nudge_selected_region_envelope_mid (float delta_coeff)
+{
+	float cur = selected_region_envelope_mid ();
+	if (cur < 0.f) {
+		if (!ensure_selected_region_envelope ()) {
+			return false;
+		}
+		cur = selected_region_envelope_mid ();
+		if (cur < 0.f) {
+			_snap.detail = L"envelope nudge — select an audio region";
+			return false;
+		}
+	}
+	return set_selected_region_envelope_mid (cur + delta_coeff);
 }
 
 bool
@@ -7465,6 +7505,91 @@ EngineHost::smoke_region_envelope_nudge ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope-nudge exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_region_envelope_drag ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-region-envelope-drag failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope-drag FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 0.8f) || !select_region_at (0, 0.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope-drag FAILED (import/select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!ensure_selected_region_envelope ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope-drag FAILED (ensure)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float mid0 = selected_region_envelope_mid ();
+		if (mid0 < 0.25f || mid0 > 0.45f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-envelope-drag FAILED (ensure mid=%.3f)\n",
+			              mid0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!set_selected_region_envelope_mid (0.70f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope-drag FAILED (set 0.70)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float mid1 = selected_region_envelope_mid ();
+		if (mid1 < 0.60f || mid1 > 0.80f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-envelope-drag FAILED (0.70 got=%.3f)\n",
+			              mid1);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!set_selected_region_envelope_mid (0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope-drag FAILED (restore 0.35)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float mid2 = selected_region_envelope_mid ();
+		if (mid2 < 0.25f || mid2 > 0.45f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-envelope-drag FAILED (restore got=%.3f)\n",
+			              mid2);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-region-envelope-drag ok (%.2f→%.2f→%.2f)\n",
+		              mid0, mid1, mid2);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-region-envelope-drag ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope-drag exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -19063,10 +19188,29 @@ EngineHost::fill_selected_region_envelope_curve (float* y_0_1, size_t n)
 	return false;
 }
 
+float
+EngineHost::selected_region_envelope_mid () const
+{
+	return -1.f;
+}
+
+bool
+EngineHost::set_selected_region_envelope_mid (float coeff_0_1)
+{
+	(void)coeff_0_1;
+	return false;
+}
+
 bool
 EngineHost::nudge_selected_region_envelope_mid (float delta_coeff)
 {
 	(void)delta_coeff;
+	return false;
+}
+
+bool
+EngineHost::smoke_region_envelope_drag ()
+{
 	return false;
 }
 

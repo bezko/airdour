@@ -239,6 +239,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_normalize,
                             bool smoke_region_envelope,
                             bool smoke_region_envelope_nudge,
+                            bool smoke_region_envelope_drag,
                             bool smoke_strip_silence,
                             bool smoke_consolidate,
                             bool smoke_freeze,
@@ -753,6 +754,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_region_envelope_nudge) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope-nudge FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_region_envelope_drag && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_region_envelope_drag ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_region_envelope_drag) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope-drag FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2780,6 +2794,81 @@ ShellWindow::do_nudge_region_envelope_mid (float delta_coeff)
 		apply_region_selection_to_lanes ();
 		InvalidateRect (_hwnd, nullptr, FALSE);
 	}
+}
+
+void
+ShellWindow::do_set_region_envelope_mid (float coeff_0_1)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.set_selected_region_envelope_mid (coeff_0_1)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+bool
+ShellWindow::envelope_mid_from_y (int lane, float y, float* out_coeff) const
+{
+	if (!out_coeff || lane < 0 || lane >= kTracks) {
+		return false;
+	}
+	const D2D1_RECT_F& lb = _lanes[lane].bounds;
+	float pad = 3.f * _dpi_scale;
+	float h = lb.bottom - lb.top - 2.f * pad;
+	if (h < 1.f) {
+		return false;
+	}
+	float t = (lb.bottom - pad - y) / h;
+	*out_coeff = std::max (0.02f, std::min (1.f, t));
+	return true;
+}
+
+bool
+ShellWindow::hit_region_envelope_mid (float x, float y, int* out_lane) const
+{
+	if (!_engine_snap.region_envelope_ok || !_engine_snap.has_selection
+	    || _engine_snap.selection_end_sec <= _engine_snap.selection_start_sec) {
+		return false;
+	}
+	int lane = _engine_snap.selection_track;
+	if (lane < 0 || lane >= kTracks || lane >= n_audio_lanes ()) {
+		return false;
+	}
+	const D2D1_RECT_F& lb = _lanes[lane].bounds;
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = _lanes[0].strip.view_span_sec ();
+	if (span < 1e-6f) {
+		return false;
+	}
+	float mid_sec = 0.5f * (_engine_snap.selection_start_sec + _engine_snap.selection_end_sec);
+	float nx = (mid_sec - view0) / span;
+	if (nx < 0.f || nx > 1.f) {
+		return false;
+	}
+	float mid_gain = _engine.selected_region_envelope_mid ();
+	if (mid_gain < 0.f) {
+		return false;
+	}
+	float pad = 3.f * _dpi_scale;
+	float lane_w = lb.right - lb.left;
+	float lane_h = lb.bottom - lb.top;
+	float px = lb.left + nx * lane_w;
+	float py = lb.bottom - pad - mid_gain * (lane_h - 2.f * pad);
+	float hit = 10.f * _dpi_scale;
+	if (std::fabs (x - px) <= hit && std::fabs (y - py) <= hit) {
+		if (out_lane) {
+			*out_lane = lane;
+		}
+		return true;
+	}
+	return false;
 }
 
 void
@@ -5082,7 +5171,7 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			InvalidateRect (_hwnd, nullptr, FALSE);
 			return true;
 		}
-		/* Selected region: trim edges → fade wedges → body move → else pan/select. */
+		/* Selected region: trim edges → fade wedges → envelope mid → body move. */
 		if (_engine.is_linked () && _engine_snap.has_selection
 		    && _engine_snap.selection_track == lane) {
 			int te = _lanes[lane].strip.hit_trim_edge (
@@ -5102,6 +5191,20 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				_drag_index = lane;
 				SetCapture (_hwnd);
 				SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return true;
+			}
+			int env_lane = -1;
+			if (_engine_snap.region_envelope_ok
+			    && hit_region_envelope_mid (x, y, &env_lane) && env_lane == lane) {
+				_drag = DragMode::EnvelopeMid;
+				_drag_index = lane;
+				float coeff = 0.35f;
+				if (envelope_mid_from_y (lane, y, &coeff)) {
+					do_set_region_envelope_mid (coeff);
+				}
+				SetCapture (_hwnd);
+				SetCursor (LoadCursorW (nullptr, IDC_SIZENS));
 				InvalidateRect (_hwnd, nullptr, FALSE);
 				return true;
 			}
@@ -5250,6 +5353,14 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 	if (_drag == DragMode::MidiCcWrite) {
 		write_midi_cc_at (x, y);
 		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	if (_drag == DragMode::EnvelopeMid && _drag_index >= 0 && _drag_index < kTracks) {
+		float coeff = 0.35f;
+		if (envelope_mid_from_y (_drag_index, y, &coeff)) {
+			do_set_region_envelope_mid (coeff);
+		}
 		return true;
 	}
 
@@ -6004,6 +6115,18 @@ ShellWindow::draw_editor_pane ()
 						float y1 = lb.bottom - pad - yv[s] * (lane_h - 2.f * pad);
 						_rt->DrawLine (D2D1::Point2F (x0, y0), D2D1::Point2F (x1, y1),
 						               _brush_accent, 1.25f * _dpi_scale);
+					}
+					/* Mid-point drag handle. */
+					float mid_g = _engine.selected_region_envelope_mid ();
+					if (mid_g >= 0.f) {
+						float mx = lb.left + (n0 + (n1 - n0) * 0.5f) * lane_w;
+						float my = lb.bottom - pad - mid_g * (lane_h - 2.f * pad);
+						float r = 4.f * _dpi_scale;
+						_brush_accent->SetOpacity (1.f);
+						_rt->FillEllipse (D2D1::Ellipse (D2D1::Point2F (mx, my), r, r),
+						                  _brush_accent);
+						_rt->DrawEllipse (D2D1::Ellipse (D2D1::Point2F (mx, my), r, r),
+						                  _brush_brand, 1.f * _dpi_scale);
 					}
 					_brush_accent->SetOpacity (1.f);
 				}

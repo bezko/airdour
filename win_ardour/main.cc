@@ -24,6 +24,7 @@
  *                         [--smoke-prefs] [--smoke-recent] [--smoke-recovery]
  *                         [--smoke-normalize] [--smoke-region-envelope]
  *                         [--smoke-region-envelope-nudge]
+ *                         [--smoke-region-envelope-drag]
  *                         [--smoke-limiter] [--smoke-gate] [--smoke-spectrum]
  *                         [--smoke-correlation] [--smoke-loudness]
  *                         [--no-splash] [--period N] [--session DIR]
@@ -165,6 +166,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_normalize = parse_flag (argc, argv, L"--smoke-normalize");
 	bool smoke_region_envelope = parse_flag (argc, argv, L"--smoke-region-envelope");
 	bool smoke_region_envelope_nudge = parse_flag (argc, argv, L"--smoke-region-envelope-nudge");
+	bool smoke_region_envelope_drag = parse_flag (argc, argv, L"--smoke-region-envelope-drag");
 	bool smoke_strip_silence = parse_flag (argc, argv, L"--smoke-strip-silence");
 	bool smoke_consolidate = parse_flag (argc, argv, L"--smoke-consolidate");
 	bool smoke_freeze = parse_flag (argc, argv, L"--smoke-freeze");
@@ -223,6 +225,7 @@ wmain (int argc, wchar_t** argv)
 		                         smoke_stretch, smoke_pitch, smoke_reverse,
 		                         smoke_normalize, smoke_region_envelope,
 		                         smoke_region_envelope_nudge,
+		                         smoke_region_envelope_drag,
 		                         smoke_strip_silence,
 		                         smoke_consolidate, smoke_freeze, smoke_comp,
 		                         smoke_eq, smoke_delay, smoke_limiter, smoke_gate,
