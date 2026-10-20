@@ -779,6 +779,8 @@ public:
 	 * For --smoke-punch. Does not roll transport.
 	 */
 	bool smoke_punch ();
+	/** set range; toggle_punch_enabled off→on→off. For --smoke-punch-toggle. */
+	bool smoke_punch_toggle ();
 
 	/**
 	 * Set BPM 60 then 140; verify snap beat spacing follows TempoMap;

@@ -9003,6 +9003,54 @@ EngineHost::smoke_monitor ()
 	}
 }
 
+
+bool
+EngineHost::smoke_punch_toggle ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-punch-toggle failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_punch_range (0.5f, 2.5f) || !_snap.punch_range_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle FAILED (range)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_punch_enabled (false) || _snap.punch_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle FAILED (start off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!toggle_punch_enabled () || !_snap.punch_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle FAILED (on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_impl->session->config.get_punch_in ()
+		    || !_impl->session->config.get_punch_out ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle FAILED (config)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!toggle_punch_enabled () || _snap.punch_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle FAILED (off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle ok (off→on→off)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-punch-toggle ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_tempo ()
 {
@@ -18987,6 +19035,12 @@ EngineHost::toggle_punch_enabled ()
 
 bool
 EngineHost::smoke_punch ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_punch_toggle ()
 {
 	return false;
 }
