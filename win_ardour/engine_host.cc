@@ -643,6 +643,8 @@ EngineHost::EngineHost ()
 	_snap.midi_scale_lock = false;
 	_snap.midi_scale_kind = 0;
 	_snap.midi_scale_root = 0;
+	_snap.midi_program = 0;
+	_snap.midi_bank = 0;
 	_snap.snap_density = 1; /* beat */
 	_snap.grid_line_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
@@ -16908,6 +16910,178 @@ EngineHost::midi_immediate_note (uint8_t status, uint8_t pitch, uint8_t velocity
 	}
 }
 
+bool
+EngineHost::send_midi_program_change (int program, int bank)
+{
+	if (!ensure_midi_track () || !_impl || !_impl->midi_track) {
+		_snap.detail = L"MIDI program: no MidiTrack";
+		return false;
+	}
+	if (program < 0) {
+		program = _snap.midi_program;
+	}
+	if (bank < 0) {
+		bank = _snap.midi_bank;
+	}
+	if (program < 0) {
+		program = 0;
+	}
+	if (program > 127) {
+		program = 127;
+	}
+	if (bank < 0) {
+		bank = 0;
+	}
+	if (bank > 127) {
+		bank = 127;
+	}
+	try {
+		/* Bank Select MSB (CC0), LSB (CC32)=0, then Program Change. */
+		uint8_t cc0[3] = { 0xB0, 0x00, (uint8_t)bank };
+		uint8_t cc32[3] = { 0xB0, 0x20, 0 };
+		uint8_t pc[2] = { 0xC0, (uint8_t)program };
+		bool ok = _impl->midi_track->write_immediate_event (Evoral::MIDI_EVENT, 3, cc0)
+		          && _impl->midi_track->write_immediate_event (Evoral::MIDI_EVENT, 3, cc32)
+		          && _impl->midi_track->write_immediate_event (Evoral::MIDI_EVENT, 2, pc);
+		if (!ok) {
+			_snap.detail = L"MIDI program: immediate write failed";
+			return false;
+		}
+		_snap.midi_program = program;
+		_snap.midi_bank = bank;
+		_snap.detail = L"MIDI bank+program sent";
+		std::fprintf (stderr, "airdour_win_shell: MIDI bank=%d program=%d\n", bank, program);
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_midi_program (int program)
+{
+	if (program < 0) {
+		program = 0;
+	}
+	if (program > 127) {
+		program = 127;
+	}
+	_snap.midi_program = program;
+	return send_midi_program_change (program, _snap.midi_bank);
+}
+
+bool
+EngineHost::nudge_midi_program (int delta)
+{
+	int p = _snap.midi_program + delta;
+	if (p < 0) {
+		p = 0;
+	}
+	if (p > 127) {
+		p = 127;
+	}
+	return set_midi_program (p);
+}
+
+int
+EngineHost::midi_program () const
+{
+	return _snap.midi_program;
+}
+
+bool
+EngineHost::set_midi_bank (int bank)
+{
+	if (bank < 0) {
+		bank = 0;
+	}
+	if (bank > 127) {
+		bank = 127;
+	}
+	_snap.midi_bank = bank;
+	return send_midi_program_change (_snap.midi_program, bank);
+}
+
+bool
+EngineHost::nudge_midi_bank (int delta)
+{
+	int b = _snap.midi_bank + delta;
+	if (b < 0) {
+		b = 0;
+	}
+	if (b > 127) {
+		b = 127;
+	}
+	return set_midi_bank (b);
+}
+
+int
+EngineHost::midi_bank () const
+{
+	return _snap.midi_bank;
+}
+
+bool
+EngineHost::smoke_midi_program ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-program failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !_impl->midi_track) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-program FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		size_t before = _impl->midi_track->immediate_events ().read_space ();
+		if (!set_midi_bank (3) || !set_midi_program (42)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-program FAILED (set)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		size_t after = _impl->midi_track->immediate_events ().read_space ();
+		if (_snap.midi_bank != 3 || _snap.midi_program != 42) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-program FAILED (snap b=%d p=%d)\n",
+			              _snap.midi_bank, _snap.midi_program);
+			std::fflush (stderr);
+			return false;
+		}
+		if (after <= before) {
+			/* Process may drain; re-send and accept successful write return. */
+			if (!send_midi_program_change (42, 3)) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-midi-program FAILED (resend)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		if (!nudge_midi_program (1) || _snap.midi_program != 43) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-program FAILED (nudge p=%d)\n",
+			              _snap.midi_program);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!nudge_midi_bank (-1) || _snap.midi_bank != 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-program FAILED (nudge b=%d)\n",
+			              _snap.midi_bank);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-program ok (bank=%d program=%d)\n",
+		              _snap.midi_bank, _snap.midi_program);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-program ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-program exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 int
 EngineHost::arp_pitch_at_step (int step) const
 {
@@ -17605,6 +17779,8 @@ EngineHost::EngineHost ()
 	_snap.midi_scale_lock = false;
 	_snap.midi_scale_kind = 0;
 	_snap.midi_scale_root = 0;
+	_snap.midi_program = 0;
+	_snap.midi_bank = 0;
 	_snap.available = false;
 	_snap.running = false;
 	_snap.session_ok = false;
@@ -17638,6 +17814,8 @@ EngineHost::EngineHost ()
 	_snap.midi_scale_lock = false;
 	_snap.midi_scale_kind = 0;
 	_snap.midi_scale_root = 0;
+	_snap.midi_program = 0;
+	_snap.midi_bank = 0;
 	_snap.snap_density = 1;
 	_snap.grid_line_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
@@ -20025,6 +20203,72 @@ EngineHost::humanize_midi_notes (float strength, uint32_t seed)
 
 bool
 EngineHost::smoke_midi_humanize ()
+{
+	return false;
+}
+
+bool
+EngineHost::send_midi_program_change (int program, int bank)
+{
+	(void)program;
+	(void)bank;
+	return false;
+}
+
+bool
+EngineHost::set_midi_program (int program)
+{
+	if (program < 0) {
+		program = 0;
+	}
+	if (program > 127) {
+		program = 127;
+	}
+	_snap.midi_program = program;
+	return false;
+}
+
+bool
+EngineHost::nudge_midi_program (int delta)
+{
+	(void)delta;
+	return false;
+}
+
+int
+EngineHost::midi_program () const
+{
+	return _snap.midi_program;
+}
+
+bool
+EngineHost::set_midi_bank (int bank)
+{
+	if (bank < 0) {
+		bank = 0;
+	}
+	if (bank > 127) {
+		bank = 127;
+	}
+	_snap.midi_bank = bank;
+	return false;
+}
+
+bool
+EngineHost::nudge_midi_bank (int delta)
+{
+	(void)delta;
+	return false;
+}
+
+int
+EngineHost::midi_bank () const
+{
+	return _snap.midi_bank;
+}
+
+bool
+EngineHost::smoke_midi_program ()
 {
 	return false;
 }

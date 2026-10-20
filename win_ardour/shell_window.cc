@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_midi_program)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -473,6 +474,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_pressure) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-pressure FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi_program && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_program ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_program) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-program FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -2911,6 +2921,32 @@ ShellWindow::do_humanize_midi_notes (float strength)
 }
 
 void
+ShellWindow::do_nudge_midi_program (int delta)
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.nudge_midi_program (delta)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_nudge_midi_bank (int delta)
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.nudge_midi_bank (delta)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_toggle_midi_step ()
 {
 	if (!_engine.is_linked ()) {
@@ -3729,6 +3765,15 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'H' || wparam == 'h')) {
 			/* H = humanize; Shift+H = 2× strength. */
 			do_humanize_midi_notes ((GetKeyState (VK_SHIFT) & 0x8000) ? 2.f : 1.f);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == VK_OEM_PERIOD || wparam == VK_OEM_COMMA)) {
+			/* Ctrl+. / Ctrl+, = MIDI program ±1; Ctrl+Shift = bank ±1. */
+			int d = (wparam == VK_OEM_PERIOD) ? 1 : -1;
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
+				do_nudge_midi_bank (d);
+			} else {
+				do_nudge_midi_program (d);
+			}
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
 
 		           && (wparam == VK_OEM_PERIOD || wparam == VK_OEM_COMMA)) {
@@ -4457,6 +4502,22 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		} else {
 			do_toggle_midi_scale ();
 		}
+		return true;
+	}
+	if (th == TransportHit::MidiPgmUp) {
+		do_nudge_midi_program (1);
+		return true;
+	}
+	if (th == TransportHit::MidiPgmDown) {
+		do_nudge_midi_program (-1);
+		return true;
+	}
+	if (th == TransportHit::MidiBankUp) {
+		do_nudge_midi_bank (1);
+		return true;
+	}
+	if (th == TransportHit::MidiBankDown) {
+		do_nudge_midi_bank (-1);
 		return true;
 	}
 	if (th == TransportHit::CountIn) {
@@ -6303,6 +6364,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
 		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
+		{ L"P+/P−  B+/B−", L"MIDI program · bank (Ctrl+. /, · Shift=bank)" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },

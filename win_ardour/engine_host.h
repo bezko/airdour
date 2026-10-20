@@ -189,6 +189,8 @@ struct EngineSnapshot {
 	bool         midi_scale_lock; /* constrain step/click roots to scale */
 	int          midi_scale_kind; /* 0=major 1=natural minor */
 	int          midi_scale_root; /* 0=C .. 11=B */
+	int          midi_program; /* 0..127 Program Change (shell + immediate) */
+	int          midi_bank; /* 0..127 Bank Select MSB (CC0); LSB forced 0 */
 	int          snap_density; /* 0=bar 1=beat 2=1/2 3=1/4 */
 	int          grid_line_count; /* visible grid lines for Editor draw */
 	static constexpr int kMaxGridLines = 96;
@@ -1116,6 +1118,21 @@ public:
 	 * Rebuilds the MIDI region (Windows-safe).
 	 */
 	bool humanize_midi_notes (float strength = 1.f, uint32_t seed = 0);
+
+	/**
+	 * MIDI bank (CC0 MSB + CC32 LSB=0) + Program Change via immediate events.
+	 * Values clamped 0..127. For Pgm± / Bank± / --smoke-midi-program.
+	 */
+	bool set_midi_program (int program);
+	bool nudge_midi_program (int delta);
+	int  midi_program () const;
+	bool set_midi_bank (int bank);
+	bool nudge_midi_bank (int delta);
+	int  midi_bank () const;
+	/** Apply current bank+program (or explicit args) to MidiTrack. */
+	bool send_midi_program_change (int program = -1, int bank = -1);
+	/** Set bank+program, verify immediate writes. For --smoke-midi-program. */
+	bool smoke_midi_program ();
 
 	/** Step-record mode: computer keys / API place notes at playhead. */
 	void set_midi_step_enabled (bool on);

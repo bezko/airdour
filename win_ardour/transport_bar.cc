@@ -46,6 +46,10 @@ TransportBar::TransportBar ()
 	, _midi_chord_btn ()
 	, _midi_arp_btn ()
 	, _midi_scale_btn ()
+	, _midi_pgm_up_btn ()
+	, _midi_pgm_dn_btn ()
+	, _midi_bank_up_btn ()
+	, _midi_bank_dn_btn ()
 	, _count_btn ()
 	, _click_btn ()
 	, _tempo_dn_btn ()
@@ -145,6 +149,10 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_midi_chord_btn, x, btn_w);
 	place (_midi_arp_btn, x, btn_w);
 	place (_midi_scale_btn, x, btn_w);
+	place (_midi_pgm_up_btn, x, narrow + 4.f * dpi_scale);
+	place (_midi_pgm_dn_btn, x, narrow + 4.f * dpi_scale);
+	place (_midi_bank_up_btn, x, narrow + 4.f * dpi_scale);
+	place (_midi_bank_dn_btn, x, narrow + 4.f * dpi_scale);
 	place (_count_btn, x, btn_w);
 	place (_click_btn, x, btn_w);
 	place (_tempo_dn_btn, x, narrow);
@@ -279,6 +287,18 @@ TransportBar::hit_test (float x, float y) const
 	}
 	if (contains (_midi_scale_btn, x, y)) {
 		return TransportHit::MidiScale;
+	}
+	if (contains (_midi_pgm_up_btn, x, y)) {
+		return TransportHit::MidiPgmUp;
+	}
+	if (contains (_midi_pgm_dn_btn, x, y)) {
+		return TransportHit::MidiPgmDown;
+	}
+	if (contains (_midi_bank_up_btn, x, y)) {
+		return TransportHit::MidiBankUp;
+	}
+	if (contains (_midi_bank_dn_btn, x, y)) {
+		return TransportHit::MidiBankDown;
 	}
 	if (contains (_count_btn, x, y)) {
 		return TransportHit::CountIn;
@@ -465,6 +485,10 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 		}
 		draw_btn (_midi_scale_btn, scl_lab, _midi_scale_lock);
 	}
+	draw_btn (_midi_pgm_up_btn, L"P+", false);
+	draw_btn (_midi_pgm_dn_btn, L"P−", false);
+	draw_btn (_midi_bank_up_btn, L"B+", false);
+	draw_btn (_midi_bank_dn_btn, L"B−", false);
 	draw_btn (_count_btn, L"Count", _count_in_enabled);
 	draw_btn (_click_btn, L"Click", _click_enabled);
 	draw_btn (_tempo_dn_btn, L"−", false);
