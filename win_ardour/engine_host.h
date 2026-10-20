@@ -14,6 +14,9 @@
 struct EngineMarkerSnap {
 	float        sec;
 	wchar_t      name[24];
+	bool         scene; /* Location::is_scene */
+	uint32_t     color; /* reserved (SceneChange color not DLL-exported) */
+	int32_t      program; /* MIDISceneChange program, or -1 */
 };
 
 struct EngineMidiDeviceSnap {
@@ -729,6 +732,15 @@ public:
 
 	/** Add IsMark at time_sec (name auto if empty). */
 	bool add_marker_at (float time_sec, const std::string& name = std::string ());
+	/**
+	 * Add scene mark at time_sec (MIDISceneChange + IsScene).
+	 * Ctrl+Alt+C adds at playhead; Shift removes nearest scene.
+	 */
+	bool add_scene_marker_at (float time_sec, int program = 0,
+	                         const std::string& name = std::string ());
+	bool remove_scene_marker_near (float time_sec, float slop_sec = 0.35f);
+	/** Add → assert snap → remove. For --smoke-scene-marker. */
+	bool smoke_scene_marker ();
 	/** Remove nearest IsMark within slop_sec of time_sec. */
 	bool remove_marker_near (float time_sec, float slop_sec = 0.35f);
 	/** Locate transport to time_sec (optional snap to nearest mark within slop). */

@@ -52,6 +52,7 @@
 #include "ardour/audio_backend.h"
 #include "ardour/chan_count.h"
 #include "ardour/location.h"
+#include "ardour/midi_scene_change.h"
 #include "ardour/midi_model.h"
 #include "ardour/midi_region.h"
 #include "ardour/midi_source.h"
@@ -690,6 +691,9 @@ EngineHost::EngineHost ()
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
+		_snap.markers[i].scene = false;
+		_snap.markers[i].color = 0;
+		_snap.markers[i].program = -1;
 	}
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
@@ -7575,6 +7579,9 @@ EngineHost::refresh_locations_snap ()
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
+		_snap.markers[i].scene = false;
+		_snap.markers[i].color = 0;
+		_snap.markers[i].program = -1;
 	}
 	if (!_impl || !_impl->session) {
 		return;
@@ -7617,6 +7624,16 @@ EngineHost::refresh_locations_snap ()
 			_snap.markers[n].sec = (float)loc->start_sample () / (float)sr;
 			std::wstring wname = utf8_to_wide (loc->name ());
 			wcsncpy_s (_snap.markers[n].name, wname.c_str (), _TRUNCATE);
+			_snap.markers[n].scene = loc->is_scene ();
+			_snap.markers[n].color = 0;
+			_snap.markers[n].program = -1;
+			if (loc->is_scene () && loc->scene_change ()) {
+				std::shared_ptr<MIDISceneChange> msc =
+					std::dynamic_pointer_cast<MIDISceneChange> (loc->scene_change ());
+				if (msc) {
+					_snap.markers[n].program = msc->program ();
+				}
+			}
 			++n;
 		}
 		_snap.marker_count = n;
@@ -9142,6 +9159,170 @@ EngineHost::smoke_punch ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-punch exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+
+bool
+EngineHost::add_scene_marker_at (float time_sec, int program, const std::string& name)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (program < 0) {
+		program = 0;
+	}
+	if (program > 127) {
+		program = 127;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		if (time_sec < 0.f) {
+			time_sec = 0.f;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		std::string marker_name = name;
+		if (marker_name.empty ()) {
+			locs->next_available_name (marker_name, "scene");
+		}
+		timepos_t where (sample);
+		Location* location = new Location (
+			*_impl->session, where, where, marker_name, Location::IsMark);
+		std::shared_ptr<MIDISceneChange> msc (new MIDISceneChange (0, 0, program));
+		/* Default opaque coral — SceneChange uses 0 alpha as "unset". */
+		location->set_scene_change (msc);
+
+		_impl->session->begin_reversible_command ("add scene marker");
+		XMLNode& before = locs->get_state ();
+		locs->add (location, true);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"scene marker added";
+		std::fprintf (stderr, "airdour_win_shell: scene \"%s\" @ %.2fs prog=%d (count=%d)\n",
+		              marker_name.c_str (), time_sec, program, _snap.marker_count);
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: add_scene_marker: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"scene marker failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"scene marker failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::remove_scene_marker_near (float time_sec, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::Flags (0));
+		if (!hit || !hit->is_scene ()) {
+			_snap.detail = L"no scene marker near playhead";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("remove scene marker");
+		XMLNode& before = locs->get_state ();
+		locs->remove (hit);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"scene marker removed";
+		std::fprintf (stderr, "airdour_win_shell: removed scene near %.2fs\n", time_sec);
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		_snap.detail = L"scene remove failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_scene_marker ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-scene-marker failed — no Session";
+		return false;
+	}
+	try {
+		if (!add_scene_marker_at (2.0f, 5, "sceneSmoke")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-scene-marker FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		bool found = false;
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 2.0f) < 0.05f
+			    && _snap.markers[i].scene
+			    && _snap.markers[i].program == 5) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-scene-marker FAILED (snap)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!remove_scene_marker_near (2.0f, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-scene-marker FAILED (remove)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 2.0f) < 0.05f && _snap.markers[i].scene) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-scene-marker FAILED (still present)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-scene-marker ok (add→remove)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-scene-marker ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-scene-marker exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17661,6 +17842,9 @@ EngineHost::EngineHost ()
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
+		_snap.markers[i].scene = false;
+		_snap.markers[i].color = 0;
+		_snap.markers[i].program = -1;
 	}
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
@@ -19209,6 +19393,29 @@ EngineHost::add_marker_at (float time_sec, const std::string& name)
 {
 	(void)time_sec;
 	(void)name;
+	return false;
+}
+
+bool
+EngineHost::add_scene_marker_at (float time_sec, int program, const std::string& name)
+{
+	(void)time_sec;
+	(void)program;
+	(void)name;
+	return false;
+}
+
+bool
+EngineHost::remove_scene_marker_near (float time_sec, float slop_sec)
+{
+	(void)time_sec;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::smoke_scene_marker ()
+{
 	return false;
 }
 
