@@ -222,6 +222,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_snap,
                             bool smoke_punch,
                             bool smoke_tempo,
+                            bool smoke_tempo_nudge,
                             bool smoke_click,
                             bool smoke_tracks,
                             bool smoke_rename,
@@ -802,6 +803,22 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_tempo) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_tempo_nudge && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_tempo_nudge ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_transport_tempo_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_tempo_nudge) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-tempo-nudge FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}

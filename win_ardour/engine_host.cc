@@ -9080,6 +9080,53 @@ EngineHost::smoke_tempo ()
 	}
 }
 
+
+bool
+EngineHost::smoke_tempo_nudge ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-tempo-nudge failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_tempo_bpm (120.f) || std::fabs (_snap.tempo_bpm - 120.f) > 0.6f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo-nudge FAILED (set 120 → %.1f)\n",
+			              _snap.tempo_bpm);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!nudge_tempo_bpm (1.f) || std::fabs (_snap.tempo_bpm - 121.f) > 0.6f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo-nudge FAILED (+1 → %.1f)\n",
+			              _snap.tempo_bpm);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!nudge_tempo_bpm (-1.f) || std::fabs (_snap.tempo_bpm - 120.f) > 0.6f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo-nudge FAILED (-1 → %.1f)\n",
+			              _snap.tempo_bpm);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!nudge_tempo_bpm (5.f) || std::fabs (_snap.tempo_bpm - 125.f) > 0.6f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo-nudge FAILED (+5 → %.1f)\n",
+			              _snap.tempo_bpm);
+			std::fflush (stderr);
+			return false;
+		}
+		set_tempo_bpm (120.f);
+		std::fprintf (stderr, "airdour_win_shell: smoke-tempo-nudge ok (120→121→120→125)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-tempo-nudge ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-tempo-nudge exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_punch ()
 {
@@ -19020,6 +19067,12 @@ EngineHost::toggle_count_in ()
 
 bool
 EngineHost::smoke_tempo ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_tempo_nudge ()
 {
 	return false;
 }

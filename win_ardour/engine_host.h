@@ -785,6 +785,8 @@ public:
 	 * toggle count-in; restore 120 + count-in off. For --smoke-tempo.
 	 */
 	bool smoke_tempo ();
+	/** set 120; nudge +1/−1/+5. For --smoke-tempo-nudge. */
+	bool smoke_tempo_nudge ();
 
 	/**
 	 * Toggle Config clicking off→on; verify snapshot + Config.
