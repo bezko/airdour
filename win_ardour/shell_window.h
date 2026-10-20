@@ -253,6 +253,13 @@ private:
 	void do_copy_midi_notes ();
 	void do_cut_midi_notes ();
 	void do_paste_midi_notes ();
+	void do_duplicate_midi_notes ();
+	void do_midi_panic ();
+	void do_nudge_midi_program (int delta);
+	void do_nudge_midi_bank (int delta);
+	void do_export_stems ();
+	void do_mute_all_tracks ();
+	void do_solo_all_tracks ();
 	void do_humanize_midi_notes (float strength = 1.f);
 	void do_toggle_midi_step ();
 	void do_cycle_midi_chord ();

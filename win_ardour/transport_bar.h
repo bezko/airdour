@@ -54,6 +54,11 @@ enum class TransportHit {
 	MidiChord,
 	MidiArp,
 	MidiScale,
+	MidiPanic,
+	MidiPgmUp,
+	MidiPgmDown,
+	MidiBankUp,
+	MidiBankDown,
 	CountIn,
 	Click,
 	TempoDown,
@@ -226,6 +231,11 @@ private:
 	D2D1_RECT_F _midi_chord_btn;
 	D2D1_RECT_F _midi_arp_btn;
 	D2D1_RECT_F _midi_scale_btn;
+	D2D1_RECT_F _midi_panic_btn;
+	D2D1_RECT_F _midi_pgm_up_btn;
+	D2D1_RECT_F _midi_pgm_dn_btn;
+	D2D1_RECT_F _midi_bank_up_btn;
+	D2D1_RECT_F _midi_bank_dn_btn;
 	D2D1_RECT_F _count_btn;
 	D2D1_RECT_F _click_btn;
 	D2D1_RECT_F _tempo_dn_btn;

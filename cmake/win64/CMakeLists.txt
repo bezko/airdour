@@ -255,6 +255,7 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     "${AIRDOUR_SRC_ROOT}/win_ardour/shell_window.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/engine_host.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/wave_strip.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/cairo_wave_blit.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/transport_bar.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/mixer_strip.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/monitor_strip.cc"
@@ -391,6 +392,28 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     message(WARNING "AIRDOUR_WIN_SHELL_WITH_ENGINE set but ${_waf_ardour_lib} missing — building UI-only")
   else()
     message(STATUS "Airdour win64: airdour_win_shell UI-only (enable AIRDOUR_WIN_SHELL_WITH_ENGINE for attach)")
+  endif()
+
+  # Optional: vcpkg Cairo (gtk-libs) for WaveStrip offline ImageSurface → D2D blit.
+  # Works for UI-only and engine-linked shells. No GTK chrome; FillRectangle fallback.
+  set(_cairo_prefix "${AIRDOUR_SRC_ROOT}/tools/win-native/vcpkg_installed/x64-windows")
+  if(EXISTS "${_cairo_prefix}/include/cairo/cairo.h" AND EXISTS "${_cairo_prefix}/lib/cairo.lib")
+    target_compile_definitions(airdour_win_shell PRIVATE AIRDOUR_HAVE_CAIRO=1)
+    target_include_directories(airdour_win_shell PRIVATE "${_cairo_prefix}/include/cairo")
+    target_link_directories(airdour_win_shell PRIVATE "${_cairo_prefix}/lib")
+    target_link_libraries(airdour_win_shell PRIVATE cairo)
+    foreach(_cairo_dll IN ITEMS cairo-2.dll pixman-1-0.dll)
+      if(EXISTS "${_cairo_prefix}/bin/${_cairo_dll}")
+        add_custom_command(TARGET airdour_win_shell POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_cairo_prefix}/bin/${_cairo_dll}" "$<TARGET_FILE_DIR:airdour_win_shell>"
+          COMMENT "Copy ${_cairo_dll} next to airdour_win_shell"
+        )
+      endif()
+    endforeach()
+    message(STATUS "Airdour win64: WaveStrip Cairo→D2D blit enabled (vcpkg cairo)")
+  else()
+    message(STATUS "Airdour win64: WaveStrip D2D-only peaks (Install-HeadlessDeps -WithGtkLibs for Cairo)")
   endif()
 
   # Console subsystem so --timeout smoke logs are capturable; still creates a HWND.

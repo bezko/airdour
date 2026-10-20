@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <chrono>
 #include <vector>
 
 struct EngineMarkerSnap {
@@ -222,6 +223,9 @@ struct EngineSnapshot {
 	bool         aux_bus_ok; /* Session Aux audio bus exists */
 	bool         midi_muted;
 	bool         midi_soloed;
+	bool         midi_armed; /* MidiTrack rec_enable_control */
+	int          midi_program; /* 0..127 Program Change (shell + immediate) */
+	int          midi_bank; /* 0..127 Bank Select MSB (CC0); LSB forced 0 */
 	bool         snap_enabled; /* Editor snap-to-grid */
 	bool         midi_step_enabled; /* Step-record: keys/click place at playhead */
 	int          midi_chord_quality; /* 0=off 1=maj (R+4+7) 2=min (R+3+7) */
@@ -396,6 +400,25 @@ public:
 	bool toggle_midi_muted ();
 	bool set_midi_soloed (bool soloed);
 	bool toggle_midi_soloed ();
+	/**
+	 * Mute every audio track + MIDI (Controllable::NoGroup).
+	 * For Alt+Shift+M / Alt+click Mute / --smoke-mute-all.
+	 */
+	bool mute_all_tracks ();
+	/** Unmute → mute_all → every audio + MIDI muted. */
+	bool smoke_mute_all ();
+	/**
+	 * Solo every audio track + MIDI (Controllable::NoGroup).
+	 * For Alt+Shift+U / Alt+Shift+click Solo / --smoke-solo-all.
+	 */
+	bool solo_all_tracks ();
+	/** Unsolo → solo_all → every audio + MIDI soloed. */
+	bool smoke_solo_all ();
+	/** MIDI track rec-enable (Arm on MIDI mixer strip). */
+	bool set_midi_armed (bool armed);
+	bool toggle_midi_armed ();
+	/** Off → on → off. For --smoke-midi-arm. */
+	bool smoke_midi_arm ();
 
 	/**
 	 * Mute/solo Audio 1 + MIDI round-trip; clear. For --smoke-mute-solo.
@@ -504,6 +527,34 @@ public:
 	/** Clear → 3 pressure points → Play. For --smoke-midi-pressure. */
 	bool smoke_midi_pressure ();
 
+	/**
+	 * MidiModel polyphonic aftertouch (note-pressure) AutomationList for one
+	 * note id (default C4=60). Values 0..127; UI maps 0..1. F8 lane / PolyAT.
+	 */
+	static constexpr int kMidiPolyAtNote = 60; /* C4 */
+	bool ensure_midi_note_pressure_automation (int note = kMidiPolyAtNote,
+	                                           int channel = 0);
+	bool write_midi_note_pressure_automation (float time_sec, float value_0_1,
+	                                          int note = kMidiPolyAtNote,
+	                                          int channel = 0);
+	bool clear_midi_note_pressure_automation (int note = kMidiPolyAtNote,
+	                                          int channel = 0);
+	bool fill_midi_note_pressure_automation_curve (float view_start_sec,
+	                                               float view_span_sec,
+	                                               float* y_0_1,
+	                                               size_t n,
+	                                               int note = kMidiPolyAtNote,
+	                                               int channel = 0);
+	int  fill_midi_note_pressure_automation_points (float view_start_sec,
+	                                                float view_span_sec,
+	                                                float* x_norm,
+	                                                float* y_0_1,
+	                                                int max_n,
+	                                                int note = kMidiPolyAtNote,
+	                                                int channel = 0);
+	/** Clear → 3 PolyAT·C4 points → Play. For --smoke-midi-note-pressure. */
+	bool smoke_midi_note_pressure ();
+
 	/** Clear PeakMeter max-peak / clip latch on Audio track (0..kMeters-1). */
 	bool clear_track_meter_clip (int track);
 
@@ -543,6 +594,20 @@ public:
 	bool export_session_wav (const std::string& outfile = std::string (),
 	                         int64_t start_sample = 0,
 	                         int64_t end_sample = 0);
+	/** Bounce route outs to WAV. track_index −1 = master_out. */
+	bool export_route_index_wav (int track_index,
+	                             const std::string& outfile,
+	                             int64_t start_sample,
+	                             int64_t end_sample);
+	/**
+	 * Export each audio track's output to a separate WAV under folder
+	 * (default: session export/stems/). Returns count of stems written.
+	 * For Shift+Export / --smoke-export-stems.
+	 */
+	bool export_stems (const std::string& folder = std::string (),
+	                   int* out_count = nullptr);
+	/** Import tones on Audio 1+2, export stems, verify ≥2 WAVs. */
+	bool smoke_export_stems (int* out_count = nullptr);
 
 	/** Convenience: export after ensuring content; for --smoke-export. */
 	bool smoke_export_wav (std::string* out_path = nullptr);
@@ -1377,6 +1442,15 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool smoke_midi_clipboard ();
 
 	/**
+	 * Duplicate selected MIDI notes immediately after the selection span
+	 * (copy → paste at selection_end). Leaves originals; selects first new note.
+	 * For Ctrl+D / --smoke-midi-duplicate.
+	 */
+	bool duplicate_selected_midi_notes ();
+	/** Add note @0, duplicate → note @length, verify count=2. For --smoke-midi-duplicate. */
+	bool smoke_midi_duplicate ();
+
+	/**
 	 * Add notes, humanize with fixed seed, verify bounded jitter.
 	 * For --smoke-midi-humanize.
 	 */
@@ -1426,6 +1500,42 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-midi-scale.
 	 */
 	bool smoke_midi_scale ();
+
+	/**
+	 * Preview a pitch through MidiTrack immediate events (Reasonable Synth).
+	 * Note-on now; auto note-off ~180ms later via poll. For click audition.
+	 */
+	bool audition_midi_note (uint8_t pitch, uint8_t velocity = 100);
+	/** Force note-off for any pending audition. */
+	void silence_midi_audition ();
+	/** Add note → select/audition → verify immediate path. --smoke-midi-audition */
+	bool smoke_midi_audition ();
+
+	/**
+	 * MIDI panic: sustain-off + All Notes Off + Reset Controllers on every
+	 * channel of every MidiTrack (Session::midi_panic). Also silences shell arp.
+	 * For F9 / Panic button / --smoke-midi-panic.
+	 */
+	bool midi_panic ();
+	/** Ensure MidiTrack, panic, verify immediate events queued. */
+	bool smoke_midi_panic ();
+	/** Seed note-on → transport_stop → verify Session::midi_panic queued. */
+	bool smoke_stop_midi_panic ();
+
+	/**
+	 * MIDI bank (CC0 MSB + CC32 LSB=0) + Program Change via immediate events.
+	 * Values clamped 0..127. For Pgm± / Bank± / --smoke-midi-program.
+	 */
+	bool set_midi_program (int program);
+	bool nudge_midi_program (int delta);
+	int  midi_program () const;
+	bool set_midi_bank (int bank);
+	bool nudge_midi_bank (int delta);
+	int  midi_bank () const;
+	/** Apply current bank+program (or explicit args) to MidiTrack. */
+	bool send_midi_program_change (int program = -1, int bank = -1);
+	/** Set bank+program, verify immediate writes. For --smoke-midi-program. */
+	bool smoke_midi_program ();
 
 	/* smoke_midi_cc declared with MIDI CC automation APIs above. */
 
@@ -1530,6 +1640,9 @@ private:
 	int     _arp_mode; /* 0=up 1=down 2=up-down */
 	int     _arp_step;
 	int     _arp_last_grid;
+	void tick_midi_audition ();
+	int     _audition_pitch; /* −1 = silent */
+	std::chrono::steady_clock::time_point _audition_off_at;
 	int     _arp_sounding; /* −1 = silent */
 	uint8_t _arp_pitches[kMaxArpPitches];
 	int     _arp_pitch_count;

@@ -606,6 +606,8 @@ EngineHost::EngineHost ()
 	, _arp_sounding (-1)
 	, _arp_pitch_count (0)
 	, _arp_held_count (0)
+	, _audition_pitch (-1)
+	, _audition_off_at ()
 	, _impl (new Impl)
 {
 	for (int i = 0; i < kMaxArpPitches; ++i) {
@@ -659,6 +661,7 @@ EngineHost::EngineHost ()
 	}
 	_snap.aux_bus_ok = false;
 	_snap.midi_muted = false;
+	_snap.midi_armed = false;
 	_snap.midi_soloed = false;
 	_snap.snap_enabled = false;
 	_snap.midi_step_enabled = false;
@@ -669,6 +672,8 @@ EngineHost::EngineHost ()
 	_snap.midi_scale_lock = false;
 	_snap.midi_scale_kind = 0;
 	_snap.midi_scale_root = 0;
+	_snap.midi_program = 0;
+	_snap.midi_bank = 0;
 	_snap.snap_density = 1; /* beat */
 	_snap.grid_line_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
@@ -2383,7 +2388,8 @@ EngineHost::compute_export_range (int64_t* start_sample, int64_t* end_sample) co
 }
 
 bool
-EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample, int64_t end_sample)
+EngineHost::export_route_index_wav (int track_index, const std::string& outfile,
+                                    int64_t start_sample, int64_t end_sample)
 {
 	_snap.export_ok = false;
 	_snap.export_path.clear ();
@@ -2406,9 +2412,19 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 		}
 	}
 
-	std::shared_ptr<Route> master = _impl->session->master_out ();
-	if (!master || !master->output ()) {
-		_snap.detail = L"export failed — no master out";
+	std::shared_ptr<Route> route;
+	if (track_index < 0) {
+		route = _impl->session->master_out ();
+	} else {
+		collect_tracks ();
+		if (track_index >= (int)_impl->tracks.size () || !_impl->tracks[track_index]) {
+			_snap.detail = L"export failed — bad track";
+			return false;
+		}
+		route = _impl->tracks[track_index];
+	}
+	if (!route || !route->output ()) {
+		_snap.detail = L"export failed — no route out";
 		return false;
 	}
 
@@ -2419,7 +2435,7 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 
 	std::string out = outfile;
 	std::string folder;
-	std::string basename = "airdour_export";
+	std::string basename = (track_index < 0) ? "airdour_export" : "airdour_stem";
 	if (out.empty ()) {
 		folder = _impl->session->session_directory ().export_path ();
 		out = path_join (folder, basename + ".wav");
@@ -2444,7 +2460,8 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 		}
 	}
 
-	std::fprintf (stderr, "airdour_win_shell: export range %lld..%lld → %s\n",
+	std::fprintf (stderr, "airdour_win_shell: export%s range %lld..%lld → %s\n",
+	              (track_index < 0) ? "" : " stem",
 	              (long long)start_sample, (long long)end_sample, out.c_str ());
 	std::fflush (stderr);
 
@@ -2503,15 +2520,15 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 		tsp->set_name (basename);
 		tsp->set_realtime (false);
 
-		IO* master_out = master->output ().get ();
-		for (uint32_t n = 0; n < master_out->n_ports ().n_audio (); ++n) {
+		IO* route_out = route->output ().get ();
+		for (uint32_t n = 0; n < route_out->n_ports ().n_audio (); ++n) {
 			PortExportChannel* channel = new PortExportChannel ();
-			channel->add_port (master_out->audio (n));
+			channel->add_port (route_out->audio (n));
 			ExportChannelPtr chan_ptr (channel);
 			ccp->register_channel (chan_ptr);
 		}
 		if (ccp->get_n_chans () == 0) {
-			_snap.detail = L"export failed — no master channels";
+			_snap.detail = L"export failed — no audio channels";
 			return false;
 		}
 
@@ -2591,6 +2608,129 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 		_snap.detail = L"export unknown failure";
 		return false;
 	}
+}
+
+bool
+EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample, int64_t end_sample)
+{
+	return export_route_index_wav (-1, outfile, start_sample, end_sample);
+}
+
+bool
+EngineHost::export_stems (const std::string& folder_in, int* out_count)
+{
+	if (out_count) {
+		*out_count = 0;
+	}
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"export stems failed — no Session";
+		return false;
+	}
+	collect_tracks ();
+	refresh_region_flags ();
+
+	int64_t start_sample = 0;
+	int64_t end_sample = 0;
+	if (!compute_export_range (&start_sample, &end_sample) || end_sample <= start_sample) {
+		_snap.detail = L"export stems failed — empty range";
+		return false;
+	}
+
+	std::string folder = folder_in;
+	if (folder.empty ()) {
+		folder = path_join (_impl->session->session_directory ().export_path (), "stems");
+	}
+	{
+		std::wstring wfolder = utf8_path_to_wide (folder);
+		if (!wfolder.empty ()) {
+			CreateDirectoryW (wfolder.c_str (), nullptr);
+		}
+	}
+
+	int written = 0;
+	const int n = (int)_impl->tracks.size ();
+	for (int i = 0; i < n && i < EngineSnapshot::kMeters; ++i) {
+		if (!_impl->tracks[i]) {
+			continue;
+		}
+		if (!_snap.track_has_regions[i]) {
+			continue;
+		}
+		/* Sanitize track name for filename. */
+		char name_utf8[96];
+		WideCharToMultiByte (CP_UTF8, 0, _snap.track_name[i], -1, name_utf8,
+		                     (int)sizeof (name_utf8), nullptr, nullptr);
+		std::string safe;
+		for (const char* p = name_utf8; *p; ++p) {
+			char c = *p;
+			if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+			    || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+				safe.push_back (c);
+			} else if (c == ' ') {
+				safe.push_back ('_');
+			}
+		}
+		if (safe.empty ()) {
+			char buf[32];
+			std::snprintf (buf, sizeof (buf), "Audio%d", i + 1);
+			safe = buf;
+		}
+		char fname[128];
+		std::snprintf (fname, sizeof (fname), "stem_%02d_%s.wav", i + 1, safe.c_str ());
+		std::string path = path_join (folder, fname);
+		if (!export_route_index_wav (i, path, start_sample, end_sample)) {
+			std::fprintf (stderr, "airdour_win_shell: stem FAILED track %d\n", i);
+			std::fflush (stderr);
+			continue;
+		}
+		++written;
+	}
+
+	if (out_count) {
+		*out_count = written;
+	}
+	if (written <= 0) {
+		_snap.detail = L"export stems failed — none written";
+		return false;
+	}
+	_snap.detail = L"export stems ok";
+	std::fprintf (stderr, "airdour_win_shell: export stems ok (count=%d) → %s\n",
+	              written, folder.c_str ());
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+EngineHost::smoke_export_stems (int* out_count)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (!import_test_tone (0, 440.f, 1.2f)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-export-stems FAILED (tone0)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!import_test_tone (1, 330.f, 1.0f)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-export-stems FAILED (tone1)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	refresh_region_flags ();
+	int count = 0;
+	std::string folder = path_join (_impl->session->session_directory ().export_path (),
+	                                "stems_smoke");
+	if (!export_stems (folder, &count) || count < 2) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-export-stems FAILED (count=%d)\n", count);
+		std::fflush (stderr);
+		return false;
+	}
+	if (out_count) {
+		*out_count = count;
+	}
+	std::fprintf (stderr, "airdour_win_shell: smoke-export-stems ok (count=%d)\n", count);
+	std::fflush (stderr);
+	return true;
 }
 
 bool
@@ -2752,6 +2892,8 @@ EngineHost::transport_play ()
 void
 EngineHost::transport_stop ()
 {
+	const bool was_playing = _impl->transport_playing
+	                         || (_impl->session && !_impl->session->transport_stopped ());
 	_impl->transport_playing = false;
 	if (_impl->session) {
 		/* Stop transport first so DiskWriter can finalize the take, then clear
@@ -2764,6 +2906,14 @@ EngineHost::transport_stop ()
 		try {
 			_impl->session->disable_record (false, true);
 		} catch (...) {
+		}
+		/* Kill hanging MIDI notes / sustain / shell arp when leaving roll. */
+		if (was_playing) {
+			try {
+				arp_silence ();
+				_impl->session->midi_panic ();
+			} catch (...) {
+			}
 		}
 		refresh_region_flags ();
 		refresh_record_flags ();
@@ -3122,6 +3272,7 @@ EngineHost::refresh_record_flags ()
 {
 	_snap.session_record_armed = false;
 	_snap.session_recording = false;
+	_snap.midi_armed = false;
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_armed[i] = false;
 	}
@@ -3137,6 +3288,10 @@ EngineHost::refresh_record_flags ()
 				_snap.track_armed[i] =
 					_impl->tracks[i]->rec_enable_control ()->get_value () >= 0.5;
 			}
+		}
+		if (_impl->midi_track && _impl->midi_track->rec_enable_control ()) {
+			_snap.midi_armed =
+				_impl->midi_track->rec_enable_control ()->get_value () >= 0.5;
 		}
 	} catch (...) {
 	}
@@ -3351,6 +3506,207 @@ EngineHost::toggle_midi_soloed ()
 {
 	refresh_mute_solo_flags ();
 	return set_midi_soloed (!_snap.midi_soloed);
+}
+
+bool
+EngineHost::set_midi_armed (bool armed)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	ensure_midi_track ();
+	if (!_impl->midi_track || !_impl->midi_track->rec_enable_control ()) {
+		return false;
+	}
+	try {
+		_impl->midi_track->rec_enable_control ()->set_value (
+			armed ? 1.0 : 0.0, Controllable::NoGroup);
+		wait_until ([&] () {
+			refresh_record_flags ();
+			return _snap.midi_armed == armed;
+		}, 400);
+		refresh_record_flags ();
+		std::fprintf (stderr, "airdour_win_shell: MIDI armed=%d\n", armed ? 1 : 0);
+		std::fflush (stderr);
+		_snap.detail = armed ? L"MIDI armed" : L"MIDI disarmed";
+		return _snap.midi_armed == armed;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: midi-arm: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_midi_armed ()
+{
+	refresh_record_flags ();
+	return set_midi_armed (!_snap.midi_armed);
+}
+
+bool
+EngineHost::smoke_midi_arm ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-midi-arm failed — no Session";
+		return false;
+	}
+	try {
+		ensure_midi_track ();
+		if (!_impl->midi_track || !_impl->midi_track->rec_enable_control ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-arm FAILED (no MIDI)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_midi_armed (false) || _snap.midi_armed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-arm FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_midi_armed (true) || !_snap.midi_armed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-arm FAILED (arm)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_midi_armed (false) || _snap.midi_armed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-arm FAILED (disarm)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-arm ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-arm ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-arm exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::mute_all_tracks ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		collect_tracks ();
+		ensure_midi_track ();
+		bool any = false;
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]
+			    && _impl->tracks[i]->mute_control ()) {
+				std::shared_ptr<MuteControl> mc = _impl->tracks[i]->mute_control ();
+				if (mc->get_value () < 0.5) {
+					_impl->session->set_control (mc, 1.0, Controllable::NoGroup);
+					any = true;
+				}
+			}
+		}
+		if (_impl->midi_track && _impl->midi_track->mute_control ()
+		    && _impl->midi_track->mute_control ()->get_value () < 0.5) {
+			_impl->session->set_control (
+				_impl->midi_track->mute_control (), 1.0, Controllable::NoGroup);
+			any = true;
+		}
+		wait_until ([&] () {
+			refresh_mute_solo_flags ();
+			for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+				if (_impl->tracks[i] && !_snap.track_muted[i]) {
+					return false;
+				}
+			}
+			return _snap.midi_muted;
+		});
+		refresh_mute_solo_flags ();
+		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+			if (_impl->tracks[i] && !_snap.track_muted[i]) {
+				_snap.detail = L"mute all — audio still unmuted";
+				return false;
+			}
+		}
+		if (!_snap.midi_muted) {
+			_snap.detail = L"mute all — MIDI still unmuted";
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: mute all tracks%s\n",
+		              any ? "" : " (already muted)");
+		std::fflush (stderr);
+		_snap.detail = L"all tracks muted";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: mute all exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::solo_all_tracks ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		collect_tracks ();
+		ensure_midi_track ();
+		bool any = false;
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]
+			    && _impl->tracks[i]->solo_control ()) {
+				std::shared_ptr<SoloControl> sc = _impl->tracks[i]->solo_control ();
+				if (sc->get_value () < 0.5) {
+					_impl->session->set_control (sc, 1.0, Controllable::NoGroup);
+					any = true;
+				}
+			}
+		}
+		if (_impl->midi_track && _impl->midi_track->solo_control ()
+		    && _impl->midi_track->solo_control ()->get_value () < 0.5) {
+			_impl->session->set_control (
+				_impl->midi_track->solo_control (), 1.0, Controllable::NoGroup);
+			any = true;
+		}
+		wait_until ([&] () {
+			refresh_mute_solo_flags ();
+			for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+				if (_impl->tracks[i] && !_snap.track_soloed[i]) {
+					return false;
+				}
+			}
+			return _snap.midi_soloed;
+		});
+		refresh_mute_solo_flags ();
+		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+			if (_impl->tracks[i] && !_snap.track_soloed[i]) {
+				_snap.detail = L"solo all — audio still unsoloed";
+				return false;
+			}
+		}
+		if (!_snap.midi_soloed) {
+			_snap.detail = L"solo all — MIDI still unsoloed";
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: solo all tracks%s\n",
+		              any ? "" : " (already soloed)");
+		std::fflush (stderr);
+		_snap.detail = L"all tracks soloed";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: solo all exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 void
@@ -3979,6 +4335,32 @@ midi_pressure_alist (std::shared_ptr<MidiRegion> region, int channel)
 	}
 	channel = clamp_midi_channel (channel);
 	Evoral::Parameter param (MidiChannelPressureAutomation, (uint8_t)channel, 0);
+	std::shared_ptr<AutomationControl> ac = model->automation_control (param, true);
+	if (!ac) {
+		return std::shared_ptr<AutomationList> ();
+	}
+	return ac->alist ();
+}
+
+std::shared_ptr<AutomationList>
+midi_note_pressure_alist (std::shared_ptr<MidiRegion> region, int note, int channel)
+{
+	if (!region) {
+		return std::shared_ptr<AutomationList> ();
+	}
+	std::shared_ptr<MidiModel> model = region->model ();
+	if (!model) {
+		return std::shared_ptr<AutomationList> ();
+	}
+	channel = clamp_midi_channel (channel);
+	if (note < 0) {
+		note = 0;
+	}
+	if (note > 127) {
+		note = 127;
+	}
+	Evoral::Parameter param (MidiNotePressureAutomation, (uint8_t)channel,
+	                         (uint32_t)note);
 	std::shared_ptr<AutomationControl> ac = model->automation_control (param, true);
 	if (!ac) {
 		return std::shared_ptr<AutomationList> ();
@@ -4662,6 +5044,384 @@ EngineHost::smoke_midi_pressure ()
 }
 
 bool
+EngineHost::midi_panic ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"MIDI panic: no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !_impl->midi_track) {
+			_snap.detail = L"MIDI panic: no MidiTrack";
+			return false;
+		}
+		/* Stop shell-driven arp note before Session all-notes-off. */
+		arp_silence ();
+		size_t before = _impl->midi_track->immediate_events ().read_space ();
+		_impl->session->midi_panic ();
+		size_t after = _impl->midi_track->immediate_events ().read_space ();
+		/*
+		 * Process callback may drain the ring concurrently; treat growth OR a
+		 * successful follow-up All Notes Off write as proof the path works.
+		 */
+		bool grew = after > before;
+		uint8_t ev[3] = { 0xB0, 0x7B, 0 }; /* CC All Notes Off ch1 */
+		bool wrote = _impl->midi_track->write_immediate_event (Evoral::MIDI_EVENT, 3, ev);
+		if (!grew && !wrote) {
+			_snap.detail = L"MIDI panic: no events queued";
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: MIDI panic (imm %zu→%zu wrote=%d)\n",
+		              before, after, wrote ? 1 : 0);
+		std::fflush (stderr);
+		_snap.detail = L"MIDI panic sent";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: MIDI panic exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_panic ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-panic failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !_impl->midi_track) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-panic FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Seed a live note-on so panic has something to clear. */
+		if (!midi_immediate_note (0x90, 60, 100)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-panic FAILED (note-on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!midi_panic ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-panic FAILED (panic)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Second panic must also succeed (idempotent). */
+		if (!midi_panic ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-panic FAILED (2nd)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-panic ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-panic ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-panic exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_stop_midi_panic ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-stop-midi-panic failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !_impl->midi_track) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-stop-midi-panic FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!midi_immediate_note (0x90, 64, 100)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-stop-midi-panic FAILED (note-on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/*
+		 * Mark shell transport as rolling so transport_stop takes the panic
+		 * path without a full Dummy play→stop cycle (that can trip late MIDI
+		 * timestamps after Session::midi_panic floods the ring).
+		 */
+		_impl->transport_playing = true;
+		size_t before = _impl->midi_track->immediate_events ().read_space ();
+		transport_stop ();
+		size_t after = _impl->midi_track->immediate_events ().read_space ();
+		bool grew = after > before;
+		uint8_t ev[3] = { 0xB0, 0x7B, 0 };
+		bool wrote = _impl->midi_track->write_immediate_event (Evoral::MIDI_EVENT, 3, ev);
+		if (!grew && !wrote) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-stop-midi-panic FAILED (imm %zu→%zu)\n",
+			              before, after);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-stop-midi-panic ok (imm %zu→%zu wrote=%d)\n",
+		              before, after, wrote ? 1 : 0);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-stop-midi-panic ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-stop-midi-panic exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::ensure_midi_note_pressure_automation (int note, int channel)
+{
+	if (!ensure_midi_region () || !_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationList> al =
+		    midi_note_pressure_alist (_impl->midi_region, note, channel);
+		if (!al) {
+			return false;
+		}
+		al->set_automation_state (Play);
+		_snap.detail = L"MIDI note-pressure automation Play";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::clear_midi_note_pressure_automation (int note, int channel)
+{
+	if (!ensure_midi_region () || !_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationList> al =
+		    midi_note_pressure_alist (_impl->midi_region, note, channel);
+		if (!al) {
+			return false;
+		}
+		al->clear ();
+		_snap.detail = L"MIDI note-pressure automation cleared";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::write_midi_note_pressure_automation (float time_sec, float value_0_1,
+                                                 int note, int channel)
+{
+	value_0_1 = std::max (0.f, std::min (1.f, value_0_1));
+	time_sec = snap_time (time_sec);
+	if (time_sec < 0.f) {
+		time_sec = 0.f;
+	}
+	if (!ensure_midi_note_pressure_automation (note, channel)) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationList> al =
+		    midi_note_pressure_alist (_impl->midi_region, note, channel);
+		if (!al) {
+			return false;
+		}
+		const double beats_per_sec = 120.0 / 60.0;
+		Temporal::Beats beats =
+		    Temporal::Beats::from_double ((double)time_sec * beats_per_sec);
+		if (beats < Temporal::Beats ()) {
+			beats = Temporal::Beats ();
+		}
+		double p_val = (double)value_0_1 * 127.0;
+		bool added = al->editor_add (timepos_t (beats), p_val, true);
+		if (!added) {
+			al->add (timepos_t (beats), p_val, true, true);
+		}
+		_snap.detail = L"MIDI note-pressure automation point";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::fill_midi_note_pressure_automation_curve (float view_start_sec,
+                                                      float view_span_sec,
+                                                      float* y_0_1,
+                                                      size_t n,
+                                                      int note,
+                                                      int channel)
+{
+	if (!y_0_1 || n == 0) {
+		return false;
+	}
+	for (size_t i = 0; i < n; ++i) {
+		y_0_1[i] = 0.f;
+	}
+	if (!_impl || !_impl->session || !_impl->midi_region) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationList> al =
+		    midi_note_pressure_alist (_impl->midi_region, note, channel);
+		if (!al || al->empty ()) {
+			return true;
+		}
+		const double beats_per_sec = 120.0 / 60.0;
+		float span = std::max (0.001f, view_span_sec);
+		for (size_t i = 0; i < n; ++i) {
+			float t = view_start_sec + ((float)i + 0.5f) / (float)n * span;
+			if (t < 0.f) {
+				t = 0.f;
+			}
+			Temporal::Beats beats =
+			    Temporal::Beats::from_double ((double)t * beats_per_sec);
+			float v = (float)al->eval (timepos_t (beats));
+			y_0_1[i] = std::max (0.f, std::min (1.f, v / 127.f));
+		}
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+int
+EngineHost::fill_midi_note_pressure_automation_points (float view_start_sec,
+                                                       float view_span_sec,
+                                                       float* x_norm,
+                                                       float* y_0_1,
+                                                       int max_n,
+                                                       int note,
+                                                       int channel)
+{
+	if (!x_norm || !y_0_1 || max_n <= 0) {
+		return 0;
+	}
+	if (!_impl || !_impl->session || !_impl->midi_region) {
+		return 0;
+	}
+	try {
+		std::shared_ptr<AutomationList> al =
+		    midi_note_pressure_alist (_impl->midi_region, note, channel);
+		if (!al || al->empty ()) {
+			return 0;
+		}
+		const double beats_per_sec = 120.0 / 60.0;
+		float span = std::max (0.001f, view_span_sec);
+		float view_end = view_start_sec + span;
+		int written = 0;
+		for (AutomationList::const_iterator it = al->begin ();
+		     it != al->end () && written < max_n; ++it) {
+			if (!*it) {
+				continue;
+			}
+			double sec = Temporal::DoubleableBeats ((*it)->when.beats ()).to_double ()
+			             / beats_per_sec;
+			if (sec < (double)view_start_sec || sec > (double)view_end) {
+				continue;
+			}
+			x_norm[written] = (float)((sec - (double)view_start_sec) / (double)span);
+			y_0_1[written] = std::max (0.f, std::min (1.f, (float)((*it)->value / 127.0)));
+			++written;
+		}
+		return written;
+	} catch (...) {
+		return 0;
+	}
+}
+
+bool
+EngineHost::smoke_midi_note_pressure ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-midi-note-pressure failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-note-pressure FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const int note = kMidiPolyAtNote;
+		if (!clear_midi_note_pressure_automation (note)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-note-pressure FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!write_midi_note_pressure_automation (0.0f, 0.20f, note)
+		    || !write_midi_note_pressure_automation (2.0f, 0.90f, note)
+		    || !write_midi_note_pressure_automation (4.0f, 0.40f, note)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-note-pressure FAILED (write)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::shared_ptr<AutomationList> al =
+		    midi_note_pressure_alist (_impl->midi_region, note, 0);
+		if (!al || al->size () < 3) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-note-pressure FAILED (size=%u)\n",
+			              al ? (unsigned)al->size () : 0u);
+			std::fflush (stderr);
+			return false;
+		}
+		const double beats_per_sec = 120.0 / 60.0;
+		Temporal::Beats mid_b = Temporal::Beats::from_double (2.0 * beats_per_sec);
+		float mid = (float)al->eval (timepos_t (mid_b));
+		if (mid < 110.f || mid > 119.f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-note-pressure FAILED (eval@2s=%.3f)\n",
+			              mid);
+			std::fflush (stderr);
+			return false;
+		}
+		if (al->automation_state () != Play) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-note-pressure FAILED (state!=Play)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Also verify CC64 sustain automation path (F8 cycle sibling). */
+		if (!clear_midi_cc_automation (64)
+		    || !write_midi_cc_automation (0.0f, 0.0f, 64)
+		    || !write_midi_cc_automation (1.0f, 1.0f, 64)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-note-pressure FAILED (CC64)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::shared_ptr<AutomationList> cc64 = midi_cc_alist (_impl->midi_region, 64, 0);
+		if (!cc64 || cc64->size () < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-note-pressure FAILED (CC64 size)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-note-pressure ok (PolyAT·C4 pts=%u eval@2s=%.1f CC64=%u)\n",
+		              (unsigned)al->size (), mid, (unsigned)cc64->size ());
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-note-pressure ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-note-pressure exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::smoke_mute_solo ()
 {
 	if (!_impl || !_impl->session) {
@@ -4731,6 +5491,119 @@ EngineHost::smoke_mute_solo ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_mute_all ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-mute-all failed — no Session";
+		return false;
+	}
+	try {
+		ensure_midi_track ();
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0] || !_impl->midi_track) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-all FAILED (tracks)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Start unmuted so mute_all has work to do. */
+		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+			set_track_muted (i, false);
+		}
+		set_midi_muted (false);
+		if (_snap.track_muted[0] || _snap.midi_muted) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-all FAILED (pre-clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!mute_all_tracks ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-all FAILED (mute_all)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+			if (!_snap.track_muted[i]) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-mute-all FAILED (Audio %d unmuted)\n",
+				              i + 1);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		if (!_snap.midi_muted) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-all FAILED (MIDI unmuted)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-mute-all ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-mute-all ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mute-all exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_solo_all ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-solo-all failed — no Session";
+		return false;
+	}
+	try {
+		ensure_midi_track ();
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0] || !_impl->midi_track) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-all FAILED (tracks)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+			set_track_soloed (i, false);
+		}
+		set_midi_soloed (false);
+		if (_snap.track_soloed[0] || _snap.midi_soloed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-all FAILED (pre-clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!solo_all_tracks ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-all FAILED (solo_all)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+			if (!_snap.track_soloed[i]) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-solo-all FAILED (Audio %d unsoloed)\n",
+				              i + 1);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		if (!_snap.midi_soloed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-all FAILED (MIDI unsoloed)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-all ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-solo-all ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-all exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -20125,6 +20998,8 @@ EngineHost::select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop
 	}
 	_impl->selected_midi_note_id = _snap.midi_notes[best].id;
 	refresh_midi_notes_snap ();
+	/* Click preview through the track synth (auto note-off via poll). */
+	audition_midi_note (_snap.midi_notes[best].pitch, _snap.midi_notes[best].velocity);
 	return true;
 }
 
@@ -21764,6 +22639,162 @@ EngineHost::paste_midi_notes (float at_sec)
 }
 
 bool
+EngineHost::duplicate_selected_midi_notes ()
+{
+	refresh_midi_notes_snap ();
+	if (_snap.midi_note_count <= 0) {
+		_snap.detail = L"MIDI duplicate: no notes";
+		return false;
+	}
+	bool have_sel = false;
+	float t0 = 1.0e9f;
+	float t1 = -1.0e9f;
+	for (int i = 0; i < _snap.midi_note_count; ++i) {
+		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+		if (!n.selected) {
+			continue;
+		}
+		have_sel = true;
+		if (n.start_sec < t0) {
+			t0 = n.start_sec;
+		}
+		float end = n.start_sec + n.length_sec;
+		if (end > t1) {
+			t1 = end;
+		}
+	}
+	if (!have_sel || t1 <= t0) {
+		_snap.detail = L"MIDI duplicate: nothing selected";
+		return false;
+	}
+	float span = t1 - t0;
+	if (span < 0.05f) {
+		span = 0.05f;
+	}
+	/* Prefer one snap unit when Snap is on and span is tiny. */
+	if (_snap.snap_enabled) {
+		float unit = snap_unit_sec ();
+		if (unit > span) {
+			span = unit;
+		}
+	}
+	if (!copy_selected_midi_notes ()) {
+		return false;
+	}
+	float paste_at = t0 + span;
+	if (_snap.snap_enabled) {
+		paste_at = snap_time (paste_at);
+	}
+	if (!paste_midi_notes (paste_at)) {
+		_snap.detail = L"MIDI duplicate: paste failed";
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: MIDI duplicate (span=%.3f paste_at=%.3f)\n",
+	              span, paste_at);
+	std::fflush (stderr);
+	_snap.detail = L"MIDI notes duplicated";
+	return true;
+}
+
+bool
+EngineHost::smoke_midi_duplicate ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-duplicate failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Clear existing notes. */
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for duplicate smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+			}
+			if (!ensure_midi_region (16.f)) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate FAILED (re-region)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		const float len = 0.5f;
+		if (!add_midi_note (60, 0.0f, len, 100)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count != 1 || !_snap.midi_notes[0].selected) {
+			/* Select the only note. */
+			if (_snap.midi_note_count >= 1) {
+				_impl->selected_midi_note_id = _snap.midi_notes[0].id;
+				refresh_midi_notes_snap ();
+			}
+		}
+		if (!duplicate_selected_midi_notes ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate FAILED (dup)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate FAILED (count=%d)\n",
+			              _snap.midi_note_count);
+			std::fflush (stderr);
+			return false;
+		}
+		bool found_orig = false;
+		bool found_dup = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			if (n.pitch != 60) {
+				continue;
+			}
+			if (n.start_sec >= -0.01f && n.start_sec <= 0.05f) {
+				found_orig = true;
+			}
+			if (n.start_sec >= len - 0.05f && n.start_sec <= len + 0.15f) {
+				found_dup = true;
+			}
+		}
+		if (!found_orig || !found_dup) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-duplicate FAILED (orig=%d dup=%d count=%d)\n",
+			              found_orig ? 1 : 0, found_dup ? 1 : 0, _snap.midi_note_count);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-duplicate ok (notes=%d paste≈%.2fs)\n",
+		              _snap.midi_note_count, len);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-duplicate ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::smoke_midi_clipboard ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
@@ -22953,6 +23984,274 @@ EngineHost::midi_immediate_note (uint8_t status, uint8_t pitch, uint8_t velocity
 	}
 }
 
+void
+EngineHost::silence_midi_audition ()
+{
+	if (_audition_pitch < 0) {
+		return;
+	}
+	midi_immediate_note (0x80, (uint8_t)_audition_pitch, 0);
+	_audition_pitch = -1;
+}
+
+bool
+EngineHost::audition_midi_note (uint8_t pitch, uint8_t velocity)
+{
+	if (!ensure_midi_track () || !_impl || !_impl->midi_track) {
+		_snap.detail = L"MIDI audition: no MidiTrack";
+		return false;
+	}
+	silence_midi_audition ();
+	if (velocity < 1) {
+		velocity = 1;
+	}
+	if (!midi_immediate_note (0x90, pitch, velocity)) {
+		_snap.detail = L"MIDI audition: note-on failed";
+		return false;
+	}
+	_audition_pitch = (int)pitch;
+	_audition_off_at = std::chrono::steady_clock::now () + std::chrono::milliseconds (180);
+	_snap.detail = L"MIDI note audition";
+	return true;
+}
+
+void
+EngineHost::tick_midi_audition ()
+{
+	if (_audition_pitch < 0) {
+		return;
+	}
+	if (std::chrono::steady_clock::now () < _audition_off_at) {
+		return;
+	}
+	silence_midi_audition ();
+}
+
+bool
+EngineHost::smoke_midi_audition ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-audition failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!add_midi_note (64, 0.0f, 0.5f, 100)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		size_t before = _impl->midi_track->immediate_events ().read_space ();
+		if (!select_midi_note_at (0.1f, 64)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition FAILED (select)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		size_t after = _impl->midi_track->immediate_events ().read_space ();
+		if (_audition_pitch != 64 && after <= before) {
+			/* Process may have drained; explicit re-audition as fallback. */
+			if (!audition_midi_note (64, 100)) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition FAILED (audition)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		/* Advance past auto note-off window. */
+		_audition_off_at = std::chrono::steady_clock::now ();
+		tick_midi_audition ();
+		if (_audition_pitch >= 0) {
+			silence_midi_audition ();
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition ok (pitch=64)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-audition ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::send_midi_program_change (int program, int bank)
+{
+	if (!ensure_midi_track () || !_impl || !_impl->midi_track) {
+		_snap.detail = L"MIDI program: no MidiTrack";
+		return false;
+	}
+	if (program < 0) {
+		program = _snap.midi_program;
+	}
+	if (bank < 0) {
+		bank = _snap.midi_bank;
+	}
+	if (program < 0) {
+		program = 0;
+	}
+	if (program > 127) {
+		program = 127;
+	}
+	if (bank < 0) {
+		bank = 0;
+	}
+	if (bank > 127) {
+		bank = 127;
+	}
+	try {
+		/* Bank Select MSB (CC0), LSB (CC32)=0, then Program Change. */
+		uint8_t cc0[3] = { 0xB0, 0x00, (uint8_t)bank };
+		uint8_t cc32[3] = { 0xB0, 0x20, 0 };
+		uint8_t pc[2] = { 0xC0, (uint8_t)program };
+		bool ok = _impl->midi_track->write_immediate_event (Evoral::MIDI_EVENT, 3, cc0)
+		          && _impl->midi_track->write_immediate_event (Evoral::MIDI_EVENT, 3, cc32)
+		          && _impl->midi_track->write_immediate_event (Evoral::MIDI_EVENT, 2, pc);
+		if (!ok) {
+			_snap.detail = L"MIDI program: immediate write failed";
+			return false;
+		}
+		_snap.midi_program = program;
+		_snap.midi_bank = bank;
+		_snap.detail = L"MIDI bank+program sent";
+		std::fprintf (stderr, "airdour_win_shell: MIDI bank=%d program=%d\n", bank, program);
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_midi_program (int program)
+{
+	if (program < 0) {
+		program = 0;
+	}
+	if (program > 127) {
+		program = 127;
+	}
+	_snap.midi_program = program;
+	return send_midi_program_change (program, _snap.midi_bank);
+}
+
+bool
+EngineHost::nudge_midi_program (int delta)
+{
+	int p = _snap.midi_program + delta;
+	if (p < 0) {
+		p = 0;
+	}
+	if (p > 127) {
+		p = 127;
+	}
+	return set_midi_program (p);
+}
+
+int
+EngineHost::midi_program () const
+{
+	return _snap.midi_program;
+}
+
+bool
+EngineHost::set_midi_bank (int bank)
+{
+	if (bank < 0) {
+		bank = 0;
+	}
+	if (bank > 127) {
+		bank = 127;
+	}
+	_snap.midi_bank = bank;
+	return send_midi_program_change (_snap.midi_program, bank);
+}
+
+bool
+EngineHost::nudge_midi_bank (int delta)
+{
+	int b = _snap.midi_bank + delta;
+	if (b < 0) {
+		b = 0;
+	}
+	if (b > 127) {
+		b = 127;
+	}
+	return set_midi_bank (b);
+}
+
+int
+EngineHost::midi_bank () const
+{
+	return _snap.midi_bank;
+}
+
+bool
+EngineHost::smoke_midi_program ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-program failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !_impl->midi_track) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-program FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		size_t before = _impl->midi_track->immediate_events ().read_space ();
+		if (!set_midi_bank (3) || !set_midi_program (42)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-program FAILED (set)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		size_t after = _impl->midi_track->immediate_events ().read_space ();
+		if (_snap.midi_bank != 3 || _snap.midi_program != 42) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-program FAILED (snap b=%d p=%d)\n",
+			              _snap.midi_bank, _snap.midi_program);
+			std::fflush (stderr);
+			return false;
+		}
+		if (after <= before) {
+			/* Process may drain; re-send and accept successful write return. */
+			if (!send_midi_program_change (42, 3)) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-midi-program FAILED (resend)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		if (!nudge_midi_program (1) || _snap.midi_program != 43) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-program FAILED (nudge p=%d)\n",
+			              _snap.midi_program);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!nudge_midi_bank (-1) || _snap.midi_bank != 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-program FAILED (nudge b=%d)\n",
+			              _snap.midi_bank);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-program ok (bank=%d program=%d)\n",
+		              _snap.midi_bank, _snap.midi_program);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-program ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-program exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 int
 EngineHost::arp_pitch_at_step (int step) const
 {
@@ -23565,6 +24864,7 @@ EngineHost::poll ()
 {
 	refresh_snapshot ();
 	tick_arpeggiator (false);
+	tick_midi_audition ();
 }
 
 EngineSnapshot
@@ -23596,6 +24896,8 @@ EngineHost::EngineHost ()
 	, _arp_sounding (-1)
 	, _arp_pitch_count (0)
 	, _arp_held_count (0)
+	, _audition_pitch (-1)
+	, _audition_off_at ()
 {
 	for (int i = 0; i < kMaxArpPitches; ++i) {
 		_arp_pitches[i] = 0;
@@ -23650,6 +24952,8 @@ EngineHost::EngineHost ()
 	_snap.midi_scale_lock = false;
 	_snap.midi_scale_kind = 0;
 	_snap.midi_scale_root = 0;
+	_snap.midi_program = 0;
+	_snap.midi_bank = 0;
 	_snap.available = false;
 	_snap.running = false;
 	_snap.session_ok = false;
@@ -23683,6 +24987,8 @@ EngineHost::EngineHost ()
 	_snap.midi_scale_lock = false;
 	_snap.midi_scale_kind = 0;
 	_snap.midi_scale_root = 0;
+	_snap.midi_program = 0;
+	_snap.midi_bank = 0;
 	_snap.snap_density = 1;
 	_snap.grid_line_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxGridLines; ++i) {
@@ -24247,10 +25553,54 @@ EngineHost::toggle_midi_soloed ()
 }
 
 bool
+EngineHost::set_midi_armed (bool armed)
+{
+	(void)armed;
+	return false;
+}
+
+bool
+EngineHost::toggle_midi_armed ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_arm ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_mute_solo ()
 {
 	return false;
 }
+
+bool
+EngineHost::mute_all_tracks ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_mute_all ()
+{
+	return false;
+}
+
+bool
+EngineHost::solo_all_tracks ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_solo_all ()
+{
+	return false;
+}
+
 
 void
 EngineHost::refresh_pan_flags ()
@@ -24575,6 +25925,96 @@ EngineHost::smoke_midi_pressure ()
 }
 
 bool
+EngineHost::midi_panic ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_panic ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_stop_midi_panic ()
+{
+	return false;
+}
+
+bool
+EngineHost::ensure_midi_note_pressure_automation (int note, int channel)
+{
+	(void)note;
+	(void)channel;
+	return false;
+}
+
+bool
+EngineHost::write_midi_note_pressure_automation (float time_sec, float value_0_1,
+                                                 int note, int channel)
+{
+	(void)time_sec;
+	(void)value_0_1;
+	(void)note;
+	(void)channel;
+	return false;
+}
+
+bool
+EngineHost::clear_midi_note_pressure_automation (int note, int channel)
+{
+	(void)note;
+	(void)channel;
+	return false;
+}
+
+bool
+EngineHost::fill_midi_note_pressure_automation_curve (float view_start_sec,
+                                                      float view_span_sec,
+                                                      float* y_0_1,
+                                                      size_t n,
+                                                      int note,
+                                                      int channel)
+{
+	(void)view_start_sec;
+	(void)view_span_sec;
+	(void)note;
+	(void)channel;
+	if (y_0_1) {
+		for (size_t i = 0; i < n; ++i) {
+			y_0_1[i] = 0.f;
+		}
+	}
+	return false;
+}
+
+int
+EngineHost::fill_midi_note_pressure_automation_points (float view_start_sec,
+                                                       float view_span_sec,
+                                                       float* x_norm,
+                                                       float* y_0_1,
+                                                       int max_n,
+                                                       int note,
+                                                       int channel)
+{
+	(void)view_start_sec;
+	(void)view_span_sec;
+	(void)x_norm;
+	(void)y_0_1;
+	(void)max_n;
+	(void)note;
+	(void)channel;
+	return 0;
+}
+
+bool
+EngineHost::smoke_midi_note_pressure ()
+{
+	return false;
+}
+
+bool
 EngineHost::clear_track_meter_clip (int track)
 {
 	(void)track;
@@ -24637,6 +26077,36 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 	(void)outfile;
 	(void)start_sample;
 	(void)end_sample;
+	return false;
+}
+
+bool
+EngineHost::export_route_index_wav (int track_index, const std::string& outfile,
+                                    int64_t start_sample, int64_t end_sample)
+{
+	(void)track_index;
+	(void)outfile;
+	(void)start_sample;
+	(void)end_sample;
+	return false;
+}
+
+bool
+EngineHost::export_stems (const std::string& folder_in, int* out_count)
+{
+	(void)folder_in;
+	if (out_count) {
+		*out_count = 0;
+	}
+	return false;
+}
+
+bool
+EngineHost::smoke_export_stems (int* out_count)
+{
+	if (out_count) {
+		*out_count = 0;
+	}
 	return false;
 }
 
@@ -26840,6 +28310,18 @@ EngineHost::smoke_midi_clipboard ()
 }
 
 bool
+EngineHost::duplicate_selected_midi_notes ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_duplicate ()
+{
+	return false;
+}
+
+bool
 EngineHost::humanize_midi_notes (float strength, uint32_t seed)
 {
 	(void)strength;
@@ -26849,6 +28331,72 @@ EngineHost::humanize_midi_notes (float strength, uint32_t seed)
 
 bool
 EngineHost::smoke_midi_humanize ()
+{
+	return false;
+}
+
+bool
+EngineHost::send_midi_program_change (int program, int bank)
+{
+	(void)program;
+	(void)bank;
+	return false;
+}
+
+bool
+EngineHost::set_midi_program (int program)
+{
+	if (program < 0) {
+		program = 0;
+	}
+	if (program > 127) {
+		program = 127;
+	}
+	_snap.midi_program = program;
+	return false;
+}
+
+bool
+EngineHost::nudge_midi_program (int delta)
+{
+	(void)delta;
+	return false;
+}
+
+int
+EngineHost::midi_program () const
+{
+	return _snap.midi_program;
+}
+
+bool
+EngineHost::set_midi_bank (int bank)
+{
+	if (bank < 0) {
+		bank = 0;
+	}
+	if (bank > 127) {
+		bank = 127;
+	}
+	_snap.midi_bank = bank;
+	return false;
+}
+
+bool
+EngineHost::nudge_midi_bank (int delta)
+{
+	(void)delta;
+	return false;
+}
+
+int
+EngineHost::midi_bank () const
+{
+	return _snap.midi_bank;
+}
+
+bool
+EngineHost::smoke_midi_program ()
 {
 	return false;
 }
@@ -27012,6 +28560,31 @@ EngineHost::midi_immediate_note (uint8_t status, uint8_t pitch, uint8_t velocity
 	(void)status;
 	(void)pitch;
 	(void)velocity;
+	return false;
+}
+
+void
+EngineHost::silence_midi_audition ()
+{
+	_audition_pitch = -1;
+}
+
+bool
+EngineHost::audition_midi_note (uint8_t pitch, uint8_t velocity)
+{
+	(void)pitch;
+	(void)velocity;
+	return false;
+}
+
+void
+EngineHost::tick_midi_audition ()
+{
+}
+
+bool
+EngineHost::smoke_midi_audition ()
+{
 	return false;
 }
 

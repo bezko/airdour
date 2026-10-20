@@ -3,6 +3,7 @@
  */
 
 #include "correlation_panel.h"
+#include "cairo_wave_blit.h"
 
 #include <algorithm>
 #include <cmath>
@@ -185,11 +186,25 @@ CorrelationPanel::draw (ID2D1RenderTarget* rt,
 		              D2D1::Point2F (gbox.right, gbox.bottom), body ? body : edge, 1.f);
 	}
 	if (accent && _gonio_n > 0) {
+		float nx[kGonioPts];
+		float ny[kGonioPts];
 		for (int i = 0; i < _gonio_n; ++i) {
-			float px = g_l2 + (_gonio_x[i] * 0.5f + 0.5f) * g_side;
-			float py = g_t2 + (1.f - (_gonio_y[i] * 0.5f + 0.5f)) * g_side;
-			float s = 1.5f * dpi_scale;
+			nx[i] = _gonio_x[i] * 0.5f + 0.5f;
+			ny[i] = 1.f - (_gonio_y[i] * 0.5f + 0.5f);
+		}
+		bool cairo_ok = false;
+		if (CairoWaveBlit::available ()) {
+			cairo_ok = CairoWaveBlit::blit_points (
+				rt, gbox, nx, ny, (size_t)_gonio_n, dpi_scale,
+				0.12f, 0.86f, 0.74f, 0.90f);
+		}
+		if (!cairo_ok) {
+			for (int i = 0; i < _gonio_n; ++i) {
+				float px = g_l2 + nx[i] * g_side;
+				float py = g_t2 + ny[i] * g_side;
+				float s = 1.5f * dpi_scale;
 			rt->FillRectangle (D2D1::RectF (px - s, py - s, px + s, py + s), accent);
+			}
 		}
 	}
 }

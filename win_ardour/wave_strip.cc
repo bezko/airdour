@@ -3,6 +3,7 @@
  */
 
 #include "wave_strip.h"
+#include "cairo_wave_blit.h"
 
 #include <algorithm>
 #include <cmath>
@@ -492,9 +493,18 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 		return;
 	}
 
-	for (size_t i = 0; i < n; ++i) {
-		float x0 = bounds.left + (float)i * col_w + gap * 0.5f;
-		float x1 = bounds.left + (float)(i + 1) * col_w - gap * 0.5f;
+	/* Prefer Cairo ImageSurface → D2D bitmap (canvas-style offline ink). */
+	bool cairo_ok = false;
+	if (CairoWaveBlit::available ()) {
+		cairo_ok = CairoWaveBlit::blit_peaks (
+			rt, bounds, _peaks.data (), _rms.data (), n, dpi_scale,
+			0.95f, 0.55f, 0.20f,  /* peak — warm */
+			0.30f, 0.55f, 0.78f); /* rms — cool */
+	}
+	if (!cairo_ok) {
+		for (size_t i = 0; i < n; ++i) {
+			float x0 = bounds.left + (float)i * col_w + gap * 0.5f;
+			float x1 = bounds.left + (float)(i + 1) * col_w - gap * 0.5f;
 		if (x1 <= x0) {
 			continue;
 		}
@@ -505,6 +515,7 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 		rt->FillRectangle (D2D1::RectF (x0, mid_y - rms_h, x1, mid_y + rms_h), rms_brush);
 		rt->FillRectangle (D2D1::RectF (x0, mid_y - peak_h, x1, mid_y - peak_h + 2.f * dpi_scale), peak_brush);
 		rt->FillRectangle (D2D1::RectF (x0, mid_y + peak_h - 2.f * dpi_scale, x1, mid_y + peak_h), peak_brush);
+		}
 	}
 
 	if (playhead_brush && _playhead_norm >= 0.f) {

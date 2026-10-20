@@ -3,6 +3,7 @@
  */
 
 #include "shell_window.h"
+#include "cairo_wave_blit.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1138,6 +1139,32 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "count-in", [this]() { return _engine.smoke_count_in (); });
 	run_smoke_check (ok, "click-toggle", [this]() { return _engine.smoke_click (); });
 	run_smoke_check (ok, "punch-toggle", [this]() { return _engine.smoke_punch (); });
+	run_smoke_check (ok, "cairo-wave", [this]() { return CairoWaveBlit::smoke_offline (); });
+	run_smoke_check (ok, "midi-note-pressure", [this]() {
+		if (!_engine.smoke_midi_note_pressure ()) {
+			return false;
+		}
+		_midi_cc_number = -3;
+		refresh_midi_cc_lane ();
+		return true;
+	});
+	run_smoke_check (ok, "midi-duplicate", [this]() { return _engine.smoke_midi_duplicate (); });
+	run_smoke_check (ok, "midi-panic", [this]() { return _engine.smoke_midi_panic (); });
+	run_smoke_check (ok, "stop-midi-panic", [this]() { return _engine.smoke_stop_midi_panic (); });
+	run_smoke_check (ok, "midi-audition", [this]() { return _engine.smoke_midi_audition (); });
+	run_smoke_check (ok, "midi-program", [this]() { return _engine.smoke_midi_program (); });
+	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
+	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
+	run_smoke_check (ok, "solo-all", [this]() { return _engine.smoke_solo_all (); });
+	run_smoke_check (ok, "midi-arm", [this]() { return _engine.smoke_midi_arm (); });
+	run_smoke_check (true, "cairo-wave", []() {
+		if (!CairoWaveBlit::available ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-cairo-wave FAILED (AIRDOUR_HAVE_CAIRO off — run Install-HeadlessDeps -WithGtkLibs)\n");
+			return false;
+		}
+		return CairoWaveBlit::smoke_offline ();
+	});
 
 	if (ok && smoke_zoom && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_zoom ()) {
@@ -1437,7 +1464,7 @@ ShellWindow::sync_mixer_arm_from_engine ()
 		_mixers[i].set_armed (_engine_snap.track_armed[i]);
 	}
 	if (mi >= 0 && mi < kMixerStripsMax) {
-		_mixers[mi].set_armed (false);
+		_mixers[mi].set_armed (_engine_snap.midi_armed);
 	}
 	_transport.set_record_armed (_engine_snap.session_record_armed);
 }
@@ -1549,10 +1576,14 @@ ShellWindow::midi_cc_label () const
 		return L"CC1 · Mod";
 	case 11:
 		return L"CC11 · Expr";
+	case 64:
+		return L"CC64 · Sustain";
 	case -1:
 		return L"Bend";
 	case -2:
 		return L"Pressure";
+	case -3:
+		return L"PolyAT · C4";
 	default:
 		return L"CC7 · Volume";
 	}
@@ -1566,9 +1597,13 @@ ShellWindow::cycle_midi_cc_controller ()
 	} else if (_midi_cc_number == 1) {
 		_midi_cc_number = 11;
 	} else if (_midi_cc_number == 11) {
+		_midi_cc_number = 64;
+	} else if (_midi_cc_number == 64) {
 		_midi_cc_number = -1; /* pitch bend */
 	} else if (_midi_cc_number == -1) {
 		_midi_cc_number = -2; /* channel pressure */
+	} else if (_midi_cc_number == -2) {
+		_midi_cc_number = -3; /* poly aftertouch · C4 */
 	} else {
 		_midi_cc_number = 7;
 	}
@@ -1578,6 +1613,8 @@ ShellWindow::cycle_midi_cc_controller ()
 			_engine.ensure_midi_bend_automation ();
 		} else if (_midi_cc_number == -2) {
 			_engine.ensure_midi_pressure_automation ();
+		} else if (_midi_cc_number == -3) {
+			_engine.ensure_midi_note_pressure_automation ();
 		} else {
 			_engine.ensure_midi_cc_automation (_midi_cc_number);
 		}
@@ -1599,6 +1636,8 @@ ShellWindow::refresh_midi_cc_lane ()
 			_engine.fill_midi_bend_automation_curve (view0, span, curve, n);
 		} else if (_midi_cc_number == -2) {
 			_engine.fill_midi_pressure_automation_curve (view0, span, curve, n);
+		} else if (_midi_cc_number == -3) {
+			_engine.fill_midi_note_pressure_automation_curve (view0, span, curve, n);
 		} else {
 			_engine.fill_midi_cc_automation_curve (
 				view0, span, curve, n, _midi_cc_number);
@@ -1625,6 +1664,9 @@ ShellWindow::refresh_midi_cc_lane ()
 				view0, span, px, py, (int)AutomationLane::kMaxPoints);
 		} else if (_midi_cc_number == -2) {
 			npt = _engine.fill_midi_pressure_automation_points (
+				view0, span, px, py, (int)AutomationLane::kMaxPoints);
+		} else if (_midi_cc_number == -3) {
+			npt = _engine.fill_midi_note_pressure_automation_points (
 				view0, span, px, py, (int)AutomationLane::kMaxPoints);
 		} else {
 			npt = _engine.fill_midi_cc_automation_points (
@@ -1653,6 +1695,8 @@ ShellWindow::write_midi_cc_at (float x, float y)
 		ok = _engine.write_midi_bend_automation (time_sec, value);
 	} else if (_midi_cc_number == -2) {
 		ok = _engine.write_midi_pressure_automation (time_sec, value);
+	} else if (_midi_cc_number == -3) {
+		ok = _engine.write_midi_note_pressure_automation (time_sec, value);
 	} else {
 		ok = _engine.write_midi_cc_automation (time_sec, value, _midi_cc_number);
 	}
@@ -4121,6 +4165,102 @@ ShellWindow::do_paste_midi_notes ()
 }
 
 void
+ShellWindow::do_duplicate_midi_notes ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.duplicate_selected_midi_notes ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_midi_panic ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	_engine.midi_panic ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_nudge_midi_program (int delta)
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.nudge_midi_program (delta)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_nudge_midi_bank (int delta)
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.nudge_midi_bank (delta)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_export_stems ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	int count = 0;
+	if (_engine.export_stems (std::string (), &count)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_mute_all_tracks ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.mute_all_tracks ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		for (int i = 0; i < n_mixer_strips (); ++i) {
+			_mixers[i].set_muted (true);
+		}
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_solo_all_tracks ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.solo_all_tracks ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		for (int i = 0; i < n_mixer_strips (); ++i) {
+			_mixers[i].set_soloed (true);
+		}
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+
+void
 ShellWindow::do_humanize_midi_notes (float strength)
 {
 	if (!_engine.is_linked ()) {
@@ -4814,12 +4954,18 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			/* Tab / Shift+Tab = cycle region selection forward/back. */
 			do_cycle_region_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? -1 : 1);
 		} else if (wparam == VK_SPACE) {
+			if (_transport_playing) {
+				_engine.midi_panic ();
+			}
 			transport_toggle ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
 		           && !(GetKeyState (VK_MENU) & 0x8000)
 		           && (wparam == 'D' || wparam == 'd')) {
-			/* Ctrl+D = duplicate selected region after itself. */
-			do_duplicate_selection ();
+			if (_engine_snap.has_selection) {
+				do_duplicate_selection ();
+			} else {
+				do_duplicate_midi_notes ();
+			}
 		} else if (wparam == VK_DELETE || wparam == VK_BACK) {
 			do_delete_selection ();
 		} else if ((GetKeyState (VK_SHIFT) & 0x8000) && wparam == VK_HOME
@@ -4884,6 +5030,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (wparam == VK_F8) {
 			/* F8 — cycle MIDI CC lane controller Volume→Mod→Expr. */
 			cycle_midi_cc_controller ();
+		} else if (wparam == VK_F9) {
+			/* F9 — MIDI panic. */
+			do_midi_panic ();
 		} else if (_engine_snap.midi_step_enabled
 		           && !(GetKeyState (VK_CONTROL) & 0x8000)
 		           && !(GetKeyState (VK_MENU) & 0x8000)
@@ -4950,8 +5099,13 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if ((GetKeyState (VK_MENU) & 0x8000)
 		           && !(GetKeyState (VK_CONTROL) & 0x8000)
 		           && (wparam == 'E' || wparam == 'e')) {
-			/* Alt+E = export selection range WAV. */
-			prompt_export_selection_wav ();
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
+				/* Alt+Shift+E = export per-track stems. */
+				do_export_stems ();
+			} else {
+				/* Alt+E = export selection range WAV. */
+				prompt_export_selection_wav ();
+			}
 		} else if ((GetKeyState (VK_SHIFT) & 0x8000)
 		           && !(GetKeyState (VK_CONTROL) & 0x8000)
 		           && !(GetKeyState (VK_MENU) & 0x8000)
@@ -5090,7 +5244,10 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			}
 		} else if (wparam == 'M' || wparam == 'm') {
-			if ((GetKeyState (VK_CONTROL) & 0x8000)
+			if ((GetKeyState (VK_MENU) & 0x8000) && (GetKeyState (VK_SHIFT) & 0x8000)) {
+				/* Alt+Shift+M = mute all audio tracks + MIDI. */
+				do_mute_all_tracks ();
+			} else if ((GetKeyState (VK_CONTROL) & 0x8000)
 			    && !(GetKeyState (VK_SHIFT) & 0x8000)
 			    && !(GetKeyState (VK_MENU) & 0x8000)) {
 				/* Ctrl+M = mute / unmute selected region. */
@@ -5325,8 +5482,13 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				layout_panes ();
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			}
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'U' || wparam == 'u')) {
-			do_apply_or_clear_group ();
+		} else if (wparam == 'U' || wparam == 'u') {
+			if ((GetKeyState (VK_MENU) & 0x8000) && (GetKeyState (VK_SHIFT) & 0x8000)) {
+				/* Alt+Shift+U = solo all audio tracks + MIDI. */
+				do_solo_all_tracks ();
+			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
+				do_apply_or_clear_group ();
+			}
 		}
 		return 0;
 	case WM_MOUSEWHEEL:
@@ -5504,8 +5666,8 @@ ShellWindow::hit_editor_lane (float x, float y) const
 int
 ShellWindow::hit_mixer_arm (float x, float y) const
 {
-	const int na = n_audio_lanes ();
-	for (int i = 0; i < na; ++i) {
+	const int n = n_mixer_strips ();
+	for (int i = 0; i < n; ++i) {
 		if (_mixers[i].hit_arm (x, y)) {
 			return i;
 		}
@@ -5957,6 +6119,26 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		}
 		return true;
 	}
+	if (th == TransportHit::MidiPanic) {
+		do_midi_panic ();
+		return true;
+	}
+	if (th == TransportHit::MidiPgmUp) {
+		do_nudge_midi_program (1);
+		return true;
+	}
+	if (th == TransportHit::MidiPgmDown) {
+		do_nudge_midi_program (-1);
+		return true;
+	}
+	if (th == TransportHit::MidiBankUp) {
+		do_nudge_midi_bank (1);
+		return true;
+	}
+	if (th == TransportHit::MidiBankDown) {
+		do_nudge_midi_bank (-1);
+		return true;
+	}
 	if (th == TransportHit::CountIn) {
 		do_toggle_count_in ();
 		return true;
@@ -6224,7 +6406,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			if (!_engine.start ()) {
 				_engine_snap = _engine.snapshot ();
 			} else {
-				_engine.toggle_track_armed (arm);
+				if (arm == midi_mixer_index ()) {
+					_engine.toggle_midi_armed ();
+				} else {
+					_engine.toggle_track_armed (arm);
+				}
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_arm_from_engine ();
@@ -7821,7 +8007,11 @@ ShellWindow::draw_help_overlay ()
 		{ L"F5 / Chd", L"MIDI chord Off→Maj→Min · multi-key latch" },
 		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
-		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
+		{ L"F8", L"MIDI auto lane · CC7→1→11→64→Bend→Pressure→PolyAT" },
+		{ L"F9 / Panic", L"MIDI panic · kill hanging notes + reset controllers" },
+		{ L"P+ / P−  B+ / B−", L"MIDI Program Change ± · Bank Select ±" },
+		{ L"Alt+Shift+M / U", L"Mute / Solo all audio tracks + MIDI" },
+		{ L"Alt+Shift+E", L"Export per-track stem WAV files" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
