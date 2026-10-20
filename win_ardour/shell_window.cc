@@ -261,7 +261,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
                             bool smoke_midi_pressure,
-                            bool smoke_crossfade_handles)
+                            bool smoke_crossfade_handles,
+                            bool smoke_crossfade_shape)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -483,6 +484,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_crossfade_handles) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-handles FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_crossfade_shape && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_crossfade_shape ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_crossfade_shape) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-crossfade-shape FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -2663,6 +2673,23 @@ ShellWindow::do_apply_crossfade ()
 }
 
 void
+ShellWindow::do_cycle_fade_shape ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.cycle_selected_fade_shape ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::do_stretch_selection (float time_ratio)
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -3705,7 +3732,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
 			do_split_at_playhead ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'F' || wparam == 'f')) {
-			do_apply_crossfade ();
+			/* F = apply crossfade; Shift+F = cycle Linear ↔ EqualPower. */
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
+				do_cycle_fade_shape ();
+			} else {
+				do_apply_crossfade ();
+			}
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'T' || wparam == 't')) {
 			/* T = stretch 1.5×; Shift+T = compress 0.75× (pitch unchanged). */
 			do_stretch_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? 0.75f : 1.5f);
@@ -6293,7 +6325,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+Z / Y", L"Undo / Redo" },
 		{ L"Ctrl+S / O / E", L"Save / Open browse / Export" },
 		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
-		{ L"S / F / Del", L"Split · Fade · Delete selection" },
+		{ L"S / F / Shift+F / Del", L"Split · Fade · Fade shape · Delete" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
 		{ L"V", L"Reverse selected audio region" },

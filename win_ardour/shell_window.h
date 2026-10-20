@@ -128,7 +128,8 @@ public:
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
 	                    bool smoke_midi_pressure = false,
-	                    bool smoke_crossfade_handles = false);
+	                    bool smoke_crossfade_handles = false,
+	                    bool smoke_crossfade_shape = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -229,6 +230,7 @@ private:
 	void do_delete_selection ();
 	void do_split_at_playhead ();
 	void do_apply_crossfade ();
+	void do_cycle_fade_shape ();
 	void do_stretch_selection (float time_ratio = 1.5f);
 	void do_pitch_shift_selection (float semitones = 1.f);
 	void do_reverse_selection ();

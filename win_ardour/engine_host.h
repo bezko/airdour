@@ -60,6 +60,8 @@ struct EngineSnapshot {
 	float        selection_end_sec;
 	float        selection_fade_in_sec; /* AudioRegion fade-in length */
 	float        selection_fade_out_sec;
+	/** Selection fade shape: 0=Linear 1=ConstantPower (EqualPower). */
+	int          selection_fade_shape;
 	bool         loop_active; /* auto-loop Location exists with positive length */
 	bool         loop_playing; /* Session get_play_loop() */
 	float        loop_start_sec;
@@ -541,6 +543,11 @@ public:
 	 * complementary fade so the abut/overlap reads as a crossfade.
 	 */
 	bool apply_selected_crossfade (float length_sec = 0.08f);
+	/**
+	 * Cycle selection (+ abutting neighbor) fade shape Linear ↔ ConstantPower.
+	 * Shift+F / --smoke-crossfade-shape.
+	 */
+	bool cycle_selected_fade_shape ();
 
 	/**
 	 * Trim selected region front/end to absolute time (seconds).
@@ -656,6 +663,12 @@ public:
 	 * For --smoke-crossfade-handles.
 	 */
 	bool smoke_crossfade_handles ();
+
+	/**
+	 * Import → split → crossfade → cycle Linear↔ConstantPower.
+	 * For --smoke-crossfade-shape.
+	 */
+	bool smoke_crossfade_shape ();
 
 	/**
 	 * Import tone → select → stretch 1.5×; verify length ~1.5× source.
