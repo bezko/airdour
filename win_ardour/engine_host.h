@@ -462,6 +462,34 @@ public:
 	/** Clear → 3 pressure points → Play. For --smoke-midi-pressure. */
 	bool smoke_midi_pressure ();
 
+	/**
+	 * MidiModel polyphonic aftertouch (note-pressure) AutomationList for one
+	 * note id (default C4=60). Values 0..127; UI maps 0..1. F8 lane / PolyAT.
+	 */
+	static constexpr int kMidiPolyAtNote = 60; /* C4 */
+	bool ensure_midi_note_pressure_automation (int note = kMidiPolyAtNote,
+	                                           int channel = 0);
+	bool write_midi_note_pressure_automation (float time_sec, float value_0_1,
+	                                          int note = kMidiPolyAtNote,
+	                                          int channel = 0);
+	bool clear_midi_note_pressure_automation (int note = kMidiPolyAtNote,
+	                                          int channel = 0);
+	bool fill_midi_note_pressure_automation_curve (float view_start_sec,
+	                                               float view_span_sec,
+	                                               float* y_0_1,
+	                                               size_t n,
+	                                               int note = kMidiPolyAtNote,
+	                                               int channel = 0);
+	int  fill_midi_note_pressure_automation_points (float view_start_sec,
+	                                                float view_span_sec,
+	                                                float* x_norm,
+	                                                float* y_0_1,
+	                                                int max_n,
+	                                                int note = kMidiPolyAtNote,
+	                                                int channel = 0);
+	/** Clear → 3 PolyAT·C4 points → Play. For --smoke-midi-note-pressure. */
+	bool smoke_midi_note_pressure ();
+
 	/** Clear PeakMeter max-peak / clip latch on Audio track (0..kMeters-1). */
 	bool clear_track_meter_clip (int track);
 
