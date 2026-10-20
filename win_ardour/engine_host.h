@@ -356,9 +356,18 @@ public:
 	bool toggle_midi_soloed ();
 
 	/**
+	 * Solo only this audio track (or MIDI): clear every other solo first.
+	 * Controllable::NoGroup so group peers do not re-solo. For Alt+click Solo.
+	 */
+	bool exclusive_solo_track (int track);
+	bool exclusive_solo_midi ();
+
+	/**
 	 * Mute/solo Audio 1 + MIDI round-trip; clear. For --smoke-mute-solo.
 	 */
 	bool smoke_mute_solo ();
+	/** Solo Audio1+2+MIDI → exclusive Audio1 → only Audio1 soloed. */
+	bool smoke_exclusive_solo ();
 
 	/** Pan azimuth 0=L … 0.5=C … 1=R via Route::pan_azimuth_control. */
 	bool  set_track_pan (int track, float pan_0_1);

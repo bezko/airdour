@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_exclusive_solo)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -621,6 +622,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_mute_solo) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_exclusive_solo && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_exclusive_solo ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_mute_solo_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_exclusive_solo) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-exclusive-solo FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -4755,8 +4769,15 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	int solo_i = hit_mixer_solo (x, y);
 	if (solo_i >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
+			const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
 			if (solo_i == midi_mixer_index ()) {
-				_engine.toggle_midi_soloed ();
+				if (alt) {
+					_engine.exclusive_solo_midi ();
+				} else {
+					_engine.toggle_midi_soloed ();
+				}
+			} else if (alt) {
+				_engine.exclusive_solo_track (solo_i);
 			} else {
 				_engine.toggle_track_soloed (solo_i);
 			}
@@ -6316,6 +6337,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"U", L"Apply / clear track group" },
+		{ L"Alt+click Solo", L"Exclusive solo (clear other solos)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
