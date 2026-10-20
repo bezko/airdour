@@ -334,6 +334,13 @@ public:
 	void  set_gain (float linear);
 	void  set_track_gain (int track, float linear);
 	bool  set_midi_gain (float linear);
+	/**
+	 * Set every audio + MIDI fader to unity (1.0 linear, NoGroup).
+	 * For Alt+click fader / --smoke-fader-reset-all.
+	 */
+	bool reset_all_faders ();
+	/** Drop gains → reset_all → verify ≈1.0. For --smoke-fader-reset-all. */
+	bool smoke_fader_reset_all ();
 	float gain () const;
 
 	/** Arm / disarm a track for recording (Session rec-enable control). */
