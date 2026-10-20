@@ -128,7 +128,8 @@ public:
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
 	                    bool smoke_midi_pressure = false,
-	                    bool smoke_input_monitor = false);
+	                    bool smoke_input_monitor = false,
+	                    bool smoke_mon_peer_badge = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }

@@ -176,6 +176,8 @@ struct EngineSnapshot {
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
 	/** MonitorChoice: 0=Auto 1=Input 2=Disk (MonitorCue unused in shell). */
 	int          track_monitor_choice[kMeters];
+	/** Peers sharing same Mon choice via RouteGroup (0 = alone / no share). */
+	int          track_monitor_peer_count[kMeters];
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
@@ -211,6 +213,7 @@ struct EngineSnapshot {
 	bool         group_shares_mute;
 	bool         group_shares_solo;
 	bool         group_shares_gain;
+	bool         group_shares_monitoring;
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
 	bool         monitor_ok; /* Session monitor_out + MonitorProcessor */
@@ -344,12 +347,18 @@ public:
 
 	/**
 	 * Track input monitor choice (MonitorControl): Auto / Input / Disk.
-	 * For Mon button / Alt+Shift+O / --smoke-input-monitor.
+	 * Uses UseGroup so RouteGroup monitoring share propagates peers.
+	 * Mon button / Alt+Shift+O / --smoke-input-monitor / --smoke-mon-peer-badge.
 	 */
 	bool set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk);
 	bool cycle_track_monitor_choice (int track = 0);
 	/** Auto → Input → Disk → Auto on Audio 1. */
 	bool smoke_input_monitor ();
+	/**
+	 * Group + Input on Audio 1 → peers match; Mon peer badge count ≥1.
+	 * For --smoke-mon-peer-badge.
+	 */
+	bool smoke_mon_peer_badge ();
 
 	/**
 	 * Route mute/solo (audio tracks 0..kMeters-1).
@@ -842,8 +851,8 @@ public:
 
 	/**
 	 * Create/replace the shell Session RouteGroup ("Group 1") from audio
-	 * indices (≥2). Shares mute + solo + gain when active. Honest scope:
-	 * one group, no VCA/subgroup/recenable.
+	 * indices (≥2). Shares mute + solo + gain + monitoring when active.
+	 * Honest scope: one group, no VCA/subgroup.
 	 */
 	bool create_route_group (const int* indices, int n);
 	/** Remove shell RouteGroup members (and drop empty group). */

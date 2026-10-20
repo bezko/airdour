@@ -41,6 +41,7 @@ MixerStrip::MixerStrip ()
 	, _fx_param3 (0.5f)
 	, _armed (false)
 	, _monitor_choice (0)
+	, _monitor_peer_count (0)
 	, _muted (false)
 	, _soloed (false)
 	, _fx_bypassed (false)
@@ -501,12 +502,18 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		const wchar_t* arm_label = _armed ? L"R" : L"Arm";
 		rt->DrawTextW (arm_label, (UINT32)wcslen (arm_label), fmt_meta, _arm_btn, brand);
 
-		/* Mon — Auto / In / Disk cycle (MonitorControl). */
-		const bool mon_forced = _monitor_choice != 0;
+		/* Mon — Auto / In / Disk; ·N peer badge when group shares monitoring. */
+		const bool mon_forced = _monitor_choice != 0 || _monitor_peer_count > 0;
 		rt->FillRectangle (_mon_btn, mon_forced ? accent : edge);
-		const wchar_t* mon_label =
+		wchar_t mon_label[16];
+		const wchar_t* base =
 			(_monitor_choice == 1) ? L"In"
 			: (_monitor_choice == 2) ? L"Disk" : L"Auto";
+		if (_monitor_peer_count > 0) {
+			_snwprintf_s (mon_label, _TRUNCATE, L"%s·%d", base, _monitor_peer_count + 1);
+		} else {
+			_snwprintf_s (mon_label, _TRUNCATE, L"%s", base);
+		}
 		rt->DrawTextW (mon_label, (UINT32)wcslen (mon_label), fmt_meta, _mon_btn, brand);
 	}
 

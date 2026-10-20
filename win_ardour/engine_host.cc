@@ -597,6 +597,7 @@ EngineHost::EngineHost ()
 		_snap.track_muted[i] = false;
 		_snap.track_soloed[i] = false;
 		_snap.track_monitor_choice[i] = 0;
+		_snap.track_monitor_peer_count[i] = 0;
 		_snap.track_pan[i] = 0.5f;
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
@@ -610,6 +611,7 @@ EngineHost::EngineHost ()
 	_snap.group_shares_mute = false;
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
+	_snap.group_shares_monitoring = false;
 	_snap.group_name[0] = L'\0';
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
@@ -3147,6 +3149,7 @@ EngineHost::refresh_monitor_choice_flags ()
 {
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_monitor_choice[i] = 0;
+		_snap.track_monitor_peer_count[i] = 0;
 	}
 	if (!_impl) {
 		return;
@@ -3164,6 +3167,26 @@ EngineHost::refresh_monitor_choice_flags ()
 				} else {
 					_snap.track_monitor_choice[i] = 0; /* Auto (and Cue→Auto) */
 				}
+			}
+		}
+		/* Peer badge: same Mon choice among active group that shares monitoring. */
+		refresh_group_flags ();
+		if (_snap.group_shares_monitoring && _snap.group_active
+		    && _snap.group_member_count >= 2) {
+			for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+				if (!_snap.track_in_group[i]) {
+					continue;
+				}
+				int peers = 0;
+				for (int j = 0; j < EngineSnapshot::kMeters; ++j) {
+					if (j == i || !_snap.track_in_group[j]) {
+						continue;
+					}
+					if (_snap.track_monitor_choice[j] == _snap.track_monitor_choice[i]) {
+						++peers;
+					}
+				}
+				_snap.track_monitor_peer_count[i] = peers;
 			}
 		}
 	} catch (...) {
@@ -3193,7 +3216,7 @@ EngineHost::set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk)
 		}
 		std::shared_ptr<MonitorControl> ctrl =
 			_impl->tracks[track]->monitoring_control ();
-		_impl->session->set_control (ctrl, (double)mc, Controllable::NoGroup);
+		_impl->session->set_control (ctrl, (double)mc, Controllable::UseGroup);
 		wait_until ([&] () {
 			refresh_monitor_choice_flags ();
 			return _snap.track_monitor_choice[track] == choice_0_auto_1_in_2_disk;
@@ -3271,6 +3294,69 @@ EngineHost::smoke_input_monitor ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-input-monitor exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_mon_peer_badge ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-mon-peer-badge failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_snap.audio_track_count < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mon-peer-badge FAILED (need ≥2 audio)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const int idxs[2] = { 0, 1 };
+		if (!create_route_group (idxs, 2) || !_snap.group_shares_monitoring) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mon-peer-badge FAILED (create)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		set_track_monitor_choice (0, 0);
+		set_track_monitor_choice (1, 0);
+		if (!set_track_monitor_choice (0, 1)
+		    || _snap.track_monitor_choice[0] != 1
+		    || _snap.track_monitor_choice[1] != 1) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-mon-peer-badge FAILED (Input propagate %d/%d)\n",
+			              _snap.track_monitor_choice[0], _snap.track_monitor_choice[1]);
+			std::fflush (stderr);
+			clear_route_group ();
+			return false;
+		}
+		refresh_monitor_choice_flags ();
+		if (_snap.track_monitor_peer_count[0] < 1 || _snap.track_monitor_peer_count[1] < 1) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-mon-peer-badge FAILED (peer count %d/%d)\n",
+			              _snap.track_monitor_peer_count[0], _snap.track_monitor_peer_count[1]);
+			std::fflush (stderr);
+			clear_route_group ();
+			return false;
+		}
+		clear_route_group ();
+		set_track_monitor_choice (0, 0);
+		refresh_monitor_choice_flags ();
+		if (_snap.track_monitor_peer_count[0] != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mon-peer-badge FAILED (ungrouped peers)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-mon-peer-badge ok (Input peers + clear)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-mon-peer-badge ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mon-peer-badge exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -8704,6 +8790,7 @@ EngineHost::refresh_group_flags ()
 	_snap.group_shares_mute = false;
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
+	_snap.group_shares_monitoring = false;
 	_snap.group_name[0] = L'\0';
 	if (!_impl) {
 		return;
@@ -8722,6 +8809,7 @@ EngineHost::refresh_group_flags ()
 		_snap.group_shares_mute = rg->is_mute ();
 		_snap.group_shares_solo = rg->is_solo ();
 		_snap.group_shares_gain = rg->is_gain ();
+		_snap.group_shares_monitoring = rg->is_monitoring ();
 		int n = 0;
 		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
 			if (_impl->tracks[i] && _impl->tracks[i]->route_group () == rg) {
@@ -8761,7 +8849,7 @@ EngineHost::create_route_group (const int* indices, int n)
 		rg->set_select (false);
 		rg->set_route_active (false);
 		rg->set_color (false);
-		rg->set_monitoring (false);
+		rg->set_monitoring (true);
 		rg->set_sursend_enable (false);
 
 		rg->clear ();
@@ -8785,7 +8873,7 @@ EngineHost::create_route_group (const int* indices, int n)
 		_impl->shell_group = rg;
 		refresh_group_flags ();
 		_snap.detail = L"route group ready";
-		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain\n",
+		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain/mon\n",
 		              rg->name ().c_str (), _snap.group_member_count);
 		std::fflush (stderr);
 		return _snap.group_member_count >= 2;
@@ -17715,6 +17803,7 @@ EngineHost::EngineHost ()
 	_snap.group_shares_mute = false;
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
+	_snap.group_shares_monitoring = false;
 	_snap.group_name[0] = L'\0';
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
@@ -18302,6 +18391,12 @@ EngineHost::cycle_track_monitor_choice (int track)
 
 bool
 EngineHost::smoke_input_monitor ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_mon_peer_badge ()
 {
 	return false;
 }

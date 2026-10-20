@@ -261,7 +261,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
                             bool smoke_midi_pressure,
-                            bool smoke_input_monitor)
+                            bool smoke_input_monitor,
+                            bool smoke_mon_peer_badge)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -635,6 +636,20 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_input_monitor) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-input-monitor FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_mon_peer_badge && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_mon_peer_badge ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_monitor_from_engine ();
+			sync_mixer_group_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_mon_peer_badge) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mon-peer-badge FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1217,9 +1232,11 @@ ShellWindow::sync_mixer_monitor_from_engine ()
 	const int na = n_audio_lanes ();
 	for (int i = 0; i < kMixerStripsMax; ++i) {
 		_mixers[i].set_monitor_choice (0);
+		_mixers[i].set_monitor_peer_count (0);
 	}
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_monitor_choice (_engine_snap.track_monitor_choice[i]);
+		_mixers[i].set_monitor_peer_count (_engine_snap.track_monitor_peer_count[i]);
 	}
 }
 

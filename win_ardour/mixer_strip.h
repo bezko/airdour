@@ -45,6 +45,9 @@ public:
 	/** 0=Auto 1=Input 2=Disk — Mon button (audio strips). */
 	void set_monitor_choice (int choice_0_1_2);
 	int  monitor_choice () const { return _monitor_choice; }
+	/** Group monitoring peers sharing this choice (badge shows total ·N). */
+	void set_monitor_peer_count (int peers) { _monitor_peer_count = peers < 0 ? 0 : peers; }
+	int  monitor_peer_count () const { return _monitor_peer_count; }
 
 	void set_muted (bool muted) { _muted = muted; }
 	bool muted () const { return _muted; }
@@ -143,6 +146,7 @@ private:
 	float       _fx_param3;
 	bool        _armed;
 	int         _monitor_choice; /* 0=Auto 1=Input 2=Disk */
+	int         _monitor_peer_count;
 	bool        _muted;
 	bool        _soloed;
 	bool        _fx_bypassed;
