@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_center_playhead,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,43 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_center_playhead && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_center_playhead ()) {
+			_smoke_failed = true;
+		} else {
+			/* Keep locate snap (poll would reset async transport to 0). */
+			_engine_snap = _engine.snapshot ();
+			_playhead_sec = _engine_snap.transport_sec;
+			sync_transport_clock_from_engine ();
+			/* Pan view away from playhead so center has work to do. */
+			_lanes[0].strip.set_view_window (0.f, 2.f);
+			apply_shared_view (0);
+			float before_mid = _lanes[0].strip.view_start_sec ()
+			                  + 0.5f * _lanes[0].strip.view_span_sec ();
+			do_center_on_playhead ();
+			float span = _lanes[0].strip.view_span_sec ();
+			float mid = _lanes[0].strip.view_start_sec () + 0.5f * span;
+			float ph = _playhead_sec;
+			if (std::fabs (mid - ph) > std::max (0.15f, span * 0.12f)) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-center-playhead FAILED (mid=%.3f ph=%.3f before_mid=%.3f)\n",
+				              mid, ph, before_mid);
+				_smoke_failed = true;
+			} else {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-center-playhead ok (mid=%.3f ph=%.3f)\n",
+				              mid, ph);
+			}
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_center_playhead) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-center-playhead FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1948,6 +1986,29 @@ ShellWindow::reset_shared_view ()
 	for (int i = 0; i < kTracks; ++i) {
 		_lanes[i].strip.reset_view ();
 	}
+}
+
+
+void
+ShellWindow::do_center_on_playhead ()
+{
+	float span = _lanes[0].strip.view_span_sec ();
+	if (span < 0.05f) {
+		span = WaveStrip::kDefaultSpanSec;
+	}
+	/* Shell playhead is UI source of truth (async Session locate may lag). */
+	float ph = _playhead_sec;
+	if (ph < 0.f) {
+		ph = 0.f;
+	}
+	float start = ph - span * 0.5f;
+	if (start < 0.f) {
+		start = 0.f;
+	}
+	_lanes[0].strip.set_view_window (start, span);
+	apply_shared_view (0);
+	refresh_editor_view_after_nav ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
@@ -3572,6 +3633,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			transport_toggle ();
 		} else if (wparam == VK_DELETE || wparam == VK_BACK) {
 			do_delete_selection ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == '0' || wparam == VK_NUMPAD0)) {
+			/* Ctrl+Alt+0 = center editor view on playhead (keep zoom). */
+			do_center_on_playhead ();
 		} else if (wparam == VK_HOME || wparam == '0') {
 			reset_shared_view ();
 			refresh_editor_view_after_nav ();
@@ -6310,6 +6376,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
 		{ L"Home / 0", L"Follow transport (reset view)" },
+		{ L"Ctrl+Alt+0", L"Center view on playhead (keep zoom)" },
 		{ L"← →  Shift+←→", L"Scroll editor · larger step" },
 		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
 		{ L"Ctrl+±", L"Zoom in / out (center)" },

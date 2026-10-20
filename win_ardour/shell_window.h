@@ -95,6 +95,7 @@ public:
 	                    bool smoke_group = false,
 	                    bool smoke_monitor = false,
 	                    bool smoke_locate = false,
+	                    bool smoke_center_playhead = false,
 	                    bool smoke_zoom = false,
 	                    bool smoke_history = false,
 	                    bool smoke_prefs = false,
@@ -299,6 +300,7 @@ private:
 	void sync_transport_clock_from_engine ();
 	void apply_shared_view (int source_lane);
 	void reset_shared_view ();
+	void do_center_on_playhead ();
 	void fit_shared_range (float start_sec, float end_sec);
 	void do_fit_session ();
 	void do_fit_selection ();
