@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_group_route_active)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -864,6 +865,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_group_route_active && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_group_route_active ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_group_from_engine ();
+			sync_mixer_mute_solo_from_engine ();
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_group_route_active) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-route-active FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_monitor && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_monitor ()) {
 			_smoke_failed = true;
@@ -1205,10 +1221,12 @@ ShellWindow::sync_mixer_mute_solo_from_engine ()
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_muted (_engine_snap.track_muted[i]);
 		_mixers[i].set_soloed (_engine_snap.track_soloed[i]);
+		_mixers[i].set_route_active (_engine_snap.track_active[i]);
 	}
 	if (mi >= 0 && mi < kMixerStripsMax) {
 		_mixers[mi].set_muted (_engine_snap.midi_muted);
 		_mixers[mi].set_soloed (_engine_snap.midi_soloed);
+		_mixers[mi].set_route_active (true);
 	}
 }
 
@@ -2492,6 +2510,23 @@ ShellWindow::do_apply_or_clear_group ()
 	_engine_snap = _engine.snapshot ();
 	sync_mixer_group_from_engine ();
 	sync_mixer_gains_from_engine ();
+	sync_mixer_mute_solo_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_toggle_focused_track_active ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	int track = _focus_audio_track;
+	if (track < 0 || track >= n_audio_lanes ()) {
+		track = 0;
+	}
+	_engine.toggle_track_active (track);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
 	sync_mixer_mute_solo_from_engine ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
@@ -3829,6 +3864,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			}
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'U' || wparam == 'u')) {
 			do_apply_or_clear_group ();
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'E' || wparam == 'e')) {
+			/* Alt+Shift+E — toggle focused track Route::active (group shares). */
+			do_toggle_focused_track_active ();
 		}
 		return 0;
 	case WM_MOUSEWHEEL:
@@ -4699,6 +4740,14 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			return true;
 		}
 		if (lab < n_audio_lanes ()) {
+			if ((GetKeyState (VK_MENU) & 0x8000)
+			    && (GetKeyState (VK_SHIFT) & 0x8000)
+			    && !(GetKeyState (VK_CONTROL) & 0x8000)) {
+				/* Alt+Shift+click label — toggle Route::active (group shares). */
+				_focus_audio_track = lab;
+				do_toggle_focused_track_active ();
+				return true;
+			}
 			if (GetKeyState (VK_SHIFT) & 0x8000) {
 				do_toggle_group_pick (lab);
 				return true;
@@ -6315,7 +6364,8 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
-		{ L"U", L"Apply / clear track group" },
+		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·active)" },
+		{ L"Alt+Shift+E", L"Toggle track active (group shares)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },

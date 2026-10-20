@@ -46,6 +46,9 @@ public:
 	bool muted () const { return _muted; }
 	void set_soloed (bool soloed) { _soloed = soloed; }
 	bool soloed () const { return _soloed; }
+	/** Route::active — dim strip when false. */
+	void set_route_active (bool active) { _route_active = active; }
+	bool route_active () const { return _route_active; }
 
 	/** Pan azimuth 0=L … 0.5=C … 1=R (audio strips only). */
 	void  set_pan (float pan_0_1);
@@ -138,6 +141,7 @@ private:
 	bool        _armed;
 	bool        _muted;
 	bool        _soloed;
+	bool        _route_active;
 	bool        _fx_bypassed;
 	int         _fx_param_count; /* 1..3 */
 	bool        _midi_strip;

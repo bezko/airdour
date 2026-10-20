@@ -174,6 +174,7 @@ struct EngineSnapshot {
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
+	bool         track_active[kMeters]; /* Route::active() — DSP path on */
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
@@ -209,6 +210,7 @@ struct EngineSnapshot {
 	bool         group_shares_mute;
 	bool         group_shares_solo;
 	bool         group_shares_gain;
+	bool         group_shares_route_active;
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
 	bool         monitor_ok; /* Session monitor_out + MonitorProcessor */
@@ -831,8 +833,8 @@ public:
 
 	/**
 	 * Create/replace the shell Session RouteGroup ("Group 1") from audio
-	 * indices (≥2). Shares mute + solo + gain when active. Honest scope:
-	 * one group, no VCA/subgroup/recenable.
+	 * indices (≥2). Shares mute + solo + gain + route-active when active.
+	 * Honest scope: one group, no VCA/subgroup.
 	 */
 	bool create_route_group (const int* indices, int n);
 	/** Remove shell RouteGroup members (and drop empty group). */
@@ -841,9 +843,21 @@ public:
 	bool toggle_route_group_active ();
 
 	/**
+	 * Route::set_active — when group shares route-active, peers follow.
+	 * Alt+Shift+E / Alt+Shift+click strip label / --smoke-group-route-active.
+	 */
+	bool set_track_active (int track, bool active);
+	bool toggle_track_active (int track);
+
+	/**
 	 * Group Audio 0+1; mute/solo/gain propagate; clear. For --smoke-group.
 	 */
 	bool smoke_group ();
+	/**
+	 * Group Audio 0+1; deactivate propagates; clear isolates.
+	 * For --smoke-group-route-active.
+	 */
+	bool smoke_group_route_active ();
 
 	/**
 	 * Ensure Session monitor bus + MonitorProcessor (add_monitor_section).
@@ -1283,6 +1297,7 @@ private:
 	void refresh_freeze_flags ();
 	void refresh_record_flags ();
 	void refresh_mute_solo_flags ();
+	void refresh_active_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_send_flags ();
