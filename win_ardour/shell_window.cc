@@ -4801,8 +4801,9 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	int send_i = hit_mixer_send (x, y);
 	if (send_i >= 0) {
-		/* Alt+click send → mute/unmute (Processor deactivate). */
-		if ((GetKeyState (VK_MENU) & 0x8000) != 0
+		/* Ctrl+click send → mute/unmute (Processor deactivate).
+		 * Alt+click remains send-reset-all on tip #38. */
+		if ((GetKeyState (VK_CONTROL) & 0x8000) != 0
 		    && _engine.is_linked () && _engine_snap.session_ok) {
 			_engine.toggle_track_send_muted (send_i);
 			_engine.poll ();
@@ -6344,7 +6345,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
-		{ L"Alt+click Send", L"Mute / unmute Aux send (Sm)" },
+		{ L"Ctrl+click Send", L"Mute / unmute Aux send (Sm)" },
 	};
 
 	float y = card.top + 40.f * _dpi_scale;

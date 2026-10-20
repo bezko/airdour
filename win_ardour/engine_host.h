@@ -371,7 +371,7 @@ public:
 	/** Aux send level 0..1 (gain coeff) via InternalSend → Aux bus. */
 	bool  set_track_send (int track, float send_0_1);
 	float track_send (int track) const;
-	/** Mute aux send via Processor deactivate (Alt+click send). */
+	/** Mute aux send via Processor deactivate (Ctrl+click send). */
 	bool set_track_send_muted (int track, bool muted);
 	bool toggle_track_send_muted (int track);
 
