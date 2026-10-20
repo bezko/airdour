@@ -3609,6 +3609,128 @@ EngineHost::smoke_send ()
 }
 
 bool
+EngineHost::reset_strip_mixer (int track)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+			return false;
+		}
+		if (!_impl->tracks[track]->gain_control ()) {
+			return false;
+		}
+		if (!_impl->tracks[track]->pan_azimuth_control ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: reset_strip_mixer: no pan on Audio %d\n",
+			              track + 1);
+			std::fflush (stderr);
+			return false;
+		}
+
+		set_track_gain (track, 1.0f);
+		bool ok = _snap.track_gain[track] >= 0.95f;
+		ok = set_track_pan (track, 0.5f) && ok;
+		ok = set_track_send (track, 0.0f) && ok;
+
+		if (_snap.track_pan[track] < 0.45f || _snap.track_pan[track] > 0.55f) {
+			ok = false;
+		}
+		if (_snap.track_send[track] > 0.05f) {
+			ok = false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: strip reset Audio %d gain=%.3f pan=%.3f send=%.3f (%s)\n",
+		              track + 1, _snap.track_gain[track], _snap.track_pan[track],
+		              _snap.track_send[track], ok ? "ok" : "partial");
+		std::fflush (stderr);
+		_snap.detail = ok ? L"strip mixer reset" : L"strip mixer reset partial";
+		return ok;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: reset_strip_mixer: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_strip_mixer_reset ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-strip-mixer-reset failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_impl->tracks[0]->gain_control () || !_impl->tracks[0]->pan_azimuth_control ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-strip-mixer-reset FAILED (no gain/pan)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_aux_sends () || !_snap.aux_bus_ok || !_snap.track_send_ok[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset FAILED (no Aux/send)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		set_track_gain (0, 0.35f);
+		if (!set_track_pan (0, 0.0f) || !set_track_send (0, 0.75f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset FAILED (dirty)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_gain[0] > 0.45f || _snap.track_pan[0] > 0.05f
+		    || _snap.track_send[0] < 0.70f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-strip-mixer-reset FAILED "
+			              "(pre gain=%.3f pan=%.3f send=%.3f)\n",
+			              _snap.track_gain[0], _snap.track_pan[0], _snap.track_send[0]);
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!reset_strip_mixer (0)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset FAILED (reset)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_gain[0] < 0.95f
+		    || _snap.track_pan[0] < 0.45f || _snap.track_pan[0] > 0.55f
+		    || _snap.track_send[0] > 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-strip-mixer-reset FAILED "
+			              "(post gain=%.3f pan=%.3f send=%.3f)\n",
+			              _snap.track_gain[0], _snap.track_pan[0], _snap.track_send[0]);
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-strip-mixer-reset ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::ensure_track_gain_automation (int track)
 {
 	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
@@ -18261,6 +18383,19 @@ EngineHost::track_send (int track) const
 
 bool
 EngineHost::smoke_send ()
+{
+	return false;
+}
+
+bool
+EngineHost::reset_strip_mixer (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::smoke_strip_mixer_reset ()
 {
 	return false;
 }
