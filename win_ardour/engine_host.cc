@@ -9565,6 +9565,45 @@ EngineHost::regions_extent_sec (float* start_sec, float* end_sec) const
 	return true;
 }
 
+
+bool
+EngineHost::smoke_zoom_regions ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-zoom-regions failed — no Session";
+		return false;
+	}
+	try {
+		if (!_snap.track_has_regions[0]) {
+			if (!import_test_tone (0, 220.f, 2.f) || !_snap.track_has_regions[0]) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-zoom-regions FAILED (import)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		float s1 = 0.f, e1 = 0.f;
+		if (!regions_extent_sec (&s1, &e1) || (e1 - s1) < 0.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-regions FAILED (extent %.2f..%.2f)\n",
+			              s1, e1);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-zoom-regions range ok [%.2f..%.2f]\n",
+		              s1, e1);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-zoom-regions range ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-regions exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_zoom ()
 {
@@ -19281,6 +19320,12 @@ EngineHost::regions_extent_sec (float* start_sec, float* end_sec) const
 	if (end_sec) {
 		*end_sec = 0.f;
 	}
+	return false;
+}
+
+bool
+EngineHost::smoke_zoom_regions ()
+{
 	return false;
 }
 

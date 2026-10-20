@@ -763,6 +763,11 @@ public:
 	bool regions_extent_sec (float* start_sec, float* end_sec) const;
 
 	/**
+	 * Ensure tone on Audio 0; verify regions_extent_sec only.
+	 * Shell applies do_zoom_to_regions. For --smoke-zoom-regions.
+	 */
+	bool smoke_zoom_regions ();
+	/**
 	 * Ensure tone on Audio 0; verify session + regions extents.
 	 * Shell applies WaveStrip fit_* and checks view window. For --smoke-zoom.
 	 */
