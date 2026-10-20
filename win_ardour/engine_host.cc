@@ -5083,6 +5083,181 @@ EngineHost::clear_region_selection ()
 	_snap.selection_fade_out_sec = 0.f;
 }
 
+
+bool
+EngineHost::cycle_region_selection (int direction, int track)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (direction == 0) {
+		direction = 1;
+	}
+	if (track < 0) {
+		track = _impl->selected_track >= 0 ? _impl->selected_track : 0;
+	}
+	if (track < 0 || track >= EngineSnapshot::kMeters
+	    || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"no track for region cycle";
+		return false;
+	}
+	try {
+		std::shared_ptr<Playlist> pl = _impl->tracks[track]->playlist ();
+		if (!pl) {
+			_snap.detail = L"no playlist for region cycle";
+			return false;
+		}
+		std::shared_ptr<RegionList> rl = pl->region_list ();
+		if (!rl || rl->empty ()) {
+			_snap.detail = L"no regions to cycle";
+			return false;
+		}
+		std::vector<std::shared_ptr<Region> > ordered;
+		ordered.reserve (rl->size ());
+		for (RegionList::const_iterator it = rl->begin (); it != rl->end (); ++it) {
+			if (*it) {
+				ordered.push_back (*it);
+			}
+		}
+		if (ordered.empty ()) {
+			_snap.detail = L"no regions to cycle";
+			return false;
+		}
+		std::sort (ordered.begin (), ordered.end (),
+		           [] (const std::shared_ptr<Region>& a, const std::shared_ptr<Region>& b) {
+			           if (!a) {
+				           return false;
+			           }
+			           if (!b) {
+				           return true;
+			           }
+			           samplepos_t as = a->position_sample ();
+			           samplepos_t bs = b->position_sample ();
+			           if (as != bs) {
+				           return as < bs;
+			           }
+			           return a->layer () < b->layer ();
+		           });
+
+		std::shared_ptr<Region> cur = _impl->selected_region.lock ();
+		int idx = -1;
+		if (cur && _impl->selected_track == track) {
+			for (int i = 0; i < (int)ordered.size (); ++i) {
+				if (ordered[i] == cur) {
+					idx = i;
+					break;
+				}
+			}
+		}
+		int n = (int)ordered.size ();
+		int next;
+		if (idx < 0) {
+			next = (direction > 0) ? 0 : (n - 1);
+		} else {
+			next = (idx + (direction > 0 ? 1 : -1) + n) % n;
+		}
+		_impl->selected_track = track;
+		_impl->selected_region = ordered[next];
+		refresh_selection_snap ();
+		_snap.detail = L"region selection cycled";
+		std::fprintf (stderr,
+		              "airdour_win_shell: region cycle track=%d idx=%d/%d [%.2f..%.2f]s\n",
+		              track, next, n, _snap.selection_start_sec, _snap.selection_end_sec);
+		std::fflush (stderr);
+		return _snap.has_selection;
+	} catch (...) {
+		_snap.detail = L"region cycle failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_region_cycle ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-region-cycle failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-cycle FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 220.f, 3.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-cycle FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!split_at (1.0f, 0) || !split_at (2.0f, 0)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-cycle FAILED (split)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		int n = track_region_count (0);
+		if (n < 3) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-cycle FAILED (regions=%d)\n", n);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		clear_region_selection ();
+		if (!cycle_region_selection (1, 0) || !_snap.has_selection) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-cycle FAILED (first)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float a = _snap.selection_start_sec;
+		if (!cycle_region_selection (1, 0) || !_snap.has_selection) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-cycle FAILED (next)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float b = _snap.selection_start_sec;
+		if (std::fabs (b - a) < 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-cycle FAILED (same %.3f)\n", a);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!cycle_region_selection (-1, 0) || !_snap.has_selection) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-cycle FAILED (prev)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float c = _snap.selection_start_sec;
+		if (std::fabs (c - a) > 0.08f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-cycle FAILED (prev back got=%.3f want=%.3f)\n",
+			              c, a);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-cycle ok (%.2f->%.2f->%.2f)\n",
+		              a, b, c);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-region-cycle ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-cycle exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::delete_selected_region ()
 {
@@ -18640,6 +18815,20 @@ EngineHost::select_region_at (int track, float time_sec)
 void
 EngineHost::clear_region_selection ()
 {
+}
+
+bool
+EngineHost::cycle_region_selection (int direction, int track)
+{
+	(void)direction;
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::smoke_region_cycle ()
+{
+	return false;
 }
 
 bool

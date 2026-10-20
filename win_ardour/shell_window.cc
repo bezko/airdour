@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_region_cycle,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_region_cycle && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_region_cycle ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_region_cycle) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-cycle FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2536,6 +2552,21 @@ ShellWindow::do_remove_marker_at_playhead ()
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+
+void
+ShellWindow::do_cycle_region_selection (int direction)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.cycle_region_selection (direction)) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 void
 ShellWindow::sync_history_from_engine ()
 {
@@ -3568,6 +3599,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		               && (GetKeyState (VK_SHIFT) & 0x8000))) {
 			/* F1 or Shift+/ (?) — toggle shortcuts help. */
 			toggle_help ();
+		} else if (wparam == VK_TAB) {
+			/* Tab / Shift+Tab = cycle region selection forward/back. */
+			do_cycle_region_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? -1 : 1);
 		} else if (wparam == VK_SPACE) {
 			transport_toggle ();
 		} else if (wparam == VK_DELETE || wparam == VK_BACK) {
@@ -6306,6 +6340,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
+		{ L"Tab / Shift+Tab", L"Cycle region selection" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },

@@ -520,6 +520,10 @@ public:
 	 */
 	bool select_region_at (int track, float time_sec);
 	void clear_region_selection ();
+	/** Cycle region selection on track (−1 = selection/0). Tab / Shift+Tab. */
+	bool cycle_region_selection (int direction = 1, int track = -1);
+	/** Import+split → cycle next/prev. For --smoke-region-cycle. */
+	bool smoke_region_cycle ();
 
 	/** Remove selected region via reversible command; peaks refresh on next poll. */
 	bool delete_selected_region ();
