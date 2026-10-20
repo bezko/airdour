@@ -127,7 +127,8 @@ public:
 	                    bool smoke_midi_scale = false,
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
-	                    bool smoke_midi_pressure = false);
+	                    bool smoke_midi_pressure = false,
+	                    bool smoke_mixer_scroll = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -274,6 +275,8 @@ private:
 	void do_rename_focused_track ();
 	void do_toggle_group_pick (int audio_index);
 	void do_apply_or_clear_group ();
+	void do_scroll_mixer (float delta_px);
+	bool smoke_mixer_scroll_layout ();
 	void do_toggle_monitor_dim ();
 	void do_toggle_monitor_mono ();
 	void do_toggle_monitor_cut ();
@@ -382,6 +385,10 @@ private:
 	D2D1_RECT_F _auto_lane_bounds;
 	D2D1_RECT_F _midi_cc_lane_bounds;
 	D2D1_RECT_F _mixer_pane;
+	D2D1_RECT_F _mixer_strips_clip; /* strips area left of History (for scroll clip) */
+	float       _mixer_scroll_x; /* px; strips content offset */
+	float       _mixer_scroll_max; /* layout-computed */
+	float       _mixer_force_min_w; /* smoke: force min strip width (0 = default) */
 	D2D1_RECT_F _status_bar;
 
 	ID2D1Factory*             _d2d_factory;

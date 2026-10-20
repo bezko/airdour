@@ -127,6 +127,10 @@ ShellWindow::ShellWindow ()
 	, _auto_lane_bounds ()
 	, _midi_cc_lane_bounds ()
 	, _mixer_pane ()
+	, _mixer_strips_clip ()
+	, _mixer_scroll_x (0.f)
+	, _mixer_scroll_max (0.f)
+	, _mixer_force_min_w (0.f)
 	, _status_bar ()
 	, _d2d_factory (nullptr)
 	, _dwrite_factory (nullptr)
@@ -260,7 +264,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_mixer_scroll)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -860,6 +865,17 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_group) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_mixer_scroll && _engine.snapshot ().session_ok) {
+		if (!smoke_mixer_scroll_layout ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_mixer_scroll) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mixer-scroll FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2446,6 +2462,63 @@ ShellWindow::do_toggle_monitor_cut ()
 }
 
 void
+ShellWindow::do_scroll_mixer (float delta_px)
+{
+	if (std::fabs (delta_px) < 0.01f) {
+		return;
+	}
+	_mixer_scroll_x += delta_px;
+	layout_panes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+bool
+ShellWindow::smoke_mixer_scroll_layout ()
+{
+	/* Force overflow with wide min strip; scroll to end; strip 0 must leave clip. */
+	_mixer_force_min_w = 140.f;
+	_mixer_scroll_x = 0.f;
+	layout_panes ();
+	if (_mixer_scroll_max < 8.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-mixer-scroll FAILED (max=%.1f need overflow)\n",
+		              _mixer_scroll_max);
+		_mixer_force_min_w = 0.f;
+		layout_panes ();
+		return false;
+	}
+	float left0 = _mixers[0].bounds ().left;
+	_mixer_scroll_x = _mixer_scroll_max;
+	layout_panes ();
+	float left1 = _mixers[0].bounds ().left;
+	if (left1 >= left0 - 4.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-mixer-scroll FAILED (scroll no move %.1f→%.1f)\n",
+		              left0, left1);
+		_mixer_force_min_w = 0.f;
+		_mixer_scroll_x = 0.f;
+		layout_panes ();
+		return false;
+	}
+	if (left1 > _mixer_strips_clip.left - 2.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-mixer-scroll FAILED (strip0 still in clip %.1f)\n",
+		              left1);
+		_mixer_force_min_w = 0.f;
+		_mixer_scroll_x = 0.f;
+		layout_panes ();
+		return false;
+	}
+	_mixer_scroll_x = 0.f;
+	_mixer_force_min_w = 0.f;
+	layout_panes ();
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-mixer-scroll ok (max=%.0f px, shifted %.0f)\n",
+	              _mixer_scroll_max, left0 - left1);
+	return true;
+}
+
+void
 ShellWindow::do_apply_or_clear_group ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -3411,12 +3484,31 @@ ShellWindow::layout_panes ()
 		mon_w = 48.f * _dpi_scale;
 		strips_inner = mix_inner - mon_w - hist_w - strip_gap * 2.f;
 	}
-	float strip_w = (strips_inner - strip_gap * (float)(n_mix - 1)) / (float)n_mix;
+	float equal_w = (strips_inner - strip_gap * (float)(n_mix - 1)) / (float)n_mix;
+	float min_w = 64.f * _dpi_scale;
+	if (_mixer_force_min_w > 1.f) {
+		min_w = _mixer_force_min_w * _dpi_scale;
+	}
+	float strip_w = equal_w;
+	if (strip_w < min_w) {
+		strip_w = min_w;
+	}
+	float content_w = strip_w * (float)n_mix + strip_gap * (float)(n_mix - 1);
+	_mixer_scroll_max = std::max (0.f, content_w - strips_inner);
+	if (_mixer_scroll_x > _mixer_scroll_max) {
+		_mixer_scroll_x = _mixer_scroll_max;
+	}
+	if (_mixer_scroll_x < 0.f) {
+		_mixer_scroll_x = 0.f;
+	}
+	float strips_left = _mixer_pane.left + mix_inset;
+	_mixer_strips_clip = D2D1::RectF (strips_left, mix_top,
+	                                  strips_left + strips_inner, mix_bot);
 	for (int i = 0; i < kMixerStripsMax; ++i) {
 		_mixers[i].layout (D2D1::RectF (0, 0, 0, 0), _dpi_scale);
 	}
 	for (int i = 0; i < n_mix; ++i) {
-		float x0 = _mixer_pane.left + mix_inset + (float)i * (strip_w + strip_gap);
+		float x0 = strips_left + (float)i * (strip_w + strip_gap) - _mixer_scroll_x;
 		_mixers[i].layout (D2D1::RectF (x0, mix_top, x0 + strip_w, mix_bot), _dpi_scale);
 	}
 	float mon_x = _mixer_pane.right - mix_inset - mon_w;
@@ -3827,6 +3919,13 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				layout_panes ();
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == VK_LEFT || wparam == VK_RIGHT)) {
+			/* Alt+Shift+←/→ — scroll mixer strips when overflowing. */
+			float step = 64.f * _dpi_scale;
+			do_scroll_mixer (wparam == VK_RIGHT ? step : -step);
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'U' || wparam == 'u')) {
 			do_apply_or_clear_group ();
 		}
@@ -4180,6 +4279,18 @@ ShellWindow::on_mouse_wheel (WPARAM wparam, LPARAM lparam)
 	ScreenToClient (_hwnd, &pt);
 	float x = (float)pt.x;
 	float y = (float)pt.y;
+	/* Wheel over mixer strip area → horizontal strip scroll when overflowing. */
+	if (x >= _mixer_strips_clip.left && x <= _mixer_strips_clip.right
+	    && y >= _mixer_strips_clip.top && y <= _mixer_strips_clip.bottom
+	    && _mixer_scroll_max > 1.f) {
+		int delta = GET_WHEEL_DELTA_WPARAM (wparam);
+		float step = 48.f * _dpi_scale;
+		if (GetKeyState (VK_SHIFT) & 0x8000) {
+			step *= 2.f;
+		}
+		do_scroll_mixer ((delta > 0) ? -step : step);
+		return true;
+	}
 	int lane = hit_editor_lane (x, y);
 	bool over_editor = (lane >= 0) || hit_editor_ruler (x, y) || hit_midi_lane (x, y)
 	                   || _midi_cc_lane.hit (_midi_cc_lane_bounds, x, y);
@@ -6316,6 +6427,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"U", L"Apply / clear track group" },
+		{ L"Alt+Shift+←/→ · wheel", L"Scroll mixer strips when overflowing" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
@@ -6387,9 +6499,22 @@ ShellWindow::draw_mixer_pane ()
 	                _brush_body);
 
 	const int n_mix = n_mixer_strips ();
+	_rt->PushAxisAlignedClip (_mixer_strips_clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 	for (int i = 0; i < n_mix; ++i) {
 		_mixers[i].draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
 		                 _brush_pane_edge, _brush_meter_hot, _fmt_pane, _fmt_meta, _dpi_scale);
+	}
+	_rt->PopAxisAlignedClip ();
+	/* Scroll hint when strips overflow. */
+	if (_mixer_scroll_max > 1.f) {
+		wchar_t scr[32];
+		_snwprintf_s (scr, _TRUNCATE, L"◀ ▶ %.0f", _mixer_scroll_x);
+		_rt->DrawTextW (scr, (UINT32)wcslen (scr), _fmt_meta,
+		                D2D1::RectF (_mixer_strips_clip.right - 72.f * _dpi_scale,
+		                             r.top + 10.f * _dpi_scale,
+		                             _mixer_strips_clip.right - 4.f * _dpi_scale,
+		                             r.top + 30.f * _dpi_scale),
+		                _brush_body);
 	}
 	_history.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
 	               _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
