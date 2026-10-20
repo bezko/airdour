@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_region_opaque)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -673,6 +674,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_edit) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_region_opaque && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_region_opaque ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_region_opaque) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-opaque FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2617,6 +2631,23 @@ ShellWindow::do_delete_selection ()
 }
 
 void
+ShellWindow::do_toggle_selection_opaque ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.toggle_selection_opaque ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::do_split_at_playhead ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -3767,6 +3798,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_move_audio_track (-1);
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_DOWN) {
 			do_move_audio_track (+1);
+		} else if ((GetKeyState (VK_MENU) & 0x8000) && (wparam == 'O' || wparam == 'o')
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_SHIFT) & 0x8000)) {
+			/* Alt+O = toggle region opaque (Ctrl+O remains Open). */
+			do_toggle_selection_opaque ();
 		} else if ((GetKeyState (VK_MENU) & 0x8000)
 		           && (wparam == VK_LEFT || wparam == VK_RIGHT)) {
 			/* Alt+←/→ = MIDI note length ± (snap unit when snap on; else 50ms). */
@@ -5854,9 +5890,10 @@ ShellWindow::draw_editor_pane ()
 			              _engine_snap.marker_count);
 		} else if (_engine_snap.has_selection) {
 			_snwprintf_s (caption, _TRUNCATE,
-			              L"sel T%d [%.1f–%.1f]  ·  trim/move  S/F  G=snap%s",
+			              L"sel T%d [%.1f–%.1f]%s  ·  trim/move  S/F  G=snap%s",
 			              _engine_snap.selection_track + 1,
 			              _engine_snap.selection_start_sec, _engine_snap.selection_end_sec,
+			              _engine_snap.selection_opaque ? L"" : L" XP",
 			              _engine_snap.snap_enabled ? L" ON" : L"");
 		} else if (with_audio > 0) {
 			_snwprintf_s (caption, _TRUNCATE,
@@ -6284,6 +6321,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+S / O / E", L"Save / Open browse / Export" },
 		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
+		{ L"Alt+O", L"Toggle region opaque / transparent" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
 		{ L"V", L"Reverse selected audio region" },

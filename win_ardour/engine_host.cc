@@ -673,6 +673,7 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_opaque = true;
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -1968,6 +1969,7 @@ EngineHost::destroy_session ()
 	_snap.selection_track = -1;
 	_snap.selection_start_sec = 0.f;
 	_snap.selection_end_sec = 0.f;
+	_snap.selection_opaque = true;
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -4897,6 +4899,7 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_opaque = true;
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -4925,6 +4928,7 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_track = _impl->selected_track;
 	_snap.selection_start_sec = (float)start / (float)sr;
 	_snap.selection_end_sec = (float)(start + len) / (float)sr;
+	_snap.selection_opaque = region->opaque ();
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (ar) {
 		_snap.selection_fade_in_sec = (float)ar->fade_in_length ().samples () / (float)sr;
@@ -5081,6 +5085,7 @@ EngineHost::clear_region_selection ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_opaque = true;
 }
 
 bool
@@ -6001,6 +6006,63 @@ EngineHost::normalize_selected (float target_dbfs)
 }
 
 bool
+EngineHost::set_selection_opaque (bool opaque)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"opaque — select a region";
+		return false;
+	}
+	try {
+		if (region->opaque () == opaque) {
+			refresh_selection_snap ();
+			return true;
+		}
+		_impl->session->begin_reversible_command (
+			opaque ? "make region opaque" : "make region transparent");
+		region->clear_changes ();
+		region->set_opaque (opaque);
+		_impl->session->add_command (new StatefulDiffCommand (region));
+		_impl->session->commit_reversible_command ();
+
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+
+		std::fprintf (stderr, "airdour_win_shell: region opaque %s\n",
+		              opaque ? "on" : "off");
+		std::fflush (stderr);
+		_snap.detail = opaque ? L"region opaque" : L"region transparent";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: region opaque exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"region opaque exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"region opaque failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_selection_opaque ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"opaque — select a region";
+		return false;
+	}
+	return set_selection_opaque (!region->opaque ());
+}
+
+bool
 EngineHost::strip_silence_selected (float threshold_dbfs,
                                     float min_silence_sec,
                                     float fade_sec)
@@ -6858,6 +6920,67 @@ EngineHost::smoke_edit ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-edit exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_region_opaque ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-region-opaque failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-opaque FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 0.8f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-opaque FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-opaque FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!_snap.selection_opaque) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-opaque FAILED (expected opaque)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!set_selection_opaque (false) || _snap.selection_opaque) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-opaque FAILED (set transparent)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!toggle_selection_opaque () || !_snap.selection_opaque) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-opaque FAILED (toggle opaque)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-opaque ok (off→on)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-region-opaque ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-opaque exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -18733,6 +18856,19 @@ EngineHost::normalize_selected (float target_dbfs)
 }
 
 bool
+EngineHost::set_selection_opaque (bool opaque)
+{
+	(void)opaque;
+	return false;
+}
+
+bool
+EngineHost::toggle_selection_opaque ()
+{
+	return false;
+}
+
+bool
 EngineHost::strip_silence_selected (float threshold_dbfs,
                                     float min_silence_sec,
                                     float fade_sec)
@@ -18851,6 +18987,12 @@ EngineHost::track_region_count (int track) const
 
 bool
 EngineHost::smoke_edit ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_region_opaque ()
 {
 	return false;
 }
