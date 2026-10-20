@@ -177,6 +177,8 @@ struct EngineSnapshot {
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
+	/** Send AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
+	int          track_send_auto_state[kMeters];
 	bool         aux_bus_ok; /* Session Aux audio bus exists */
 	bool         midi_muted;
 	bool         midi_soloed;
@@ -370,9 +372,17 @@ public:
 	/** Aux send level 0..1 (gain coeff) via InternalSend → Aux bus. */
 	bool  set_track_send (int track, float send_0_1);
 	float track_send (int track) const;
+	/**
+	 * Aux-send AutoState: 0=Off 1=Play 2=Write 3=Touch.
+	 * Alt+Shift+Q / --smoke-send-auto-state.
+	 */
+	bool set_track_send_auto_state (int track, int state_0_off_1_play_2_write_3_touch);
+	bool cycle_track_send_auto_state (int track = 0);
 
 	/** Send 0 → 0.75 → 0.25 on Audio 1. For --smoke-send. */
 	bool smoke_send ();
+	/** Cycle Off→Play→Write→Touch→Off on Audio 1 send. For --smoke-send-auto-state. */
+	bool smoke_send_auto_state ();
 
 	/**
 	 * Track fader AutomationList (GainAutomation). Enable Play, write points,
@@ -1286,6 +1296,7 @@ private:
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_send_flags ();
+	void refresh_send_auto_state_flags ();
 	void refresh_group_flags ();
 	void refresh_monitor_flags ();
 	bool ensure_aux_sends ();
