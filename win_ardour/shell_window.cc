@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_mixer_reset)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -634,6 +635,20 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_pan) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_mixer_reset && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_mixer_reset ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_gains_from_engine ();
+			sync_mixer_pan_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_mixer_reset) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mixer-reset FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -3844,6 +3859,34 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 	case WM_LBUTTONDBLCLK: {
 		float x, y;
 		client_from_lparam (lparam, &x, &y);
+		/* Double-click fader → unity; pan → center (before rename hit). */
+		int fi = hit_mixer_fader (x, y);
+		if (fi >= 0 && _engine.is_linked () && _engine_snap.session_ok) {
+			_mixers[fi].set_gain (1.f);
+			if (fi == midi_mixer_index ()) {
+				_engine.set_midi_gain (1.f);
+			} else {
+				_engine.set_track_gain (fi, 1.f);
+				if (fi == 0) {
+					_engine_snap.gain = 1.f;
+				}
+			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_gains_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return 0;
+		}
+		int pi = hit_mixer_pan (x, y);
+		if (pi >= 0 && _engine.is_linked () && _engine_snap.session_ok) {
+			_mixers[pi].set_pan (0.5f);
+			_engine.set_track_pan (pi, 0.5f);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_pan_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return 0;
+		}
 		int lab = hit_mixer_label (x, y);
 		if (lab >= 0) {
 			const int mi = midi_mixer_index ();
@@ -6314,6 +6357,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
 		{ L"F2", L"Rename focused track" },
+		{ L"Dbl-click fader/pan", L"Reset fader → unity · pan → center" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"U", L"Apply / clear track group" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
