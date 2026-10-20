@@ -520,6 +520,8 @@ public:
 	 */
 	bool select_region_at (int track, float time_sec);
 	void clear_region_selection ();
+	/** Import 2s tone → select for --smoke-zoom-selection (shell fits). */
+	bool smoke_zoom_selection ();
 
 	/** Remove selected region via reversible command; peaks refresh on next poll. */
 	bool delete_selected_region ();

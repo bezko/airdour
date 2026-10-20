@@ -5083,6 +5083,60 @@ EngineHost::clear_region_selection ()
 	_snap.selection_fade_out_sec = 0.f;
 }
 
+
+bool
+EngineHost::smoke_zoom_selection ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-zoom-selection failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 220.f, 2.0f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.5f) || !_snap.has_selection) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float len = _snap.selection_end_sec - _snap.selection_start_sec;
+		if (len < 1.5f || len > 2.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection FAILED (len=%.3f)\n",
+			              len);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-zoom-selection range ok [%.2f..%.2f]\n",
+		              _snap.selection_start_sec, _snap.selection_end_sec);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-zoom-selection range ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::delete_selected_region ()
 {
@@ -18640,6 +18694,12 @@ EngineHost::select_region_at (int track, float time_sec)
 void
 EngineHost::clear_region_selection ()
 {
+}
+
+bool
+EngineHost::smoke_zoom_selection ()
+{
+	return false;
 }
 
 bool

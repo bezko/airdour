@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_zoom_selection,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,39 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_zoom_selection && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_zoom_selection ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			apply_region_selection_to_lanes ();
+			float before = _lanes[0].strip.view_span_sec ();
+			float want = _engine_snap.selection_end_sec - _engine_snap.selection_start_sec;
+			do_zoom_to_selection ();
+			float span = _lanes[0].strip.view_span_sec ();
+			/* fit_range pad_frac=0.06 → span ≈ want * 1.12 */
+			float expect = want * 1.12f;
+			if (span < expect * 0.85f || span > expect * 1.25f + 0.3f) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-zoom-selection FAILED (span=%.2f want≈%.2f before=%.2f)\n",
+				              span, expect, before);
+				_smoke_failed = true;
+			} else {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-zoom-selection ok (span=%.2fs)\n",
+				              span);
+			}
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_zoom_selection) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1995,6 +2029,13 @@ ShellWindow::do_fit_all_regions ()
 		return;
 	}
 	do_fit_session ();
+}
+
+
+void
+ShellWindow::do_zoom_to_selection ()
+{
+	do_fit_selection ();
 }
 
 void
@@ -3632,6 +3673,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else {
 				do_fit_all_regions ();
 			}
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'E' || wparam == 'e')) {
+			/* Ctrl+Alt+E = zoom editor to selection. */
+			do_zoom_to_selection ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')
 		           && !(GetKeyState (VK_MENU) & 0x8000)) {
 			/* E = fit selection (Ctrl+E remains export). */
@@ -6309,6 +6355,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
+		{ L"Ctrl+Alt+E", L"Zoom editor to selection" },
 		{ L"Home / 0", L"Follow transport (reset view)" },
 		{ L"← →  Shift+←→", L"Scroll editor · larger step" },
 		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
