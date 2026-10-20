@@ -174,6 +174,8 @@ struct EngineSnapshot {
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
+	float        track_trim[kMeters]; /* TrimAutomation linear coeff (−20..+20 dB) */
+	float        track_trim_norm[kMeters]; /* UI 0..1 (0.5 = unity / 0 dB) */
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
@@ -359,6 +361,19 @@ public:
 	 * Mute/solo Audio 1 + MIDI round-trip; clear. For --smoke-mute-solo.
 	 */
 	bool smoke_mute_solo ();
+
+	/**
+	 * Strip preamp trim (Route::trim_control / TrimAutomation).
+	 * linear: 0.1..10 (−20..+20 dB); norm UI: 0..1 (0.5 = unity).
+	 * For drag / dbl-click / Alt+Shift+T / --smoke-strip-trim.
+	 */
+	bool  set_track_trim (int track, float linear);
+	bool  set_track_trim_norm (int track, float norm_0_1);
+	float track_trim (int track) const;
+	float track_trim_norm (int track) const;
+
+	/** Unity → −6 dB → +6 dB → unity on Audio 1. For --smoke-strip-trim. */
+	bool smoke_strip_trim ();
 
 	/** Pan azimuth 0=L … 0.5=C … 1=R via Route::pan_azimuth_control. */
 	bool  set_track_pan (int track, float pan_0_1);
@@ -1283,6 +1298,7 @@ private:
 	void refresh_freeze_flags ();
 	void refresh_record_flags ();
 	void refresh_mute_solo_flags ();
+	void refresh_trim_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_send_flags ();

@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_strip_trim)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -634,6 +635,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_pan) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_strip_trim && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_strip_trim ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_trim_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_strip_trim) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-strip-trim FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1209,6 +1223,15 @@ ShellWindow::sync_mixer_mute_solo_from_engine ()
 	if (mi >= 0 && mi < kMixerStripsMax) {
 		_mixers[mi].set_muted (_engine_snap.midi_muted);
 		_mixers[mi].set_soloed (_engine_snap.midi_soloed);
+	}
+}
+
+void
+ShellWindow::sync_mixer_trim_from_engine ()
+{
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
+		_mixers[i].set_trim (_engine_snap.track_trim_norm[i]);
 	}
 }
 
@@ -3696,7 +3719,27 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_split_at_playhead ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'F' || wparam == 'f')) {
 			do_apply_crossfade ();
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'T' || wparam == 't')) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'T' || wparam == 't')) {
+			/* Alt+Shift+T — reset focused strip trim to unity. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				int ti = _focus_audio_track;
+				if (ti < 0) {
+					ti = 0;
+				}
+				if (ti < n_audio_lanes ()) {
+					_engine.set_track_trim (ti, 1.f);
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_mixer_trim_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+				}
+			}
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'T' || wparam == 't')) {
 			/* T = stretch 1.5×; Shift+T = compress 0.75× (pitch unchanged). */
 			do_stretch_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? 0.75f : 1.5f);
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'R' || wparam == 'r')) {
@@ -3844,6 +3887,16 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 	case WM_LBUTTONDBLCLK: {
 		float x, y;
 		client_from_lparam (lparam, &x, &y);
+		int trim_i = hit_mixer_trim (x, y);
+		if (trim_i >= 0 && _engine.is_linked () && _engine_snap.session_ok) {
+			/* Double-click trim → unity (0 dB). */
+			_engine.set_track_trim (trim_i, 1.f);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_trim_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return 0;
+		}
 		int lab = hit_mixer_label (x, y);
 		if (lab >= 0) {
 			const int mi = midi_mixer_index ();
@@ -4033,6 +4086,18 @@ ShellWindow::hit_mixer_solo (float x, float y) const
 	const int n = n_mixer_strips ();
 	for (int i = 0; i < n; ++i) {
 		if (_mixers[i].hit_solo (x, y)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int
+ShellWindow::hit_mixer_trim (float x, float y) const
+{
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < na; ++i) {
+		if (_mixers[i].hit_trim (x, y)) {
 			return i;
 		}
 	}
@@ -4768,6 +4833,22 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
+	int trim_i = hit_mixer_trim (x, y);
+	if (trim_i >= 0) {
+		_drag = DragMode::Trim;
+		_drag_index = trim_i;
+		if (_mixers[trim_i].drag_trim_to (x)) {
+			_engine.set_track_trim_norm (trim_i, _mixers[trim_i].trim ());
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_trim_from_engine ();
+		}
+		SetCapture (_hwnd);
+		SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
 	int pan_i = hit_mixer_pan (x, y);
 	if (pan_i >= 0) {
 		_drag = DragMode::Pan;
@@ -5140,6 +5221,17 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
 			sync_mixer_fx_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+		return true;
+	}
+
+	if (_drag == DragMode::Trim && _drag_index >= 0 && _drag_index < kTracks) {
+		if (_mixers[_drag_index].drag_trim_to (x)) {
+			_engine.set_track_trim_norm (_drag_index, _mixers[_drag_index].trim ());
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_trim_from_engine ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		}
 		return true;
@@ -5667,6 +5759,7 @@ ShellWindow::on_tick ()
 	}
 	sync_mixer_fx_from_engine ();
 	sync_mixer_mute_solo_from_engine ();
+	sync_mixer_trim_from_engine ();
 	sync_mixer_pan_from_engine ();
 	sync_mixer_send_from_engine ();
 	sync_monitor_from_engine ();
@@ -6285,6 +6378,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },
+		{ L"Alt+Shift+T / dbl-click trim", L"Reset strip preamp trim to 0 dB" },
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
 		{ L"V", L"Reverse selected audio region" },
 		{ L"N", L"Normalize selection to −1 dBFS" },
