@@ -9565,6 +9565,36 @@ EngineHost::regions_extent_sec (float* start_sec, float* end_sec) const
 	return true;
 }
 
+
+bool
+EngineHost::smoke_zoom_playhead ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-zoom-playhead failed — no Session";
+		return false;
+	}
+	try {
+		if (!locate_to (4.0f, false, 0.f)
+		    || std::fabs (_snap.transport_sec - 4.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-playhead FAILED (locate got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-playhead locate ok (4.00s)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-zoom-playhead locate ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-playhead exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_zoom ()
 {
@@ -19281,6 +19311,12 @@ EngineHost::regions_extent_sec (float* start_sec, float* end_sec) const
 	if (end_sec) {
 		*end_sec = 0.f;
 	}
+	return false;
+}
+
+bool
+EngineHost::smoke_zoom_playhead ()
+{
 	return false;
 }
 

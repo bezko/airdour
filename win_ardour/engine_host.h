@@ -763,6 +763,11 @@ public:
 	bool regions_extent_sec (float* start_sec, float* end_sec) const;
 
 	/**
+	 * Locate to 4.0s for shell zoom-around-playhead UI check.
+	 * For --smoke-zoom-playhead.
+	 */
+	bool smoke_zoom_playhead ();
+	/**
 	 * Ensure tone on Audio 0; verify session + regions extents.
 	 * Shell applies WaveStrip fit_* and checks view window. For --smoke-zoom.
 	 */

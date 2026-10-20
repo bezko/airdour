@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_zoom_playhead,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,44 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_zoom_playhead && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_zoom_playhead ()) {
+			_smoke_failed = true;
+		} else {
+			/* Keep locate snap (poll would reset async transport). */
+			_engine_snap = _engine.snapshot ();
+			_playhead_sec = _engine_snap.transport_sec;
+			sync_transport_clock_from_engine ();
+			/* Window 0..8s so playhead@4 is mid; zoom in around it. */
+			_lanes[0].strip.set_view_window (0.f, 8.f);
+			apply_shared_view (0);
+			float before = _lanes[0].strip.view_span_sec ();
+			do_zoom_around_playhead (1.15f);
+			float span = _lanes[0].strip.view_span_sec ();
+			float start = _lanes[0].strip.view_start_sec ();
+			float mid = start + 0.5f * span;
+			/* Span should shrink; playhead should stay near view mid. */
+			if (span >= before * 0.98f || span < before / 1.15f * 0.85f
+			    || std::fabs (mid - _playhead_sec) > std::max (0.2f, span * 0.15f)) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-zoom-playhead FAILED (span=%.3f before=%.3f mid=%.3f ph=%.3f)\n",
+				              span, before, mid, _playhead_sec);
+				_smoke_failed = true;
+			} else {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-zoom-playhead ok (span=%.3f→%.3f mid=%.3f)\n",
+				              before, span, mid);
+			}
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_zoom_playhead) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-playhead FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1995,6 +2034,35 @@ ShellWindow::do_fit_all_regions ()
 		return;
 	}
 	do_fit_session ();
+}
+
+
+void
+ShellWindow::do_zoom_around_playhead (float factor)
+{
+	if (factor <= 0.f) {
+		return;
+	}
+	float span = _lanes[0].strip.view_span_sec ();
+	if (span < 0.05f) {
+		span = WaveStrip::kDefaultSpanSec;
+	}
+	float start = _lanes[0].strip.view_start_sec ();
+	float ph = _playhead_sec;
+	if (ph < 0.f) {
+		ph = 0.f;
+	}
+	float norm = (ph - start) / span;
+	if (norm < 0.f) {
+		norm = 0.f;
+	}
+	if (norm > 1.f) {
+		norm = 1.f;
+	}
+	_lanes[0].strip.zoom_at (factor, norm);
+	apply_shared_view (0);
+	refresh_editor_view_after_nav ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
@@ -3751,6 +3819,16 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			prompt_open_session (); /* Ctrl+O browse; Ctrl+Shift+O = recent menu */
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')) {
 			prompt_export_wav ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == VK_OEM_PLUS || wparam == VK_ADD)) {
+			/* Ctrl+Alt+= = zoom in around playhead. */
+			do_zoom_around_playhead (1.15f);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == VK_OEM_MINUS || wparam == VK_SUBTRACT)) {
+			/* Ctrl+Alt+− = zoom out around playhead. */
+			do_zoom_around_playhead (1.f / 1.15f);
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == VK_OEM_PLUS || wparam == VK_ADD)) {
 			_lanes[0].strip.zoom_at (1.15f, 0.5f);
 			apply_shared_view (0);
@@ -6313,6 +6391,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"← →  Shift+←→", L"Scroll editor · larger step" },
 		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
+		{ L"Ctrl+Alt+±", L"Zoom around playhead" },
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"U", L"Apply / clear track group" },
