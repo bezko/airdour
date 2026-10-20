@@ -41,30 +41,61 @@ paint_peaks_surface (cairo_surface_t* surface,
 
 	const double mid_y = (double)height * 0.5;
 	const double col_w = (double)width / (double)n;
-	const double gap = std::max (0.5, (double)dpi_scale);
-	const double peak_edge = std::max (1.0, 2.0 * (double)dpi_scale);
+	const double amp = (double)height * 0.46;
+	const double stroke = std::max (1.0, 1.5 * (double)dpi_scale);
 
+	/* Canvas-style filled RMS envelope (upper then mirrored lower). */
+	cairo_new_path (cr);
 	for (size_t i = 0; i < n; ++i) {
-		double x0 = (double)i * col_w + gap * 0.5;
-		double x1 = (double)(i + 1) * col_w - gap * 0.5;
-		if (x1 <= x0) {
-			continue;
-		}
 		float p = peaks ? std::max (0.f, std::min (1.f, peaks[i])) : 0.f;
 		float r = rms ? std::max (0.f, std::min (p, rms[i])) : p * 0.55f;
-		double peak_h = (double)p * ((double)height * 0.46);
-		double rms_h = (double)r * ((double)height * 0.46);
-
-		cairo_set_source_rgba (cr, rms_r, rms_g, rms_b, 0.55);
-		cairo_rectangle (cr, x0, mid_y - rms_h, x1 - x0, rms_h * 2.0);
-		cairo_fill (cr);
-
-		cairo_set_source_rgba (cr, peak_r, peak_g, peak_b, 0.95);
-		cairo_rectangle (cr, x0, mid_y - peak_h, x1 - x0, peak_edge);
-		cairo_fill (cr);
-		cairo_rectangle (cr, x0, mid_y + peak_h - peak_edge, x1 - x0, peak_edge);
-		cairo_fill (cr);
+		double x = ((double)i + 0.5) * col_w;
+		double y = mid_y - (double)r * amp;
+		if (i == 0) {
+			cairo_move_to (cr, x, y);
+		} else {
+			cairo_line_to (cr, x, y);
+		}
 	}
+	for (size_t i = n; i-- > 0;) {
+		float p = peaks ? std::max (0.f, std::min (1.f, peaks[i])) : 0.f;
+		float r = rms ? std::max (0.f, std::min (p, rms[i])) : p * 0.55f;
+		double x = ((double)i + 0.5) * col_w;
+		cairo_line_to (cr, x, mid_y + (double)r * amp);
+	}
+	cairo_close_path (cr);
+	cairo_set_source_rgba (cr, rms_r, rms_g, rms_b, 0.50);
+	cairo_fill (cr);
+
+	/* Antialiased peak outline (upper + lower). */
+	cairo_set_line_width (cr, stroke);
+	cairo_set_line_join (cr, CAIRO_LINE_JOIN_ROUND);
+	cairo_set_line_cap (cr, CAIRO_LINE_CAP_ROUND);
+	cairo_set_source_rgba (cr, peak_r, peak_g, peak_b, 0.95);
+	cairo_new_path (cr);
+	for (size_t i = 0; i < n; ++i) {
+		float p = peaks ? std::max (0.f, std::min (1.f, peaks[i])) : 0.f;
+		double x = ((double)i + 0.5) * col_w;
+		double y = mid_y - (double)p * amp;
+		if (i == 0) {
+			cairo_move_to (cr, x, y);
+		} else {
+			cairo_line_to (cr, x, y);
+		}
+	}
+	cairo_stroke (cr);
+	cairo_new_path (cr);
+	for (size_t i = 0; i < n; ++i) {
+		float p = peaks ? std::max (0.f, std::min (1.f, peaks[i])) : 0.f;
+		double x = ((double)i + 0.5) * col_w;
+		double y = mid_y + (double)p * amp;
+		if (i == 0) {
+			cairo_move_to (cr, x, y);
+		} else {
+			cairo_line_to (cr, x, y);
+		}
+	}
+	cairo_stroke (cr);
 
 	cairo_destroy (cr);
 }

@@ -2,8 +2,9 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Thin Cairo→D2D bridge for editor waveforms.
- * Reuses the libs/canvas ImageSurface pattern (offline ARGB32) without
- * linking libs/canvas or opening GTK windows. Product chrome stays D2D.
+ * Reuses the libs/canvas ImageSurface pattern (offline ARGB32 envelope +
+ * antialiased peak stroke) without linking libs/canvas or opening GTK
+ * windows. Product chrome stays D2D.
  */
 
 #pragma once
