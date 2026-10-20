@@ -72,7 +72,8 @@ Default backends: **dummy** + **wasapi**. Needs MSVC deps above **plus** the gli
 
 Manifest: `tools/win-native/vcpkg.json` (core headless deps; **no GTK2 chrome**).  
 Optional MSVC **GTK3/Cairo libs** (not product UI): `-WithGtkLibs` → feature `gtk-libs`.  
-Probe (no windows): `tools/win-native/gtk-lib-probe/build-and-run.cmd` — see store doc `gtk-native-msvc.md`.
+Probe (no windows): `tools/win-native/gtk-lib-probe/build-and-run.cmd` — see store doc `gtk-native-msvc.md`.  
+cairomm spike (isolated; canvas TU still FAIL): `tools/win-native/canvas-cxx-spike/` — gtkmm2 **not** available via vcpkg.
 
 ### Packaging scripts
 
