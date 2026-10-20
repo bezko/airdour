@@ -201,7 +201,7 @@ clip_from_meter (std::shared_ptr<PeakMeter> m)
 	if (!m) {
 		return false;
 	}
-	/* Sticky max peak (until reset_max) â€” classic clip latch. */
+	/* Sticky max peak (until reset_max) — classic clip latch. */
 	float max_db = m->meter_level (0, MeterMaxPeak);
 	if (std::isfinite (max_db) && max_db >= 0.f) {
 		return true;
@@ -437,7 +437,7 @@ public:
 
 	bool call_slot (InvalidationRecord*, const std::function<void()>& f) override
 	{
-		/* UI thread owns this loop â€” run slots immediately. */
+		/* UI thread owns this loop — run slots immediately. */
 		f ();
 		return true;
 	}
@@ -561,7 +561,7 @@ public:
 
 EngineHost::EngineHost ()
 	: _started (false)
-	, _backend_name () /* empty â†’ resolve from WinShellPrefs / Dummy in start() */
+	, _backend_name () /* empty → resolve from WinShellPrefs / Dummy in start() */
 	, _period_frames (0)
 	, _pref_backend ("Dummy")
 	, _pref_period_frames (0)
@@ -799,7 +799,7 @@ EngineHost::EngineHost ()
 	_snap.backend = L"(idle)";
 	_snap.session_path.clear ();
 	_snap.export_path.clear ();
-	_snap.detail = L"engine linked â€” not started";
+	_snap.detail = L"engine linked — not started";
 	_last_export_path.clear ();
 }
 
@@ -825,7 +825,7 @@ EngineHost::prepare (const std::string& backend_name)
 	_snap.backend = utf8_to_wide (resolve_backend_name (
 		_backend_name.empty () ? (_pref_backend.empty () ? "Dummy" : _pref_backend)
 		                       : _backend_name));
-	_snap.detail = L"prepared â€” press Play to start";
+	_snap.detail = L"prepared — press Play to start";
 }
 
 void
@@ -905,7 +905,7 @@ bool
 EngineHost::save_shell_prefs ()
 {
 	if (!_impl || !_impl->ardour_inited || !Config) {
-		_snap.detail = L"prefs save failed â€” Config not ready";
+		_snap.detail = L"prefs save failed — Config not ready";
 		return false;
 	}
 	try {
@@ -989,7 +989,7 @@ bool
 EngineHost::smoke_prefs ()
 {
 	if (!_impl || !_impl->ardour_inited || !Config) {
-		_snap.detail = L"smoke-prefs failed â€” Config not ready";
+		_snap.detail = L"smoke-prefs failed — Config not ready";
 		return false;
 	}
 	try {
@@ -1066,7 +1066,7 @@ path_basename_utf8 (const std::string& path)
 		return path;
 	}
 	if (slash + 1 >= path.size ()) {
-		/* trailing slash â€” take previous component */
+		/* trailing slash — take previous component */
 		size_t end = slash;
 		while (end > 0 && (path[end - 1] == '/' || path[end - 1] == '\\')) {
 			--end;
@@ -1237,7 +1237,7 @@ EngineHost::open_recent (int index)
 	std::string path;
 	std::string snap;
 	if (!recent_entry (index, &path, &snap)) {
-		_snap.detail = L"recent open failed â€” bad index";
+		_snap.detail = L"recent open failed — bad index";
 		return false;
 	}
 	return open_session (path, snap); /* remember_recent inside open_session */
@@ -1247,7 +1247,7 @@ bool
 EngineHost::smoke_recent ()
 {
 	if (!_impl || !_impl->ardour_inited || !Config) {
-		_snap.detail = L"smoke-recent failed â€” Config not ready";
+		_snap.detail = L"smoke-recent failed — Config not ready";
 		return false;
 	}
 	try {
@@ -1258,7 +1258,7 @@ EngineHost::smoke_recent ()
 		clear_recent_sessions (false);
 		remember_recent_session (probe_a, "win_shell", false);
 		remember_recent_session (probe_b, "snap_b", false);
-		/* B should be front; A second; dedupe re-push A â†’ A front, B second. */
+		/* B should be front; A second; dedupe re-push A → A front, B second. */
 		remember_recent_session (probe_a, "win_shell", false);
 		if (_recent.size () != 2 || _recent[0].path != probe_a || _recent[1].path != probe_b
 		    || _recent[1].snapshot != "snap_b") {
@@ -1502,7 +1502,7 @@ EngineHost::autosave_now ()
 	if (!save_recovery_marker ()) {
 		return false;
 	}
-	_snap.detail = L"autosave â€” recovery marker written";
+	_snap.detail = L"autosave — recovery marker written";
 	std::fprintf (stderr, "airdour_win_shell: autosave ok (path=%s ft=%llu)\n",
 	              _recovery_path.c_str (), (unsigned long long)_recovery_saved_ft);
 	std::fflush (stderr);
@@ -1546,7 +1546,7 @@ EngineHost::restore_recovery_session ()
 	std::string path;
 	std::string snap;
 	if (!recovery_offer_path (&path, &snap)) {
-		_snap.detail = L"recovery restore failed â€” nothing to offer";
+		_snap.detail = L"recovery restore failed — nothing to offer";
 		return false;
 	}
 	if (!open_session (path, snap)) {
@@ -1600,7 +1600,7 @@ bool
 EngineHost::smoke_recovery ()
 {
 	if (!_impl || !_impl->session || !_impl->ardour_inited || !Config) {
-		_snap.detail = L"smoke-recovery failed â€” no Session";
+		_snap.detail = L"smoke-recovery failed — no Session";
 		return false;
 	}
 	try {
@@ -1683,7 +1683,7 @@ EngineHost::ensure_session ()
 	 */
 	const char* try_sess = std::getenv ("AIRDOUR_WIN_SHELL_SESSION");
 	if (try_sess && try_sess[0] == '0') {
-		_snap.detail = L"Session PeakMeter disabled (AIRDOUR_WIN_SHELL_SESSION=0) â€” stub meters";
+		_snap.detail = L"Session PeakMeter disabled (AIRDOUR_WIN_SHELL_SESSION=0) — stub meters";
 		_snap.meters_real = false;
 		_snap.session_ok = false;
 		return false;
@@ -1705,7 +1705,7 @@ EngineHost::ensure_session ()
 		char uniq[96];
 		std::snprintf (uniq, sizeof (uniq), "airdour_win_shell_%u_%lu",
 		               (unsigned)GetCurrentProcessId (), (unsigned long)GetTickCount ());
-		/* Path must NOT exist yet â€” Session::pre_engine_init sets _is_new from that. */
+		/* Path must NOT exist yet — Session::pre_engine_init sets _is_new from that. */
 		_impl->session_dir = path_join (win_temp_dir (), uniq);
 
 		BusProfile profile;
@@ -1714,7 +1714,7 @@ EngineHost::ensure_session ()
 		/* Click default from prefs / RC (shell ctor defaults to on). */
 		Config->set_clicking (_pref_click_default);
 
-		step ("Session ctor (new/unnamed)â€¦");
+		step ("Session ctor (new/unnamed)…");
 		/* unnamed=true matches unit-test / headless new-session path. */
 		_impl->session = new Session (*_impl->engine, _impl->session_dir, "win_shell",
 		                              &profile, std::string (), true);
@@ -1731,7 +1731,7 @@ EngineHost::ensure_session ()
 		AudioTrackList created = _impl->session->new_audio_track (
 			1, 2,
 			std::shared_ptr<RouteGroup> (),
-			6u /* default Audio 1â€“6 (Reverb/Comp/EQ/Delay/Limiter/Gate); add more via UI */,
+			6u /* default Audio 1–6 (Reverb/Comp/EQ/Delay/Limiter/Gate); add more via UI */,
 			"Audio",
 			PresentationInfo::max_order);
 
@@ -1799,14 +1799,14 @@ EngineHost::ensure_session ()
 					track->gain_control ()->set_value (_track_gain[t], Controllable::NoGroup);
 				}
 			}
-			_snap.detail = L"Session + PeakMeter â€” demo tones on Audio 1â€“6";
+			_snap.detail = L"Session + PeakMeter — demo tones on Audio 1–6";
 		} else {
 			for (size_t t = 0; t < _impl->tracks.size (); ++t) {
 				if (_impl->tracks[t] && _impl->tracks[t]->gain_control ()) {
 					_impl->tracks[t]->gain_control ()->set_value (_track_gain[t], Controllable::NoGroup);
 				}
 			}
-			_snap.detail = L"Session + PeakMeter â€” empty Audio 1â€“6 (no demo tones)";
+			_snap.detail = L"Session + PeakMeter — empty Audio 1–6 (no demo tones)";
 		}
 
 		/* Best-effort ACE Reverb on Audio 1 (headless insert, no GTK UI). */
@@ -1853,25 +1853,25 @@ EngineHost::ensure_session ()
 		std::fprintf (stderr, "airdour_win_shell: session SessionException: %s\n", e.what ());
 		std::fflush (stderr);
 		destroy_session ();
-		_snap.detail = L"Session create failed â€” stub meters";
+		_snap.detail = L"Session create failed — stub meters";
 		return false;
 	} catch (failed_constructor& e) {
 		std::fprintf (stderr, "airdour_win_shell: session failed_constructor: %s\n", e.what ());
 		std::fflush (stderr);
 		destroy_session ();
-		_snap.detail = L"Session create failed â€” stub meters";
+		_snap.detail = L"Session create failed — stub meters";
 		return false;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: session exception: %s\n", e.what ());
 		std::fflush (stderr);
 		destroy_session ();
-		_snap.detail = L"Session exception â€” stub meters";
+		_snap.detail = L"Session exception — stub meters";
 		return false;
 	} catch (...) {
 		std::fprintf (stderr, "airdour_win_shell: session unknown failure\n");
 		std::fflush (stderr);
 		destroy_session ();
-		_snap.detail = L"Session unknown failure â€” stub meters";
+		_snap.detail = L"Session unknown failure — stub meters";
 		return false;
 	}
 }
@@ -1939,7 +1939,7 @@ EngineHost::destroy_session ()
 		} catch (...) {
 		}
 		/* Must delete so Session::destroy() unregisters LTC/click ports and
-		 * clears SessionHandleRefs â€” otherwise reopen fails (LTC-Out exists).
+		 * clears SessionHandleRefs — otherwise reopen fails (LTC-Out exists).
 		 * Process-exit --timeout still ExitProcess(0) and skips this path. */
 		Session* doomed = _impl->session;
 		_impl->session = nullptr;
@@ -2105,7 +2105,7 @@ bool
 EngineHost::save_session ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"save failed â€” no Session";
+		_snap.detail = L"save failed — no Session";
 		_snap.session_saved = false;
 		return false;
 	}
@@ -2149,17 +2149,17 @@ bool
 EngineHost::open_session (const std::string& session_dir, const std::string& snapshot_name)
 {
 	if (!_impl || !_impl->engine || !_started) {
-		_snap.detail = L"open failed â€” engine not running";
+		_snap.detail = L"open failed — engine not running";
 		return false;
 	}
 	if (session_dir.empty ()) {
-		_snap.detail = L"open failed â€” empty path";
+		_snap.detail = L"open failed — empty path";
 		return false;
 	}
 
 	DWORD attrs = GetFileAttributesW (utf8_path_to_wide (session_dir).c_str ());
 	if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-		_snap.detail = L"open failed â€” session folder missing";
+		_snap.detail = L"open failed — session folder missing";
 		std::fprintf (stderr, "airdour_win_shell: open: not a directory: %s\n", session_dir.c_str ());
 		std::fflush (stderr);
 		return false;
@@ -2183,7 +2183,7 @@ EngineHost::open_session (const std::string& session_dir, const std::string& sna
 		std::string snap = snapshot_name.empty () ? "win_shell" : snapshot_name;
 
 		step (("Session ctor load " + session_dir).c_str ());
-		/* Path exists â†’ load_state. unnamed=false so it is a normal reopen. */
+		/* Path exists → load_state. unnamed=false so it is a normal reopen. */
 		_impl->session = new Session (*_impl->engine, session_dir, snap,
 		                              nullptr, std::string (), false);
 		step ("Session load done");
@@ -2191,7 +2191,7 @@ EngineHost::open_session (const std::string& session_dir, const std::string& sna
 
 		collect_tracks ();
 		if (_impl->tracks.empty ()) {
-			step ("no audio tracks after load â€” creating 3");
+			step ("no audio tracks after load — creating 3");
 			AudioTrackList created = _impl->session->new_audio_track (
 				1, 2,
 				std::shared_ptr<RouteGroup> (),
@@ -2221,7 +2221,7 @@ EngineHost::open_session (const std::string& session_dir, const std::string& sna
 		refresh_record_flags ();
 		remember_recent_session (session_dir, snap, true);
 		mark_recovery_clean_open ();
-		_snap.detail = L"session reopened â€” Editor peaks from disk";
+		_snap.detail = L"session reopened — Editor peaks from disk";
 		std::fprintf (stderr, "airdour_win_shell: opened %s (tracks=%u regions0=%d)\n",
 		              session_dir.c_str (),
 		              (unsigned)_impl->tracks.size (),
@@ -2259,7 +2259,7 @@ bool
 EngineHost::reload_session ()
 {
 	if (!_impl || _impl->session_dir.empty ()) {
-		_snap.detail = L"reload failed â€” no session path";
+		_snap.detail = L"reload failed — no session path";
 		return false;
 	}
 	std::string path = _impl->session_dir;
@@ -2345,7 +2345,7 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 	_last_export_path.clear ();
 
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"export failed â€” no Session";
+		_snap.detail = L"export failed — no Session";
 		return false;
 	}
 
@@ -2356,14 +2356,14 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 
 	if (end_sample <= start_sample) {
 		if (!compute_export_range (&start_sample, &end_sample) || end_sample <= start_sample) {
-			_snap.detail = L"export failed â€” empty range";
+			_snap.detail = L"export failed — empty range";
 			return false;
 		}
 	}
 
 	std::shared_ptr<Route> master = _impl->session->master_out ();
 	if (!master || !master->output ()) {
-		_snap.detail = L"export failed â€” no master out";
+		_snap.detail = L"export failed — no master out";
 		return false;
 	}
 
@@ -2399,7 +2399,7 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 		}
 	}
 
-	std::fprintf (stderr, "airdour_win_shell: export range %lld..%lld â†’ %s\n",
+	std::fprintf (stderr, "airdour_win_shell: export range %lld..%lld → %s\n",
 	              (long long)start_sample, (long long)end_sample, out.c_str ());
 	std::fflush (stderr);
 
@@ -2407,7 +2407,7 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 		std::shared_ptr<ExportHandler> handler = _impl->session->get_export_handler ();
 		std::shared_ptr<ExportStatus> status = _impl->session->get_export_status ();
 		if (!handler || !status) {
-			_snap.detail = L"export failed â€” no handler";
+			_snap.detail = L"export failed — no handler";
 			return false;
 		}
 
@@ -2448,7 +2448,7 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 
 		XMLTree tree;
 		if (!tree.read_buffer (xml.c_str ()) || !tree.root ()) {
-			_snap.detail = L"export failed â€” format XML";
+			_snap.detail = L"export failed — format XML";
 			return false;
 		}
 		std::shared_ptr<ExportFormatSpecification> fmp = handler->add_format (*tree.root ());
@@ -2466,7 +2466,7 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 			ccp->register_channel (chan_ptr);
 		}
 		if (ccp->get_n_chans () == 0) {
-			_snap.detail = L"export failed â€” no master channels";
+			_snap.detail = L"export failed — no master channels";
 			return false;
 		}
 
@@ -2478,7 +2478,7 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 		handler->add_export_config (tsp, ccp, fmp, fnp, BroadcastInfoPtr ());
 
 		if (0 != handler->do_export ()) {
-			_snap.detail = L"export failed â€” do_export";
+			_snap.detail = L"export failed — do_export";
 			return false;
 		}
 
@@ -2502,7 +2502,7 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 		std::wstring wout = utf8_path_to_wide (out);
 		DWORD attrs = GetFileAttributesW (wout.c_str ());
 		if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-			/* Handler may have written a slightly different name â€” check get_path. */
+			/* Handler may have written a slightly different name — check get_path. */
 			std::string alt = fnp->get_path (fmp);
 			if (!alt.empty ()) {
 				out = alt;
@@ -2532,7 +2532,7 @@ EngineHost::export_session_wav (const std::string& outfile, int64_t start_sample
 		_last_export_path = out;
 		_snap.export_path = utf8_to_wide (out);
 		_snap.export_ok = true;
-		_snap.detail = L"export ok â€” WAV written";
+		_snap.detail = L"export ok — WAV written";
 		std::fprintf (stderr, "airdour_win_shell: export ok (%lld bytes) %s\n",
 		              (long long)sz.QuadPart, out.c_str ());
 		std::fflush (stderr);
@@ -2668,9 +2668,9 @@ EngineHost::start ()
 	refresh_prefs_snap ();
 	refresh_snapshot ();
 	if (_snap.session_ok) {
-		_snap.detail = L"Session + PeakMeter â€” UI thread; audio on RT";
+		_snap.detail = L"Session + PeakMeter — UI thread; audio on RT";
 	} else {
-		_snap.detail = L"engine only â€” stub meters (no Session)";
+		_snap.detail = L"engine only — stub meters (no Session)";
 	}
 	step ("running");
 	return true;
@@ -2696,10 +2696,10 @@ EngineHost::transport_play ()
 	if (_impl->session) {
 		_impl->session->request_roll (TRS_UI);
 		_snap.transport_rolling = true;
-		_snap.detail = L"transport rolling â€” PeakMeter live";
+		_snap.detail = L"transport rolling — PeakMeter live";
 	} else {
 		_snap.transport_rolling = true;
-		_snap.detail = L"transport rolling â€” engine processed_samples clock";
+		_snap.detail = L"transport rolling — engine processed_samples clock";
 	}
 	refresh_snapshot ();
 }
@@ -2711,7 +2711,7 @@ EngineHost::transport_stop ()
 	if (_impl->session) {
 		/* Stop transport first so DiskWriter can finalize the take, then clear
 		 * session record-enable. Disabling record before stop drops the capture.
-		 * Skip immediate locate â€” FSM may still be DeclickToStop (bad transition). */
+		 * Skip immediate locate — FSM may still be DeclickToStop (bad transition). */
 		try {
 			_impl->session->request_stop (false, false, TRS_UI);
 		} catch (...) {
@@ -2722,9 +2722,9 @@ EngineHost::transport_stop ()
 		}
 		refresh_region_flags ();
 		refresh_record_flags ();
-		_snap.detail = L"transport stopped â€” Session kept warm";
+		_snap.detail = L"transport stopped — Session kept warm";
 	} else {
-		_snap.detail = L"transport stopped â€” engine kept warm";
+		_snap.detail = L"transport stopped — engine kept warm";
 	}
 	_snap.transport_rolling = false;
 	_snap.transport_sec = 0.f;
@@ -2774,7 +2774,7 @@ EngineHost::stop ()
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.meter_peak[i] = 0.f;
 	}
-	_snap.detail = L"engine stopped â€” press Play to restart";
+	_snap.detail = L"engine stopped — press Play to restart";
 }
 
 void
@@ -2991,7 +2991,7 @@ EngineHost::fill_track_waveform (int track,
 			return has_any;
 		}
 
-		/* Reuse scratch â€” avoid per-tick heap traffic on the UI thread. */
+		/* Reuse scratch — avoid per-tick heap traffic on the UI thread. */
 		static thread_local std::vector<PeakData> buf;
 		if (buf.size () < n_columns) {
 			buf.resize (n_columns);
@@ -3164,7 +3164,7 @@ EngineHost::refresh_mute_solo_flags ()
 	}
 }
 
-/** Mute/Solo are Controllable::RealTime â€” applied on the process thread. */
+/** Mute/Solo are Controllable::RealTime — applied on the process thread. */
 static bool
 wait_until (std::function<bool ()> pred, int timeout_ms = 400)
 {
@@ -3376,7 +3376,7 @@ bool
 EngineHost::smoke_pan ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-pan failed â€” no Session";
+		_snap.detail = L"smoke-pan failed — no Session";
 		return false;
 	}
 	try {
@@ -3389,7 +3389,7 @@ EngineHost::smoke_pan ()
 		if (!_impl->tracks[0]->pan_azimuth_control ()) {
 			std::fprintf (stderr,
 			              "airdour_win_shell: smoke-pan FAILED "
-			              "(no pan_azimuth â€” check panner DLLs)\n");
+			              "(no pan_azimuth — check panner DLLs)\n");
 			std::fflush (stderr);
 			return false;
 		}
@@ -3414,7 +3414,7 @@ EngineHost::smoke_pan ()
 			return false;
 		}
 
-		std::fprintf (stderr, "airdour_win_shell: smoke-pan ok (Audio1 Lâ†’Râ†’C)\n");
+		std::fprintf (stderr, "airdour_win_shell: smoke-pan ok (Audio1 L→R→C)\n");
 		std::fflush (stderr);
 		_snap.detail = L"smoke-pan ok";
 		return true;
@@ -3567,7 +3567,7 @@ bool
 EngineHost::smoke_send ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-send failed â€” no Session";
+		_snap.detail = L"smoke-send failed — no Session";
 		return false;
 	}
 	try {
@@ -3596,7 +3596,7 @@ EngineHost::smoke_send ()
 			std::fflush (stderr);
 			return false;
 		}
-		std::fprintf (stderr, "airdour_win_shell: smoke-send ok (Audio1 â†’ Aux 0â†’0.75â†’0.25)\n");
+		std::fprintf (stderr, "airdour_win_shell: smoke-send ok (Audio1 → Aux 0→0.75→0.25)\n");
 		std::fflush (stderr);
 		_snap.detail = L"smoke-send ok";
 		return true;
@@ -3686,7 +3686,7 @@ EngineHost::write_track_gain_automation (int track, float time_sec, float value_
 		samplepos_t samples = (samplepos_t)std::llround ((double)time_sec * (double)sr);
 		bool added = al->editor_add (timepos_t (samples), (double)value_0_1, true);
 		if (!added) {
-			/* Point already at this time â€” modify via add which replaces. */
+			/* Point already at this time — modify via add which replaces. */
 			al->add (timepos_t (samples), (double)value_0_1, true, true);
 		}
 		_snap.detail = L"gain automation point";
@@ -3804,7 +3804,7 @@ bool
 EngineHost::smoke_automation ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-automation failed â€” no Session";
+		_snap.detail = L"smoke-automation failed — no Session";
 		return false;
 	}
 	try {
@@ -4105,7 +4105,7 @@ bool
 EngineHost::smoke_midi_cc ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-midi-cc failed â€” no Session";
+		_snap.detail = L"smoke-midi-cc failed — no Session";
 		return false;
 	}
 	try {
@@ -4136,7 +4136,7 @@ EngineHost::smoke_midi_cc ()
 		const double beats_per_sec = 120.0 / 60.0;
 		Temporal::Beats mid_b = Temporal::Beats::from_double (2.0 * beats_per_sec);
 		float mid = (float)al->eval (timepos_t (mid_b));
-		/* 0.90 * 127 â‰ˆ 114.3 */
+		/* 0.90 * 127 ≈ 114.3 */
 		if (mid < 110.f || mid > 119.f) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc FAILED (eval@2s=%.3f)\n",
 			              mid);
@@ -4343,7 +4343,7 @@ bool
 EngineHost::smoke_midi_bend ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-midi-bend failed â€” no Session";
+		_snap.detail = L"smoke-midi-bend failed — no Session";
 		return false;
 	}
 	try {
@@ -4357,7 +4357,7 @@ EngineHost::smoke_midi_bend ()
 			std::fflush (stderr);
 			return false;
 		}
-		/* 0.0 â†’ 0, 0.5 â†’ ~8191.5, 1.0 â†’ 16383 */
+		/* 0.0 → 0, 0.5 → ~8191.5, 1.0 → 16383 */
 		if (!write_midi_bend_automation (0.0f, 0.0f)
 		    || !write_midi_bend_automation (2.0f, 0.5f)
 		    || !write_midi_bend_automation (4.0f, 1.0f)) {
@@ -4559,7 +4559,7 @@ bool
 EngineHost::smoke_midi_pressure ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-midi-pressure failed â€” no Session";
+		_snap.detail = L"smoke-midi-pressure failed — no Session";
 		return false;
 	}
 	try {
@@ -4620,7 +4620,7 @@ bool
 EngineHost::smoke_mute_solo ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-mute-solo failed â€” no Session";
+		_snap.detail = L"smoke-mute-solo failed — no Session";
 		return false;
 	}
 	try {
@@ -4637,7 +4637,7 @@ EngineHost::smoke_mute_solo ()
 			return false;
 		}
 
-		/* Clear first (RT â€” wait for settle). */
+		/* Clear first (RT — wait for settle). */
 		set_track_muted (0, false);
 		set_track_soloed (0, false);
 		set_midi_muted (false);
@@ -4712,7 +4712,7 @@ EngineHost::set_session_record (bool enable)
 				set_track_armed (0, true);
 			}
 			_impl->session->maybe_enable_record (false);
-			_snap.detail = L"session record armed â€” Play to capture";
+			_snap.detail = L"session record armed — Play to capture";
 		} else {
 			_impl->session->disable_record (false, true);
 			refresh_region_flags ();
@@ -4753,13 +4753,13 @@ EngineHost::import_audio_file (int track, const std::string& path)
 			false);
 		std::shared_ptr<AudioSource> as = std::dynamic_pointer_cast<AudioSource> (src);
 		if (!as) {
-			_snap.detail = L"import failed â€” not an audio source";
+			_snap.detail = L"import failed — not an audio source";
 			return false;
 		}
 
 		samplecnt_t n = as->length ().samples ();
 		if (n <= 0) {
-			_snap.detail = L"import failed â€” empty file";
+			_snap.detail = L"import failed — empty file";
 			return false;
 		}
 
@@ -4769,7 +4769,7 @@ EngineHost::import_audio_file (int track, const std::string& path)
 		std::shared_ptr<Region> region = RegionFactory::create (src, plist);
 		std::shared_ptr<Playlist> pl = _impl->tracks[track]->playlist ();
 		if (!region || !pl) {
-			_snap.detail = L"import failed â€” region create";
+			_snap.detail = L"import failed — region create";
 			return false;
 		}
 		/* Wrap in Session history so Ctrl+Z / --smoke-undo can reverse import. */
@@ -4784,7 +4784,7 @@ EngineHost::import_audio_file (int track, const std::string& path)
 		refresh_region_flags ();
 		refresh_history_flags ();
 		refresh_selection_snap ();
-		_snap.detail = L"imported audio onto track â€” Editor peaks from Session";
+		_snap.detail = L"imported audio onto track — Editor peaks from Session";
 		std::fprintf (stderr, "airdour_win_shell: imported \"%s\" (%lld samples) onto track %d\n",
 		              path.c_str (), (long long)n, track);
 		std::fflush (stderr);
@@ -4941,7 +4941,7 @@ EngineHost::undo_to_index (int index)
 	}
 	refresh_history_flags ();
 	if ((uint32_t)index >= _snap.undo_depth) {
-		_snap.detail = L"undo jump â€” out of range";
+		_snap.detail = L"undo jump — out of range";
 		return false;
 	}
 	return undo ((uint32_t)index + 1u);
@@ -4964,7 +4964,7 @@ EngineHost::undo (uint32_t n)
 		refresh_history_flags ();
 		refresh_selection_snap ();
 		_snap.detail = L"undo";
-		std::fprintf (stderr, "airdour_win_shell: undo (%u) â€” undo_depth=%u redo_depth=%u\n",
+		std::fprintf (stderr, "airdour_win_shell: undo (%u) — undo_depth=%u redo_depth=%u\n",
 		              (unsigned)n, (unsigned)_snap.undo_depth, (unsigned)_snap.redo_depth);
 		std::fflush (stderr);
 		return true;
@@ -4996,7 +4996,7 @@ EngineHost::redo (uint32_t n)
 		refresh_history_flags ();
 		refresh_selection_snap ();
 		_snap.detail = L"redo";
-		std::fprintf (stderr, "airdour_win_shell: redo (%u) â€” undo_depth=%u redo_depth=%u\n",
+		std::fprintf (stderr, "airdour_win_shell: redo (%u) — undo_depth=%u redo_depth=%u\n",
 		              (unsigned)n, (unsigned)_snap.undo_depth, (unsigned)_snap.redo_depth);
 		std::fflush (stderr);
 		return true;
@@ -5057,7 +5057,7 @@ EngineHost::select_region_at (int track, float time_sec)
 		_impl->selected_track = track;
 		_impl->selected_region = best;
 		refresh_selection_snap ();
-		_snap.detail = L"region selected â€” Delete to remove";
+		_snap.detail = L"region selected — Delete to remove";
 		std::fprintf (stderr,
 		              "airdour_win_shell: selected region track=%d [%.2f..%.2f]s\n",
 		              track, _snap.selection_start_sec, _snap.selection_end_sec);
@@ -5102,7 +5102,7 @@ EngineHost::delete_selected_region ()
 			pl = _impl->tracks[track]->playlist ();
 		}
 		if (!pl) {
-			_snap.detail = L"delete failed â€” no playlist";
+			_snap.detail = L"delete failed — no playlist";
 			return false;
 		}
 		_impl->session->begin_reversible_command ("remove region");
@@ -5114,7 +5114,7 @@ EngineHost::delete_selected_region ()
 		clear_region_selection ();
 		refresh_region_flags ();
 		refresh_history_flags ();
-		_snap.detail = L"region deleted â€” Ctrl+Z to undo";
+		_snap.detail = L"region deleted — Ctrl+Z to undo";
 		std::fprintf (stderr, "airdour_win_shell: deleted region on track %d\n", track);
 		std::fflush (stderr);
 		return true;
@@ -5152,7 +5152,7 @@ bool
 EngineHost::split_at (float time_sec, int track)
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"split failed â€” no Session";
+		_snap.detail = L"split failed — no Session";
 		return false;
 	}
 	if (track < 0) {
@@ -5160,13 +5160,13 @@ EngineHost::split_at (float time_sec, int track)
 	}
 	if (track < 0 || track >= EngineSnapshot::kMeters
 	    || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
-		_snap.detail = L"split failed â€” no track";
+		_snap.detail = L"split failed — no track";
 		return false;
 	}
 	try {
 		std::shared_ptr<Playlist> pl = _impl->tracks[track]->playlist ();
 		if (!pl) {
-			_snap.detail = L"split failed â€” no playlist";
+			_snap.detail = L"split failed — no playlist";
 			return false;
 		}
 		samplecnt_t sr = _impl->session->sample_rate ();
@@ -5192,9 +5192,9 @@ EngineHost::split_at (float time_sec, int track)
 		refresh_history_flags ();
 		refresh_selection_snap ();
 		int after = track_region_count (track);
-		_snap.detail = L"split at playhead â€” peaks refresh";
+		_snap.detail = L"split at playhead — peaks refresh";
 		std::fprintf (stderr,
-		              "airdour_win_shell: split track=%d @%.2fs regions %dâ†’%d\n",
+		              "airdour_win_shell: split track=%d @%.2fs regions %d→%d\n",
 		              track, time_sec, before, after);
 		std::fflush (stderr);
 		return after >= before;
@@ -5228,7 +5228,7 @@ EngineHost::set_selected_fade_in_sec (float sec)
 	std::shared_ptr<Region> region = _impl->selected_region.lock ();
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (!ar) {
-		_snap.detail = L"fade-in â€” select an audio region";
+		_snap.detail = L"fade-in — select an audio region";
 		return false;
 	}
 	try {
@@ -5267,7 +5267,7 @@ EngineHost::set_selected_fade_out_sec (float sec)
 	std::shared_ptr<Region> region = _impl->selected_region.lock ();
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (!ar) {
-		_snap.detail = L"fade-out â€” select an audio region";
+		_snap.detail = L"fade-out — select an audio region";
 		return false;
 	}
 	try {
@@ -5307,7 +5307,7 @@ EngineHost::apply_selected_crossfade (float length_sec)
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	int track = _impl->selected_track;
 	if (!ar || track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
-		_snap.detail = L"crossfade â€” select an audio region";
+		_snap.detail = L"crossfade — select an audio region";
 		return false;
 	}
 	try {
@@ -5391,7 +5391,7 @@ EngineHost::trim_selected_front_to (float time_sec)
 	}
 	std::shared_ptr<Region> region = _impl->selected_region.lock ();
 	if (!region) {
-		_snap.detail = L"trim front â€” select a region";
+		_snap.detail = L"trim front — select a region";
 		return false;
 	}
 	try {
@@ -5435,7 +5435,7 @@ EngineHost::trim_selected_front_to (float time_sec)
 		refresh_region_flags ();
 		refresh_selection_snap ();
 		refresh_history_flags ();
-		_snap.detail = L"trim front â€” peaks refresh";
+		_snap.detail = L"trim front — peaks refresh";
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: trim front exception: %s\n", e.what ());
@@ -5456,7 +5456,7 @@ EngineHost::trim_selected_end_to (float time_sec)
 	}
 	std::shared_ptr<Region> region = _impl->selected_region.lock ();
 	if (!region) {
-		_snap.detail = L"trim end â€” select a region";
+		_snap.detail = L"trim end — select a region";
 		return false;
 	}
 	try {
@@ -5500,7 +5500,7 @@ EngineHost::trim_selected_end_to (float time_sec)
 		refresh_region_flags ();
 		refresh_selection_snap ();
 		refresh_history_flags ();
-		_snap.detail = L"trim end â€” peaks refresh";
+		_snap.detail = L"trim end — peaks refresh";
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: trim end exception: %s\n", e.what ());
@@ -5521,7 +5521,7 @@ EngineHost::move_selected_to (float time_sec)
 	}
 	std::shared_ptr<Region> region = _impl->selected_region.lock ();
 	if (!region) {
-		_snap.detail = L"move â€” select a region";
+		_snap.detail = L"move — select a region";
 		return false;
 	}
 	try {
@@ -5558,7 +5558,7 @@ EngineHost::move_selected_to (float time_sec)
 		refresh_region_flags ();
 		refresh_selection_snap ();
 		refresh_history_flags ();
-		_snap.detail = L"move region â€” peaks refresh";
+		_snap.detail = L"move region — peaks refresh";
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: move region exception: %s\n", e.what ());
@@ -5607,11 +5607,11 @@ scale_selected_region_length (Session& session,
                               std::wstring& detail)
 {
 	if (!region || !(time_ratio > 0.f) || !std::isfinite (time_ratio)) {
-		detail = L"scale â€” bad ratio";
+		detail = L"scale — bad ratio";
 		return false;
 	}
 	if (std::fabs (time_ratio - 1.f) < 0.001f) {
-		detail = L"scale â€” no-op";
+		detail = L"scale — no-op";
 		return true;
 	}
 	samplecnt_t old_len = region->length_samples ();
@@ -5637,7 +5637,7 @@ scale_selected_region_length (Session& session,
 		session.add_command (new StatefulDiffCommand (region));
 	}
 	session.commit_reversible_command ();
-	detail = L"scale region (interim, no pitch) â€” peaks refresh";
+	detail = L"scale region (interim, no pitch) — peaks refresh";
 	return true;
 }
 
@@ -5652,21 +5652,21 @@ EngineHost::stretch_selected (float time_ratio)
 	std::shared_ptr<Region> region = _impl->selected_region.lock ();
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (!ar) {
-		_snap.detail = L"stretch â€” select an audio region";
+		_snap.detail = L"stretch — select an audio region";
 		return false;
 	}
 	if (!(time_ratio > 0.f) || !std::isfinite (time_ratio)) {
-		_snap.detail = L"stretch â€” bad ratio";
+		_snap.detail = L"stretch — bad ratio";
 		return false;
 	}
 	if (std::fabs (time_ratio - 1.f) < 0.001f) {
-		_snap.detail = L"stretch â€” no-op";
+		_snap.detail = L"stretch — no-op";
 		return true;
 	}
 	try {
 		std::shared_ptr<Playlist> pl = ar->playlist ();
 		if (!pl) {
-			_snap.detail = L"stretch â€” no playlist";
+			_snap.detail = L"stretch — no playlist";
 			return false;
 		}
 
@@ -5686,7 +5686,7 @@ EngineHost::stretch_selected (float time_ratio)
 		RBStretch fx (*_impl->session, req);
 		if (fx.run (ar, &progress) != 0 || fx.results.empty ()) {
 			std::fprintf (stderr,
-			              "airdour_win_shell: RBStretch failed â€” falling back to scale/slip\n");
+			              "airdour_win_shell: RBStretch failed — falling back to scale/slip\n");
 			std::fflush (stderr);
 			std::wstring d;
 			if (!scale_selected_region_length (*_impl->session, ar, time_ratio, d)) {
@@ -5701,7 +5701,7 @@ EngineHost::stretch_selected (float time_ratio)
 		}
 
 		std::shared_ptr<Region> neu = fx.results.front ();
-		/* replace_region clones whole_file results â€” keep position for re-select. */
+		/* replace_region clones whole_file results — keep position for re-select. */
 		timepos_t pos = ar->position ();
 		samplecnt_t sr = _impl->session->sample_rate ();
 		if (sr <= 0) {
@@ -5732,10 +5732,10 @@ EngineHost::stretch_selected (float time_ratio)
 			new_len = neu->length_samples ();
 		}
 		std::fprintf (stderr,
-		              "airdour_win_shell: stretch ok (RB %.3fx samples %lldâ†’%lld)\n",
+		              "airdour_win_shell: stretch ok (RB %.3fx samples %lld→%lld)\n",
 		              time_ratio, (long long)old_len, (long long)new_len);
 		std::fflush (stderr);
-		_snap.detail = L"time stretch (RubberBand) â€” peaks refresh";
+		_snap.detail = L"time stretch (RubberBand) — peaks refresh";
 		return true;
 #else
 		(void)frac;
@@ -5773,14 +5773,14 @@ EngineHost::pitch_shift_selected (float semitones)
 	std::shared_ptr<Region> region = _impl->selected_region.lock ();
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (!ar) {
-		_snap.detail = L"pitch â€” select an audio region";
+		_snap.detail = L"pitch — select an audio region";
 		return false;
 	}
 	if (!std::isfinite (semitones) || std::fabs (semitones) < 0.001f) {
-		_snap.detail = L"pitch â€” no-op";
+		_snap.detail = L"pitch — no-op";
 		return true;
 	}
-	/* Clamp to a musically sane range (Â±2 octaves). */
+	/* Clamp to a musically sane range (±2 octaves). */
 	if (semitones > 24.f) {
 		semitones = 24.f;
 	}
@@ -5790,7 +5790,7 @@ EngineHost::pitch_shift_selected (float semitones)
 	try {
 		std::shared_ptr<Playlist> pl = ar->playlist ();
 		if (!pl) {
-			_snap.detail = L"pitch â€” no playlist";
+			_snap.detail = L"pitch — no playlist";
 			return false;
 		}
 
@@ -5845,16 +5845,16 @@ EngineHost::pitch_shift_selected (float semitones)
 			new_len = neu->length_samples ();
 		}
 		std::fprintf (stderr,
-		              "airdour_win_shell: pitch ok (%+.1fst ratio=%.4f samples %lldâ†’%lld)\n",
+		              "airdour_win_shell: pitch ok (%+.1fst ratio=%.4f samples %lld→%lld)\n",
 		              semitones, pitch_frac, (long long)old_len, (long long)new_len);
 		std::fflush (stderr);
-		_snap.detail = L"pitch shift (RubberBand) â€” duration held";
+		_snap.detail = L"pitch shift (RubberBand) — duration held";
 		return true;
 #else
 		(void)pitch_frac;
 		(void)old_len;
 		_snap.detail = L"pitch unavailable (no RubberBand)";
-		std::fprintf (stderr, "airdour_win_shell: pitch failed â€” no HAVE_RUBBERBAND\n");
+		std::fprintf (stderr, "airdour_win_shell: pitch failed — no HAVE_RUBBERBAND\n");
 		std::fflush (stderr);
 		return false;
 #endif
@@ -5878,13 +5878,13 @@ EngineHost::reverse_selected ()
 	std::shared_ptr<Region> region = _impl->selected_region.lock ();
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (!ar) {
-		_snap.detail = L"reverse â€” select an audio region";
+		_snap.detail = L"reverse — select an audio region";
 		return false;
 	}
 	try {
 		std::shared_ptr<Playlist> pl = ar->playlist ();
 		if (!pl) {
-			_snap.detail = L"reverse â€” no playlist";
+			_snap.detail = L"reverse — no playlist";
 			return false;
 		}
 
@@ -5927,10 +5927,10 @@ EngineHost::reverse_selected ()
 			new_len = neu->length_samples ();
 		}
 		std::fprintf (stderr,
-		              "airdour_win_shell: reverse ok (samples %lldâ†’%lld)\n",
+		              "airdour_win_shell: reverse ok (samples %lld→%lld)\n",
 		              (long long)old_len, (long long)new_len);
 		std::fflush (stderr);
-		_snap.detail = L"reverse region â€” peaks refresh";
+		_snap.detail = L"reverse region — peaks refresh";
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: reverse exception: %s\n", e.what ());
@@ -5952,7 +5952,7 @@ EngineHost::normalize_selected (float target_dbfs)
 	std::shared_ptr<Region> region = _impl->selected_region.lock ();
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (!ar) {
-		_snap.detail = L"normalize â€” select an audio region";
+		_snap.detail = L"normalize — select an audio region";
 		return false;
 	}
 	if (!std::isfinite (target_dbfs) || target_dbfs > 0.f) {
@@ -5968,7 +5968,7 @@ EngineHost::normalize_selected (float target_dbfs)
 			return false;
 		}
 		if (max_amp < (double)GAIN_COEFF_SMALL) {
-			_snap.detail = L"normalize â€” silence / no peak";
+			_snap.detail = L"normalize — silence / no peak";
 			return false;
 		}
 
@@ -5985,10 +5985,10 @@ EngineHost::normalize_selected (float target_dbfs)
 
 		float scale_after = ar->scale_amplitude ();
 		std::fprintf (stderr,
-		              "airdour_win_shell: normalize ok (peak=%.4f â†’ %.1f dBFS scale %.4fâ†’%.4f)\n",
+		              "airdour_win_shell: normalize ok (peak=%.4f → %.1f dBFS scale %.4f→%.4f)\n",
 		              max_amp, target_dbfs, scale_before, scale_after);
 		std::fflush (stderr);
-		_snap.detail = L"normalize â€” peaks refresh";
+		_snap.detail = L"normalize — peaks refresh";
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: normalize exception: %s\n", e.what ());
@@ -6012,13 +6012,13 @@ EngineHost::strip_silence_selected (float threshold_dbfs,
 	std::shared_ptr<Region> region = _impl->selected_region.lock ();
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (!ar) {
-		_snap.detail = L"strip silence â€” select an audio region";
+		_snap.detail = L"strip silence — select an audio region";
 		return false;
 	}
 	try {
 		std::shared_ptr<Playlist> pl = ar->playlist ();
 		if (!pl) {
-			_snap.detail = L"strip silence â€” no playlist";
+			_snap.detail = L"strip silence — no playlist";
 			return false;
 		}
 
@@ -6072,9 +6072,9 @@ EngineHost::strip_silence_selected (float threshold_dbfs,
 		}
 
 		if (filter.results.empty ()) {
-			/* Entire region was silence â€” leave selection; nothing to replace. */
-			_snap.detail = L"strip silence â€” all quiet (no change)";
-			std::fprintf (stderr, "airdour_win_shell: strip silence â€” all silence, no replace\n");
+			/* Entire region was silence — leave selection; nothing to replace. */
+			_snap.detail = L"strip silence — all quiet (no change)";
+			std::fprintf (stderr, "airdour_win_shell: strip silence — all silence, no replace\n");
 			std::fflush (stderr);
 			return true;
 		}
@@ -6108,11 +6108,11 @@ EngineHost::strip_silence_selected (float threshold_dbfs,
 		int n1 = track_region_count (track >= 0 ? track : 0);
 		std::fprintf (stderr,
 		              "airdour_win_shell: strip silence ok (thresh=%.1f dBFS silences=%u "
-		              "results=%u regions %dâ†’%d)\n",
+		              "results=%u regions %d→%d)\n",
 		              threshold_dbfs, (unsigned)silences.size (),
 		              (unsigned)filter.results.size (), n0, n1);
 		std::fflush (stderr);
-		_snap.detail = L"strip silence â€” peaks refresh";
+		_snap.detail = L"strip silence — peaks refresh";
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: strip silence exception: %s\n", e.what ());
@@ -6132,11 +6132,11 @@ EngineHost::consolidate_range (int track, float start_sec, float end_sec)
 		return false;
 	}
 	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
-		_snap.detail = L"consolidate â€” bad track";
+		_snap.detail = L"consolidate — bad track";
 		return false;
 	}
 	if (!(end_sec > start_sec) || !std::isfinite (start_sec) || !std::isfinite (end_sec)) {
-		_snap.detail = L"consolidate â€” bad range";
+		_snap.detail = L"consolidate — bad range";
 		return false;
 	}
 	if (start_sec < 0.f) {
@@ -6146,7 +6146,7 @@ EngineHost::consolidate_range (int track, float start_sec, float end_sec)
 		std::shared_ptr<AudioTrack> at = _impl->tracks[track];
 		std::shared_ptr<Playlist> pl = at->playlist ();
 		if (!pl) {
-			_snap.detail = L"consolidate â€” no playlist";
+			_snap.detail = L"consolidate — no playlist";
 			return false;
 		}
 
@@ -6157,7 +6157,7 @@ EngineHost::consolidate_range (int track, float start_sec, float end_sec)
 		samplepos_t start = (samplepos_t)std::llround ((double)start_sec * (double)sr);
 		samplepos_t end = (samplepos_t)std::llround ((double)end_sec * (double)sr);
 		if (end <= start) {
-			_snap.detail = L"consolidate â€” empty range";
+			_snap.detail = L"consolidate — empty range";
 			return false;
 		}
 
@@ -6166,7 +6166,7 @@ EngineHost::consolidate_range (int track, float start_sec, float end_sec)
 		InterThreadInfo itt;
 		itt.cancel = false;
 		itt.done = false;
-		/* No processing: tap before processors (nil endpoint) â€” GTK consolidate. */
+		/* No processing: tap before processors (nil endpoint) — GTK consolidate. */
 		std::shared_ptr<Region> bounced = at->bounce_range (
 			start, end, itt, std::shared_ptr<Processor> (), false, "Consolidated", true);
 		if (!bounced || itt.cancel) {
@@ -6180,7 +6180,7 @@ EngineHost::consolidate_range (int track, float start_sec, float end_sec)
 		plist.add (Properties::whole_file, false);
 		std::shared_ptr<Region> copy = RegionFactory::create (bounced, plist);
 		if (!copy) {
-			_snap.detail = L"consolidate â€” region copy failed";
+			_snap.detail = L"consolidate — region copy failed";
 			return false;
 		}
 
@@ -6211,10 +6211,10 @@ EngineHost::consolidate_range (int track, float start_sec, float end_sec)
 		int n1 = track_region_count (track);
 		std::fprintf (stderr,
 		              "airdour_win_shell: consolidate ok (track %d [%.3f..%.3f]s "
-		              "regions %dâ†’%d)\n",
+		              "regions %d→%d)\n",
 		              track, start_sec, end_sec, n0, n1);
 		std::fflush (stderr);
-		_snap.detail = L"consolidate â€” peaks refresh";
+		_snap.detail = L"consolidate — peaks refresh";
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: consolidate exception: %s\n", e.what ());
@@ -6231,7 +6231,7 @@ bool
 EngineHost::consolidate_selected ()
 {
 	if (!_snap.has_selection || _snap.selection_track < 0) {
-		_snap.detail = L"consolidate â€” select a region";
+		_snap.detail = L"consolidate — select a region";
 		return false;
 	}
 	return consolidate_range (_snap.selection_track,
@@ -6310,22 +6310,22 @@ EngineHost::freeze_track (int track)
 		return false;
 	}
 	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
-		_snap.detail = L"freeze â€” bad track";
+		_snap.detail = L"freeze — bad track";
 		return false;
 	}
 	try {
 		std::shared_ptr<AudioTrack> at = _impl->tracks[track];
 		if (at->freeze_state () == Track::Frozen) {
 			refresh_freeze_flags ();
-			_snap.detail = L"freeze â€” already frozen";
+			_snap.detail = L"freeze — already frozen";
 			return true;
 		}
 		if (!at->bounceable (at->main_outs (), true)) {
-			_snap.detail = L"freeze â€” track not bounceable";
+			_snap.detail = L"freeze — track not bounceable";
 			return false;
 		}
 		if (!ensure_freeze_session_range (track)) {
-			_snap.detail = L"freeze â€” session range";
+			_snap.detail = L"freeze — session range";
 			return false;
 		}
 
@@ -6363,7 +6363,7 @@ EngineHost::freeze_track (int track)
 		std::fprintf (stderr, "airdour_win_shell: freeze ok (track %d frozen=%d)\n",
 		              track, _snap.track_frozen[track] ? 1 : 0);
 		std::fflush (stderr);
-		_snap.detail = L"freeze â€” peaks refresh";
+		_snap.detail = L"freeze — peaks refresh";
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: freeze exception: %s\n", e.what ());
@@ -6383,14 +6383,14 @@ EngineHost::unfreeze_track (int track)
 		return false;
 	}
 	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
-		_snap.detail = L"unfreeze â€” bad track";
+		_snap.detail = L"unfreeze — bad track";
 		return false;
 	}
 	try {
 		std::shared_ptr<AudioTrack> at = _impl->tracks[track];
 		if (at->freeze_state () != Track::Frozen) {
 			refresh_freeze_flags ();
-			_snap.detail = L"unfreeze â€” not frozen";
+			_snap.detail = L"unfreeze — not frozen";
 			return true;
 		}
 
@@ -6414,7 +6414,7 @@ EngineHost::unfreeze_track (int track)
 
 		std::fprintf (stderr, "airdour_win_shell: unfreeze ok (track %d)\n", track);
 		std::fflush (stderr);
-		_snap.detail = L"unfreeze â€” peaks refresh";
+		_snap.detail = L"unfreeze — peaks refresh";
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: unfreeze exception: %s\n", e.what ());
@@ -6498,7 +6498,7 @@ namespace {
 double
 snap_unit_sec_fallback (int density)
 {
-	/* Fixed 120 BPM / 4/4 â€” matches win_ardour MIDI beat mapping. */
+	/* Fixed 120 BPM / 4/4 — matches win_ardour MIDI beat mapping. */
 	const double beat = 60.0 / 120.0;
 	switch (density) {
 	case 0: return beat * 4.0; /* bar */
@@ -6678,7 +6678,7 @@ bool
 EngineHost::smoke_snap ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-snap failed â€” no Session";
+		_snap.detail = L"smoke-snap failed — no Session";
 		return false;
 	}
 	try {
@@ -6686,20 +6686,20 @@ EngineHost::smoke_snap ()
 		set_snap_enabled (true);
 		float s1 = snap_time (1.1f);
 		if (std::fabs (s1 - 1.0f) > 0.08f) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (beat 1.1â†’%.3f)\n", s1);
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (beat 1.1→%.3f)\n", s1);
 			std::fflush (stderr);
 			return false;
 		}
 		float s2 = snap_time (0.24f);
 		if (std::fabs (s2 - 0.0f) > 0.08f && std::fabs (s2 - 0.5f) > 0.08f) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (beat 0.24â†’%.3f)\n", s2);
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (beat 0.24→%.3f)\n", s2);
 			std::fflush (stderr);
 			return false;
 		}
 		set_snap_density (0); /* bar */
 		float s3 = snap_time (1.1f);
 		if (std::fabs (s3 - 0.0f) > 0.08f && std::fabs (s3 - 2.0f) > 0.08f) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (bar 1.1â†’%.3f)\n", s3);
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (bar 1.1→%.3f)\n", s3);
 			std::fflush (stderr);
 			return false;
 		}
@@ -6714,12 +6714,12 @@ EngineHost::smoke_snap ()
 		set_snap_enabled (false);
 		float s4 = snap_time (1.1f);
 		if (std::fabs (s4 - 1.1f) > 0.001f) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (off 1.1â†’%.3f)\n", s4);
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (off 1.1→%.3f)\n", s4);
 			std::fflush (stderr);
 			return false;
 		}
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-snap ok (beat 1.1â†’%.2f barâ†’%.2f lines=%d)\n",
+		              "airdour_win_shell: smoke-snap ok (beat 1.1→%.2f bar→%.2f lines=%d)\n",
 		              s1, s3, lines);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-snap ok";
@@ -6738,11 +6738,11 @@ bool
 EngineHost::smoke_edit ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-edit failed â€” no Session";
+		_snap.detail = L"smoke-edit failed — no Session";
 		return false;
 	}
 	try {
-		/* Prefs may enable snap â€” absolute trim/move times must not quantize. */
+		/* Prefs may enable snap — absolute trim/move times must not quantize. */
 		const bool snap_was = _snap.snap_enabled;
 		set_snap_enabled (false);
 		collect_tracks ();
@@ -6773,7 +6773,7 @@ EngineHost::smoke_edit ()
 		}
 		int n1 = track_region_count (0);
 		if (n1 < n0 + 1) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (regions %dâ†’%d)\n",
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (regions %d→%d)\n",
 			              n0, n1);
 			std::fflush (stderr);
 			set_snap_enabled (snap_was);
@@ -6842,14 +6842,14 @@ EngineHost::smoke_edit ()
 		}
 		float len3 = _snap.selection_end_sec - _snap.selection_start_sec;
 		if (std::fabs (len3 - len2) > 0.05f) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (move changed len %.3fâ†’%.3f)\n",
+			std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (move changed len %.3f→%.3f)\n",
 			              len2, len3);
 			std::fflush (stderr);
 			set_snap_enabled (snap_was);
 			return false;
 		}
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-edit ok (split %dâ†’%d fade_out=%.0fms "
+		              "airdour_win_shell: smoke-edit ok (split %d→%d fade_out=%.0fms "
 		              "trim+move start=%.2f len=%.2f)\n",
 		              n0, n1, _snap.selection_fade_out_sec * 1000.f,
 		              _snap.selection_start_sec, len3);
@@ -6870,7 +6870,7 @@ bool
 EngineHost::smoke_stretch ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-stretch failed â€” no Session";
+		_snap.detail = L"smoke-stretch failed — no Session";
 		return false;
 	}
 	try {
@@ -6911,17 +6911,17 @@ EngineHost::smoke_stretch ()
 			return false;
 		}
 		float len1 = _snap.selection_end_sec - _snap.selection_start_sec;
-		/* Allow generous tolerance: RB length + scale interim both ~1.5Ã—. */
+		/* Allow generous tolerance: RB length + scale interim both ~1.5×. */
 		if (len1 < len0 * 1.25f || len1 > len0 * 1.85f) {
 			std::fprintf (stderr,
-			              "airdour_win_shell: smoke-stretch FAILED (len %.3fâ†’%.3f)\n",
+			              "airdour_win_shell: smoke-stretch FAILED (len %.3f→%.3f)\n",
 			              len0, len1);
 			std::fflush (stderr);
 			set_snap_enabled (snap_was);
 			return false;
 		}
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-stretch ok (len %.3fâ†’%.3f ratioâ‰ˆ%.2f)\n",
+		              "airdour_win_shell: smoke-stretch ok (len %.3f→%.3f ratio≈%.2f)\n",
 		              len0, len1, len1 / len0);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-stretch ok";
@@ -6940,7 +6940,7 @@ bool
 EngineHost::smoke_pitch ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-pitch failed â€” no Session";
+		_snap.detail = L"smoke-pitch failed — no Session";
 		return false;
 	}
 	try {
@@ -6983,14 +6983,14 @@ EngineHost::smoke_pitch ()
 		/* Duration held: allow small RubberBand length jitter. */
 		if (std::fabs (len1 - len0) > 0.08f) {
 			std::fprintf (stderr,
-			              "airdour_win_shell: smoke-pitch FAILED (len drifted %.3fâ†’%.3f)\n",
+			              "airdour_win_shell: smoke-pitch FAILED (len drifted %.3f→%.3f)\n",
 			              len0, len1);
 			std::fflush (stderr);
 			set_snap_enabled (snap_was);
 			return false;
 		}
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-pitch ok (+1st len %.3fâ†’%.3f held)\n",
+		              "airdour_win_shell: smoke-pitch ok (+1st len %.3f→%.3f held)\n",
 		              len0, len1);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-pitch ok";
@@ -7009,7 +7009,7 @@ bool
 EngineHost::smoke_reverse ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-reverse failed â€” no Session";
+		_snap.detail = L"smoke-reverse failed — no Session";
 		return false;
 	}
 	try {
@@ -7053,7 +7053,7 @@ EngineHost::smoke_reverse ()
 		float start1 = _snap.selection_start_sec;
 		if (std::fabs (len1 - len0) > 0.05f || std::fabs (start1 - start0) > 0.05f) {
 			std::fprintf (stderr,
-			              "airdour_win_shell: smoke-reverse FAILED (start/len %.3f/%.3fâ†’%.3f/%.3f)\n",
+			              "airdour_win_shell: smoke-reverse FAILED (start/len %.3f/%.3f→%.3f/%.3f)\n",
 			              start0, len0, start1, len1);
 			std::fflush (stderr);
 			set_snap_enabled (snap_was);
@@ -7079,7 +7079,7 @@ bool
 EngineHost::smoke_normalize ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-normalize failed â€” no Session";
+		_snap.detail = L"smoke-normalize failed — no Session";
 		return false;
 	}
 	try {
@@ -7137,17 +7137,17 @@ EngineHost::smoke_normalize ()
 		}
 		float scale1 = ar->scale_amplitude ();
 		float expect = dB_to_coefficient (target_db) / (float)peak0;
-		/* AudioRegion::normalize nudges unity target by FLT_EPSILON; âˆ’1 dBFS is fine. */
+		/* AudioRegion::normalize nudges unity target by FLT_EPSILON; −1 dBFS is fine. */
 		if (std::fabs (scale1 - expect) > 0.05f) {
 			std::fprintf (stderr,
-			              "airdour_win_shell: smoke-normalize FAILED (scale %.4fâ†’%.4f expectâ‰ˆ%.4f)\n",
+			              "airdour_win_shell: smoke-normalize FAILED (scale %.4f→%.4f expect≈%.4f)\n",
 			              scale0, scale1, expect);
 			std::fflush (stderr);
 			set_snap_enabled (snap_was);
 			return false;
 		}
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-normalize ok (âˆ’1 dBFS peak=%.3f scale %.3fâ†’%.3f)\n",
+		              "airdour_win_shell: smoke-normalize ok (−1 dBFS peak=%.3f scale %.3f→%.3f)\n",
 		              peak0, scale0, scale1);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-normalize ok";
@@ -7166,7 +7166,7 @@ bool
 EngineHost::smoke_strip_silence ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-strip-silence failed â€” no Session";
+		_snap.detail = L"smoke-strip-silence failed — no Session";
 		return false;
 	}
 	try {
@@ -7190,7 +7190,7 @@ EngineHost::smoke_strip_silence ()
 		std::string wav = path_join (
 			_impl->session_dir,
 			string_compose ("import_gated_%1.wav", 1));
-		/* silence | tone | silence | tone â€” strip should yield 2 audible regions. */
+		/* silence | tone | silence | tone — strip should yield 2 audible regions. */
 		if (!write_pcm16_wav_gated (wav, (int)sr, 440.f, 0.28f, 0.15f, 0.25f)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-strip-silence FAILED (write gated wav)\n");
 			std::fflush (stderr);
@@ -7225,14 +7225,14 @@ EngineHost::smoke_strip_silence ()
 		int n1 = track_region_count (0);
 		if (n1 < n0 + 1) {
 			std::fprintf (stderr,
-			              "airdour_win_shell: smoke-strip-silence FAILED (regions %dâ†’%d, want â‰¥%d)\n",
+			              "airdour_win_shell: smoke-strip-silence FAILED (regions %d→%d, want ≥%d)\n",
 			              n0, n1, n0 + 1);
 			std::fflush (stderr);
 			set_snap_enabled (snap_was);
 			return false;
 		}
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-strip-silence ok (regions %dâ†’%d)\n",
+		              "airdour_win_shell: smoke-strip-silence ok (regions %d→%d)\n",
 		              n0, n1);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-strip-silence ok";
@@ -7251,7 +7251,7 @@ bool
 EngineHost::smoke_consolidate ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-consolidate failed â€” no Session";
+		_snap.detail = L"smoke-consolidate failed — no Session";
 		return false;
 	}
 	try {
@@ -7285,13 +7285,13 @@ EngineHost::smoke_consolidate ()
 		}
 		int n1 = track_region_count (0);
 		if (n1 < n0 + 1) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-consolidate FAILED (split regions %dâ†’%d)\n",
+			std::fprintf (stderr, "airdour_win_shell: smoke-consolidate FAILED (split regions %d→%d)\n",
 			              n0, n1);
 			std::fflush (stderr);
 			set_snap_enabled (snap_was);
 			return false;
 		}
-		/* Bounce range covering both halves â†’ one consolidated region. */
+		/* Bounce range covering both halves → one consolidated region. */
 		if (!consolidate_range (0, 0.f, 1.0f)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-consolidate FAILED (consolidate)\n");
 			std::fflush (stderr);
@@ -7301,7 +7301,7 @@ EngineHost::smoke_consolidate ()
 		int n2 = track_region_count (0);
 		if (n2 != 1) {
 			std::fprintf (stderr,
-			              "airdour_win_shell: smoke-consolidate FAILED (regions %dâ†’%dâ†’%d want 1)\n",
+			              "airdour_win_shell: smoke-consolidate FAILED (regions %d→%d→%d want 1)\n",
 			              n0, n1, n2);
 			std::fflush (stderr);
 			set_snap_enabled (snap_was);
@@ -7322,7 +7322,7 @@ EngineHost::smoke_consolidate ()
 			return false;
 		}
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-consolidate ok (regions %dâ†’%dâ†’%d len=%.2f)\n",
+		              "airdour_win_shell: smoke-consolidate ok (regions %d→%d→%d len=%.2f)\n",
 		              n0, n1, n2, len);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-consolidate ok";
@@ -7341,7 +7341,7 @@ bool
 EngineHost::smoke_freeze ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-freeze failed â€” no Session";
+		_snap.detail = L"smoke-freeze failed — no Session";
 		return false;
 	}
 	try {
@@ -7408,7 +7408,7 @@ EngineHost::smoke_freeze ()
 			return false;
 		}
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-freeze ok (regions %dâ†’%dâ†’%d frozenâ†’thawed)\n",
+		              "airdour_win_shell: smoke-freeze ok (regions %d→%d→%d frozen→thawed)\n",
 		              n0, n1, n2);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-freeze ok";
@@ -7427,7 +7427,7 @@ bool
 EngineHost::smoke_undo ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-undo failed â€” no Session";
+		_snap.detail = L"smoke-undo failed — no Session";
 		return false;
 	}
 	try {
@@ -7485,7 +7485,7 @@ EngineHost::smoke_undo ()
 		/* Leave session empty after verifying redo. */
 		undo (1);
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-undo ok (importâ†”undoâ†”redo; undo_depth=%u)\n",
+		              "airdour_win_shell: smoke-undo ok (import↔undo↔redo; undo_depth=%u)\n",
 		              (unsigned)_snap.undo_depth);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-undo ok";
@@ -7505,7 +7505,7 @@ bool
 EngineHost::smoke_history ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-history failed â€” no Session";
+		_snap.detail = L"smoke-history failed — no Session";
 		return false;
 	}
 	try {
@@ -7528,7 +7528,7 @@ EngineHost::smoke_history ()
 		bool had_region = _snap.track_has_regions[0];
 		if (!undo_to_index (0) || _snap.undo_depth >= before) {
 			std::fprintf (stderr,
-			              "airdour_win_shell: smoke-history FAILED (jump depth %uâ†’%u)\n",
+			              "airdour_win_shell: smoke-history FAILED (jump depth %u→%u)\n",
 			              (unsigned)before, (unsigned)_snap.undo_depth);
 			std::fflush (stderr);
 			return false;
@@ -7851,7 +7851,7 @@ bool
 EngineHost::copy_loop_to_punch ()
 {
 	if (!_snap.loop_active) {
-		_snap.detail = L"copy punch â€” no loop range";
+		_snap.detail = L"copy punch — no loop range";
 		return false;
 	}
 	return set_punch_range (_snap.loop_start_sec, _snap.loop_end_sec);
@@ -7886,7 +7886,7 @@ EngineHost::set_punch_enabled (bool enable)
 			}
 			_impl->session->config.set_punch_in (true);
 			_impl->session->config.set_punch_out (true);
-			_snap.detail = L"punch armed â€” record only inside range";
+			_snap.detail = L"punch armed — record only inside range";
 		} else {
 			_impl->session->config.set_punch_in (false);
 			_impl->session->config.set_punch_out (false);
@@ -7955,7 +7955,7 @@ EngineHost::set_tempo_bpm (float bpm)
 	try {
 		Temporal::TempoMap::WritableSharedPtr tmap = Temporal::TempoMap::write_copy ();
 		if (!tmap) {
-			_snap.detail = L"tempo set failed â€” no map";
+			_snap.detail = L"tempo set failed — no map";
 			return false;
 		}
 		Temporal::TempoMetric const& metric = tmap->metric_at (Temporal::timepos_t (0));
@@ -8001,7 +8001,7 @@ EngineHost::set_count_in (bool enable)
 	try {
 		_impl->session->config.set_count_in (enable);
 		refresh_tempo_snap ();
-		_snap.detail = enable ? L"count-in on â€” 1â€“2 bars before record"
+		_snap.detail = enable ? L"count-in on — 1–2 bars before record"
 		                      : L"count-in off";
 		std::fprintf (stderr, "airdour_win_shell: count-in %s\n", enable ? "on" : "off");
 		std::fflush (stderr);
@@ -8035,7 +8035,7 @@ EngineHost::set_clicking (bool enable)
 			_impl->session->reconnect_click_output ();
 		}
 		refresh_tempo_snap ();
-		_snap.detail = enable ? L"click on â€” metronome"
+		_snap.detail = enable ? L"click on — metronome"
 		                      : L"click off";
 		std::fprintf (stderr, "airdour_win_shell: click %s\n", enable ? "on" : "off");
 		std::fflush (stderr);
@@ -8056,7 +8056,7 @@ bool
 EngineHost::smoke_click ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-click failed â€” no Session";
+		_snap.detail = L"smoke-click failed — no Session";
 		return false;
 	}
 	try {
@@ -8075,7 +8075,7 @@ EngineHost::smoke_click ()
 			std::fflush (stderr);
 			return false;
 		}
-		std::fprintf (stderr, "airdour_win_shell: smoke-click ok (offâ†’on + ClickIO)\n");
+		std::fprintf (stderr, "airdour_win_shell: smoke-click ok (off→on + ClickIO)\n");
 		std::fflush (stderr);
 		_snap.detail = L"smoke-click ok";
 		return true;
@@ -8096,7 +8096,7 @@ EngineHost::add_audio_track ()
 	}
 	collect_tracks ();
 	if ((int)_impl->tracks.size () >= EngineSnapshot::kMeters) {
-		_snap.detail = L"add audio â€” at max tracks";
+		_snap.detail = L"add audio — at max tracks";
 		return false;
 	}
 	try {
@@ -8124,7 +8124,7 @@ EngineHost::add_audio_track ()
 		refresh_pan_flags ();
 		refresh_send_flags ();
 		_snap.detail = L"audio track added";
-		std::fprintf (stderr, "airdour_win_shell: add audio â†’ count=%d\n",
+		std::fprintf (stderr, "airdour_win_shell: add audio → count=%d\n",
 		              _snap.audio_track_count);
 		std::fflush (stderr);
 		return _snap.audio_track_count > 0;
@@ -8158,18 +8158,18 @@ EngineHost::remove_audio_track (int index, bool require_empty_or_selected)
 	}
 	collect_tracks ();
 	if ((int)_impl->tracks.size () <= 1) {
-		_snap.detail = L"remove audio â€” need â‰¥1";
+		_snap.detail = L"remove audio — need ≥1";
 		return false;
 	}
 	if (index < 0 || index >= (int)_impl->tracks.size () || !_impl->tracks[index]) {
-		_snap.detail = L"remove audio â€” bad index";
+		_snap.detail = L"remove audio — bad index";
 		return false;
 	}
 	refresh_region_flags ();
 	bool empty = !_snap.track_has_regions[index];
 	bool selected = (_snap.selection_track == index);
 	if (require_empty_or_selected && !empty && !selected) {
-		_snap.detail = L"remove audio â€” not empty/selected";
+		_snap.detail = L"remove audio — not empty/selected";
 		return false;
 	}
 	try {
@@ -8192,7 +8192,7 @@ EngineHost::remove_audio_track (int index, bool require_empty_or_selected)
 		refresh_send_flags ();
 		refresh_selection_snap ();
 		_snap.detail = L"audio track removed";
-		std::fprintf (stderr, "airdour_win_shell: remove audio[%d] â†’ count=%d\n",
+		std::fprintf (stderr, "airdour_win_shell: remove audio[%d] → count=%d\n",
 		              index, _snap.audio_track_count);
 		std::fflush (stderr);
 		return true;
@@ -8220,7 +8220,7 @@ EngineHost::remove_selected_or_empty_audio_track ()
 			return remove_audio_track (i, true);
 		}
 	}
-	_snap.detail = L"remove â€” no selected/empty audio";
+	_snap.detail = L"remove — no selected/empty audio";
 	return false;
 }
 
@@ -8228,7 +8228,7 @@ bool
 EngineHost::remove_midi_track ()
 {
 	if (!_impl || !_impl->session || !_impl->midi_track) {
-		_snap.detail = L"remove MIDI â€” none";
+		_snap.detail = L"remove MIDI — none";
 		return false;
 	}
 	try {
@@ -8262,7 +8262,7 @@ bool
 EngineHost::smoke_tracks ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-tracks failed â€” no Session";
+		_snap.detail = L"smoke-tracks failed — no Session";
 		return false;
 	}
 	try {
@@ -8273,33 +8273,33 @@ EngineHost::smoke_tracks ()
 			std::fflush (stderr);
 			return false;
 		}
-		/* Default session now fills Audio 1â€“6 (kMeters). At max: remove then
+		/* Default session now fills Audio 1–6 (kMeters). At max: remove then
 		 * re-add; otherwise add then remove. */
 		if (n0 >= EngineSnapshot::kMeters) {
 			if (!remove_audio_track (n0 - 1, true)
 			    || _snap.audio_track_count != n0 - 1) {
-				std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (remove@max â†’ %d)\n",
+				std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (remove@max → %d)\n",
 				              _snap.audio_track_count);
 				std::fflush (stderr);
 				return false;
 			}
 			if (!add_audio_track () || _snap.audio_track_count != n0) {
-				std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (re-add â†’ %d)\n",
+				std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (re-add → %d)\n",
 				              _snap.audio_track_count);
 				std::fflush (stderr);
 				return false;
 			}
 		} else {
 			if (!add_audio_track () || _snap.audio_track_count != n0 + 1) {
-				std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (add â†’ %d)\n",
+				std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (add → %d)\n",
 				              _snap.audio_track_count);
 				std::fflush (stderr);
 				return false;
 			}
 			const int n1 = _snap.audio_track_count;
-			/* New track is empty â€” remove it. */
+			/* New track is empty — remove it. */
 			if (!remove_audio_track (n1 - 1, true) || _snap.audio_track_count != n0) {
-				std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (remove â†’ %d)\n",
+				std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (remove → %d)\n",
 				              _snap.audio_track_count);
 				std::fflush (stderr);
 				return false;
@@ -8320,7 +8320,7 @@ EngineHost::smoke_tracks ()
 		}
 		collect_tracks ();
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-tracks ok (audio %dâ†’â€¦â†’%d midi ok)\n",
+		              "airdour_win_shell: smoke-tracks ok (audio %d→…→%d midi ok)\n",
 		              n0, _snap.audio_track_count);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-tracks ok";
@@ -8342,17 +8342,17 @@ EngineHost::set_track_name (int track, const std::string& name)
 	}
 	collect_tracks ();
 	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
-		_snap.detail = L"rename â€” bad index";
+		_snap.detail = L"rename — bad index";
 		return false;
 	}
 	if (name.empty ()) {
-		_snap.detail = L"rename â€” empty name";
+		_snap.detail = L"rename — empty name";
 		return false;
 	}
 	try {
 		std::shared_ptr<Track> t = std::dynamic_pointer_cast<Track> (_impl->tracks[track]);
 		if (!t) {
-			_snap.detail = L"rename â€” not a Track";
+			_snap.detail = L"rename — not a Track";
 			return false;
 		}
 		if (!t->set_name (name)) {
@@ -8363,7 +8363,7 @@ EngineHost::set_track_name (int track, const std::string& name)
 		}
 		collect_tracks ();
 		_snap.detail = L"track renamed";
-		std::fprintf (stderr, "airdour_win_shell: rename audio[%d] â†’ %s\n",
+		std::fprintf (stderr, "airdour_win_shell: rename audio[%d] → %s\n",
 		              track, wide_to_utf8 (_snap.track_name[track]).c_str ());
 		std::fflush (stderr);
 		return true;
@@ -8385,11 +8385,11 @@ EngineHost::set_midi_track_name (const std::string& name)
 		return false;
 	}
 	if (!_impl->midi_track) {
-		_snap.detail = L"rename MIDI â€” none";
+		_snap.detail = L"rename MIDI — none";
 		return false;
 	}
 	if (name.empty ()) {
-		_snap.detail = L"rename â€” empty name";
+		_snap.detail = L"rename — empty name";
 		return false;
 	}
 	try {
@@ -8400,7 +8400,7 @@ EngineHost::set_midi_track_name (const std::string& name)
 		}
 		collect_tracks ();
 		_snap.detail = L"MIDI renamed";
-		std::fprintf (stderr, "airdour_win_shell: rename MIDI â†’ %s\n",
+		std::fprintf (stderr, "airdour_win_shell: rename MIDI → %s\n",
 		              wide_to_utf8 (_snap.midi_track_name).c_str ());
 		std::fflush (stderr);
 		return true;
@@ -8424,13 +8424,13 @@ EngineHost::move_audio_track (int index, int delta)
 	collect_tracks ();
 	const int n = (int)_impl->tracks.size ();
 	if (n < 2) {
-		_snap.detail = L"reorder â€” need â‰¥2 audio";
+		_snap.detail = L"reorder — need ≥2 audio";
 		return false;
 	}
 	const int other = index + delta;
 	if (index < 0 || index >= n || other < 0 || other >= n
 	    || !_impl->tracks[index] || !_impl->tracks[other]) {
-		_snap.detail = L"reorder â€” edge / bad index";
+		_snap.detail = L"reorder — edge / bad index";
 		return false;
 	}
 	try {
@@ -8475,7 +8475,7 @@ EngineHost::move_audio_track (int index, int delta)
 		refresh_send_flags ();
 		refresh_selection_snap ();
 		_snap.detail = L"tracks reordered";
-		std::fprintf (stderr, "airdour_win_shell: move audio[%d] %+d â†’ [%d]\n",
+		std::fprintf (stderr, "airdour_win_shell: move audio[%d] %+d → [%d]\n",
 		              index, delta, other);
 		std::fflush (stderr);
 		return true;
@@ -8494,14 +8494,14 @@ bool
 EngineHost::smoke_rename ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-rename failed â€” no Session";
+		_snap.detail = L"smoke-rename failed — no Session";
 		return false;
 	}
 	try {
 		collect_tracks ();
 		if (_snap.audio_track_count < 2) {
 			if (!add_audio_track () || _snap.audio_track_count < 2) {
-				std::fprintf (stderr, "airdour_win_shell: smoke-rename FAILED (need â‰¥2 audio)\n");
+				std::fprintf (stderr, "airdour_win_shell: smoke-rename FAILED (need ≥2 audio)\n");
 				std::fflush (stderr);
 				return false;
 			}
@@ -8602,7 +8602,7 @@ bool
 EngineHost::create_route_group (const int* indices, int n)
 {
 	if (!_impl || !_impl->session || !indices || n < 2) {
-		_snap.detail = L"group â€” need â‰¥2 tracks";
+		_snap.detail = L"group — need ≥2 tracks";
 		return false;
 	}
 	collect_tracks ();
@@ -8643,7 +8643,7 @@ EngineHost::create_route_group (const int* indices, int n)
 			rg->clear ();
 			_impl->shell_group = rg;
 			refresh_group_flags ();
-			_snap.detail = L"group â€” <2 valid tracks";
+			_snap.detail = L"group — <2 valid tracks";
 			return false;
 		}
 		_impl->shell_group = rg;
@@ -8732,13 +8732,13 @@ bool
 EngineHost::smoke_group ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-group failed â€” no Session";
+		_snap.detail = L"smoke-group failed — no Session";
 		return false;
 	}
 	try {
 		collect_tracks ();
 		if (_snap.audio_track_count < 2) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (need â‰¥2 audio)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (need ≥2 audio)\n");
 			std::fflush (stderr);
 			return false;
 		}
@@ -8853,11 +8853,11 @@ EngineHost::ensure_monitor_section ()
 			return _snap.monitor_ok;
 		}
 		if (!_impl->session->master_out ()) {
-			_snap.detail = L"monitor â€” no master";
+			_snap.detail = L"monitor — no master";
 			return false;
 		}
-		/* Public path: RC Config use-monitor-bus â†’ Session::config_changed
-		 * â†’ add_monitor_section() (private). */
+		/* Public path: RC Config use-monitor-bus → Session::config_changed
+		 * → add_monitor_section() (private). */
 		if (!Config->get_use_monitor_bus ()) {
 			Config->set_use_monitor_bus (true);
 		}
@@ -8962,7 +8962,7 @@ bool
 EngineHost::smoke_monitor ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-monitor failed â€” no Session";
+		_snap.detail = L"smoke-monitor failed — no Session";
 		return false;
 	}
 	try {
@@ -9010,13 +9010,13 @@ bool
 EngineHost::smoke_tempo ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-tempo failed â€” no Session";
+		_snap.detail = L"smoke-tempo failed — no Session";
 		return false;
 	}
 	try {
 		/* Anchor at 120 so snap expectations are stable. */
 		if (!set_tempo_bpm (120.f) || std::fabs (_snap.tempo_bpm - 120.f) > 0.6f) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (set 120 â†’ %.1f)\n",
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (set 120 → %.1f)\n",
 			              _snap.tempo_bpm);
 			std::fflush (stderr);
 			return false;
@@ -9025,26 +9025,26 @@ EngineHost::smoke_tempo ()
 		set_snap_enabled (true);
 		float at120 = snap_time (0.60f);
 		if (std::fabs (at120 - 0.50f) > 0.08f) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (120 BPM snap 0.60â†’%.3f)\n",
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (120 BPM snap 0.60→%.3f)\n",
 			              at120);
 			std::fflush (stderr);
 			return false;
 		}
 		if (!set_tempo_bpm (60.f) || std::fabs (_snap.tempo_bpm - 60.f) > 0.6f) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (set 60 â†’ %.1f)\n",
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (set 60 → %.1f)\n",
 			              _snap.tempo_bpm);
 			std::fflush (stderr);
 			return false;
 		}
 		float at60 = snap_time (0.60f);
 		if (std::fabs (at60 - 1.00f) > 0.08f && std::fabs (at60 - 0.00f) > 0.08f) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (60 BPM snap 0.60â†’%.3f)\n",
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (60 BPM snap 0.60→%.3f)\n",
 			              at60);
 			std::fflush (stderr);
 			return false;
 		}
 		if (!set_tempo_bpm (140.f) || std::fabs (_snap.tempo_bpm - 140.f) > 0.6f) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (set 140 â†’ %.1f)\n",
+			std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (set 140 → %.1f)\n",
 			              _snap.tempo_bpm);
 			std::fflush (stderr);
 			return false;
@@ -9069,7 +9069,7 @@ EngineHost::smoke_tempo ()
 		set_snap_enabled (false);
 		std::fprintf (stderr,
 		              "airdour_win_shell: smoke-tempo ok "
-		              "(120â†’%.2f 60â†’%.2f bpm=140 count-in)\n",
+		              "(120→%.2f 60→%.2f bpm=140 count-in)\n",
 		              at120, at60);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-tempo ok";
@@ -9087,7 +9087,7 @@ bool
 EngineHost::smoke_punch ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-punch failed â€” no Session";
+		_snap.detail = L"smoke-punch failed — no Session";
 		return false;
 	}
 	try {
@@ -9249,7 +9249,7 @@ EngineHost::set_marker_locked_near (float time_sec, bool locked, float slop_sec)
 		refresh_locations_snap ();
 		refresh_history_flags ();
 		_snap.detail = locked ? L"marker locked" : L"marker unlocked";
-		std::fprintf (stderr, "airdour_win_shell: marker %s @ %.2fs\n",
+		std::fprintf (stderr, "airdour_win_shell: marker %s @ %.2fs\\n",
 		              locked ? "locked" : "unlocked", time_sec);
 		std::fflush (stderr);
 		return hit->locked () == locked;
@@ -9298,17 +9298,17 @@ bool
 EngineHost::smoke_marker_lock ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-marker-lock failed â€” no Session";
+		_snap.detail = L"smoke-marker-lock failed — no Session";
 		return false;
 	}
 	try {
 		if (!add_marker_at (1.25f, "lockMark")) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (add)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (add)\\n");
 			std::fflush (stderr);
 			return false;
 		}
 		if (!set_marker_locked_near (1.25f, true, 0.35f)) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (lock)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (lock)\\n");
 			std::fflush (stderr);
 			return false;
 		}
@@ -9320,12 +9320,12 @@ EngineHost::smoke_marker_lock ()
 			}
 		}
 		if (!found_locked) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (snap locked)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (snap locked)\\n");
 			std::fflush (stderr);
 			return false;
 		}
 		if (!set_marker_locked_near (1.25f, false, 0.35f)) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (unlock)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (unlock)\\n");
 			std::fflush (stderr);
 			return false;
 		}
@@ -9337,21 +9337,21 @@ EngineHost::smoke_marker_lock ()
 			}
 		}
 		if (still_locked) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (still locked)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (still locked)\\n");
 			std::fflush (stderr);
 			return false;
 		}
 		if (!remove_marker_near (1.25f, 0.35f)) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (cleanup)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock FAILED (cleanup)\\n");
 			std::fflush (stderr);
 			return false;
 		}
-		std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock ok (lockâ†’unlock)\n");
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock ok (lock→unlock)\\n");
 		std::fflush (stderr);
 		_snap.detail = L"smoke-marker-lock ok";
 		return true;
 	} catch (std::exception& e) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock exception: %s\n", e.what ());
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-lock exception: %s\\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -9519,11 +9519,11 @@ EngineHost::set_transport_speed (double speed)
 			speed = -8.0;
 		}
 		if (std::fabs (speed) < 1.0e-4) {
-			/* Do not request_transport_speed(0) â€” TransportFSM asserts speedâ‰ 0
+			/* Do not request_transport_speed(0) — TransportFSM asserts speed≠0
 			 * on SetTransportSpeed; stop via request_stop like transport_stop. */
 			_impl->session->request_stop (false, false, TRS_UI);
 			refresh_clock_snap ();
-			/* Request is async â€” keep UI snap at the commanded speed. */
+			/* Request is async — keep UI snap at the commanded speed. */
 			_snap.transport_speed = 0.f;
 			_snap.transport_rolling = false;
 			_snap.detail = L"shuttle stop";
@@ -9552,7 +9552,7 @@ bool
 EngineHost::smoke_locate ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-locate failed â€” no Session";
+		_snap.detail = L"smoke-locate failed — no Session";
 		return false;
 	}
 	try {
@@ -9564,13 +9564,13 @@ EngineHost::smoke_locate ()
 		}
 		if (!locate_to (1.0f, false, 0.f)
 		    || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (locate 1.0 â†’ %.3f)\n",
+			std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (locate 1.0 → %.3f)\n",
 			              _snap.transport_sec);
 			std::fflush (stderr);
 			return false;
 		}
 		if (!scrub_to (2.5f) || std::fabs (_snap.transport_sec - 2.5f) > 0.08f) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (scrub 2.5 â†’ %.3f)\n",
+			std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (scrub 2.5 → %.3f)\n",
 			              _snap.transport_sec);
 			std::fflush (stderr);
 			return false;
@@ -9582,9 +9582,9 @@ EngineHost::smoke_locate ()
 			std::fflush (stderr);
 			return false;
 		}
-		/* Shuttle forward briefly then stop â€” must not leave rolling. */
+		/* Shuttle forward briefly then stop — must not leave rolling. */
 		if (!set_transport_speed (2.0) || std::fabs (_snap.transport_speed - 2.f) > 0.05f) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (shuttle +2 â†’ %.2f)\n",
+			std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (shuttle +2 → %.2f)\n",
 			              _snap.transport_speed);
 			std::fflush (stderr);
 			return false;
@@ -9724,7 +9724,7 @@ bool
 EngineHost::smoke_zoom ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-zoom failed â€” no Session";
+		_snap.detail = L"smoke-zoom failed — no Session";
 		return false;
 	}
 	try {
@@ -9774,7 +9774,7 @@ bool
 EngineHost::smoke_loop_markers ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-loop failed â€” no Session";
+		_snap.detail = L"smoke-loop failed — no Session";
 		return false;
 	}
 	try {
@@ -9865,7 +9865,7 @@ EngineHost::configure_backend_midi ()
 		if (!chosen.empty ()) {
 			be->set_midi_option (chosen);
 			_snap.midi_option = utf8_to_wide (chosen);
-			std::fprintf (stderr, "airdour_win_shell: MIDI option â†’ %s\n", chosen.c_str ());
+			std::fprintf (stderr, "airdour_win_shell: MIDI option → %s\n", chosen.c_str ());
 			std::fflush (stderr);
 			return true;
 		}
@@ -9878,29 +9878,29 @@ namespace {
 
 /* Bundled ACE Reasonable Synth (libs/plugins/reasonablesynth.lv2). */
 static const char* kReasonableSynthUri = "https://community.ardour.org/node/7596";
-/* Bundled ACE Reverb (libs/plugins/a-reverb.lv2) â€” audio-track FX, no cairo. */
+/* Bundled ACE Reverb (libs/plugins/a-reverb.lv2) — audio-track FX, no cairo. */
 static const char* kAceReverbUri = "urn:ardour:a-reverb";
 /* LV2 control port index for Blend (wet mix); see a-reverb.ttl.in. */
 static const uint32_t kAceReverbBlendPort = 4;
-/* Bundled ACE Compressor (libs/plugins/a-comp.lv2) â€” DSP-only, no cairo. */
+/* Bundled ACE Compressor (libs/plugins/a-comp.lv2) — DSP-only, no cairo. */
 static const char* kAceCompUri = "urn:ardour:a-comp";
 static const uint32_t kAceCompRatioPort = 3;
 static const uint32_t kAceCompThresholdPort = 4;
 static const uint32_t kAceCompSidechainPort = 9;
-/* Bundled ACE EQ (libs/plugins/a-eq.lv2) â€” DSP-only, no cairo. */
+/* Bundled ACE EQ (libs/plugins/a-eq.lv2) — DSP-only, no cairo. */
 static const char* kAceEqUri = "urn:ardour:a-eq";
 static const uint32_t kAceEqGainLPort = 1; /* Gain L */
 static const uint32_t kAceEqGain2Port = 6; /* Gain 2 (mid) */
 static const uint32_t kAceEqGainHPort = 15; /* Gain H */
-/* Bundled ACE Delay (libs/plugins/a-delay.lv2) â€” DSP-only, no cairo. */
+/* Bundled ACE Delay (libs/plugins/a-delay.lv2) — DSP-only, no cairo. */
 static const char* kAceDelayUri = "urn:ardour:a-delay";
 static const uint32_t kAceDelayTimePort = 5; /* Time ms */
 static const uint32_t kAceDelayFeedbackPort = 8; /* Feedback % */
-/* Bundled ACE Limiter (libs/plugins/a-limiter.lv2) â€” DSP-only. */
+/* Bundled ACE Limiter (libs/plugins/a-limiter.lv2) — DSP-only. */
 static const char* kAceLimiterUri = "urn:ardour:a-limiter";
 static const uint32_t kAceLimiterCeilingPort = 0; /* Ceiling dB */
 static const uint32_t kAceLimiterReleasePort = 1; /* Release ms */
-/* Bundled ACE Gate (libs/plugins/a-gate.lv2) â€” DSP-only. */
+/* Bundled ACE Gate (libs/plugins/a-gate.lv2) — DSP-only. */
 static const char* kAceGateUri = "urn:ardour:a-gate";
 static const uint32_t kAceGateThresholdPort = 0; /* Threshold dB */
 static const uint32_t kAceGateHoldPort = 1; /* Hold ms */
@@ -10072,7 +10072,7 @@ scan_vst3_fresh ()
 			extra = path;
 		}
 		if (smoke && *smoke) {
-			/* File â†’ parent dir; dir used as-is. */
+			/* File → parent dir; dir used as-is. */
 			if (Glib::file_test (smoke, Glib::FILE_TEST_IS_REGULAR)) {
 				std::string dir = Glib::path_get_dirname (smoke);
 				if (!extra.empty ()) {
@@ -10535,7 +10535,7 @@ EngineHost::refresh_midi_notes_snap ()
 			return;
 		}
 		_snap.midi_region_ok = true;
-		/* Map beatsâ†’seconds at a fixed 120 BPM to avoid TempoMap locks while
+		/* Map beats→seconds at a fixed 120 BPM to avoid TempoMap locks while
 		 * the process thread may be reading the same MidiModel. */
 		const double sec_per_beat = 60.0 / 120.0;
 		const MidiModel::Notes& notes = model->notes ();
@@ -10595,7 +10595,7 @@ EngineHost::refresh_midi_snap ()
 		for (size_t i = 0; i < devs.size () && n < EngineSnapshot::kMaxMidiDevices; ++i) {
 			std::wstring w = utf8_to_wide (devs[i].name);
 			wcsncpy_s (_snap.midi_devices[n].name, w.c_str (), _TRUNCATE);
-			/* Heuristic: names containing "out" / "synth" â†’ output. */
+			/* Heuristic: names containing "out" / "synth" → output. */
 			std::string lower = devs[i].name;
 			for (size_t c = 0; c < lower.size (); ++c) {
 				if (lower[c] >= 'A' && lower[c] <= 'Z') {
@@ -10699,7 +10699,7 @@ EngineHost::connect_midi_output ()
 		_impl->midi_out_port = chosen;
 		_snap.midi_out_connected = true;
 		_snap.midi_out_name = utf8_to_wide (chosen);
-		std::fprintf (stderr, "airdour_win_shell: MIDI out â†’ %s\n", chosen.c_str ());
+		std::fprintf (stderr, "airdour_win_shell: MIDI out → %s\n", chosen.c_str ());
 		std::fflush (stderr);
 		return true;
 	} catch (std::exception& e) {
@@ -11303,13 +11303,13 @@ EngineHost::set_track_comp_sidechain (int track, int src_track, bool enable)
 
 		if (src_track < 0 || src_track >= (int)_impl->tracks.size ()
 		    || !_impl->tracks[src_track] || src_track == track) {
-			_snap.detail = L"Comp SC â€” bad source track";
+			_snap.detail = L"Comp SC — bad source track";
 			return false;
 		}
 
 		if (!pi->has_sidechain ()) {
 			if (!at->add_sidechain (pi)) {
-				_snap.detail = L"Comp SC â€” add_sidechain failed";
+				_snap.detail = L"Comp SC — add_sidechain failed";
 				std::fprintf (stderr, "airdour_win_shell: Comp add_sidechain failed\n");
 				std::fflush (stderr);
 				return false;
@@ -11319,16 +11319,16 @@ EngineHost::set_track_comp_sidechain (int track, int src_track, bool enable)
 		std::shared_ptr<IO> sc_in = pi->sidechain_input ();
 		std::shared_ptr<IO> src_out = _impl->tracks[src_track]->output ();
 		if (!sc_in || !src_out || !sc_in->nth (0) || !src_out->nth (0)) {
-			_snap.detail = L"Comp SC â€” missing ports";
+			_snap.detail = L"Comp SC — missing ports";
 			return false;
 		}
-		/* Disconnect existing then wire src audio out â†’ SC in. */
+		/* Disconnect existing then wire src audio out → SC in. */
 		try {
 			sc_in->disconnect ();
 		} catch (...) {
 		}
 		if (sc_in->connect (sc_in->nth (0), src_out->nth (0)->name ()) != 0) {
-			_snap.detail = L"Comp SC â€” connect failed";
+			_snap.detail = L"Comp SC — connect failed";
 			std::fprintf (stderr, "airdour_win_shell: Comp SC connect failed\n");
 			std::fflush (stderr);
 			return false;
@@ -11342,7 +11342,7 @@ EngineHost::set_track_comp_sidechain (int track, int src_track, bool enable)
 		_impl->track_comp_sidechain = true;
 		_impl->track_comp_sidechain_src = src_track;
 		refresh_track_comp_snap ();
-		std::fprintf (stderr, "airdour_win_shell: Comp SC Audio %d â†’ Audio %d\n",
+		std::fprintf (stderr, "airdour_win_shell: Comp SC Audio %d → Audio %d\n",
 		              src_track + 1, track + 1);
 		std::fflush (stderr);
 		return true;
@@ -11360,7 +11360,7 @@ bool
 EngineHost::smoke_comp ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-comp failed â€” no Session";
+		_snap.detail = L"smoke-comp failed — no Session";
 		return false;
 	}
 	try {
@@ -11414,7 +11414,7 @@ EngineHost::smoke_comp ()
 		if (sc_ok && !_snap.track_comp_sidechain) {
 			sc_ok = false;
 		}
-		/* Sidechain is best-effort â€” still pass if threshold/ratio work. */
+		/* Sidechain is best-effort — still pass if threshold/ratio work. */
 		if (sc_ok) {
 			set_track_comp_sidechain (1, 0, false);
 		}
@@ -11741,7 +11741,7 @@ bool
 EngineHost::smoke_eq ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-eq failed â€” no Session";
+		_snap.detail = L"smoke-eq failed — no Session";
 		return false;
 	}
 	try {
@@ -12070,7 +12070,7 @@ bool
 EngineHost::smoke_delay ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-delay failed â€” no Session";
+		_snap.detail = L"smoke-delay failed — no Session";
 		return false;
 	}
 	try {
@@ -12388,7 +12388,7 @@ bool
 EngineHost::smoke_limiter ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-limiter failed â€” no Session";
+		_snap.detail = L"smoke-limiter failed — no Session";
 		return false;
 	}
 	try {
@@ -12707,7 +12707,7 @@ bool
 EngineHost::smoke_gate ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-gate failed â€” no Session";
+		_snap.detail = L"smoke-gate failed — no Session";
 		return false;
 	}
 	try {
@@ -12810,7 +12810,7 @@ spectrum_goertzel_bands (const float* samples, uint32_t n, float sample_rate,
 			power = 0.f;
 		}
 		float db = (power > 1.0e-20f) ? (10.f * std::log10 (power)) : -100.f;
-		/* Map roughly âˆ’90..0 dB â†’ 0..1 */
+		/* Map roughly −90..0 dB → 0..1 */
 		float norm = (db + 90.f) / 90.f;
 		if (norm < 0.f) {
 			norm = 0.f;
@@ -12984,7 +12984,7 @@ bool
 EngineHost::smoke_spectrum ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-spectrum failed â€” no Session";
+		_snap.detail = L"smoke-spectrum failed — no Session";
 		return false;
 	}
 	try {
@@ -13023,7 +13023,7 @@ EngineHost::smoke_spectrum ()
 			return false;
 		}
 
-		/* Live playlist path (may be silent â€” still must not throw). */
+		/* Live playlist path (may be silent — still must not throw). */
 		set_spectrum_master (false);
 		refresh_spectrum_snap ();
 		set_spectrum_master (true);
@@ -13140,7 +13140,7 @@ EngineHost::refresh_correlation_snap ()
 				std::memset (gainbuf, 0, sizeof (gainbuf));
 				apl->read (dst_r, mixdown, gainbuf,
 				           timepos_t (pos), timecnt_t ((samplecnt_t)kSpecFftN), 1);
-				/* Mono playlist: chan1 empty â†’ copy L to R. */
+				/* Mono playlist: chan1 empty → copy L to R. */
 				float er = 0.f;
 				for (uint32_t i = 0; i < kSpecFftN; ++i) {
 					er += std::fabs (dst_r[i]);
@@ -13268,7 +13268,7 @@ bool
 EngineHost::smoke_correlation ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-correlation failed â€” no Session";
+		_snap.detail = L"smoke-correlation failed — no Session";
 		return false;
 	}
 	try {
@@ -13327,7 +13327,7 @@ EngineHost::smoke_correlation ()
 
 
 /* UI-rate approx LUFS: K-weight (BS.1770-ish) over ~400 ms window. Preallocated.
- * Not a certified meter â€” labeled â‰ˆ in the UI.
+ * Not a certified meter — labeled ≈ in the UI.
  */
 static constexpr uint32_t kLufsWin = 19200; /* 400 ms @ 48 kHz */
 
@@ -13455,7 +13455,7 @@ EngineHost::refresh_loudness_snap ()
 		collect_tracks ();
 		if (_snap.loudness_master) {
 			_snap.loudness_track = -1;
-			wcsncpy_s (_snap.loudness_label, L"Master â‰ˆLUFS", _TRUNCATE);
+			wcsncpy_s (_snap.loudness_label, L"Master ≈LUFS", _TRUNCATE);
 			float scale = 1.f;
 			int ntr = (int)_impl->tracks.size ();
 			if (ntr > 1) {
@@ -13506,7 +13506,7 @@ EngineHost::refresh_loudness_snap ()
 				wcsncpy_s (_snap.loudness_label, _snap.track_name[tr], _TRUNCATE);
 			} else {
 				wchar_t lab[32];
-				std::swprintf (lab, 32, L"Audio %d â‰ˆ", tr + 1);
+				std::swprintf (lab, 32, L"Audio %d ≈", tr + 1);
 				wcsncpy_s (_snap.loudness_label, lab, _TRUNCATE);
 			}
 			if (tr < (int)_impl->tracks.size () && _impl->tracks[tr]
@@ -13546,7 +13546,7 @@ EngineHost::refresh_loudness_snap ()
 	}
 	_snap.loudness_momentary = _snap.loudness_momentary * 0.4f + m * 0.6f;
 
-	/* Absolute gate âˆ’70 LUFS; keep recent gated blocks for integrated approx. */
+	/* Absolute gate −70 LUFS; keep recent gated blocks for integrated approx. */
 	if (m > -70.f) {
 		integ_blocks[integ_i] = m;
 		integ_i = (integ_i + 1) % 64;
@@ -13557,7 +13557,7 @@ EngineHost::refresh_loudness_snap ()
 	if (integ_n > 0) {
 		double sum = 0.0;
 		int used = 0;
-		/* Relative gate: discard blocks below ungated mean âˆ’ 10 LU. */
+		/* Relative gate: discard blocks below ungated mean − 10 LU. */
 		double ungated = 0.0;
 		for (int i = 0; i < integ_n; ++i) {
 			ungated += (double)integ_blocks[i];
@@ -13620,7 +13620,7 @@ bool
 EngineHost::smoke_loudness ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-loudness failed â€” no Session";
+		_snap.detail = L"smoke-loudness failed — no Session";
 		return false;
 	}
 	try {
@@ -13634,7 +13634,7 @@ EngineHost::smoke_loudness ()
 		static float R[kLufsWin];
 		const uint32_t n = 4800; /* 100 ms @ 48 kHz */
 		for (uint32_t i = 0; i < n; ++i) {
-			/* âˆ’20 dBFS 1 kHz stereo sine â†’ expect roughly âˆ’23 LUFS-ish. */
+			/* −20 dBFS 1 kHz stereo sine → expect roughly −23 LUFS-ish. */
 			float s = 0.1f * std::sin (2.f * 3.14159265f * 1000.f * (float)i / 48000.f);
 			L[i] = s;
 			R[i] = s;
@@ -13684,7 +13684,7 @@ EngineHost::smoke_perf (unsigned sample_secs)
 		sample_secs = 30;
 	}
 
-	/* Do not transport_play here â€” Debug Session roll during attach_engine has
+	/* Do not transport_play here — Debug Session roll during attach_engine has
 	 * intermittent AVs. WASAPI shared still runs process cycles while stopped. */
 	PROCESS_MEMORY_COUNTERS_EX pmc0;
 	std::memset (&pmc0, 0, sizeof (pmc0));
@@ -13741,7 +13741,7 @@ EngineHost::smoke_perf (unsigned sample_secs)
 	std::fprintf (stderr,
 	              "airdour_win_shell: PERF backend=%ls sr=%u period=%u (%.2f ms) "
 	              "cb_us last=%llu avg=%llu max=%llu / period_us=%.0f "
-	              "dsp_pct avg=%.1f max=%.1f headroom_pctâ‰ˆ%.1f xruns=%llu "
+	              "dsp_pct avg=%.1f max=%.1f headroom_pct≈%.1f xruns=%llu "
 	              "ws_peak_mb=%.1f cycles=%llu\n",
 	              _snap.backend.c_str (),
 	              (unsigned)sr0,
@@ -13766,7 +13766,7 @@ bool
 EngineHost::smoke_plugin_insert ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-plugin failed â€” no Session";
+		_snap.detail = L"smoke-plugin failed — no Session";
 		return false;
 	}
 	try {
@@ -13790,7 +13790,7 @@ EngineHost::smoke_plugin_insert ()
 			return false;
 		}
 
-		/* Bypass off â†’ on â†’ off */
+		/* Bypass off → on → off */
 		if (!set_track_fx_bypassed (0, false) || _snap.track_fx_bypassed) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-plugin FAILED (bypass clear)\n");
 			std::fflush (stderr);
@@ -13824,7 +13824,7 @@ EngineHost::smoke_plugin_insert ()
 		}
 
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-plugin ok (fx=%s on_route=1 bypass=0â†’1â†’0 "
+		              "airdour_win_shell: smoke-plugin ok (fx=%s on_route=1 bypass=0→1→0 "
 		              "blend=%.2f)\n",
 		              verified.c_str (), got);
 		std::fflush (stderr);
@@ -13843,7 +13843,7 @@ bool
 EngineHost::smoke_vst3 ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-vst3 failed â€” no Session";
+		_snap.detail = L"smoke-vst3 failed — no Session";
 		return false;
 	}
 	try {
@@ -13856,7 +13856,7 @@ EngineHost::smoke_vst3 ()
 		const size_t n = PluginManager::instance ().vst3_plugin_info ().size ();
 		PluginInfoPtr info = find_smoke_vst3_info ();
 		if (!info) {
-			/* Honest success when no VST3 is installed â€” scan path compiled + ran. */
+			/* Honest success when no VST3 is installed — scan path compiled + ran. */
 			std::fprintf (stderr,
 			              "airdour_win_shell: smoke-vst3 ok (scan-only VST3=%zu; "
 			              "set VST3_PATH or AIRDOUR_SMOKE_VST3 to insert)\n",
@@ -13993,7 +13993,7 @@ EngineHost::ensure_midi_track ()
 			attach_midi_synth ();
 		}
 		std::fflush (stderr);
-		/* Do not connect WinMME MIDI out here â€” SMF WriterLock vs reader deadlock
+		/* Do not connect WinMME MIDI out here — SMF WriterLock vs reader deadlock
 		 * during note edits. Soft-synth audio goes through Dummy/WASAPI master. */
 		refresh_midi_snap ();
 		_snap.detail = L"MIDI track ready";
@@ -14324,7 +14324,7 @@ bool
 EngineHost::smoke_midi ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
-		_snap.detail = L"smoke-midi failed â€” no Session";
+		_snap.detail = L"smoke-midi failed — no Session";
 		return false;
 	}
 	try {
@@ -14370,11 +14370,11 @@ bool
 EngineHost::smoke_midi_edit ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
-		_snap.detail = L"smoke-midi-edit failed â€” no Session";
+		_snap.detail = L"smoke-midi-edit failed — no Session";
 		return false;
 	}
 	try {
-		/* Enumerate + track only â€” do NOT connect MIDI out until after edits
+		/* Enumerate + track only — do NOT connect MIDI out until after edits
 		 * (SMF WriterLock vs process ReaderLock deadlock under Dummy/WinMME). */
 		refresh_midi_snap ();
 		if (!ensure_midi_track () || !_snap.midi_track_ok) {
@@ -14408,7 +14408,7 @@ EngineHost::smoke_midi_edit ()
 			return false;
 		}
 		/* Select middle note and delete it. */
-		std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit selectingâ€¦\n");
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit selecting…\n");
 		std::fflush (stderr);
 		if (!select_midi_note_at (0.75f, 64)) {
 			/* Fallback: select first snap note. */
@@ -14425,7 +14425,7 @@ EngineHost::smoke_midi_edit ()
 		refresh_midi_notes_snap ();
 		const int after_del = _snap.midi_note_count;
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-midi-edit delete=%d count %dâ†’%d\n",
+		              "airdour_win_shell: smoke-midi-edit delete=%d count %d→%d\n",
 		              deleted ? 1 : 0, before_del, after_del);
 		std::fflush (stderr);
 		if (!deleted || after_del != before_del - 1 || after_del < 1) {
@@ -14439,7 +14439,7 @@ EngineHost::smoke_midi_edit ()
 			std::fflush (stderr);
 			return false;
 		}
-		/* Optional WinMME physical out â€” not required for hearing via soft-synth. */
+		/* Optional WinMME physical out — not required for hearing via soft-synth. */
 		connect_midi_output ();
 		refresh_midi_snap ();
 		std::fprintf (stderr,
@@ -14577,7 +14577,7 @@ bool
 EngineHost::smoke_midi_quantize ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
-		_snap.detail = L"smoke-midi-quantize failed â€” no Session";
+		_snap.detail = L"smoke-midi-quantize failed — no Session";
 		return false;
 	}
 	try {
@@ -14619,7 +14619,7 @@ EngineHost::smoke_midi_quantize ()
 		set_snap_density (1); /* beat */
 		set_snap_enabled (true);
 
-		/* Off-grid starts at fixed 120 BPM (0.5s/beat): 0.13â†’0.0, 0.63â†’0.5, 1.12â†’1.0 */
+		/* Off-grid starts at fixed 120 BPM (0.5s/beat): 0.13→0.0, 0.63→0.5, 1.12→1.0 */
 		bool a = add_midi_note (60, 0.13f, 0.25f, 100);
 		bool b = add_midi_note (64, 0.63f, 0.25f, 100);
 		bool c = add_midi_note (67, 1.12f, 0.25f, 100);
@@ -14807,7 +14807,7 @@ bool
 EngineHost::smoke_midi_transpose ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
-		_snap.detail = L"smoke-midi-transpose failed â€” no Session";
+		_snap.detail = L"smoke-midi-transpose failed — no Session";
 		return false;
 	}
 	try {
@@ -14880,7 +14880,7 @@ EngineHost::smoke_midi_transpose ()
 		}
 
 		if (!transpose_midi_notes (-12)) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (âˆ’12)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (−12)\n");
 			std::fflush (stderr);
 			return false;
 		}
@@ -14895,7 +14895,7 @@ EngineHost::smoke_midi_transpose ()
 			}
 		}
 		if (!got49 || !got53) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (âˆ’12 verify)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (−12 verify)\n");
 			for (int i = 0; i < _snap.midi_note_count; ++i) {
 				std::fprintf (stderr, "  note p=%u\n", (unsigned)_snap.midi_notes[i].pitch);
 			}
@@ -14904,7 +14904,7 @@ EngineHost::smoke_midi_transpose ()
 		}
 
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-midi-transpose ok (notes=%d +1â†’âˆ’12)\n",
+		              "airdour_win_shell: smoke-midi-transpose ok (notes=%d +1→−12)\n",
 		              _snap.midi_note_count);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-midi-transpose ok";
@@ -15123,7 +15123,7 @@ bool
 EngineHost::smoke_midi_velocity ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
-		_snap.detail = L"smoke-midi-velocity failed â€” no Session";
+		_snap.detail = L"smoke-midi-velocity failed — no Session";
 		return false;
 	}
 	try {
@@ -15562,7 +15562,7 @@ bool
 EngineHost::smoke_midi_length ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
-		_snap.detail = L"smoke-midi-length failed â€” no Session";
+		_snap.detail = L"smoke-midi-length failed — no Session";
 		return false;
 	}
 	try {
@@ -15877,7 +15877,7 @@ bool
 EngineHost::smoke_midi_clipboard ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
-		_snap.detail = L"smoke-midi-clipboard failed â€” no Session";
+		_snap.detail = L"smoke-midi-clipboard failed — no Session";
 		return false;
 	}
 	try {
@@ -16072,7 +16072,7 @@ EngineHost::humanize_midi_notes (float strength, uint32_t seed)
 			use_seed ^= (uint32_t)_snap.midi_note_count * 2654435761u;
 		}
 		std::mt19937 rng (use_seed);
-		/* strength 1 â†’ Â±20 ms timing, Â±8 velocity. */
+		/* strength 1 → ±20 ms timing, ±8 velocity. */
 		const float tmax = 0.020f * strength;
 		const float vmax = 8.f * strength;
 		std::uniform_real_distribution<float> tdist (-tmax, tmax);
@@ -16172,7 +16172,7 @@ bool
 EngineHost::smoke_midi_humanize ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
-		_snap.detail = L"smoke-midi-humanize failed â€” no Session";
+		_snap.detail = L"smoke-midi-humanize failed — no Session";
 		return false;
 	}
 	try {
@@ -16478,7 +16478,7 @@ EngineHost::snap_pitch_to_scale (uint8_t pitch) const
 		if (dist > 6) {
 			dist = 12 - dist; /* wrap */
 		}
-		/* Prefer upward on ties so C#â†’D in C major. */
+		/* Prefer upward on ties so C#→D in C major. */
 		bool better = dist < best_dist;
 		if (!better && dist == best_dist) {
 			int up = (dpc - pc + 12) % 12;
@@ -16546,7 +16546,7 @@ EngineHost::step_input_midi_note (uint8_t pitch, uint8_t velocity, bool advance)
 		return false;
 	}
 
-	/* Expand root â†’ triad when chord quality is Maj/Min. */
+	/* Expand root → triad when chord quality is Maj/Min. */
 	uint8_t pitches[3];
 	int n = 1;
 	pitches[0] = pitch;
@@ -16583,7 +16583,7 @@ EngineHost::step_input_midi_note (uint8_t pitch, uint8_t velocity, bool advance)
 		set_snap_enabled (snap_was);
 	}
 	std::fprintf (stderr,
-	              "airdour_win_shell: step note root=%u n=%d q=%d t=%.3f len=%.3f adv=%d â†’ %.3f\n",
+	              "airdour_win_shell: step note root=%u n=%d q=%d t=%.3f len=%.3f adv=%d → %.3f\n",
 	              (unsigned)pitch, n, q, start, len, advance ? 1 : 0,
 	              _snap.transport_sec);
 	std::fflush (stderr);
@@ -16595,7 +16595,7 @@ bool
 EngineHost::smoke_midi_step ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
-		_snap.detail = L"smoke-midi-step failed â€” no Session";
+		_snap.detail = L"smoke-midi-step failed — no Session";
 		return false;
 	}
 	try {
@@ -16754,7 +16754,7 @@ bool
 EngineHost::smoke_midi_chord ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
-		_snap.detail = L"smoke-midi-chord failed â€” no Session";
+		_snap.detail = L"smoke-midi-chord failed — no Session";
 		return false;
 	}
 	try {
@@ -16814,10 +16814,10 @@ EngineHost::smoke_midi_chord ()
 		}
 		float unit = snap_unit_sec ();
 
-		/* Maj triad at t=0 from root 60 â†’ 60,64,67; advance once. */
+		/* Maj triad at t=0 from root 60 → 60,64,67; advance once. */
 		set_midi_chord_quality (0);
 		if (cycle_midi_chord_quality () != 1) {
-			return fail ("cycleâ†’maj");
+			return fail ("cycle→maj");
 		}
 		if (midi_chord_quality () != 1) {
 			return fail ("set maj");
@@ -16849,7 +16849,7 @@ EngineHost::smoke_midi_chord ()
 			return fail ("maj advance");
 		}
 
-		/* Min triad at beat from root 60 â†’ 60,63,67. */
+		/* Min triad at beat from root 60 → 60,63,67. */
 		set_midi_chord_quality (2);
 		if (!step_input_midi_note (60, 100, true)) {
 			return fail ("min place");
@@ -17258,7 +17258,7 @@ bool
 EngineHost::smoke_midi_arp ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
-		_snap.detail = L"smoke-midi-arp failed â€” no Session";
+		_snap.detail = L"smoke-midi-arp failed — no Session";
 		return false;
 	}
 	try {
@@ -17403,7 +17403,7 @@ bool
 EngineHost::smoke_midi_scale ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
-		_snap.detail = L"smoke-midi-scale failed â€” no Session";
+		_snap.detail = L"smoke-midi-scale failed — no Session";
 		return false;
 	}
 	try {
@@ -17467,7 +17467,7 @@ EngineHost::smoke_midi_scale ()
 		set_midi_scale_kind (0); /* major */
 		set_midi_scale_lock (true);
 		if (!midi_scale_lock () || snap_pitch_to_scale (61) != 62) {
-			return fail ("C maj C#â†’D");
+			return fail ("C maj C#→D");
 		}
 		if (snap_pitch_to_scale (60) != 60) {
 			return fail ("C stays");
@@ -17476,7 +17476,7 @@ EngineHost::smoke_midi_scale ()
 		if (!locate_to (0.f, false, 0.f)) {
 			return fail ("locate 0");
 		}
-		/* C# root â†’ D; place single note. */
+		/* C# root → D; place single note. */
 		if (!step_input_midi_note (61, 100, true)) {
 			return fail ("step C#");
 		}
@@ -17493,7 +17493,7 @@ EngineHost::smoke_midi_scale ()
 			return fail ("verify D");
 		}
 
-		/* Chord maj from snapped C#â†’D: D F# A = 62,66,69 */
+		/* Chord maj from snapped C#→D: D F# A = 62,66,69 */
 		set_midi_chord_quality (1);
 		float unit = snap_unit_sec ();
 		if (!step_input_midi_note (61, 100, true)) {
@@ -17546,12 +17546,12 @@ EngineHost::smoke_midi_scale ()
 		set_midi_scale_root (9); /* A */
 		set_midi_scale_kind (0);
 		if (cycle_midi_scale_kind () != 1) {
-			return fail ("cycleâ†’min");
+			return fail ("cycle→min");
 		}
 		set_midi_scale_lock (true);
-		/* Bb (70) nearest in A natural minor {9,11,0,2,4,5,7} â†’ A(69) or B(71); tieâ†’up B */
+		/* Bb (70) nearest in A natural minor {9,11,0,2,4,5,7} → A(69) or B(71); tie→up B */
 		if (snap_pitch_to_scale (70) != 71) {
-			return fail ("A min Bbâ†’B");
+			return fail ("A min Bb→B");
 		}
 
 		set_midi_chord_quality (chord_was);
