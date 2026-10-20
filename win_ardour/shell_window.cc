@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_midi_panic)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -473,6 +474,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_pressure) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-pressure FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi_panic && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_midi_panic ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_midi_panic) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-panic FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -2911,6 +2921,19 @@ ShellWindow::do_humanize_midi_notes (float strength)
 }
 
 void
+ShellWindow::do_midi_panic ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.midi_panic ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_toggle_midi_step ()
 {
 	if (!_engine.is_linked ()) {
@@ -3729,6 +3752,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'H' || wparam == 'h')) {
 			/* H = humanize; Shift+H = 2× strength. */
 			do_humanize_midi_notes ((GetKeyState (VK_SHIFT) & 0x8000) ? 2.f : 1.f);
+		} else if (wparam == VK_F9) {
+			/* F9 — MIDI panic (all-notes-off + sustain off + reset CC). */
+			do_midi_panic ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
 
 		           && (wparam == VK_OEM_PERIOD || wparam == VK_OEM_COMMA)) {
@@ -4457,6 +4483,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		} else {
 			do_toggle_midi_scale ();
 		}
+		return true;
+	}
+	if (th == TransportHit::MidiPanic) {
+		do_midi_panic ();
 		return true;
 	}
 	if (th == TransportHit::CountIn) {
@@ -6303,6 +6333,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
 		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
+		{ L"F9 / Panic", L"MIDI panic · all-notes-off + sustain off" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },

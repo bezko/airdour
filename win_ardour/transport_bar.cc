@@ -46,6 +46,7 @@ TransportBar::TransportBar ()
 	, _midi_chord_btn ()
 	, _midi_arp_btn ()
 	, _midi_scale_btn ()
+	, _midi_panic_btn ()
 	, _count_btn ()
 	, _click_btn ()
 	, _tempo_dn_btn ()
@@ -145,6 +146,7 @@ TransportBar::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	place (_midi_chord_btn, x, btn_w);
 	place (_midi_arp_btn, x, btn_w);
 	place (_midi_scale_btn, x, btn_w);
+	place (_midi_panic_btn, x, btn_w * 1.15f);
 	place (_count_btn, x, btn_w);
 	place (_click_btn, x, btn_w);
 	place (_tempo_dn_btn, x, narrow);
@@ -279,6 +281,9 @@ TransportBar::hit_test (float x, float y) const
 	}
 	if (contains (_midi_scale_btn, x, y)) {
 		return TransportHit::MidiScale;
+	}
+	if (contains (_midi_panic_btn, x, y)) {
+		return TransportHit::MidiPanic;
 	}
 	if (contains (_count_btn, x, y)) {
 		return TransportHit::CountIn;
@@ -465,6 +470,7 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 		}
 		draw_btn (_midi_scale_btn, scl_lab, _midi_scale_lock);
 	}
+	draw_btn (_midi_panic_btn, L"Panic", false);
 	draw_btn (_count_btn, L"Count", _count_in_enabled);
 	draw_btn (_click_btn, L"Click", _click_enabled);
 	draw_btn (_tempo_dn_btn, L"−", false);

@@ -127,7 +127,8 @@ public:
 	                    bool smoke_midi_scale = false,
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
-	                    bool smoke_midi_pressure = false);
+	                    bool smoke_midi_pressure = false,
+	                    bool smoke_midi_panic = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -246,6 +247,7 @@ private:
 	void do_cut_midi_notes ();
 	void do_paste_midi_notes ();
 	void do_humanize_midi_notes (float strength = 1.f);
+	void do_midi_panic ();
 	void do_toggle_midi_step ();
 	void do_cycle_midi_chord ();
 	void do_toggle_midi_arp ();

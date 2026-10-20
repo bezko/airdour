@@ -462,6 +462,15 @@ public:
 	/** Clear → 3 pressure points → Play. For --smoke-midi-pressure. */
 	bool smoke_midi_pressure ();
 
+	/**
+	 * MIDI panic: sustain-off + All Notes Off + Reset Controllers on every
+	 * channel of every MidiTrack (Session::midi_panic). Also silences shell arp.
+	 * For F9 / Panic button / --smoke-midi-panic.
+	 */
+	bool midi_panic ();
+	/** Ensure MidiTrack, panic, verify immediate events queued. */
+	bool smoke_midi_panic ();
+
 	/** Clear PeakMeter max-peak / clip latch on Audio track (0..kMeters-1). */
 	bool clear_track_meter_clip (int track);
 
