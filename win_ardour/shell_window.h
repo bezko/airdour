@@ -127,7 +127,8 @@ public:
 	                    bool smoke_midi_scale = false,
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
-	                    bool smoke_midi_pressure = false);
+	                    bool smoke_midi_pressure = false,
+	                    bool smoke_send_automation = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -193,6 +194,7 @@ private:
 	void layout_panes ();
 	void draw_editor_pane ();
 	void draw_automation_lane ();
+	void cycle_auto_lane_kind ();
 	void refresh_automation_lane ();
 	void write_automation_at (float x, float y);
 	void draw_midi_cc_lane ();
@@ -429,5 +431,6 @@ private:
 	RecoveryPanel  _recovery;
 	float          _auto_last_write_sec;
 	float          _midi_cc_last_write_sec;
+	bool           _auto_lane_send; /* false=Gain, true=Send level on Audio 1 → Aux */
 	int            _midi_cc_number; /* 7 Vol / 1 Mod / 11 Expr / -1 Bend / -2 Pressure */
 };
