@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_pan_auto_state)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -634,6 +635,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_pan) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_pan_auto_state && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_pan_auto_state ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_pan_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_pan_auto_state) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-pan-auto-state FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1220,6 +1234,19 @@ ShellWindow::sync_mixer_pan_from_engine ()
 		_mixers[i].set_pan (_engine_snap.track_pan[i]);
 	}
 	_transport.set_recording (_engine_snap.session_recording);
+}
+
+void
+ShellWindow::do_cycle_pan_auto_state ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.cycle_track_pan_auto_state (0);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_pan_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
@@ -3829,6 +3856,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			}
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'U' || wparam == 'u')) {
 			do_apply_or_clear_group ();
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'P' || wparam == 'p')) {
+			/* Alt+Shift+P — cycle pan automation Off→Play→Write→Touch. */
+			do_cycle_pan_auto_state ();
 		}
 		return 0;
 	case WM_MOUSEWHEEL:
@@ -6303,6 +6336,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
 		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
+		{ L"Alt+Shift+P", L"Cycle pan auto Off→Play→Write→Touch" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
