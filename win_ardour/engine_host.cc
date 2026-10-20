@@ -3307,6 +3307,66 @@ EngineHost::toggle_midi_soloed ()
 	return set_midi_soloed (!_snap.midi_soloed);
 }
 
+bool
+EngineHost::mute_all_tracks ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		collect_tracks ();
+		ensure_midi_track ();
+		bool any = false;
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]
+			    && _impl->tracks[i]->mute_control ()) {
+				std::shared_ptr<MuteControl> mc = _impl->tracks[i]->mute_control ();
+				if (mc->get_value () < 0.5) {
+					_impl->session->set_control (mc, 1.0, Controllable::NoGroup);
+					any = true;
+				}
+			}
+		}
+		if (_impl->midi_track && _impl->midi_track->mute_control ()
+		    && _impl->midi_track->mute_control ()->get_value () < 0.5) {
+			_impl->session->set_control (
+				_impl->midi_track->mute_control (), 1.0, Controllable::NoGroup);
+			any = true;
+		}
+		wait_until ([&] () {
+			refresh_mute_solo_flags ();
+			for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+				if (_impl->tracks[i] && !_snap.track_muted[i]) {
+					return false;
+				}
+			}
+			return _snap.midi_muted;
+		});
+		refresh_mute_solo_flags ();
+		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+			if (_impl->tracks[i] && !_snap.track_muted[i]) {
+				_snap.detail = L"mute all — audio still unmuted";
+				return false;
+			}
+		}
+		if (!_snap.midi_muted) {
+			_snap.detail = L"mute all — MIDI still unmuted";
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: mute all tracks%s\n",
+		              any ? "" : " (already muted)");
+		std::fflush (stderr);
+		_snap.detail = L"all tracks muted";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: mute all exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 void
 EngineHost::refresh_pan_flags ()
 {
@@ -4685,6 +4745,63 @@ EngineHost::smoke_mute_solo ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_mute_all ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-mute-all failed — no Session";
+		return false;
+	}
+	try {
+		ensure_midi_track ();
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0] || !_impl->midi_track) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-all FAILED (tracks)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Start unmuted so mute_all has work to do. */
+		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+			set_track_muted (i, false);
+		}
+		set_midi_muted (false);
+		if (_snap.track_muted[0] || _snap.midi_muted) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-all FAILED (pre-clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!mute_all_tracks ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-all FAILED (mute_all)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+			if (!_snap.track_muted[i]) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-mute-all FAILED (Audio %d unmuted)\n",
+				              i + 1);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		if (!_snap.midi_muted) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-all FAILED (MIDI unmuted)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-mute-all ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-mute-all ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mute-all exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -18203,6 +18320,18 @@ EngineHost::toggle_midi_soloed ()
 
 bool
 EngineHost::smoke_mute_solo ()
+{
+	return false;
+}
+
+bool
+EngineHost::mute_all_tracks ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_mute_all ()
 {
 	return false;
 }

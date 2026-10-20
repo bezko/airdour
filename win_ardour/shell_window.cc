@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_mute_all)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -621,6 +622,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_mute_solo) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_mute_all && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_mute_all ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_mute_solo_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_mute_all) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mute-all FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2446,6 +2460,20 @@ ShellWindow::do_toggle_monitor_cut ()
 }
 
 void
+ShellWindow::do_mute_all_tracks ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (_engine.mute_all_tracks ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_mute_solo_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::do_apply_or_clear_group ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -3674,7 +3702,13 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				}
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			}
-		} else if (wparam == 'M' || wparam == 'm') {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'M' || wparam == 'm')) {
+			/* Alt+Shift+M = mute every audio track + MIDI. */
+			do_mute_all_tracks ();
+		} else if (!(GetKeyState (VK_MENU) & 0x8000) && (wparam == 'M' || wparam == 'm')) {
 			if (GetKeyState (VK_SHIFT) & 0x8000) {
 				do_remove_marker_at_playhead ();
 			} else {
@@ -4739,7 +4773,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	int mute_i = hit_mixer_mute (x, y);
 	if (mute_i >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
-			if (mute_i == midi_mixer_index ()) {
+			const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
+			if (alt) {
+				/* Alt+click Mute → mute every audio track + MIDI. */
+				_engine.mute_all_tracks ();
+			} else if (mute_i == midi_mixer_index ()) {
 				_engine.toggle_midi_muted ();
 			} else {
 				_engine.toggle_track_muted (mute_i);
@@ -6306,6 +6344,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
+		{ L"Alt+Shift+M / Alt+click Mute", L"Mute all tracks (audio + MIDI)" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
