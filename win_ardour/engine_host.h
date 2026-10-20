@@ -546,6 +546,11 @@ public:
 	bool trim_selected_end_to (float time_sec);
 	/** Move selected region so its start is at time_sec (Region::set_position). */
 	bool move_selected_to (float time_sec);
+	/**
+	 * Nudge selected region start by delta_sec (uses move_selected_to).
+	 * Respects lock / can_move. Default callers use snap_unit_sec().
+	 */
+	bool nudge_selected_by_sec (float delta_sec);
 
 	/**
 	 * Time-stretch selected AudioRegion by time_ratio (pitch unchanged).
@@ -646,6 +651,12 @@ public:
 	 * For --smoke-edit.
 	 */
 	bool smoke_edit ();
+
+	/**
+	 * Import tone → select → nudge +0.25s; verify start moved.
+	 * For --smoke-region-nudge.
+	 */
+	bool smoke_region_nudge ();
 
 	/**
 	 * Import tone → select → stretch 1.5×; verify length ~1.5× source.

@@ -5570,6 +5570,27 @@ EngineHost::move_selected_to (float time_sec)
 	}
 }
 
+bool
+EngineHost::nudge_selected_by_sec (float delta_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_selection_snap ();
+	if (!_snap.has_selection) {
+		_snap.detail = L"nudge — select a region";
+		return false;
+	}
+	if (!std::isfinite (delta_sec) || delta_sec == 0.f) {
+		return true;
+	}
+	float next = _snap.selection_start_sec + delta_sec;
+	if (next < 0.f) {
+		next = 0.f;
+	}
+	return move_selected_to (next);
+}
+
 namespace {
 
 struct ShellProgress : public Progress {
@@ -6858,6 +6879,85 @@ EngineHost::smoke_edit ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-edit exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_region_nudge ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-region-nudge failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-nudge FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 0.8f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-nudge FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-nudge FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float start0 = _snap.selection_start_sec;
+		float len0 = _snap.selection_end_sec - _snap.selection_start_sec;
+		if (!nudge_selected_by_sec (0.25f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-nudge FAILED (nudge +0.25)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (std::fabs (_snap.selection_start_sec - (start0 + 0.25f)) > 0.02f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-nudge FAILED (start %.3f→%.3f)\n",
+			              start0, _snap.selection_start_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float len1 = _snap.selection_end_sec - _snap.selection_start_sec;
+		if (std::fabs (len1 - len0) > 0.02f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-nudge FAILED (len %.3f→%.3f)\n",
+			              len0, len1);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!nudge_selected_by_sec (-0.10f)
+		    || std::fabs (_snap.selection_start_sec - (start0 + 0.15f)) > 0.02f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-nudge FAILED (nudge −0.10 start=%.3f)\n",
+			              _snap.selection_start_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-region-nudge ok (%.2f→%.2f→%.2f)\n",
+		              start0, start0 + 0.25f, _snap.selection_start_sec);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-region-nudge ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-nudge exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -18706,6 +18806,13 @@ EngineHost::move_selected_to (float time_sec)
 }
 
 bool
+EngineHost::nudge_selected_by_sec (float delta_sec)
+{
+	(void)delta_sec;
+	return false;
+}
+
+bool
 EngineHost::stretch_selected (float time_ratio)
 {
 	(void)time_ratio;
@@ -18851,6 +18958,12 @@ EngineHost::track_region_count (int track) const
 
 bool
 EngineHost::smoke_edit ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_region_nudge ()
 {
 	return false;
 }
