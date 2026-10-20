@@ -598,6 +598,7 @@ EngineHost::EngineHost ()
 		_snap.track_pan[i] = 0.5f;
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
+		_snap.track_send_auto_state[i] = 0;
 		_snap.track_gain[i] = _track_gain[i];
 		_snap.track_name[i][0] = L'\0';
 		_snap.track_in_group[i] = false;
@@ -3601,6 +3602,154 @@ EngineHost::smoke_send ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+void
+EngineHost::refresh_send_auto_state_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_send_auto_state[i] = 0;
+	}
+	if (!_impl || !_impl->session || !_impl->aux_bus) {
+		return;
+	}
+	try {
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i >= (int)_impl->tracks.size () || !_impl->tracks[i]) {
+				continue;
+			}
+			std::shared_ptr<Send> send =
+				_impl->tracks[i]->internal_send_for (_impl->aux_bus);
+			if (!send || !send->gain_control ()) {
+				continue;
+			}
+			AutoState st = send->gain_control ()->automation_state ();
+			if (st & Write) {
+				_snap.track_send_auto_state[i] = 2;
+			} else if (st & Touch) {
+				_snap.track_send_auto_state[i] = 3;
+			} else if (st & Play) {
+				_snap.track_send_auto_state[i] = 1;
+			} else {
+				_snap.track_send_auto_state[i] = 0;
+			}
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::set_track_send_auto_state (int track, int state_0_off_1_play_2_write_3_touch)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (!ensure_aux_sends ()) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track] || !_impl->aux_bus) {
+		return false;
+	}
+	if (state_0_off_1_play_2_write_3_touch < 0 || state_0_off_1_play_2_write_3_touch > 3) {
+		return false;
+	}
+	try {
+		std::shared_ptr<Send> send =
+			_impl->tracks[track]->internal_send_for (_impl->aux_bus);
+		if (!send || !send->gain_control ()) {
+			return false;
+		}
+		AutoState st = Off;
+		const char* name = "Off";
+		switch (state_0_off_1_play_2_write_3_touch) {
+		case 1:
+			st = Play;
+			name = "Play";
+			break;
+		case 2:
+			st = Write;
+			name = "Write";
+			break;
+		case 3:
+			st = Touch;
+			name = "Touch";
+			break;
+		default:
+			break;
+		}
+		send->gain_control ()->set_automation_state (st);
+		refresh_send_auto_state_flags ();
+		std::fprintf (stderr, "airdour_win_shell: Audio %d send auto=%s (got=%d)\n",
+		              track + 1, name, _snap.track_send_auto_state[track]);
+		std::fflush (stderr);
+		_snap.detail = L"send auto state set";
+		return _snap.track_send_auto_state[track] == state_0_off_1_play_2_write_3_touch;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::cycle_track_send_auto_state (int track)
+{
+	refresh_send_auto_state_flags ();
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	int next = (_snap.track_send_auto_state[track] + 1) % 4;
+	return set_track_send_auto_state (track, next);
+}
+
+bool
+EngineHost::smoke_send_auto_state ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-send-auto-state failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_aux_sends () || !_snap.aux_bus_ok || !_snap.track_send_ok[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-auto-state FAILED (no Aux/send)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send_auto_state (0, 0) || _snap.track_send_auto_state[0] != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-auto-state FAILED (Off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_track_send_auto_state (0) || _snap.track_send_auto_state[0] != 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-auto-state FAILED (→Play)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_track_send_auto_state (0) || _snap.track_send_auto_state[0] != 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-auto-state FAILED (→Write)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_track_send_auto_state (0) || _snap.track_send_auto_state[0] != 3) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-auto-state FAILED (→Touch)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_track_send_auto_state (0) || _snap.track_send_auto_state[0] != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-auto-state FAILED (→Off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		set_track_send_auto_state (0, 1);
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-auto-state ok (Off→Play→Write→Touch→Off)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-send-auto-state ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-auto-state exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17464,6 +17613,7 @@ EngineHost::refresh_snapshot ()
 			refresh_mute_solo_flags ();
 			refresh_pan_flags ();
 			refresh_send_flags ();
+			refresh_send_auto_state_flags ();
 			refresh_group_flags ();
 			refresh_monitor_flags ();
 			refresh_history_flags ();
@@ -17565,6 +17715,7 @@ EngineHost::EngineHost ()
 		_snap.track_frozen[i] = false;
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
+		_snap.track_send_auto_state[i] = 0;
 		_snap.track_gain[i] = _track_gain[i];
 		_snap.track_name[i][0] = L'\0';
 		_snap.track_in_group[i] = false;
@@ -18261,6 +18412,32 @@ EngineHost::track_send (int track) const
 
 bool
 EngineHost::smoke_send ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_send_auto_state_flags ()
+{
+}
+
+bool
+EngineHost::set_track_send_auto_state (int track, int state_0_off_1_play_2_write_3_touch)
+{
+	(void)track;
+	(void)state_0_off_1_play_2_write_3_touch;
+	return false;
+}
+
+bool
+EngineHost::cycle_track_send_auto_state (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::smoke_send_auto_state ()
 {
 	return false;
 }
