@@ -3863,6 +3863,272 @@ EngineHost::smoke_automation ()
 	}
 }
 
+bool
+EngineHost::ensure_track_pan_automation (int track)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		collect_tracks ();
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
+	    || !_impl->tracks[track]->pan_azimuth_control ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationControl> pan =
+			_impl->tracks[track]->pan_azimuth_control ();
+		std::shared_ptr<AutomationList> al = pan->alist ();
+		if (!al) {
+			return false;
+		}
+		pan->set_automation_state (Play);
+		_snap.detail = L"pan automation Play";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::clear_track_pan_automation (int track)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
+	    || !_impl->tracks[track]->pan_azimuth_control ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationList> al =
+			_impl->tracks[track]->pan_azimuth_control ()->alist ();
+		if (!al) {
+			return false;
+		}
+		al->clear ();
+		_snap.detail = L"pan automation cleared";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::write_track_pan_automation (int track, float time_sec, float value_0_1)
+{
+	value_0_1 = std::max (0.f, std::min (1.f, value_0_1));
+	time_sec = snap_time (time_sec);
+	if (time_sec < 0.f) {
+		time_sec = 0.f;
+	}
+	if (!ensure_track_pan_automation (track)) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationControl> pan =
+			_impl->tracks[track]->pan_azimuth_control ();
+		std::shared_ptr<AutomationList> al = pan->alist ();
+		if (!al) {
+			return false;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		samplepos_t samples = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		bool added = al->editor_add (timepos_t (samples), (double)value_0_1, true);
+		if (!added) {
+			al->add (timepos_t (samples), (double)value_0_1, true, true);
+		}
+		_snap.detail = L"pan automation point";
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::fill_pan_automation_curve (int track,
+                                       float view_start_sec,
+                                       float view_span_sec,
+                                       float* y_0_1,
+                                       size_t n)
+{
+	if (!y_0_1 || n == 0) {
+		return false;
+	}
+	for (size_t i = 0; i < n; ++i) {
+		y_0_1[i] = 0.5f;
+	}
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
+	    || !_impl->tracks[track]->pan_azimuth_control ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationList> al =
+			_impl->tracks[track]->pan_azimuth_control ()->alist ();
+		if (!al || al->empty ()) {
+			float p = _snap.track_pan[track];
+			for (size_t i = 0; i < n; ++i) {
+				y_0_1[i] = p;
+			}
+			return true;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		float span = std::max (0.001f, view_span_sec);
+		for (size_t i = 0; i < n; ++i) {
+			float t = view_start_sec + ((float)i + 0.5f) / (float)n * span;
+			if (t < 0.f) {
+				t = 0.f;
+			}
+			samplepos_t samples = (samplepos_t)std::llround ((double)t * (double)sr);
+			float v = (float)al->eval (timepos_t (samples));
+			y_0_1[i] = std::max (0.f, std::min (1.f, v));
+		}
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+int
+EngineHost::fill_pan_automation_points (int track,
+                                        float view_start_sec,
+                                        float view_span_sec,
+                                        float* x_norm,
+                                        float* y_0_1,
+                                        int max_n)
+{
+	if (!x_norm || !y_0_1 || max_n <= 0) {
+		return 0;
+	}
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return 0;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
+	    || !_impl->tracks[track]->pan_azimuth_control ()) {
+		return 0;
+	}
+	try {
+		std::shared_ptr<AutomationList> al =
+			_impl->tracks[track]->pan_azimuth_control ()->alist ();
+		if (!al || al->empty ()) {
+			return 0;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		float span = std::max (0.001f, view_span_sec);
+		float view_end = view_start_sec + span;
+		int written = 0;
+		for (AutomationList::const_iterator it = al->begin ();
+		     it != al->end () && written < max_n; ++it) {
+			if (!*it) {
+				continue;
+			}
+			double sec = (*it)->when.samples () / (double)sr;
+			if (sec < (double)view_start_sec || sec > (double)view_end) {
+				continue;
+			}
+			x_norm[written] = (float)((sec - (double)view_start_sec) / (double)span);
+			y_0_1[written] = std::max (0.f, std::min (1.f, (float)(*it)->value));
+			++written;
+		}
+		return written;
+	} catch (...) {
+		return 0;
+	}
+}
+
+bool
+EngineHost::smoke_pan_automation ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-pan-automation failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]
+		    || !_impl->tracks[0]->pan_azimuth_control ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-pan-automation FAILED (no Audio 1 pan)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!clear_track_pan_automation (0)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pan-automation FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* L → C → R */
+		if (!write_track_pan_automation (0, 0.0f, 0.0f)
+		    || !write_track_pan_automation (0, 2.0f, 0.5f)
+		    || !write_track_pan_automation (0, 4.0f, 1.0f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pan-automation FAILED (write)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::shared_ptr<AutomationList> al =
+			_impl->tracks[0]->pan_azimuth_control ()->alist ();
+		if (!al || al->size () < 3) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pan-automation FAILED (size=%u)\n",
+			              al ? (unsigned)al->size () : 0u);
+			std::fflush (stderr);
+			return false;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		float mid = (float)al->eval (timepos_t ((samplepos_t)(2 * sr)));
+		if (mid < 0.45f || mid > 0.55f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-pan-automation FAILED (eval@2s=%.3f)\n",
+			              mid);
+			std::fflush (stderr);
+			return false;
+		}
+		if (_impl->tracks[0]->pan_azimuth_control ()->automation_state () != Play) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-pan-automation FAILED (state!=Play)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-pan-automation ok (Audio1 pan pts=%u eval@2s=%.2f Play)\n",
+		              (unsigned)al->size (), mid);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-pan-automation ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-pan-automation exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 namespace {
 
 int
@@ -18325,6 +18591,70 @@ EngineHost::fill_gain_automation_points (int track,
 
 bool
 EngineHost::smoke_automation ()
+{
+	return false;
+}
+
+bool
+EngineHost::ensure_track_pan_automation (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::write_track_pan_automation (int track, float time_sec, float value_0_1)
+{
+	(void)track;
+	(void)time_sec;
+	(void)value_0_1;
+	return false;
+}
+
+bool
+EngineHost::clear_track_pan_automation (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::fill_pan_automation_curve (int track,
+                                       float view_start_sec,
+                                       float view_span_sec,
+                                       float* y_0_1,
+                                       size_t n)
+{
+	(void)track;
+	(void)view_start_sec;
+	(void)view_span_sec;
+	if (y_0_1 && n) {
+		for (size_t i = 0; i < n; ++i) {
+			y_0_1[i] = 0.5f;
+		}
+	}
+	return false;
+}
+
+int
+EngineHost::fill_pan_automation_points (int track,
+                                        float view_start_sec,
+                                        float view_span_sec,
+                                        float* x_norm,
+                                        float* y_0_1,
+                                        int max_n)
+{
+	(void)track;
+	(void)view_start_sec;
+	(void)view_span_sec;
+	(void)x_norm;
+	(void)y_0_1;
+	(void)max_n;
+	return 0;
+}
+
+bool
+EngineHost::smoke_pan_automation ()
 {
 	return false;
 }
