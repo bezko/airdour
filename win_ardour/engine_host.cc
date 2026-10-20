@@ -690,6 +690,7 @@ EngineHost::EngineHost ()
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
+		_snap.markers[i].section = false;
 	}
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
@@ -7575,6 +7576,7 @@ EngineHost::refresh_locations_snap ()
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
+		_snap.markers[i].section = false;
 	}
 	if (!_impl || !_impl->session) {
 		return;
@@ -7617,6 +7619,7 @@ EngineHost::refresh_locations_snap ()
 			_snap.markers[n].sec = (float)loc->start_sample () / (float)sr;
 			std::wstring wname = utf8_to_wide (loc->name ());
 			wcsncpy_s (_snap.markers[n].name, wname.c_str (), _TRUNCATE);
+			_snap.markers[n].section = loc->is_section ();
 			++n;
 		}
 		_snap.marker_count = n;
@@ -9142,6 +9145,231 @@ EngineHost::smoke_punch ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-punch exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+
+bool
+EngineHost::add_section_marker_at (float time_sec, const std::string& name)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		if (time_sec < 0.f) {
+			time_sec = 0.f;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		std::string marker_name = name;
+		if (marker_name.empty ()) {
+			locs->next_available_name (marker_name, "section");
+		}
+		timepos_t where (sample);
+		Location* location = new Location (
+			*_impl->session, where, where, marker_name,
+			Location::Flags (Location::IsMark | Location::IsSection));
+		_impl->session->begin_reversible_command ("add section marker");
+		XMLNode& before = locs->get_state ();
+		locs->add (location, true);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"section marker added";
+		return true;
+	} catch (...) {
+		_snap.detail = L"section marker failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::remove_section_marker_near (float time_sec, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::Flags (0));
+		if (!hit || !hit->is_section ()) {
+			_snap.detail = L"no section marker near";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("remove section marker");
+		XMLNode& before = locs->get_state ();
+		locs->remove (hit);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"section marker removed";
+		return true;
+	} catch (...) {
+		_snap.detail = L"section remove failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::locate_next_section ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		samplepos_t here = (samplepos_t)std::llround ((double)_snap.transport_sec * (double)sr);
+		if (here < 0) {
+			here = 0;
+		}
+		timepos_t pos = locs->first_mark_after_flagged (
+			timepos_t (here), false, Location::IsSection);
+		if (pos == timepos_t::max (Temporal::AudioTime)) {
+			_snap.detail = L"no next section";
+			return false;
+		}
+		return locate_to ((float)pos.samples () / (float)sr, false, 0.f);
+	} catch (...) {
+		_snap.detail = L"next section failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::locate_prev_section ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		samplepos_t here = (samplepos_t)std::llround ((double)_snap.transport_sec * (double)sr);
+		if (here < 1) {
+			_snap.detail = L"no prev section";
+			return false;
+		}
+		timepos_t pos = locs->first_mark_before_flagged (
+			timepos_t (here), false, Location::IsSection);
+		if (pos == timepos_t::max (Temporal::AudioTime)) {
+			_snap.detail = L"no prev section";
+			return false;
+		}
+		return locate_to ((float)pos.samples () / (float)sr, false, 0.f);
+	} catch (...) {
+		_snap.detail = L"prev section failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_section_navigate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-section-navigate failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		if (!add_section_marker_at (1.0f, "sec-nav-a")
+		    || !add_section_marker_at (2.0f, "sec-nav-b")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-section-navigate FAILED (add)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_to (0.5f, false, 0.f)
+		    || std::fabs (_snap.transport_sec - 0.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-section-navigate FAILED (start)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_next_section () || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-section-navigate FAILED (next→1 got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_next_section () || std::fabs (_snap.transport_sec - 2.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-section-navigate FAILED (next→2 got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_prev_section () || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-section-navigate FAILED (prev→1 got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		remove_section_marker_near (1.0f, 0.2f);
+		remove_section_marker_near (2.0f, 0.2f);
+		locate_to (0.f, false, 0.f);
+		std::fprintf (stderr, "airdour_win_shell: smoke-section-navigate ok (0.5→1→2→1)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-section-navigate ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-section-navigate exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17661,6 +17889,7 @@ EngineHost::EngineHost ()
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
+		_snap.markers[i].section = false;
 	}
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
@@ -19209,6 +19438,40 @@ EngineHost::add_marker_at (float time_sec, const std::string& name)
 {
 	(void)time_sec;
 	(void)name;
+	return false;
+}
+
+bool
+EngineHost::add_section_marker_at (float time_sec, const std::string& name)
+{
+	(void)time_sec;
+	(void)name;
+	return false;
+}
+
+bool
+EngineHost::remove_section_marker_near (float time_sec, float slop_sec)
+{
+	(void)time_sec;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::locate_next_section ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_prev_section ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_section_navigate ()
+{
 	return false;
 }
 
