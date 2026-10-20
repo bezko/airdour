@@ -9149,6 +9149,39 @@ EngineHost::smoke_punch ()
 	}
 }
 
+
+bool
+EngineHost::smoke_zoom_loop ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-zoom-loop failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_loop_range (0.5f, 2.5f) || !_snap.loop_active) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-loop FAILED (set)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (std::fabs (_snap.loop_start_sec - 0.5f) > 0.05f
+		    || std::fabs (_snap.loop_end_sec - 2.5f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-loop FAILED (snap)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-loop range ok [0.50..2.50]\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-zoom-loop range ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-loop exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::add_marker_at (float time_sec, const std::string& name)
 {
@@ -18940,6 +18973,12 @@ EngineHost::set_loop_play (bool enable)
 
 bool
 EngineHost::toggle_loop_play ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_zoom_loop ()
 {
 	return false;
 }

@@ -95,6 +95,7 @@ public:
 	                    bool smoke_group = false,
 	                    bool smoke_monitor = false,
 	                    bool smoke_locate = false,
+	                    bool smoke_zoom_loop = false,
 	                    bool smoke_zoom = false,
 	                    bool smoke_history = false,
 	                    bool smoke_prefs = false,
@@ -303,6 +304,7 @@ private:
 	void do_fit_session ();
 	void do_fit_selection ();
 	void do_fit_all_regions ();
+	void do_zoom_to_loop ();
 	void do_scroll_editor (float delta_widths);
 	void refresh_editor_view_after_nav ();
 	void apply_region_selection_to_lanes ();

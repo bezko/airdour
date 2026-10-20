@@ -713,6 +713,8 @@ public:
 	bool set_loop_end (float end_sec);
 	bool set_loop_play (bool enable);
 	bool toggle_loop_play ();
+	/** Set loop 0.5–2.5s for --smoke-zoom-loop (shell fits view). */
+	bool smoke_zoom_loop ();
 
 	/**
 	 * Create/update Session IsAutoPunch Location [start_sec, end_sec].
