@@ -213,6 +213,7 @@ struct EngineSnapshot {
 	wchar_t      group_name[kGroupNameLen];
 	bool         monitor_ok; /* Session monitor_out + MonitorProcessor */
 	bool         monitor_dim; /* MonitorProcessor::dim_all */
+	float        monitor_dim_db; /* dim_level −20..0 dB (default −12) */
 	bool         monitor_mono;
 	bool         monitor_cut; /* cut_all = monitor mute */
 	float        transport_sec;
@@ -852,6 +853,10 @@ public:
 	bool ensure_monitor_section ();
 	bool set_monitor_dim (bool enable);
 	bool toggle_monitor_dim ();
+	/** Dim attenuation dB (−20..0). For Shift+click Dim / Alt+Shift+D. */
+	bool set_monitor_dim_level_db (float db);
+	/** Cycle −20 → −12 → −6 → −20. */
+	bool cycle_monitor_dim_level ();
 	bool set_monitor_mono (bool enable);
 	bool toggle_monitor_mono ();
 	bool set_monitor_cut (bool enable); /* mute / cut_all */
@@ -861,6 +866,8 @@ public:
 	 * Ensure monitor; dim→mono→cut on then off. For --smoke-monitor.
 	 */
 	bool smoke_monitor ();
+	/** −20 → −12 → −6 → restore −12. For --smoke-monitor-dim-level. */
+	bool smoke_monitor_dim_level ();
 
 	/** Refresh BBT + timecode clock fields from Session transport. */
 	void refresh_clock_snap ();

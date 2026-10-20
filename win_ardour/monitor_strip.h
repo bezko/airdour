@@ -36,6 +36,8 @@ public:
 
 	void set_dim (bool on) { _dim = on; }
 	bool dim () const { return _dim; }
+	void set_dim_db (float db) { _dim_db = db; }
+	float dim_db () const { return _dim_db; }
 	void set_mono (bool on) { _mono = on; }
 	bool mono () const { return _mono; }
 	void set_mute (bool on) { _mute = on; }
@@ -62,6 +64,7 @@ private:
 	D2D1_RECT_F _mute_btn;
 	bool        _available;
 	bool        _dim;
+	float       _dim_db;
 	bool        _mono;
 	bool        _mute;
 };

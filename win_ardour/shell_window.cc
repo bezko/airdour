@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_monitor_dim_level)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -874,6 +875,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_monitor) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-monitor FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_monitor_dim_level && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_monitor_dim_level ()) {
+			_smoke_failed = true;
+		} else {
+			sync_monitor_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_monitor_dim_level) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-monitor-dim-level FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2402,6 +2416,7 @@ ShellWindow::sync_monitor_from_engine ()
 {
 	_monitor.set_available (_engine_snap.monitor_ok);
 	_monitor.set_dim (_engine_snap.monitor_dim);
+	_monitor.set_dim_db (_engine_snap.monitor_dim_db);
 	_monitor.set_mono (_engine_snap.monitor_mono);
 	_monitor.set_mute (_engine_snap.monitor_cut);
 }
@@ -3705,6 +3720,18 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'V' || wparam == 'v')) {
 			/* V = reverse selected audio region. */
 			do_reverse_selection ();
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'D' || wparam == 'd')) {
+			/* Alt+Shift+D — cycle monitor dim depth −20/−12/−6. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				_engine.cycle_monitor_dim_level ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_monitor_from_engine ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			}
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'N' || wparam == 'n')) {
 			/* N = normalize selection to −1 dBFS. */
 			do_normalize_selection (-1.f);
@@ -4556,7 +4583,17 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	MonitorHit mh = _monitor.hit_test (x, y);
 	if (mh == MonitorHit::Dim) {
-		do_toggle_monitor_dim ();
+		if ((GetKeyState (VK_SHIFT) & 0x8000)
+		    && _engine.is_linked () && _engine_snap.session_ok) {
+			/* Shift+click Dim → cycle dim depth −20/−12/−6. */
+			_engine.cycle_monitor_dim_level ();
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_monitor_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		} else {
+			do_toggle_monitor_dim ();
+		}
 		return true;
 	}
 	if (mh == MonitorHit::Mono) {
@@ -6288,6 +6325,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
 		{ L"V", L"Reverse selected audio region" },
 		{ L"N", L"Normalize selection to −1 dBFS" },
+		{ L"Alt+Shift+D / Shift+click Dim", L"Cycle monitor dim −20/−12/−6 dB" },
 		{ L"I", L"Strip silence (−40 dBFS threshold)" },
 		{ L"B", L"Consolidate / bounce selection in place" },
 		{ L"Z", L"Freeze / unfreeze focused audio track" },

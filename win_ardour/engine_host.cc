@@ -611,6 +611,7 @@ EngineHost::EngineHost ()
 	_snap.group_name[0] = L'\0';
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
+	_snap.monitor_dim_db = -12.f;
 	_snap.monitor_mono = false;
 	_snap.monitor_cut = false;
 	_snap.transport_speed = 0.f;
@@ -8818,6 +8819,7 @@ EngineHost::refresh_monitor_flags ()
 {
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
+	_snap.monitor_dim_db = -12.f;
 	_snap.monitor_mono = false;
 	_snap.monitor_cut = false;
 	if (!_impl || !_impl->session) {
@@ -8831,6 +8833,8 @@ EngineHost::refresh_monitor_flags ()
 		std::shared_ptr<MonitorProcessor> mp = mon->monitor_control ();
 		_snap.monitor_ok = true;
 		_snap.monitor_dim = mp->dim_all ();
+		_snap.monitor_dim_db = accurate_coefficient_to_dB (
+			std::max (0.0001f, (float)mp->dim_level ()));
 		_snap.monitor_mono = mp->mono ();
 		_snap.monitor_cut = mp->cut_all ();
 	} catch (...) {
@@ -8903,6 +8907,58 @@ EngineHost::toggle_monitor_dim ()
 {
 	refresh_monitor_flags ();
 	return set_monitor_dim (!_snap.monitor_dim);
+}
+
+bool
+EngineHost::set_monitor_dim_level_db (float db)
+{
+	if (!ensure_monitor_section ()) {
+		return false;
+	}
+	try {
+		float d = db;
+		if (d < -20.f) {
+			d = -20.f;
+		}
+		if (d > 0.f) {
+			d = 0.f;
+		}
+		std::shared_ptr<MonitorProcessor> mp =
+			_impl->session->monitor_out ()->monitor_control ();
+		float coeff = dB_to_coefficient (d);
+		if (mp->dim_level_control ()) {
+			mp->dim_level_control ()->set_value (
+				(double)coeff, Controllable::NoGroup);
+		}
+		refresh_monitor_flags ();
+		std::fprintf (stderr, "airdour_win_shell: monitor dim-level=%.1f dB\n",
+		              _snap.monitor_dim_db);
+		std::fflush (stderr);
+		_snap.detail = L"monitor dim level";
+		return std::fabs (_snap.monitor_dim_db - d) < 0.6f;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: monitor-dim-level: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::cycle_monitor_dim_level ()
+{
+	refresh_monitor_flags ();
+	float cur = _snap.monitor_dim_db;
+	float next = -12.f;
+	if (cur > -9.f) {
+		next = -20.f; /* was −6-ish → −20 */
+	} else if (cur > -16.f) {
+		next = -6.f; /* was −12-ish → −6 */
+	} else {
+		next = -12.f; /* was −20-ish → −12 */
+	}
+	return set_monitor_dim_level_db (next);
 }
 
 bool
@@ -8996,6 +9052,66 @@ EngineHost::smoke_monitor ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-monitor exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_monitor_dim_level ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-monitor-dim-level failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_monitor_section ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-monitor-dim-level FAILED (ensure)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_monitor_dim_level_db (-20.f)
+		    || std::fabs (_snap.monitor_dim_db + 20.f) > 0.6f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-monitor-dim-level FAILED (−20 got=%.1f)\n",
+			              _snap.monitor_dim_db);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_monitor_dim_level_db (-12.f)
+		    || std::fabs (_snap.monitor_dim_db + 12.f) > 0.6f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-monitor-dim-level FAILED (−12 got=%.1f)\n",
+			              _snap.monitor_dim_db);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_monitor_dim_level_db (-6.f)
+		    || std::fabs (_snap.monitor_dim_db + 6.f) > 0.6f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-monitor-dim-level FAILED (−6 got=%.1f)\n",
+			              _snap.monitor_dim_db);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_monitor_dim_level_db (-12.f)
+		    || std::fabs (_snap.monitor_dim_db + 12.f) > 0.6f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-monitor-dim-level FAILED (restore got=%.1f)\n",
+			              _snap.monitor_dim_db);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-monitor-dim-level ok (−20/−12/−6/−12)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-monitor-dim-level ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-monitor-dim-level exception: %s\n",
+		              e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17578,6 +17694,7 @@ EngineHost::EngineHost ()
 	_snap.group_name[0] = L'\0';
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
+	_snap.monitor_dim_db = -12.f;
 	_snap.monitor_mono = false;
 	_snap.monitor_cut = false;
 	_snap.transport_speed = 0.f;
@@ -19168,6 +19285,25 @@ EngineHost::set_monitor_dim (bool enable)
 
 bool
 EngineHost::toggle_monitor_dim ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_monitor_dim_level_db (float db)
+{
+	(void)db;
+	return false;
+}
+
+bool
+EngineHost::cycle_monitor_dim_level ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_monitor_dim_level ()
 {
 	return false;
 }
