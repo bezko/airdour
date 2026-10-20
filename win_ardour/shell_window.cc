@@ -1107,6 +1107,37 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		layout_panes ();
 		return true;
 	});
+	run_smoke_check (ok, "region-mute-gain", [this]() { return _engine.smoke_region_mute_gain (); });
+	run_smoke_check (ok, "region-lock", [this]() { return _engine.smoke_region_lock (); });
+	run_smoke_check (ok, "fade-nudge", [this]() { return _engine.smoke_fade_nudge (); });
+	run_smoke_check (ok, "region-duplicate", [this]() { return _engine.smoke_region_duplicate (); });
+	run_smoke_check (ok, "region-nudge", [this]() { return _engine.smoke_region_nudge (); });
+	run_smoke_check (ok, "region-layer", [this]() { return _engine.smoke_region_layer (); });
+	run_smoke_check (ok, "region-opaque", [this]() { return _engine.smoke_region_opaque (); });
+	run_smoke_check (ok, "export-selection", [this]() { return _engine.smoke_export_selection (); });
+	run_smoke_check (ok, "punch-selection", [this]() { return _engine.smoke_punch_selection (); });
+	run_smoke_check (ok, "region-rename", [this]() { return _engine.smoke_region_rename (); });
+	run_smoke_check (ok, "region-caption", [this]() { return _engine.smoke_region_caption (); });
+	run_smoke_check (ok, "loop-selection", [this]() { return _engine.smoke_loop_selection (); });
+	run_smoke_check (ok, "crossfade-handles", [this]() { return _engine.smoke_crossfade_handles (); });
+	run_smoke_check (ok, "crossfade-shape", [this]() { return _engine.smoke_crossfade_shape (); });
+	run_smoke_check (ok, "fade-shape-expand", [this]() { return _engine.smoke_fade_shape_expand (); });
+	run_smoke_check (ok, "region-envelope", [this]() { return _engine.smoke_region_envelope (); });
+	run_smoke_check (ok, "region-envelope-nudge", [this]() { return _engine.smoke_region_envelope_nudge (); });
+	run_smoke_check (ok, "region-envelope-drag", [this]() { return _engine.smoke_region_envelope_drag (); });
+	run_smoke_check (ok, "fade-active", [this]() { return _engine.smoke_fade_active (); });
+	run_smoke_check (ok, "region-position-lock", [this]() { return _engine.smoke_region_position_lock (); });
+	run_smoke_check (ok, "skip-range", [this]() { return _engine.smoke_skip_range (); });
+	run_smoke_check (ok, "region-cycle", [this]() { return _engine.smoke_region_cycle (); });
+	run_smoke_check (ok, "region-layer-cycle", [this]() { return _engine.smoke_region_layer_cycle (); });
+	run_smoke_check (ok, "clear-selection", [this]() { return _engine.smoke_clear_selection (); });
+	run_smoke_check (ok, "snap-toggle", [this]() { return _engine.smoke_snap_toggle (); });
+	run_smoke_check (ok, "snap-density", [this]() { return _engine.smoke_snap_density (); });
+	run_smoke_check (ok, "grid-refresh", [this]() { return _engine.smoke_grid_lines (); });
+	run_smoke_check (ok, "tempo-nudge", [this]() { return _engine.smoke_tempo_nudge (); });
+	run_smoke_check (ok, "count-in", [this]() { return _engine.smoke_count_in (); });
+	run_smoke_check (ok, "click-toggle", [this]() { return _engine.smoke_click (); });
+	run_smoke_check (ok, "punch-toggle", [this]() { return _engine.smoke_punch (); });
 
 	if (ok && smoke_zoom && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_zoom ()) {
@@ -2684,6 +2715,499 @@ ShellWindow::do_scroll_playhead_into_view ()
 }
 
 void
+ShellWindow::do_clear_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	_engine.clear_region_selection ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	apply_region_selection_to_lanes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_cycle_fade_shape ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.cycle_selected_fade_shape ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_cycle_region_layer ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.cycle_selected_region_layer ()) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	apply_region_selection_to_lanes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_cycle_region_selection (int direction)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.cycle_region_selection (direction)) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_duplicate_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.duplicate_selected_region ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_ensure_region_envelope ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.ensure_selected_region_envelope ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_export_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		std::fprintf (stderr, "airdour_win_shell: export selection — no selection\n");
+		std::fflush (stderr);
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	if (_engine.export_selection_wav ()) {
+		std::fprintf (stderr, "airdour_win_shell: export selection ok\n");
+	} else {
+		std::fprintf (stderr, "airdour_win_shell: export selection failed\n");
+	}
+	std::fflush (stderr);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_loop_from_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.copy_selection_to_loop ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_transport_loop_from_engine ();
+		apply_loop_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_lower_selection (bool to_bottom)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.lower_selected_region (to_bottom)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_nudge_region_envelope_mid (float delta_coeff)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.nudge_selected_region_envelope_mid (delta_coeff)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_nudge_selection (float delta_sec)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.nudge_selected_by_sec (delta_sec)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_nudge_selection_gain_db (float delta_db)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.nudge_selection_gain_db (delta_db)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_punch_from_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.copy_selection_to_punch ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_transport_punch_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_raise_selection (bool to_top)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.raise_selected_region (to_top)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_set_region_envelope_mid (float coeff_0_1)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.set_selected_region_envelope_mid (coeff_0_1)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_skip_range_from_selection ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		MessageBoxW (_hwnd, L"Select a region first for a skip range.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+		return;
+	}
+	if (!_engine.add_skip_range_from_selection ()) {
+		MessageBoxW (_hwnd, L"Could not create skip range from selection.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_toggle_fade_active ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.toggle_selected_fade_active ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_toggle_region_position_lock ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.toggle_selection_position_locked ()) {
+		MessageBoxW (_hwnd, L"Select a region to position-lock.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_toggle_selection_locked ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.toggle_selection_locked ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_toggle_selection_muted ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.toggle_selection_muted ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_toggle_selection_opaque ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.toggle_selection_opaque ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+bool
+ShellWindow::envelope_mid_from_y (int lane, float y, float* out_coeff) const
+{
+	if (!out_coeff || lane < 0 || lane >= kTracks) {
+		return false;
+	}
+	const D2D1_RECT_F& lb = _lanes[lane].bounds;
+	float pad = 3.f * _dpi_scale;
+	float h = lb.bottom - lb.top - 2.f * pad;
+	if (h < 1.f) {
+		return false;
+	}
+	float t = (lb.bottom - pad - y) / h;
+	*out_coeff = std::max (0.02f, std::min (1.f, t));
+	return true;
+}
+
+bool
+ShellWindow::hit_region_envelope_mid (float x, float y, int* out_lane) const
+{
+	if (!_engine_snap.region_envelope_ok || !_engine_snap.has_selection
+	    || _engine_snap.selection_end_sec <= _engine_snap.selection_start_sec) {
+		return false;
+	}
+	int lane = _engine_snap.selection_track;
+	if (lane < 0 || lane >= kTracks || lane >= n_audio_lanes ()) {
+		return false;
+	}
+	const D2D1_RECT_F& lb = _lanes[lane].bounds;
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = _lanes[0].strip.view_span_sec ();
+	if (span < 1e-6f) {
+		return false;
+	}
+	float mid_sec = 0.5f * (_engine_snap.selection_start_sec + _engine_snap.selection_end_sec);
+	float nx = (mid_sec - view0) / span;
+	if (nx < 0.f || nx > 1.f) {
+		return false;
+	}
+	float mid_gain = _engine.selected_region_envelope_mid ();
+	if (mid_gain < 0.f) {
+		return false;
+	}
+	float pad = 3.f * _dpi_scale;
+	float lane_w = lb.right - lb.left;
+	float lane_h = lb.bottom - lb.top;
+	float px = lb.left + nx * lane_w;
+	float py = lb.bottom - pad - mid_gain * (lane_h - 2.f * pad);
+	float hit = 10.f * _dpi_scale;
+	if (std::fabs (x - px) <= hit && std::fabs (y - py) <= hit) {
+		if (out_lane) {
+			*out_lane = lane;
+		}
+		return true;
+	}
+	return false;
+}
+
+void
+ShellWindow::prompt_export_selection_wav ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		std::fprintf (stderr, "airdour_win_shell: export selection — select a region first\n");
+		std::fflush (stderr);
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+
+	wchar_t path[MAX_PATH] = L"airdour_export_selection.wav";
+	OPENFILENAMEW ofn = {};
+	ofn.lStructSize = sizeof (ofn);
+	ofn.hwndOwner = _hwnd;
+	ofn.lpstrFilter = L"WAV audio (*.wav)\0*.wav\0All files (*.*)\0*.*\0";
+	ofn.lpstrFile = path;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+	ofn.lpstrTitle = L"Airdour — export selection WAV";
+	ofn.lpstrDefExt = L"wav";
+	if (!GetSaveFileNameW (&ofn)) {
+		return;
+	}
+
+	char utf8[MAX_PATH * 4];
+	WideCharToMultiByte (CP_UTF8, 0, path, -1, utf8, sizeof (utf8), nullptr, nullptr);
+	if (_engine.export_selection_wav (utf8)) {
+		std::fprintf (stderr, "airdour_win_shell: export selection dialog ok\n");
+	} else {
+		std::fprintf (stderr, "airdour_win_shell: export selection dialog failed\n");
+	}
+	std::fflush (stderr);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::prompt_rename_selected_region ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok
+	    || !_engine_snap.has_selection) {
+		return;
+	}
+	wchar_t name[EngineSnapshot::kRegionNameLen];
+	if (_engine_snap.selection_region_name[0]) {
+		wcsncpy_s (name, _engine_snap.selection_region_name, _TRUNCATE);
+	} else {
+		wcsncpy_s (name, L"Region", _TRUNCATE);
+	}
+	if (!run_rename_dialog (_hwnd, name, EngineSnapshot::kRegionNameLen)) {
+		return;
+	}
+	char utf8[128];
+	WideCharToMultiByte (CP_UTF8, 0, name, -1, utf8, sizeof (utf8), nullptr, nullptr);
+	if (!_engine.set_selected_region_name (utf8)) {
+		MessageBoxW (_hwnd, L"Could not rename region (empty name or no selection).",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	apply_region_selection_to_lanes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_fit_all_regions ()
 {
 	float s = 0.f, e = 0.f;
@@ -2729,7 +3253,8 @@ ShellWindow::apply_region_selection_to_lanes ()
 			_engine_snap.selection_start_sec,
 			_engine_snap.selection_end_sec,
 			active ? _engine_snap.selection_fade_in_sec : 0.f,
-			active ? _engine_snap.selection_fade_out_sec : 0.f);
+			active ? _engine_snap.selection_fade_out_sec : 0.f,
+			active ? _engine_snap.selection_muted : false);
 	}
 }
 
@@ -4234,7 +4759,10 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			return 0;
 		}
 		if (wparam == VK_ESCAPE) {
-			if (_recent.visible ()) {
+			if (_engine_snap.has_selection) {
+				/* Esc = clear region selection (quit via second Esc). */
+				do_clear_selection ();
+			} else if (_recent.visible ()) {
 				_recent.set_visible (false);
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			} else if (_prefs_visible) {
@@ -4282,8 +4810,16 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		               && (GetKeyState (VK_SHIFT) & 0x8000))) {
 			/* F1 or Shift+/ (?) — toggle shortcuts help. */
 			toggle_help ();
+		} else if (wparam == VK_TAB) {
+			/* Tab / Shift+Tab = cycle region selection forward/back. */
+			do_cycle_region_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? -1 : 1);
 		} else if (wparam == VK_SPACE) {
 			transport_toggle ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'D' || wparam == 'd')) {
+			/* Ctrl+D = duplicate selected region after itself. */
+			do_duplicate_selection ();
 		} else if (wparam == VK_DELETE || wparam == VK_BACK) {
 			do_delete_selection ();
 		} else if ((GetKeyState (VK_SHIFT) & 0x8000) && wparam == VK_HOME
@@ -4368,6 +4904,19 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && step_piano_pitch_for_key (wparam) >= 0) {
 			do_step_piano_key_down ((uint8_t)step_piano_pitch_for_key (wparam));
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == VK_LEFT || wparam == VK_RIGHT)
+		           && _engine_snap.has_selection) {
+			/* Ctrl+←/→ = nudge selected region by snap unit (Shift = 4×). */
+			float unit = _engine.snap_unit_sec ();
+			if (!_engine_snap.snap_enabled) {
+				unit = 0.05f;
+			}
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
+				unit *= 4.f;
+			}
+			do_nudge_selection (wparam == VK_RIGHT ? unit : -unit);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
 		           && (GetKeyState (VK_MENU) & 0x8000)
 		           && (wparam == VK_LEFT || wparam == VK_RIGHT)) {
 			/* Ctrl+Alt+←/→ = previous / next marker. */
@@ -4398,20 +4947,58 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && (wparam == 'E' || wparam == 'e')) {
 			/* Ctrl+Alt+E = zoom editor to selection. */
 			do_zoom_to_selection ();
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'E' || wparam == 'e')) {
+			/* Alt+E = export selection range WAV. */
+			prompt_export_selection_wav ();
+		} else if ((GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'E' || wparam == 'e')) {
+			/* Shift+E = activate region gain envelope. */
+			do_ensure_region_envelope ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')
-		           && !(GetKeyState (VK_MENU) & 0x8000)) {
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && !(GetKeyState (VK_SHIFT) & 0x8000)) {
 			/* E = fit selection (Ctrl+E remains export). */
 			do_fit_selection ();
 		} else if (wparam == 'L' || wparam == 'l') {
 			if ((GetKeyState (VK_CONTROL) & 0x8000)
+			    && (GetKeyState (VK_SHIFT) & 0x8000)
+			    && !(GetKeyState (VK_MENU) & 0x8000)) {
+				/* Ctrl+Shift+L = loop range ← selection. */
+				do_loop_from_selection ();
+			} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+			    && (GetKeyState (VK_MENU) & 0x8000)
+			    && _engine_snap.has_selection) {
+				/* Ctrl+Alt+L = position-lock selected region. */
+				do_toggle_region_position_lock ();
+			} else if ((GetKeyState (VK_CONTROL) & 0x8000)
 			    && (GetKeyState (VK_MENU) & 0x8000)) {
 				/* Ctrl+Alt+L = zoom editor to loop range. */
 				do_zoom_to_loop ();
+			} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+			           && !(GetKeyState (VK_SHIFT) & 0x8000)
+			           && !(GetKeyState (VK_MENU) & 0x8000)) {
+				/* Ctrl+L = lock / unlock selected region (blocks move/trim). */
+				do_toggle_selection_locked ();
 			} else {
 				do_toggle_loop ();
 			}
+		} else if (wparam == 'O' || wparam == 'o') {
+			if ((GetKeyState (VK_MENU) & 0x8000)
+			    && !(GetKeyState (VK_CONTROL) & 0x8000)) {
+				/* Alt+O = toggle region opaque / transparent. */
+				do_toggle_selection_opaque ();
+			}
 		} else if (wparam == 'P' || wparam == 'p') {
 			if ((GetKeyState (VK_CONTROL) & 0x8000)
+			    && (GetKeyState (VK_SHIFT) & 0x8000)
+			    && !(GetKeyState (VK_MENU) & 0x8000)) {
+				/* Ctrl+Shift+P = punch range ← selection. */
+				do_punch_from_selection ();
+			} else if ((GetKeyState (VK_CONTROL) & 0x8000)
 			    && (GetKeyState (VK_MENU) & 0x8000)) {
 				/* Ctrl+Alt+P = zoom editor to punch range. */
 				do_zoom_to_punch ();
@@ -4428,6 +5015,38 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && wparam == VK_OEM_6) {
 			/* Ctrl+Alt+] = locate punch out. */
 			do_locate_punch_out ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && wparam == VK_OEM_6) {
+			/* Ctrl+Alt+Shift+] = cycle region layer top↔bottom. */
+			do_cycle_region_layer ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && _engine_snap.has_selection
+		           && (wparam == VK_OEM_4 || wparam == VK_OEM_6)) {
+			/* Ctrl+[ / ] = lower / raise selected region (Shift = bottom / top). */
+			bool extreme = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
+			if (wparam == VK_OEM_6) {
+				do_raise_selection (extreme);
+			} else {
+				do_lower_selection (extreme);
+			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && _engine_snap.has_selection
+		           && (wparam == VK_OEM_4 || wparam == VK_OEM_6)) {
+			/* Alt+[ / ] = nudge fade-in ±10ms; Alt+Shift = fade-out. */
+			float delta = (wparam == VK_OEM_6 ? 0.010f : -0.010f);
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
+				_engine.nudge_selected_fade_out_sec (delta);
+			} else {
+				_engine.nudge_selected_fade_in_sec (delta);
+			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			apply_region_selection_to_lanes ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
 		           && !(GetKeyState (VK_MENU) & 0x8000)
 		           && wparam == VK_OEM_4) {
@@ -4472,6 +5091,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			}
 		} else if (wparam == 'M' || wparam == 'm') {
 			if ((GetKeyState (VK_CONTROL) & 0x8000)
+			    && !(GetKeyState (VK_SHIFT) & 0x8000)
+			    && !(GetKeyState (VK_MENU) & 0x8000)) {
+				/* Ctrl+M = mute / unmute selected region. */
+				do_toggle_selection_muted ();
+			} else if ((GetKeyState (VK_CONTROL) & 0x8000)
 			    && (GetKeyState (VK_SHIFT) & 0x8000)) {
 				/* Ctrl+Shift+M = lock/unlock marker at playhead. */
 				do_toggle_marker_lock_at_playhead ();
@@ -4514,8 +5138,17 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_save_session ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
 			do_split_at_playhead ();
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'F' || wparam == 'f')) {
-			do_apply_crossfade ();
+		} else if (wparam == 'F' || wparam == 'f') {
+			if ((GetKeyState (VK_CONTROL) & 0x8000)
+			    && !(GetKeyState (VK_MENU) & 0x8000)) {
+				/* Ctrl+F = toggle fade in/out active. */
+				do_toggle_fade_active ();
+			} else if (GetKeyState (VK_SHIFT) & 0x8000) {
+				/* Shift+F = cycle fade shape (Linear→EqualPower→Fast→Slow→Symmetric). */
+				do_cycle_fade_shape ();
+			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
+				do_apply_crossfade ();
+			}
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'T' || wparam == 't')) {
 			/* T = stretch 1.5×; Shift+T = compress 0.75× (pitch unchanged). */
 			do_stretch_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? 0.75f : 1.5f);
@@ -4566,8 +5199,15 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_transpose_midi_notes (st);
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'C' || wparam == 'c')) {
 			do_toggle_count_in ();
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'K' || wparam == 'k')) {
-			do_toggle_click ();
+		} else if (wparam == 'K' || wparam == 'k') {
+			if ((GetKeyState (VK_CONTROL) & 0x8000)
+			    && (GetKeyState (VK_SHIFT) & 0x8000)
+			    && !(GetKeyState (VK_MENU) & 0x8000)) {
+				/* Ctrl+Shift+K = skip range ← selection. */
+				do_skip_range_from_selection ();
+			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
+				do_toggle_click ();
+			}
 		} else if (wparam == VK_OEM_MINUS || wparam == VK_SUBTRACT) {
 			do_nudge_tempo (-1.f);
 		} else if (wparam == VK_OEM_PLUS || wparam == VK_ADD) {
@@ -4602,9 +5242,25 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			    && (GetKeyState (VK_SHIFT) & 0x8000)) {
 				/* Alt+Shift+F2 = rename marker at playhead. */
 				do_rename_marker_at_playhead ();
+			} else if (GetKeyState (VK_SHIFT) & 0x8000) {
+				/* Shift+F2 = rename selected region. */
+				prompt_rename_selected_region ();
 			} else {
 				do_rename_focused_track ();
 			}
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == VK_UP || wparam == VK_DOWN)
+		           && _engine_snap.has_selection) {
+			/* Ctrl+Shift+↑/↓ = nudge selected region gain ±1 dB. */
+			do_nudge_selection_gain_db (wparam == VK_UP ? 1.0f : -1.0f);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == VK_UP || wparam == VK_DOWN)
+		           && _engine_snap.has_selection) {
+			/* Ctrl+Alt+↑/↓ = nudge region envelope mid gain. */
+			do_nudge_region_envelope_mid (wparam == VK_UP ? 0.08f : -0.08f);
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_UP) {
 			do_move_audio_track (-1);
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_DOWN) {
@@ -5873,6 +6529,20 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				InvalidateRect (_hwnd, nullptr, FALSE);
 				return true;
 			}
+			int env_lane = -1;
+			if (_engine_snap.region_envelope_ok
+			    && hit_region_envelope_mid (x, y, &env_lane) && env_lane == lane) {
+				_drag = DragMode::EnvelopeMid;
+				_drag_index = lane;
+				float coeff = 0.35f;
+				if (envelope_mid_from_y (lane, y, &coeff)) {
+					do_set_region_envelope_mid (coeff);
+				}
+				SetCapture (_hwnd);
+				SetCursor (LoadCursorW (nullptr, IDC_SIZENS));
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return true;
+			}
 			if (_lanes[lane].strip.hit_selection_body (
 				    _lanes[lane].bounds, x, y, _dpi_scale)) {
 				float t = _lanes[lane].strip.time_at_x (_lanes[lane].bounds, x);
@@ -6021,6 +6691,13 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 		return true;
 	}
 
+	if (_drag == DragMode::EnvelopeMid && _drag_index >= 0 && _drag_index < kTracks) {
+		float coeff = 0.35f;
+		if (envelope_mid_from_y (_drag_index, y, &coeff)) {
+			do_set_region_envelope_mid (coeff);
+		}
+		return true;
+	}
 	if ((_drag == DragMode::FadeIn || _drag == DragMode::FadeOut)
 	    && _drag_index >= 0 && _drag_index < kTracks
 	    && _engine_snap.has_selection) {
@@ -7167,6 +7844,26 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+Alt+A", L"Zoom editor to all regions" },
 		{ L"Ctrl+Alt+0", L"Center view on playhead (keep zoom)" },
 		{ L"Ctrl+Shift+0", L"Scroll playhead into view (keep zoom)" },
+		{ L"Ctrl+M", L"Mute / unmute selected region" },
+		{ L"Ctrl+Shift+↑/↓", L"Region gain ±1 dB" },
+		{ L"Ctrl+L", L"Lock / unlock selected region (blocks move/trim)" },
+		{ L"Ctrl+Alt+L", L"Position-lock selected region (blocks move)" },
+		{ L"Alt+[ / ]", L"Fade-in ±10ms · Alt+Shift = fade-out" },
+		{ L"Ctrl+D", L"Duplicate selected region after itself" },
+		{ L"Ctrl+←/→", L"Nudge selected region (snap unit; Shift=4×)" },
+		{ L"Ctrl+] / [", L"Raise / lower region · Shift = top/bottom" },
+		{ L"Ctrl+Alt+Shift+]", L"Cycle region layer top↔bottom" },
+		{ L"Alt+O", L"Toggle region opaque / transparent" },
+		{ L"Alt+E", L"Export selection time range WAV" },
+		{ L"Ctrl+Shift+P", L"Punch range ← selection" },
+		{ L"Ctrl+Shift+L", L"Loop range ← selection" },
+		{ L"Ctrl+Shift+K", L"Skip range ← selection" },
+		{ L"Shift+F2", L"Rename selected region" },
+		{ L"Shift+F", L"Cycle fade shapes (Linear/Power/Fast/Slow/Sym)" },
+		{ L"Ctrl+F", L"Toggle fade in/out active" },
+		{ L"Shift+E", L"Region gain envelope (unity→dip→unity)" },
+		{ L"Ctrl+Alt+↑/↓", L"Nudge region envelope mid gain" },
+		{ L"Tab / Shift+Tab", L"Cycle region selection" },
 		{ L"Ctrl+Alt+±", L"Zoom around playhead" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },

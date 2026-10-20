@@ -31,6 +31,12 @@ struct EngineRangeSnap {
 	wchar_t      name[24];
 };
 
+struct EngineSkipSnap {
+	float        start_sec;
+	float        end_sec;
+	wchar_t      name[24];
+};
+
 struct EngineMidiDeviceSnap {
 	wchar_t name[64];
 	bool    input; /* true = capture / in; false = playback / out (best-effort) */
@@ -77,6 +83,19 @@ struct EngineSnapshot {
 	float        selection_fade_out_sec;
 	bool         selection_sync_marked; /* Region::sync_marked */
 	float        selection_sync_sec; /* absolute session time of sync point */
+	bool         selection_muted; /* Region::muted() */
+	float        selection_gain_db; /* AudioRegion scale_amplitude as dB */
+	bool         selection_locked; /* Region::locked() — blocks move/trim */
+	bool         selection_position_locked; /* Region::position_locked — blocks move */
+	uint32_t     selection_layer; /* Playlist layer (higher = on top) */
+	bool         selection_opaque; /* Region::opaque — false = transparent layering */
+	static constexpr int kRegionNameLen = 32;
+	wchar_t      selection_region_name[kRegionNameLen]; /* selected Region::name */
+	int          selection_fade_shape;
+	bool         selection_fade_in_active;
+	bool         selection_fade_out_active;
+	bool         region_envelope_ok; /* selected AudioRegion envelope_active */
+	int          region_envelope_points; /* AutomationList size on selection */
 	bool         loop_active; /* auto-loop Location exists with positive length */
 	bool         loop_playing; /* Session get_play_loop() */
 	float        loop_start_sec;
@@ -88,6 +107,9 @@ struct EngineSnapshot {
 	static constexpr int kMaxRanges = 8;
 	int          range_count; /* IsRangeMarker locations */
 	EngineRangeSnap ranges[kMaxRanges];
+	static constexpr int kMaxSkips = 8;
+	int          skip_count; /* IsSkip range locations (transport skip) */
+	EngineSkipSnap skips[kMaxSkips];
 	int          marker_count;
 	EngineMarkerSnap markers[kMaxMarkers];
 	bool         midi_ok; /* backend MIDI option active / ports present */
@@ -815,6 +837,71 @@ bool locate_next_marker ();
 	bool smoke_center_playhead ();
 	bool smoke_zoom_playhead ();
 	bool smoke_scroll_playhead ();
+
+bool add_skip_range (float start_sec, float end_sec, const std::string& name = std::string ());
+	bool add_skip_range_from_selection ();
+	bool copy_selection_to_loop ();
+	bool copy_selection_to_punch ();
+	bool cycle_region_selection (int direction = 1, int track = -1);
+	bool cycle_selected_fade_shape ();
+	bool cycle_selected_region_layer ();
+	bool duplicate_selected_region ();
+	bool ensure_selected_region_envelope ();
+	bool export_selection_wav (const std::string& outfile = std::string ());
+	bool fill_selected_region_envelope_curve (float* y_0_1, size_t n);
+	bool lower_selected_region (bool to_bottom = false);
+	bool nudge_selected_by_sec (float delta_sec);
+	bool nudge_selected_fade_in_sec (float delta_sec);
+	bool nudge_selected_fade_out_sec (float delta_sec);
+	bool nudge_selected_region_envelope_mid (float delta_coeff);
+	bool nudge_selection_gain_db (float delta_db);
+	bool raise_selected_region (bool to_top = false);
+	bool remove_skip_range_near (float time_sec, float slop_sec = 0.35f);
+	float selected_region_envelope_mid () const;
+	bool set_selected_fade_active (bool active);
+	bool set_selected_region_envelope_mid (float coeff_0_1);
+	bool set_selected_region_name (const std::string& name);
+	bool set_selection_gain_db (float gain_db);
+	bool set_selection_locked (bool locked);
+	bool set_selection_muted (bool muted);
+	bool set_selection_opaque (bool opaque);
+	bool set_selection_position_locked (bool locked);
+	bool smoke_clear_selection ();
+	bool smoke_click_toggle ();
+	bool smoke_count_in ();
+	bool smoke_crossfade_handles ();
+	bool smoke_crossfade_shape ();
+	bool smoke_export_selection (std::string* out_path = nullptr);
+	bool smoke_fade_active ();
+	bool smoke_fade_nudge ();
+	bool smoke_fade_shape_expand ();
+	bool smoke_grid_lines ();
+	bool smoke_loop_selection ();
+	bool smoke_punch_selection ();
+	bool smoke_punch_toggle ();
+	bool smoke_region_caption ();
+	bool smoke_region_cycle ();
+	bool smoke_region_duplicate ();
+	bool smoke_region_envelope ();
+	bool smoke_region_envelope_drag ();
+	bool smoke_region_envelope_nudge ();
+	bool smoke_region_layer ();
+	bool smoke_region_layer_cycle ();
+	bool smoke_region_lock ();
+	bool smoke_region_mute_gain ();
+	bool smoke_region_nudge ();
+	bool smoke_region_opaque ();
+	bool smoke_region_position_lock ();
+	bool smoke_region_rename ();
+	bool smoke_skip_range ();
+	bool smoke_snap_density ();
+	bool smoke_snap_toggle ();
+	bool smoke_tempo_nudge ();
+	bool toggle_selected_fade_active ();
+	bool toggle_selection_locked ();
+	bool toggle_selection_muted ();
+	bool toggle_selection_opaque ();
+	bool toggle_selection_position_locked ();
 	/**
 	 * Continuous scrub locate (no mark snap). Same Session request_locate path.
 	 * Used while dragging the editor ruler.

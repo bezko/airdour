@@ -154,6 +154,7 @@ private:
 		MidiCcWrite, /* click/drag MIDI CC7 automation lane */
 		FadeIn, /* drag selection fade-in handle */
 		FadeOut, /* drag selection fade-out handle */
+		EnvelopeMid, /* drag selected region envelope mid gain */
 		TrimFront, /* drag selected region left edge */
 		TrimEnd, /* drag selected region right edge */
 		RegionMovePending, /* click on selection body; may become move */
@@ -337,6 +338,32 @@ private:
 	void do_center_on_playhead ();
 	void do_zoom_around_playhead (float factor);
 	void do_scroll_playhead_into_view ();
+
+void do_toggle_selection_muted ();
+	void do_nudge_selection_gain_db (float delta_db);
+	void do_toggle_selection_locked ();
+	void do_duplicate_selection ();
+	void do_nudge_selection (float delta_sec);
+	void do_raise_selection (bool to_top);
+	void do_lower_selection (bool to_bottom);
+	void do_toggle_selection_opaque ();
+	void prompt_export_selection_wav ();
+	void do_export_selection ();
+	void do_punch_from_selection ();
+	void prompt_rename_selected_region ();
+	void do_loop_from_selection ();
+	void do_cycle_fade_shape ();
+	void do_ensure_region_envelope ();
+	void do_nudge_region_envelope_mid (float delta_coeff);
+	void do_set_region_envelope_mid (float coeff_0_1);
+	bool hit_region_envelope_mid (float x, float y, int* out_lane) const;
+	bool envelope_mid_from_y (int lane, float y, float* out_coeff) const;
+	void do_toggle_fade_active ();
+	void do_toggle_region_position_lock ();
+	void do_skip_range_from_selection ();
+	void do_cycle_region_selection (int direction);
+	void do_cycle_region_layer ();
+	void do_clear_selection ();
 	void do_fit_all_regions ();
 	void do_scroll_editor (float delta_widths);
 	void refresh_editor_view_after_nav ();
