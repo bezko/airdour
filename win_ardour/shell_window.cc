@@ -261,7 +261,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
                             bool smoke_midi_pressure,
-                            bool smoke_midi_panic)
+                            bool smoke_midi_panic,
+                            bool smoke_stop_midi_panic)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -483,6 +484,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_midi_panic) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-panic FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_stop_midi_panic && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_stop_midi_panic ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_stop_midi_panic) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-stop-midi-panic FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
@@ -6305,7 +6315,7 @@ ShellWindow::draw_help_overlay ()
 
 	struct Row { const wchar_t* key; const wchar_t* action; };
 	static const Row kRows[] = {
-		{ L"Space", L"Play / Stop" },
+		{ L"Space", L"Play / Stop (Stop also MIDI-panics)" },
 		{ L"Esc", L"Close help · quit app" },
 		{ L"F1  /  ?", L"Toggle this help" },
 		{ L"F3", L"About Airdour" },

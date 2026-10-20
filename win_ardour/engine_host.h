@@ -470,6 +470,11 @@ public:
 	bool midi_panic ();
 	/** Ensure MidiTrack, panic, verify immediate events queued. */
 	bool smoke_midi_panic ();
+	/**
+	 * Seed note-on → transport_stop → verify Session::midi_panic queued.
+	 * For --smoke-stop-midi-panic (Stop also panics hanging MIDI).
+	 */
+	bool smoke_stop_midi_panic ();
 
 	/** Clear PeakMeter max-peak / clip latch on Audio track (0..kMeters-1). */
 	bool clear_track_meter_clip (int track);

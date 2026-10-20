@@ -2706,6 +2706,8 @@ EngineHost::transport_play ()
 void
 EngineHost::transport_stop ()
 {
+	const bool was_playing = _impl->transport_playing
+	                         || (_impl->session && !_impl->session->transport_stopped ());
 	_impl->transport_playing = false;
 	if (_impl->session) {
 		/* Stop transport first so DiskWriter can finalize the take, then clear
@@ -2718,6 +2720,14 @@ EngineHost::transport_stop ()
 		try {
 			_impl->session->disable_record (false, true);
 		} catch (...) {
+		}
+		/* Kill hanging MIDI notes / sustain / shell arp when leaving roll. */
+		if (was_playing) {
+			try {
+				arp_silence ();
+				_impl->session->midi_panic ();
+			} catch (...) {
+			}
 		}
 		refresh_region_flags ();
 		refresh_record_flags ();
@@ -4694,6 +4704,59 @@ EngineHost::smoke_midi_panic ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-panic exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_stop_midi_panic ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-stop-midi-panic failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !_impl->midi_track) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-stop-midi-panic FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!midi_immediate_note (0x90, 64, 100)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-stop-midi-panic FAILED (note-on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/*
+		 * Mark shell transport as rolling so transport_stop takes the panic
+		 * path without a full Dummy play→stop cycle (that can trip late MIDI
+		 * timestamps after Session::midi_panic floods the ring).
+		 */
+		_impl->transport_playing = true;
+		size_t before = _impl->midi_track->immediate_events ().read_space ();
+		transport_stop ();
+		size_t after = _impl->midi_track->immediate_events ().read_space ();
+		bool grew = after > before;
+		uint8_t ev[3] = { 0xB0, 0x7B, 0 };
+		bool wrote = _impl->midi_track->write_immediate_event (Evoral::MIDI_EVENT, 3, ev);
+		if (!grew && !wrote) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-stop-midi-panic FAILED (imm %zu→%zu)\n",
+			              before, after);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-stop-midi-panic ok (imm %zu→%zu wrote=%d)\n",
+		              before, after, wrote ? 1 : 0);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-stop-midi-panic ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-stop-midi-panic exception: %s\n",
+		              e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -18623,6 +18686,12 @@ EngineHost::midi_panic ()
 
 bool
 EngineHost::smoke_midi_panic ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_stop_midi_panic ()
 {
 	return false;
 }
