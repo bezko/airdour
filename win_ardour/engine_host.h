@@ -356,9 +356,17 @@ public:
 	bool toggle_midi_soloed ();
 
 	/**
+	 * Solo every audio track + MIDI (Controllable::NoGroup).
+	 * For Alt+Shift+U / Alt+Shift+click Solo / --smoke-solo-all.
+	 */
+	bool solo_all_tracks ();
+
+	/**
 	 * Mute/solo Audio 1 + MIDI round-trip; clear. For --smoke-mute-solo.
 	 */
 	bool smoke_mute_solo ();
+	/** Unsolo → solo_all → every audio + MIDI soloed. */
+	bool smoke_solo_all ();
 
 	/** Pan azimuth 0=L … 0.5=C … 1=R via Route::pan_azimuth_control. */
 	bool  set_track_pan (int track, float pan_0_1);

@@ -3307,6 +3307,66 @@ EngineHost::toggle_midi_soloed ()
 	return set_midi_soloed (!_snap.midi_soloed);
 }
 
+bool
+EngineHost::solo_all_tracks ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		collect_tracks ();
+		ensure_midi_track ();
+		bool any = false;
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]
+			    && _impl->tracks[i]->solo_control ()) {
+				std::shared_ptr<SoloControl> sc = _impl->tracks[i]->solo_control ();
+				if (sc->get_value () < 0.5) {
+					_impl->session->set_control (sc, 1.0, Controllable::NoGroup);
+					any = true;
+				}
+			}
+		}
+		if (_impl->midi_track && _impl->midi_track->solo_control ()
+		    && _impl->midi_track->solo_control ()->get_value () < 0.5) {
+			_impl->session->set_control (
+				_impl->midi_track->solo_control (), 1.0, Controllable::NoGroup);
+			any = true;
+		}
+		wait_until ([&] () {
+			refresh_mute_solo_flags ();
+			for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+				if (_impl->tracks[i] && !_snap.track_soloed[i]) {
+					return false;
+				}
+			}
+			return _snap.midi_soloed;
+		});
+		refresh_mute_solo_flags ();
+		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+			if (_impl->tracks[i] && !_snap.track_soloed[i]) {
+				_snap.detail = L"solo all — audio still unsoloed";
+				return false;
+			}
+		}
+		if (!_snap.midi_soloed) {
+			_snap.detail = L"solo all — MIDI still unsoloed";
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: solo all tracks%s\n",
+		              any ? "" : " (already soloed)");
+		std::fflush (stderr);
+		_snap.detail = L"all tracks soloed";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: solo all exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 void
 EngineHost::refresh_pan_flags ()
 {
@@ -4685,6 +4745,62 @@ EngineHost::smoke_mute_solo ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_solo_all ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-solo-all failed — no Session";
+		return false;
+	}
+	try {
+		ensure_midi_track ();
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0] || !_impl->midi_track) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-all FAILED (tracks)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+			set_track_soloed (i, false);
+		}
+		set_midi_soloed (false);
+		if (_snap.track_soloed[0] || _snap.midi_soloed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-all FAILED (pre-clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!solo_all_tracks ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-all FAILED (solo_all)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
+			if (!_snap.track_soloed[i]) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-solo-all FAILED (Audio %d unsoloed)\n",
+				              i + 1);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		if (!_snap.midi_soloed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-all FAILED (MIDI unsoloed)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-all ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-solo-all ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-all exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -18203,6 +18319,18 @@ EngineHost::toggle_midi_soloed ()
 
 bool
 EngineHost::smoke_mute_solo ()
+{
+	return false;
+}
+
+bool
+EngineHost::solo_all_tracks ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_solo_all ()
 {
 	return false;
 }
