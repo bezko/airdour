@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_cue_marker,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,17 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_cue_marker && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_cue_marker ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_cue_marker) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-cue-marker FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2537,6 +2549,27 @@ ShellWindow::do_remove_marker_at_playhead ()
 }
 
 void
+ShellWindow::do_add_cue_marker_at_playhead ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	/* Shift+Ctrl+Alt+U removes nearest cue; else add cue 1. */
+	if (GetKeyState (VK_SHIFT) & 0x8000) {
+		if (!_engine.remove_cue_marker_near (_playhead_sec)) {
+			MessageBoxW (_hwnd, L"No cue marker near playhead.",
+			             L"Airdour", MB_OK | MB_ICONWARNING);
+		}
+	} else if (!_engine.add_cue_marker_at (_playhead_sec, 1)) {
+		MessageBoxW (_hwnd, L"Could not add cue marker.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::sync_history_from_engine ()
 {
 	_history.set_available (_engine_snap.session_ok);
@@ -3680,6 +3713,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else {
 				do_add_marker_at_playhead ();
 			}
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'U' || wparam == 'u')) {
+			/* Ctrl+Alt+U = add cue at playhead; +Shift = remove. */
+			do_add_cue_marker_at_playhead ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Z' || wparam == 'z')) {
 			do_undo ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Y' || wparam == 'y')) {
@@ -5731,11 +5769,23 @@ ShellWindow::draw_editor_ruler ()
 		_rt->FillRectangle (
 			D2D1::RectF (px - thick * 0.5f, rr.top, px + thick * 0.5f, rr.bottom),
 			_brush_marker);
-		const wchar_t* name = _engine_snap.markers[i].name;
-		if (name[0]) {
-			_rt->DrawTextW (name, (UINT32)wcslen (name), _fmt_meta,
+		wchar_t label[32];
+		if (_engine_snap.markers[i].cue) {
+			if (_engine_snap.markers[i].name[0]) {
+				_snwprintf_s (label, _TRUNCATE, L"Q%d %s",
+				              (int)_engine_snap.markers[i].cue_id,
+				              _engine_snap.markers[i].name);
+			} else {
+				_snwprintf_s (label, _TRUNCATE, L"Q%d",
+				              (int)_engine_snap.markers[i].cue_id);
+			}
+		} else {
+			wcsncpy_s (label, _engine_snap.markers[i].name, _TRUNCATE);
+		}
+		if (label[0]) {
+			_rt->DrawTextW (label, (UINT32)wcslen (label), _fmt_meta,
 			                D2D1::RectF (px + 2.f * _dpi_scale, rr.top,
-			                             px + 48.f * _dpi_scale, rr.bottom),
+			                             px + 56.f * _dpi_scale, rr.bottom),
 			                _brush_marker);
 		}
 	}
@@ -6306,6 +6356,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
+		{ L"Ctrl+Alt+U", L"Add cue marker at playhead (Shift=remove)" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },

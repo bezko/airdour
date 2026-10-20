@@ -690,6 +690,8 @@ EngineHost::EngineHost ()
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
+		_snap.markers[i].cue = false;
+		_snap.markers[i].cue_id = 0;
 	}
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
@@ -7575,6 +7577,8 @@ EngineHost::refresh_locations_snap ()
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
+		_snap.markers[i].cue = false;
+		_snap.markers[i].cue_id = 0;
 	}
 	if (!_impl || !_impl->session) {
 		return;
@@ -7617,6 +7621,8 @@ EngineHost::refresh_locations_snap ()
 			_snap.markers[n].sec = (float)loc->start_sample () / (float)sr;
 			std::wstring wname = utf8_to_wide (loc->name ());
 			wcsncpy_s (_snap.markers[n].name, wname.c_str (), _TRUNCATE);
+			_snap.markers[n].cue = loc->is_cue_marker ();
+			_snap.markers[n].cue_id = loc->is_cue_marker () ? loc->cue_id () : 0;
 			++n;
 		}
 		_snap.marker_count = n;
@@ -9142,6 +9148,167 @@ EngineHost::smoke_punch ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-punch exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+
+bool
+EngineHost::add_cue_marker_at (float time_sec, int32_t cue_id, const std::string& name)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (cue_id < 0) {
+		cue_id = 0;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		if (time_sec < 0.f) {
+			time_sec = 0.f;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		std::string marker_name = name;
+		if (marker_name.empty ()) {
+			locs->next_available_name (marker_name, "cue");
+		}
+		timepos_t where (sample);
+		Location* location = new Location (
+			*_impl->session, where, where, marker_name,
+			Location::Flags (Location::IsMark | Location::IsCueMarker),
+			cue_id);
+
+		_impl->session->begin_reversible_command ("add cue marker");
+		XMLNode& before = locs->get_state ();
+		locs->add (location, true);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"cue marker added";
+		std::fprintf (stderr, "airdour_win_shell: cue%d \"%s\" @ %.2fs (count=%d)\n",
+		              (int)cue_id, marker_name.c_str (), time_sec, _snap.marker_count);
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: add_cue_marker: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"cue marker failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"cue marker failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::remove_cue_marker_near (float time_sec, float slop_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplecnt_t slop = (samplecnt_t)std::llround ((double)slop_sec * (double)sr);
+		if (slop < 1) {
+			slop = 1;
+		}
+		/* Flags(0): any IsMark — cue marks are IsMark|IsCueMarker. */
+		Location* hit = locs->mark_at (timepos_t (sample), timecnt_t ((samplepos_t)slop),
+		                               Location::Flags (0));
+		if (!hit || !hit->is_cue_marker ()) {
+			_snap.detail = L"no cue marker near playhead";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("remove cue marker");
+		XMLNode& before = locs->get_state ();
+		locs->remove (hit);
+		XMLNode& after = locs->get_state ();
+		_impl->session->add_command (new MementoCommand<Locations> (*locs, &before, &after));
+		_impl->session->commit_reversible_command ();
+		refresh_locations_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"cue marker removed";
+		std::fprintf (stderr, "airdour_win_shell: removed cue near %.2fs\n", time_sec);
+		std::fflush (stderr);
+		return true;
+	} catch (...) {
+		_snap.detail = L"cue remove failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_cue_marker ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-cue-marker failed — no Session";
+		return false;
+	}
+	try {
+		if (!add_cue_marker_at (2.0f, 3, "cueSmoke")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cue-marker FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		bool found = false;
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 2.0f) < 0.05f
+			    && _snap.markers[i].cue
+			    && _snap.markers[i].cue_id == 3) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cue-marker FAILED (snap cue)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!remove_cue_marker_near (2.0f, 0.35f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-cue-marker FAILED (remove)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		for (int i = 0; i < _snap.marker_count; ++i) {
+			if (std::fabs (_snap.markers[i].sec - 2.0f) < 0.05f && _snap.markers[i].cue) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-cue-marker FAILED (still present)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-cue-marker ok (cue3 add→remove)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-cue-marker ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-cue-marker exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17661,6 +17828,8 @@ EngineHost::EngineHost ()
 	for (int i = 0; i < EngineSnapshot::kMaxMarkers; ++i) {
 		_snap.markers[i].sec = 0.f;
 		_snap.markers[i].name[0] = L'\0';
+		_snap.markers[i].cue = false;
+		_snap.markers[i].cue_id = 0;
 	}
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = false;
@@ -19209,6 +19378,29 @@ EngineHost::add_marker_at (float time_sec, const std::string& name)
 {
 	(void)time_sec;
 	(void)name;
+	return false;
+}
+
+bool
+EngineHost::add_cue_marker_at (float time_sec, int32_t cue_id, const std::string& name)
+{
+	(void)time_sec;
+	(void)cue_id;
+	(void)name;
+	return false;
+}
+
+bool
+EngineHost::remove_cue_marker_near (float time_sec, float slop_sec)
+{
+	(void)time_sec;
+	(void)slop_sec;
+	return false;
+}
+
+bool
+EngineHost::smoke_cue_marker ()
+{
 	return false;
 }
 
