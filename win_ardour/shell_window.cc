@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_arm_all)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -621,6 +622,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_mute_solo) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_arm_all && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_arm_all ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_arm_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_arm_all) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-arm-all FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -4723,8 +4737,16 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	int arm = hit_mixer_arm (x, y);
 	if (arm >= 0) {
 		if (_engine.is_linked ()) {
+			const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
+			const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
 			if (!_engine.start ()) {
 				_engine_snap = _engine.snapshot ();
+			} else if (alt && shift) {
+				/* Alt+Shift+click Arm → arm every audio track. */
+				_engine.arm_all_tracks ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_arm_from_engine ();
 			} else {
 				_engine.toggle_track_armed (arm);
 				_engine.poll ();
@@ -6315,6 +6337,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
+		{ L"Alt+Shift+click Arm", L"Arm all audio tracks" },
 		{ L"U", L"Apply / clear track group" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },

@@ -339,6 +339,13 @@ public:
 	/** Arm / disarm a track for recording (Session rec-enable control). */
 	bool set_track_armed (int track, bool armed);
 	bool toggle_track_armed (int track);
+	/**
+	 * Arm every audio track rec-enable (NoGroup).
+	 * For Alt+Shift+click Arm / --smoke-arm-all.
+	 */
+	bool arm_all_tracks ();
+	/** Disarm → arm 0+1 via arm_all → verify. For --smoke-arm-all. */
+	bool smoke_arm_all ();
 
 	/**
 	 * Route mute/solo (audio tracks 0..kMeters-1).
