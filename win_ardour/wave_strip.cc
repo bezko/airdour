@@ -407,56 +407,73 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 				             bounds.left + n1 * w, bounds.bottom),
 				selection_brush);
 
-			/* Fade wedges — honest affordance for fade in/out handles. */
+			/* Fade wedges — Cairo AA when available; else D2D PathGeometry. */
 			float region_len = std::max (0.001f, _sel_end_sec - _sel_start_sec);
 			float fi = std::min (_sel_fade_in_sec, region_len * 0.49f);
 			float fo = std::min (_sel_fade_out_sec, region_len * 0.49f);
-			selection_brush->SetOpacity (0.45f);
+			float fade_in_n = n0;
+			float fade_out_n = n1;
 			if (fi > 0.001f) {
-				float nf = (_sel_start_sec + fi - _view_start_sec) / span;
-				nf = std::max (0.f, std::min (1.f, nf));
-				ID2D1PathGeometry* geo = nullptr;
-				ID2D1Factory* fac = nullptr;
-				rt->GetFactory (&fac);
-				if (fac && SUCCEEDED (fac->CreatePathGeometry (&geo)) && geo) {
-					ID2D1GeometrySink* sink = nullptr;
-					if (SUCCEEDED (geo->Open (&sink)) && sink) {
-						sink->BeginFigure (
-							D2D1::Point2F (bounds.left + n0 * w, bounds.bottom),
-							D2D1_FIGURE_BEGIN_FILLED);
-						sink->AddLine (D2D1::Point2F (bounds.left + nf * w, bounds.top));
-						sink->AddLine (D2D1::Point2F (bounds.left + nf * w, bounds.bottom));
-						sink->EndFigure (D2D1_FIGURE_END_CLOSED);
-						sink->Close ();
-						sink->Release ();
-						rt->FillGeometry (geo, selection_brush);
-					}
-					geo->Release ();
-				}
+				fade_in_n = (_sel_start_sec + fi - _view_start_sec) / span;
+				fade_in_n = std::max (0.f, std::min (1.f, fade_in_n));
 			}
 			if (fo > 0.001f) {
-				float nf = (_sel_end_sec - fo - _view_start_sec) / span;
-				nf = std::max (0.f, std::min (1.f, nf));
-				ID2D1PathGeometry* geo = nullptr;
-				ID2D1Factory* fac = nullptr;
-				rt->GetFactory (&fac);
-				if (fac && SUCCEEDED (fac->CreatePathGeometry (&geo)) && geo) {
-					ID2D1GeometrySink* sink = nullptr;
-					if (SUCCEEDED (geo->Open (&sink)) && sink) {
-						sink->BeginFigure (
-							D2D1::Point2F (bounds.left + n1 * w, bounds.bottom),
-							D2D1_FIGURE_BEGIN_FILLED);
-						sink->AddLine (D2D1::Point2F (bounds.left + nf * w, bounds.top));
-						sink->AddLine (D2D1::Point2F (bounds.left + nf * w, bounds.bottom));
-						sink->EndFigure (D2D1_FIGURE_END_CLOSED);
-						sink->Close ();
-						sink->Release ();
-						rt->FillGeometry (geo, selection_brush);
-					}
-					geo->Release ();
-				}
+				fade_out_n = (_sel_end_sec - fo - _view_start_sec) / span;
+				fade_out_n = std::max (0.f, std::min (1.f, fade_out_n));
 			}
-			selection_brush->SetOpacity (1.f);
+			bool fade_cairo = false;
+			if (CairoWaveBlit::available () && (fi > 0.001f || fo > 0.001f)) {
+				fade_cairo = CairoWaveBlit::blit_fade_wedges (
+					rt, bounds, n0, n1,
+					fi > 0.001f ? fade_in_n : n0,
+					fo > 0.001f ? fade_out_n : n1,
+					dpi_scale,
+					0.40f, 0.70f, 0.95f, 0.45f);
+			}
+			if (!fade_cairo) {
+				selection_brush->SetOpacity (0.45f);
+				if (fi > 0.001f) {
+					ID2D1PathGeometry* geo = nullptr;
+					ID2D1Factory* fac = nullptr;
+					rt->GetFactory (&fac);
+					if (fac && SUCCEEDED (fac->CreatePathGeometry (&geo)) && geo) {
+						ID2D1GeometrySink* sink = nullptr;
+						if (SUCCEEDED (geo->Open (&sink)) && sink) {
+							sink->BeginFigure (
+								D2D1::Point2F (bounds.left + n0 * w, bounds.bottom),
+								D2D1_FIGURE_BEGIN_FILLED);
+							sink->AddLine (D2D1::Point2F (bounds.left + fade_in_n * w, bounds.top));
+							sink->AddLine (D2D1::Point2F (bounds.left + fade_in_n * w, bounds.bottom));
+							sink->EndFigure (D2D1_FIGURE_END_CLOSED);
+							sink->Close ();
+							sink->Release ();
+							rt->FillGeometry (geo, selection_brush);
+						}
+						geo->Release ();
+					}
+				}
+				if (fo > 0.001f) {
+					ID2D1PathGeometry* geo = nullptr;
+					ID2D1Factory* fac = nullptr;
+					rt->GetFactory (&fac);
+					if (fac && SUCCEEDED (fac->CreatePathGeometry (&geo)) && geo) {
+						ID2D1GeometrySink* sink = nullptr;
+						if (SUCCEEDED (geo->Open (&sink)) && sink) {
+							sink->BeginFigure (
+								D2D1::Point2F (bounds.left + n1 * w, bounds.bottom),
+								D2D1_FIGURE_BEGIN_FILLED);
+							sink->AddLine (D2D1::Point2F (bounds.left + fade_out_n * w, bounds.top));
+							sink->AddLine (D2D1::Point2F (bounds.left + fade_out_n * w, bounds.bottom));
+							sink->EndFigure (D2D1_FIGURE_END_CLOSED);
+							sink->Close ();
+							sink->Release ();
+							rt->FillGeometry (geo, selection_brush);
+						}
+						geo->Release ();
+					}
+				}
+				selection_brush->SetOpacity (1.f);
+			}
 		}
 	}
 

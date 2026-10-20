@@ -5981,6 +5981,12 @@ ShellWindow::draw_midi_lane ()
 
 	/* Session MIDI notes — height scales with velocity (bottom-aligned in row). */
 	const bool trimming = (_drag == DragMode::MidiTrimStart || _drag == DragMode::MidiTrimEnd);
+	const float piano_w = std::max (1.f, piano.right - piano.left);
+	const float piano_h = std::max (1.f, piano.bottom - piano.top);
+	CairoMidiNoteBlit note_blits[EngineSnapshot::kMaxMidiNotes];
+	size_t note_blit_n = 0;
+	const bool use_cairo_notes = CairoWaveBlit::available ()
+	    && _engine_snap.midi_note_count > 0;
 	for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
 		const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
 		if (n.pitch < kMidiPitchLo || n.pitch > kMidiPitchHi) {
@@ -6008,6 +6014,26 @@ ShellWindow::draw_midi_lane ()
 		float vh = vmin + (full - vmin) * ((float)n.velocity / 127.f);
 		float y1 = row_bot;
 		float y0 = y1 - vh;
+		if (use_cairo_notes && note_blit_n < (size_t)EngineSnapshot::kMaxMidiNotes) {
+			CairoMidiNoteBlit& b = note_blits[note_blit_n++];
+			b.x0 = (x0 - piano.left) / piano_w;
+			b.x1 = (x1 - piano.left) / piano_w;
+			b.y0 = (y0 - piano.top) / piano_h;
+			b.y1 = (y1 - piano.top) / piano_h;
+			if (n.selected) {
+				b.r = kAccent.r;
+				b.g = kAccent.g;
+				b.b = kAccent.b;
+				b.a = 0.95f;
+			} else {
+				b.r = kMidi.r;
+				b.g = kMidi.g;
+				b.b = kMidi.b;
+				b.a = 0.70f;
+			}
+			b.selected = n.selected;
+			continue;
+		}
 		ID2D1SolidColorBrush* brush = n.selected ? _brush_accent : _brush_midi;
 		if (!brush) {
 			continue;
@@ -6017,6 +6043,11 @@ ShellWindow::draw_midi_lane ()
 		brush->SetOpacity (1.f);
 		if (n.selected && _brush_playhead) {
 			_rt->DrawRectangle (D2D1::RectF (x0, y0, x1, y1), _brush_playhead, 1.2f);
+		}
+	}
+	if (use_cairo_notes && note_blit_n > 0) {
+		if (!CairoWaveBlit::blit_midi_notes (_rt, piano, note_blits, note_blit_n, _dpi_scale)) {
+			/* Rare blit failure — fall back already skipped; leave empty rather than double-draw. */
 		}
 	}
 

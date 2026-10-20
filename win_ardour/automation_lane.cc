@@ -3,6 +3,7 @@
  */
 
 #include "automation_lane.h"
+#include "cairo_wave_blit.h"
 
 #include <algorithm>
 #include <cstring>
@@ -146,7 +147,18 @@ AutomationLane::draw (ID2D1RenderTarget* rt,
 		fill->SetOpacity (1.f);
 	}
 
-	if (_curve_n >= 2 && line) {
+	/* Prefer Cairo AA polyline + dots (canvas-style); D2D fallback. */
+	bool cairo_ok = false;
+	if (CairoWaveBlit::available () && (_curve_n >= 2 || _pt_n > 0)) {
+		cairo_ok = CairoWaveBlit::blit_automation_curve (
+			rt, bounds,
+			_curve_n >= 2 ? _curve : nullptr, _curve_n,
+			_pt_n > 0 ? _pt_x : nullptr,
+			_pt_n > 0 ? _pt_y : nullptr, _pt_n,
+			dpi_scale,
+			0.30f, 0.75f, 0.95f);
+	}
+	if (!cairo_ok && _curve_n >= 2 && line) {
 		float col_w = w / (float)_curve_n;
 		D2D1_POINT_2F prev = D2D1::Point2F (
 			bounds.left + col_w * 0.5f,
@@ -159,8 +171,7 @@ AutomationLane::draw (ID2D1RenderTarget* rt,
 			prev = cur;
 		}
 	}
-
-	if (_pt_n > 0 && line) {
+	if (!cairo_ok && _pt_n > 0 && line) {
 		float r = std::max (2.5f, 3.f * dpi_scale);
 		for (size_t i = 0; i < _pt_n; ++i) {
 			float px = bounds.left + _pt_x[i] * w;
