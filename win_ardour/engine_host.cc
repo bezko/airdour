@@ -6733,6 +6733,69 @@ EngineHost::smoke_snap ()
 	}
 }
 
+
+bool
+EngineHost::smoke_snap_toggle ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-snap-toggle failed — no Session";
+		return false;
+	}
+	try {
+		set_snap_density (1); /* beat */
+		set_snap_enabled (false);
+		if (_snap.snap_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap-toggle FAILED (start on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		toggle_snap ();
+		if (!_snap.snap_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap-toggle FAILED (on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		float s_on = snap_time (1.1f);
+		if (std::fabs (s_on - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap-toggle FAILED (on snap 1.1→%.3f)\n",
+			              s_on);
+			std::fflush (stderr);
+			return false;
+		}
+		toggle_snap ();
+		if (_snap.snap_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap-toggle FAILED (off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		float s_off = snap_time (1.1f);
+		if (std::fabs (s_off - 1.1f) > 0.001f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap-toggle FAILED (off 1.1→%.3f)\n",
+			              s_off);
+			std::fflush (stderr);
+			return false;
+		}
+		toggle_snap ();
+		if (!_snap.snap_enabled) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-snap-toggle FAILED (on2)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-snap-toggle ok (off→on→off→on)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-snap-toggle ok";
+		/* Leave snap off for interactive default. */
+		set_snap_enabled (false);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-snap-toggle exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_edit ()
 {
@@ -18899,6 +18962,12 @@ EngineHost::smoke_freeze ()
 
 bool
 EngineHost::smoke_snap ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_snap_toggle ()
 {
 	return false;
 }

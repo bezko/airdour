@@ -694,6 +694,8 @@ public:
 	 * For --smoke-snap.
 	 */
 	bool smoke_snap ();
+	/** Toggle snap off→on→off→on via toggle_snap. For --smoke-snap-toggle. */
+	bool smoke_snap_toggle ();
 
 	/**
 	 * Import a test tone, undo it (regions gone), redo (regions back), undo again.

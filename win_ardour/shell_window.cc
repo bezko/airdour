@@ -220,6 +220,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_automation,
                             bool smoke_edit,
                             bool smoke_snap,
+                            bool smoke_snap_toggle,
                             bool smoke_punch,
                             bool smoke_tempo,
                             bool smoke_click,
@@ -776,6 +777,22 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_snap) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_snap_toggle && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_snap_toggle ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			_transport.set_snap_enabled (_engine_snap.snap_enabled);
+		}
+		std::fflush (stderr);
+	} else if (smoke_snap_toggle) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-snap-toggle FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
