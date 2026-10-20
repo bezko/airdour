@@ -22,6 +22,7 @@
  *                         [--smoke-rename] [--smoke-group] [--smoke-monitor]
  *                         [--smoke-locate] [--smoke-zoom] [--smoke-history]
  *                         [--smoke-prefs] [--smoke-recent] [--smoke-recovery]
+ *                         [--smoke-comp-sc-hotkey]
  *                         [--smoke-limiter] [--smoke-gate] [--smoke-spectrum]
  *                         [--smoke-correlation] [--smoke-loudness]
  *                         [--no-splash] [--period N] [--session DIR]
@@ -165,6 +166,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_consolidate = parse_flag (argc, argv, L"--smoke-consolidate");
 	bool smoke_freeze = parse_flag (argc, argv, L"--smoke-freeze");
 	bool smoke_comp = parse_flag (argc, argv, L"--smoke-comp");
+	bool smoke_comp_sc_hotkey = parse_flag (argc, argv, L"--smoke-comp-sc-hotkey");
 	bool smoke_eq = parse_flag (argc, argv, L"--smoke-eq");
 	bool smoke_delay = parse_flag (argc, argv, L"--smoke-delay");
 	bool smoke_limiter = parse_flag (argc, argv, L"--smoke-limiter");
@@ -219,6 +221,7 @@ wmain (int argc, wchar_t** argv)
 		                         smoke_stretch, smoke_pitch, smoke_reverse,
 		                         smoke_normalize, smoke_strip_silence,
 		                         smoke_consolidate, smoke_freeze, smoke_comp,
+	                         smoke_comp_sc_hotkey,
 		                         smoke_eq, smoke_delay, smoke_limiter, smoke_gate,
 	                         smoke_spectrum, smoke_correlation, smoke_loudness,
 	                         smoke_midi_quantize, smoke_midi_transpose,
