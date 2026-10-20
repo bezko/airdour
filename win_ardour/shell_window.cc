@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_group_relative)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -864,6 +865,20 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_group_relative && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_group_relative ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_group_from_engine ();
+			sync_mixer_gains_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_group_relative) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-relative FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_monitor && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_monitor ()) {
 			_smoke_failed = true;
@@ -1175,6 +1190,8 @@ ShellWindow::sync_mixer_group_from_engine ()
 	}
 	_transport.set_group_active (_engine_snap.group_member_count >= 2
 	                             && _engine_snap.group_active);
+	_transport.set_group_relative (_engine_snap.group_member_count >= 2
+	                              && _engine_snap.group_relative);
 	_transport.set_spectrum_enabled (_engine_snap.spectrum_enabled);
 	_transport.set_correlation_enabled (_engine_snap.correlation_enabled);
 	_transport.set_loudness_enabled (_engine_snap.loudness_enabled);
@@ -2493,6 +2510,22 @@ ShellWindow::do_apply_or_clear_group ()
 	sync_mixer_group_from_engine ();
 	sync_mixer_gains_from_engine ();
 	sync_mixer_mute_solo_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_toggle_group_relative ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (_engine_snap.group_member_count < 2) {
+		return;
+	}
+	_engine.toggle_route_group_relative ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_group_from_engine ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
@@ -3827,6 +3860,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				layout_panes ();
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'G' || wparam == 'g')) {
+			/* Alt+Shift+G — toggle RouteGroup relative gain. */
+			do_toggle_group_relative ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'U' || wparam == 'u')) {
 			do_apply_or_clear_group ();
 		}
@@ -4496,7 +4535,13 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 	if (th == TransportHit::Group) {
-		do_apply_or_clear_group ();
+		if ((GetKeyState (VK_MENU) & 0x8000)
+		    && !(GetKeyState (VK_SHIFT) & 0x8000)) {
+			/* Alt+click Grp → toggle relative gain linking. */
+			do_toggle_group_relative ();
+		} else {
+			do_apply_or_clear_group ();
+		}
 		return true;
 	}
 	if (th == TransportHit::FitSession) {
@@ -6315,7 +6360,8 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
-		{ L"U", L"Apply / clear track group" },
+		{ L"U / Shift+U", L"Apply / clear track group" },
+		{ L"Alt+Shift+G / Alt+Grp", L"Toggle group relative gain" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
