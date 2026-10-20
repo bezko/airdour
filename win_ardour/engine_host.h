@@ -694,6 +694,8 @@ public:
 	 * For --smoke-snap.
 	 */
 	bool smoke_snap ();
+	/** refresh_grid_lines at bar/beat/1/4; assert counts. For --smoke-grid-lines. */
+	bool smoke_grid_lines ();
 
 	/**
 	 * Import a test tone, undo it (regions gone), redo (regions back), undo again.

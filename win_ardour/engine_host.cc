@@ -6733,6 +6733,67 @@ EngineHost::smoke_snap ()
 	}
 }
 
+
+bool
+EngineHost::smoke_grid_lines ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-grid-lines failed — no Session";
+		return false;
+	}
+	try {
+		set_tempo_bpm (120.f);
+		set_snap_enabled (true);
+		set_snap_density (0); /* bar = 2.0s → ~5 lines in 0..8 */
+		refresh_grid_lines (0.f, 8.f);
+		int n_bar = _snap.grid_line_count;
+		if (n_bar < 3) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-grid-lines FAILED (bar lines=%d)\n",
+			              n_bar);
+			std::fflush (stderr);
+			return false;
+		}
+		set_snap_density (1); /* beat = 0.5s */
+		refresh_grid_lines (0.f, 8.f);
+		int n_beat = _snap.grid_line_count;
+		if (n_beat <= n_bar) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-grid-lines FAILED (beat=%d bar=%d)\n",
+			              n_beat, n_bar);
+			std::fflush (stderr);
+			return false;
+		}
+		set_snap_density (3); /* 1/4 = 0.125s */
+		refresh_grid_lines (0.f, 8.f);
+		int n_q = _snap.grid_line_count;
+		if (n_q <= n_beat) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-grid-lines FAILED (1/4=%d beat=%d)\n",
+			              n_q, n_beat);
+			std::fflush (stderr);
+			return false;
+		}
+		set_snap_enabled (false);
+		refresh_grid_lines (0.f, 8.f);
+		if (_snap.grid_line_count != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-grid-lines FAILED (off lines=%d)\n",
+			              _snap.grid_line_count);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-grid-lines ok (bar=%d beat=%d 1/4=%d off=0)\n",
+		              n_bar, n_beat, n_q);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-grid-lines ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-grid-lines exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::smoke_edit ()
 {
@@ -18899,6 +18960,12 @@ EngineHost::smoke_freeze ()
 
 bool
 EngineHost::smoke_snap ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_grid_lines ()
 {
 	return false;
 }
