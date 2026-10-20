@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_clear_solos)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -621,6 +622,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_mute_solo) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_clear_solos && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_clear_solos ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_mute_solo_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_clear_solos) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-solos FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2446,6 +2460,20 @@ ShellWindow::do_toggle_monitor_cut ()
 }
 
 void
+ShellWindow::do_clear_all_solos ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (_engine.clear_all_solos ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_mute_solo_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::do_apply_or_clear_group ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -3827,7 +3855,13 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				layout_panes ();
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			}
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'U' || wparam == 'u')) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000) && (wparam == 'U' || wparam == 'u')
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)) {
+			/* Alt+U = clear all solos (U alone = track group). */
+			do_clear_all_solos ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'U' || wparam == 'u')) {
 			do_apply_or_clear_group ();
 		}
 		return 0;
@@ -6316,6 +6350,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"U", L"Apply / clear track group" },
+		{ L"Alt+U", L"Clear all solos (audio + MIDI)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
