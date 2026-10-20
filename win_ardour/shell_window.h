@@ -16,6 +16,8 @@
 
 #include <cstdint>
 #include <string>
+#include <set>
+#include <functional>
 
 #include <windows.h>
 #include <d2d1.h>
@@ -54,6 +56,10 @@ public:
 
 	ShellWindow ();
 	~ShellWindow ();
+
+	void set_smoke_flags (const std::set<std::string>& flags) { _smoke_flags = flags; }
+	bool has_smoke (const std::string& name) const { return _smoke_flags.count (name) > 0; }
+	void add_smoke_flag (const std::string& name) { _smoke_flags.insert (name); }
 
 	bool create (HINSTANCE instance, int show_cmd);
 	/** Show brief branded splash (ignored if already dismissed / --no-splash). */
@@ -433,4 +439,7 @@ private:
 	float          _auto_last_write_sec;
 	float          _midi_cc_last_write_sec;
 	int            _midi_cc_number; /* 7 Vol / 1 Mod / 11 Expr / -1 Bend / -2 Pressure */
+
+	std::set<std::string> _smoke_flags;
+	void run_smoke_check (bool ok, const char* name, std::function<bool()> fn, bool select_lanes = false);
 };

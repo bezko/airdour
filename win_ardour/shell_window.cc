@@ -198,6 +198,33 @@ ShellWindow::~ShellWindow ()
 	if (_hwnd) { DestroyWindow (_hwnd); _hwnd = nullptr; }
 }
 
+void
+ShellWindow::run_smoke_check (bool ok, const char* name, std::function<bool()> fn, bool select_lanes)
+{
+	bool requested = has_smoke (name);
+	if (!requested) {
+		return;
+	}
+	if (ok && _engine.snapshot ().session_ok) {
+		if (!fn ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			_playhead_sec = _engine_snap.transport_sec;
+			sync_transport_clock_from_engine ();
+			if (select_lanes) {
+				apply_region_selection_to_lanes ();
+			}
+		}
+		std::fflush (stderr);
+	} else {
+		std::fprintf (stderr, "airdour_win_shell: smoke-%s FAILED (no session)\n", name);
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+}
+
 bool
 ShellWindow::attach_engine (const std::string& backend_name,
                             unsigned smoke_timeout_secs,

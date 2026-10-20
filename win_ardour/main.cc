@@ -34,6 +34,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <set>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -107,6 +108,20 @@ parse_flag (int argc, wchar_t** argv, const wchar_t* name)
 		}
 	}
 	return false;
+}
+
+static std::set<std::string>
+parse_smoke_flags (int argc, wchar_t** argv)
+{
+	std::set<std::string> flags;
+	for (int i = 1; i < argc; ++i) {
+		if (wcsncmp (argv[i], L"--smoke-", 8) == 0) {
+			char buf[128];
+			WideCharToMultiByte (CP_UTF8, 0, argv[i] + 8, -1, buf, sizeof (buf), nullptr, nullptr);
+			flags.insert (std::string (buf));
+		}
+	}
+	return flags;
 }
 
 int
@@ -208,6 +223,7 @@ wmain (int argc, wchar_t** argv)
 	               timeout, no_splash ? L" (--no-splash)" : L"");
 
 	if (!no_engine) {
+		shell.set_smoke_flags (parse_smoke_flags (argc, argv));
 		if (shell.attach_engine (backend, timeout, smoke_import, smoke_record,
 		                         smoke_save_load, smoke_export, smoke_undo,
 		                         smoke_loop, smoke_midi, smoke_midi_edit,
