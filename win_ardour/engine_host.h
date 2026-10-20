@@ -532,6 +532,9 @@ public:
 	/** Set fade-in/out length (seconds) on selected AudioRegion; activates fades. */
 	bool set_selected_fade_in_sec (float sec);
 	bool set_selected_fade_out_sec (float sec);
+	/** Nudge selected fade-in/out by delta_sec (clamped ≥0, ≤ half length). */
+	bool nudge_selected_fade_in_sec (float delta_sec);
+	bool nudge_selected_fade_out_sec (float delta_sec);
 	/**
 	 * Apply ~80 ms fades on selection; if an adjacent region exists, set
 	 * complementary fade so the abut/overlap reads as a crossfade.
@@ -646,6 +649,12 @@ public:
 	 * For --smoke-edit.
 	 */
 	bool smoke_edit ();
+
+	/**
+	 * Import tone → select → fade-in 0 → nudge +80ms → fade-out nudge +50ms.
+	 * For --smoke-fade-nudge.
+	 */
+	bool smoke_fade_nudge ();
 
 	/**
 	 * Import tone → select → stretch 1.5×; verify length ~1.5× source.

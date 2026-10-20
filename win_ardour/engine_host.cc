@@ -5297,6 +5297,48 @@ EngineHost::set_selected_fade_out_sec (float sec)
 }
 
 bool
+EngineHost::nudge_selected_fade_in_sec (float delta_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_selection_snap ();
+	if (!_snap.has_selection) {
+		_snap.detail = L"fade-in nudge — select an audio region";
+		return false;
+	}
+	if (!std::isfinite (delta_sec)) {
+		delta_sec = 0.f;
+	}
+	float next = _snap.selection_fade_in_sec + delta_sec;
+	if (next < 0.f) {
+		next = 0.f;
+	}
+	return set_selected_fade_in_sec (next);
+}
+
+bool
+EngineHost::nudge_selected_fade_out_sec (float delta_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_selection_snap ();
+	if (!_snap.has_selection) {
+		_snap.detail = L"fade-out nudge — select an audio region";
+		return false;
+	}
+	if (!std::isfinite (delta_sec)) {
+		delta_sec = 0.f;
+	}
+	float next = _snap.selection_fade_out_sec + delta_sec;
+	if (next < 0.f) {
+		next = 0.f;
+	}
+	return set_selected_fade_out_sec (next);
+}
+
+bool
 EngineHost::apply_selected_crossfade (float length_sec)
 {
 	if (!_impl || !_impl->session) {
@@ -6858,6 +6900,95 @@ EngineHost::smoke_edit ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-edit exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_fade_nudge ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-fade-nudge failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-nudge FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 0.8f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-nudge FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-nudge FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!set_selected_fade_in_sec (0.f) || !set_selected_fade_out_sec (0.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-nudge FAILED (clear fades)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!nudge_selected_fade_in_sec (0.08f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-nudge FAILED (fade-in nudge)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (std::fabs (_snap.selection_fade_in_sec - 0.08f) > 0.015f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-fade-nudge FAILED (fade-in=%.3f)\n",
+			              _snap.selection_fade_in_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!nudge_selected_fade_out_sec (0.05f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fade-nudge FAILED (fade-out nudge)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (std::fabs (_snap.selection_fade_out_sec - 0.05f) > 0.015f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-fade-nudge FAILED (fade-out=%.3f)\n",
+			              _snap.selection_fade_out_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!nudge_selected_fade_in_sec (-0.03f)
+		    || std::fabs (_snap.selection_fade_in_sec - 0.05f) > 0.015f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-fade-nudge FAILED (fade-in after −30ms=%.3f)\n",
+			              _snap.selection_fade_in_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-fade-nudge ok (in=%.0fms out=%.0fms)\n",
+		              _snap.selection_fade_in_sec * 1000.f,
+		              _snap.selection_fade_out_sec * 1000.f);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-fade-nudge ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-fade-nudge exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -18678,6 +18809,20 @@ EngineHost::set_selected_fade_out_sec (float sec)
 }
 
 bool
+EngineHost::nudge_selected_fade_in_sec (float delta_sec)
+{
+	(void)delta_sec;
+	return false;
+}
+
+bool
+EngineHost::nudge_selected_fade_out_sec (float delta_sec)
+{
+	(void)delta_sec;
+	return false;
+}
+
+bool
 EngineHost::apply_selected_crossfade (float length_sec)
 {
 	(void)length_sec;
@@ -18851,6 +18996,12 @@ EngineHost::track_region_count (int track) const
 
 bool
 EngineHost::smoke_edit ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_fade_nudge ()
 {
 	return false;
 }
