@@ -9149,6 +9149,87 @@ EngineHost::smoke_punch ()
 	}
 }
 
+
+bool
+EngineHost::locate_loop_start ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_locations_snap ();
+	if (!_snap.loop_active) {
+		_snap.detail = L"no loop range";
+		return false;
+	}
+	return locate_to (_snap.loop_start_sec, false, 0.f);
+}
+
+bool
+EngineHost::locate_loop_end ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_locations_snap ();
+	if (!_snap.loop_active) {
+		_snap.detail = L"no loop range";
+		return false;
+	}
+	return locate_to (_snap.loop_end_sec, false, 0.f);
+}
+
+bool
+EngineHost::smoke_loop_navigate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-loop-navigate failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		if (!set_loop_range (0.5f, 2.5f) || !_snap.loop_active) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop-navigate FAILED (set)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_to (0.0f, false, 0.f)
+		    || std::fabs (_snap.transport_sec) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop-navigate FAILED (start)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_loop_start () || std::fabs (_snap.transport_sec - 0.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop-navigate FAILED (in got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_loop_end () || std::fabs (_snap.transport_sec - 2.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-loop-navigate FAILED (out got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		locate_to (0.f, false, 0.f);
+		std::fprintf (stderr, "airdour_win_shell: smoke-loop-navigate ok (0->0.5->2.5)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-loop-navigate ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-loop-navigate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::add_marker_at (float time_sec, const std::string& name)
 {
@@ -18940,6 +19021,24 @@ EngineHost::set_loop_play (bool enable)
 
 bool
 EngineHost::toggle_loop_play ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_loop_start ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_loop_end ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_loop_navigate ()
 {
 	return false;
 }

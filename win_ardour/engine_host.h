@@ -713,6 +713,11 @@ public:
 	bool set_loop_end (float end_sec);
 	bool set_loop_play (bool enable);
 	bool toggle_loop_play ();
+	/** Locate transport to loop start/end. Ctrl+[ / ]. */
+	bool locate_loop_start ();
+	bool locate_loop_end ();
+	/** Set loop → locate start → end. For --smoke-loop-navigate. */
+	bool smoke_loop_navigate ();
 
 	/**
 	 * Create/update Session IsAutoPunch Location [start_sec, end_sec].

@@ -95,6 +95,7 @@ public:
 	                    bool smoke_group = false,
 	                    bool smoke_monitor = false,
 	                    bool smoke_locate = false,
+	                    bool smoke_loop_navigate = false,
 	                    bool smoke_zoom = false,
 	                    bool smoke_history = false,
 	                    bool smoke_prefs = false,
@@ -288,6 +289,8 @@ private:
 	void draw_punch_overlay ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
+	void do_locate_loop_start ();
+	void do_locate_loop_end ();
 	void sync_mixer_arm_from_engine ();
 	void sync_mixer_mute_solo_from_engine ();
 	void sync_mixer_pan_from_engine ();

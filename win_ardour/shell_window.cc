@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_loop_navigate,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,25 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_loop_navigate && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_loop_navigate ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			_playhead_sec = _engine_snap.transport_sec;
+			sync_transport_clock_from_engine ();
+			sync_transport_loop_from_engine ();
+			apply_loop_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_loop_navigate) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-loop-navigate FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2536,6 +2556,39 @@ ShellWindow::do_remove_marker_at_playhead ()
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+
+void
+ShellWindow::do_locate_loop_start ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.locate_loop_start ()) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_playhead_sec = _engine_snap.transport_sec;
+	sync_transport_clock_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_locate_loop_end ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.locate_loop_end ()) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_playhead_sec = _engine_snap.transport_sec;
+	sync_transport_clock_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 void
 ShellWindow::sync_history_from_engine ()
 {
@@ -3642,6 +3695,16 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
 				do_toggle_punch ();
 			}
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && wparam == VK_OEM_4) {
+			/* Ctrl+[ = locate loop start. */
+			do_locate_loop_start ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && wparam == VK_OEM_6) {
+			/* Ctrl+] = locate loop end. */
+			do_locate_loop_end ();
 		} else if (wparam == VK_OEM_4) { /* [ */
 			if (_engine.is_linked () && _engine_snap.session_ok) {
 				if (GetKeyState (VK_SHIFT) & 0x8000) {
@@ -6305,6 +6368,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
+		{ L"Ctrl+[ / ]", L"Locate loop start / end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
