@@ -892,6 +892,12 @@ public:
 	float track_fx_param (int track = 0) const;
 
 	/**
+	 * Reset mixer FX param 1..3 on track to insert defaults (Blend 0.3, EQ 0.5, …).
+	 * For double-click FX param / --smoke-fx-param-reset.
+	 */
+	bool reset_track_fx_param (int track, int which_1_to_3);
+
+	/**
 	 * Insert ACE Compressor (bundled LV2, DSP-only) on an audio track pre-fader.
 	 * Default track 1 = Audio 2. Idempotent when already present.
 	 */
@@ -963,6 +969,8 @@ public:
 	 * For --smoke-plugin. Hardware not required.
 	 */
 	bool smoke_plugin_insert ();
+	/** Nudge Audio1 Blend → reset_track_fx_param → ~0.3. For --smoke-fx-param-reset. */
+	bool smoke_fx_param_reset ();
 
 	/**
 	 * Insert ACE Comp on Audio 2; set threshold/ratio; optional SC from Audio 1.
