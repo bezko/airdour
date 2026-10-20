@@ -60,6 +60,7 @@
 #include "ardour/automation_list.h"
 #include "ardour/mute_control.h"
 #include "ardour/solo_control.h"
+#include "ardour/solo_safe_control.h"
 #include "ardour/gain_control.h"
 #include "ardour/plugin.h"
 #include "ardour/plugin_insert.h"
@@ -595,6 +596,7 @@ EngineHost::EngineHost ()
 		_snap.track_frozen[i] = false;
 		_snap.track_muted[i] = false;
 		_snap.track_soloed[i] = false;
+		_snap.track_solo_safe[i] = false;
 		_snap.track_pan[i] = 0.5f;
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
@@ -3305,6 +3307,115 @@ EngineHost::toggle_midi_soloed ()
 {
 	refresh_mute_solo_flags ();
 	return set_midi_soloed (!_snap.midi_soloed);
+}
+
+void
+EngineHost::refresh_solo_safe_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_solo_safe[i] = false;
+	}
+	if (!_impl) {
+		return;
+	}
+	try {
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]
+			    && _impl->tracks[i]->solo_safe_control ()) {
+				_snap.track_solo_safe[i] =
+					_impl->tracks[i]->solo_safe_control ()->solo_safe ();
+			}
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::set_track_solo_safe (int track, bool safe)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	collect_tracks ();
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
+	    || !_impl->tracks[track]->solo_safe_control ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<SoloSafeControl> ssc =
+			_impl->tracks[track]->solo_safe_control ();
+		_impl->session->set_control (ssc, safe ? 1.0 : 0.0, Controllable::NoGroup);
+		wait_until ([&] () {
+			refresh_solo_safe_flags ();
+			return _snap.track_solo_safe[track] == safe;
+		}, 400);
+		refresh_solo_safe_flags ();
+		std::fprintf (stderr, "airdour_win_shell: Audio %d solo-safe=%d\n",
+		              track + 1, safe ? 1 : 0);
+		std::fflush (stderr);
+		_snap.detail = safe ? L"solo safe" : L"solo safe off";
+		return _snap.track_solo_safe[track] == safe;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: solo-safe: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_track_solo_safe (int track)
+{
+	refresh_solo_safe_flags ();
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	return set_track_solo_safe (track, !_snap.track_solo_safe[track]);
+}
+
+bool
+EngineHost::smoke_solo_safe ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-solo-safe failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]
+		    || !_impl->tracks[0]->solo_safe_control ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-safe FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_solo_safe (0, false) || _snap.track_solo_safe[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-safe FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_solo_safe (0, true) || !_snap.track_solo_safe[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-safe FAILED (on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_solo_safe (0, false) || _snap.track_solo_safe[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-safe FAILED (off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-safe ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-solo-safe ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-safe exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 void
@@ -17462,6 +17573,7 @@ EngineHost::refresh_snapshot ()
 			refresh_region_flags ();
 			refresh_record_flags ();
 			refresh_mute_solo_flags ();
+			refresh_solo_safe_flags ();
 			refresh_pan_flags ();
 			refresh_send_flags ();
 			refresh_group_flags ();
@@ -18199,6 +18311,32 @@ bool
 EngineHost::toggle_midi_soloed ()
 {
 	return false;
+}
+
+bool
+EngineHost::set_track_solo_safe (int track, bool safe)
+{
+	(void)track;
+	(void)safe;
+	return false;
+}
+
+bool
+EngineHost::toggle_track_solo_safe (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::smoke_solo_safe ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_solo_safe_flags ()
+{
 }
 
 bool
