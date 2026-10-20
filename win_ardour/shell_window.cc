@@ -237,6 +237,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_pitch,
                             bool smoke_reverse,
                             bool smoke_normalize,
+                            bool smoke_region_envelope,
                             bool smoke_strip_silence,
                             bool smoke_consolidate,
                             bool smoke_freeze,
@@ -725,6 +726,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_normalize) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-normalize FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_region_envelope && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_region_envelope ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_region_envelope) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2721,6 +2735,23 @@ ShellWindow::do_normalize_selection (float target_dbfs)
 }
 
 void
+ShellWindow::do_ensure_region_envelope ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.ensure_selected_region_envelope ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::do_strip_silence_selection ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -3632,6 +3663,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else {
 				do_fit_all_regions ();
 			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'E' || wparam == 'e')) {
+			/* Alt+E = activate region gain envelope (unity→dip→unity stub). */
+			do_ensure_region_envelope ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')
 		           && !(GetKeyState (VK_MENU) & 0x8000)) {
 			/* E = fit selection (Ctrl+E remains export). */
@@ -5904,6 +5940,38 @@ ShellWindow::draw_editor_pane ()
 		_lanes[i].strip.draw (_rt, lb, _brush_peak, _brush_rms, _brush_body,
 		                      _brush_playhead, _brush_selection, _dpi_scale);
 
+		/* Selected-region gain envelope polyline (stub lane under waveform). */
+		if (_engine_snap.region_envelope_ok
+		    && _engine_snap.has_selection
+		    && _engine_snap.selection_track == i
+		    && _engine_snap.selection_end_sec > _engine_snap.selection_start_sec) {
+			float n0 = (_engine_snap.selection_start_sec - view0) / span;
+			float n1 = (_engine_snap.selection_end_sec - view0) / span;
+			n0 = std::max (0.f, std::min (1.f, n0));
+			n1 = std::max (0.f, std::min (1.f, n1));
+			if (n1 > n0) {
+				enum { kEnvSamples = 32 };
+				float yv[kEnvSamples];
+				if (_engine.fill_selected_region_envelope_curve (yv, kEnvSamples)) {
+					float lane_w = lb.right - lb.left;
+					float lane_h = lb.bottom - lb.top;
+					float pad = 3.f * _dpi_scale;
+					_brush_accent->SetOpacity (0.75f);
+					for (int s = 1; s < kEnvSamples; ++s) {
+						float t0 = (float)(s - 1) / (float)(kEnvSamples - 1);
+						float t1 = (float)s / (float)(kEnvSamples - 1);
+						float x0 = lb.left + (n0 + (n1 - n0) * t0) * lane_w;
+						float x1 = lb.left + (n0 + (n1 - n0) * t1) * lane_w;
+						float y0 = lb.bottom - pad - yv[s - 1] * (lane_h - 2.f * pad);
+						float y1 = lb.bottom - pad - yv[s] * (lane_h - 2.f * pad);
+						_rt->DrawLine (D2D1::Point2F (x0, y0), D2D1::Point2F (x1, y1),
+						               _brush_accent, 1.25f * _dpi_scale);
+					}
+					_brush_accent->SetOpacity (1.f);
+				}
+			}
+		}
+
 		/* Marker hairlines across lanes. */
 		float lane_w = lb.right - lb.left;
 		float mark_bot = (i == 0) ? _auto_lane_bounds.bottom : lb.bottom;
@@ -6319,6 +6387,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
+		{ L"Alt+E", L"Region gain envelope (unity→dip→unity)" },
 	};
 
 	float y = card.top + 40.f * _dpi_scale;

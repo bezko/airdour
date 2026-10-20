@@ -673,6 +673,8 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.region_envelope_ok = false;
+	_snap.region_envelope_points = 0;
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -4897,6 +4899,8 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.region_envelope_ok = false;
+	_snap.region_envelope_points = 0;
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -4929,6 +4933,10 @@ EngineHost::refresh_selection_snap ()
 	if (ar) {
 		_snap.selection_fade_in_sec = (float)ar->fade_in_length ().samples () / (float)sr;
 		_snap.selection_fade_out_sec = (float)ar->fade_out_length ().samples () / (float)sr;
+		_snap.region_envelope_ok = ar->envelope_active ();
+		if (ar->envelope ()) {
+			_snap.region_envelope_points = (int)ar->envelope ()->size ();
+		}
 	}
 }
 
@@ -5081,6 +5089,8 @@ EngineHost::clear_region_selection ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.region_envelope_ok = false;
+	_snap.region_envelope_points = 0;
 }
 
 bool
@@ -5996,6 +6006,92 @@ EngineHost::normalize_selected (float target_dbfs)
 		return false;
 	} catch (...) {
 		_snap.detail = L"normalize failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::ensure_selected_region_envelope ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (!ar) {
+		_snap.detail = L"envelope — select an audio region";
+		return false;
+	}
+	std::shared_ptr<AutomationList> env = ar->envelope ();
+	if (!env) {
+		_snap.detail = L"envelope — no AutomationList";
+		return false;
+	}
+	try {
+		samplecnt_t len = ar->length_samples ();
+		if (len < 3) {
+			_snap.detail = L"envelope — region too short";
+			return false;
+		}
+		samplecnt_t mid = len / 2;
+		_impl->session->begin_reversible_command ("region envelope");
+		ar->clear_changes ();
+		env->freeze ();
+		env->clear ();
+		/* Region-relative AudioTime: unity → mid dip → unity. */
+		env->fast_simple_add (timepos_t (Temporal::AudioTime), GAIN_COEFF_UNITY);
+		env->fast_simple_add (timepos_t ((samplepos_t)mid), 0.35);
+		env->fast_simple_add (timepos_t ((samplepos_t)len), GAIN_COEFF_UNITY);
+		env->thaw ();
+		ar->set_envelope_active (true);
+		_impl->session->add_command (new StatefulDiffCommand (ar));
+		_impl->session->commit_reversible_command ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+		_snap.detail = L"region envelope active";
+		return _snap.region_envelope_ok && _snap.region_envelope_points >= 3;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: region envelope exception: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"envelope exception";
+		return false;
+	} catch (...) {
+		_snap.detail = L"envelope failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::fill_selected_region_envelope_curve (float* y_0_1, size_t n)
+{
+	if (!y_0_1 || n == 0) {
+		return false;
+	}
+	for (size_t i = 0; i < n; ++i) {
+		y_0_1[i] = 1.f;
+	}
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
+	if (!ar || !ar->envelope () || !ar->envelope_active ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationList> env = ar->envelope ();
+		samplecnt_t len = ar->length_samples ();
+		if (len <= 0) {
+			return false;
+		}
+		for (size_t i = 0; i < n; ++i) {
+			double frac = ((double)i + 0.5) / (double)n;
+			samplepos_t off = (samplepos_t)std::llround (frac * (double)(len - 1));
+			float v = (float)env->eval (timepos_t (off));
+			y_0_1[i] = std::max (0.f, std::min (1.f, v));
+		}
+		return true;
+	} catch (...) {
 		return false;
 	}
 }
@@ -7154,6 +7250,80 @@ EngineHost::smoke_normalize ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-normalize exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_region_envelope ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-region-envelope failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 0.8f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!ensure_selected_region_envelope ()
+		    || !_snap.region_envelope_ok
+		    || _snap.region_envelope_points < 3) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-envelope FAILED (ensure ok=%d pts=%d)\n",
+			              (int)_snap.region_envelope_ok, _snap.region_envelope_points);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::shared_ptr<AudioRegion> ar =
+			std::dynamic_pointer_cast<AudioRegion> (_impl->selected_region.lock ());
+		if (!ar || !ar->envelope ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope FAILED (no env)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		samplecnt_t mid = ar->length_samples () / 2;
+		float mid_v = (float)ar->envelope ()->eval (timepos_t ((samplepos_t)mid));
+		if (mid_v < 0.25f || mid_v > 0.45f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-envelope FAILED (mid=%.3f)\n",
+			              mid_v);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-region-envelope ok (pts=%d mid=%.2f active)\n",
+		              _snap.region_envelope_points, mid_v);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-region-envelope ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope exception: %s\n",
+		              e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17629,6 +17799,8 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.region_envelope_ok = false;
+	_snap.region_envelope_points = 0;
 	_snap.snap_enabled = false;
 	_snap.midi_step_enabled = false;
 	_snap.midi_chord_quality = 0;
@@ -18733,6 +18905,23 @@ EngineHost::normalize_selected (float target_dbfs)
 }
 
 bool
+EngineHost::ensure_selected_region_envelope ()
+{
+	return false;
+}
+
+bool
+EngineHost::fill_selected_region_envelope_curve (float* y_0_1, size_t n)
+{
+	if (y_0_1 && n > 0) {
+		for (size_t i = 0; i < n; ++i) {
+			y_0_1[i] = 1.f;
+		}
+	}
+	return false;
+}
+
+bool
 EngineHost::strip_silence_selected (float threshold_dbfs,
                                     float min_silence_sec,
                                     float fade_sec)
@@ -18875,6 +19064,12 @@ EngineHost::smoke_reverse ()
 
 bool
 EngineHost::smoke_normalize ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_region_envelope ()
 {
 	return false;
 }

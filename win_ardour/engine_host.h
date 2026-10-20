@@ -60,6 +60,8 @@ struct EngineSnapshot {
 	float        selection_end_sec;
 	float        selection_fade_in_sec; /* AudioRegion fade-in length */
 	float        selection_fade_out_sec;
+	bool         region_envelope_ok; /* selected AudioRegion envelope_active */
+	int          region_envelope_points; /* AutomationList size on selection */
 	bool         loop_active; /* auto-loop Location exists with positive length */
 	bool         loop_playing; /* Session get_play_loop() */
 	float        loop_start_sec;
@@ -575,6 +577,14 @@ public:
 	bool normalize_selected (float target_dbfs = -1.f);
 
 	/**
+	 * Activate selected AudioRegion gain envelope and write unity→dip→unity
+	 * (region-relative AutomationList). Alt+E. For --smoke-region-envelope.
+	 */
+	bool ensure_selected_region_envelope ();
+	/** Sample selected region envelope across its length into y_0_1[n] (0..1). */
+	bool fill_selected_region_envelope_curve (float* y_0_1, size_t n);
+
+	/**
 	 * Strip silence from selected AudioRegion (find_silence + StripSilence Filter).
 	 * Threshold dBFS (default −40); min silence / fade in seconds.
 	 * Quiet spans removed; audible parts become one or more regions.
@@ -670,6 +680,12 @@ public:
 	 * For --smoke-normalize.
 	 */
 	bool smoke_normalize ();
+
+	/**
+	 * Import → select → ensure envelope (active + ≥3 pts + mid dip).
+	 * For --smoke-region-envelope.
+	 */
+	bool smoke_region_envelope ();
 
 	/**
 	 * Import gated tone (silence gaps) → strip silence → ≥2 regions.

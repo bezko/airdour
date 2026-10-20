@@ -104,6 +104,7 @@ public:
 	                    bool smoke_pitch = false,
 	                    bool smoke_reverse = false,
 	                    bool smoke_normalize = false,
+	                    bool smoke_region_envelope = false,
 	                    bool smoke_strip_silence = false,
 	                    bool smoke_consolidate = false,
 	                    bool smoke_freeze = false,
@@ -232,6 +233,7 @@ private:
 	void do_pitch_shift_selection (float semitones = 1.f);
 	void do_reverse_selection ();
 	void do_normalize_selection (float target_dbfs = -1.f);
+	void do_ensure_region_envelope ();
 	void do_strip_silence_selection ();
 	void do_consolidate_selection ();
 	void do_toggle_freeze_track ();
