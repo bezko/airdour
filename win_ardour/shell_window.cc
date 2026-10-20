@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_fx_bypass_all)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -487,6 +488,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		/* Always scaffold a MIDI track + empty region so the piano-roll is live. */
 		_engine.ensure_midi_track ();
 		_engine.ensure_midi_region ();
+	}
+
+	if (ok && smoke_fx_bypass_all && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_fx_bypass_all ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_fx_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_fx_bypass_all) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-fx-bypass-all FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
 	}
 
 	if (ok && smoke_plugin && _engine.snapshot ().session_ok) {
@@ -3711,7 +3725,20 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'I' || wparam == 'i')) {
 			/* I = strip silence on selection (−40 dBFS threshold). */
 			do_strip_silence_selection ();
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'B' || wparam == 'b')) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'B' || wparam == 'b')) {
+			/* Alt+B — bypass every shell ACE insert (Reverb…Gate). */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				_engine.set_all_fx_bypassed (true);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_fx_from_engine ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			}
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'B' || wparam == 'b')) {
 			/* B = consolidate / bounce selection in place. */
 			do_consolidate_selection ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Z' || wparam == 'z')) {
@@ -4887,7 +4914,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	int fxi = hit_mixer_fx (x, y);
 	if (fxi >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
-			if (fxi == 5) {
+			const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
+			if (alt) {
+				/* Alt+click FX → bypass every shell ACE insert. */
+				_engine.set_all_fx_bypassed (true);
+			} else if (fxi == 5) {
 				if (_mixers[fxi].has_fx ()) {
 					_engine.toggle_track_gate_bypass (fxi);
 				} else {
@@ -6290,6 +6321,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"N", L"Normalize selection to −1 dBFS" },
 		{ L"I", L"Strip silence (−40 dBFS threshold)" },
 		{ L"B", L"Consolidate / bounce selection in place" },
+		{ L"Alt+B / Alt+click FX", L"Bypass all ACE inserts" },
 		{ L"Z", L"Freeze / unfreeze focused audio track" },
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"Q / Qnt", L"Quantize MIDI notes to snap grid" },
