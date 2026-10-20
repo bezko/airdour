@@ -673,6 +673,7 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_position_locked = false;
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -4897,6 +4898,7 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_position_locked = false;
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -4925,6 +4927,7 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_track = _impl->selected_track;
 	_snap.selection_start_sec = (float)start / (float)sr;
 	_snap.selection_end_sec = (float)(start + len) / (float)sr;
+	_snap.selection_position_locked = region->position_locked ();
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (ar) {
 		_snap.selection_fade_in_sec = (float)ar->fade_in_length ().samples () / (float)sr;
@@ -5081,6 +5084,7 @@ EngineHost::clear_region_selection ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_position_locked = false;
 }
 
 bool
@@ -5521,6 +5525,10 @@ EngineHost::move_selected_to (float time_sec)
 	std::shared_ptr<Region> region = _impl->selected_region.lock ();
 	if (!region) {
 		_snap.detail = L"move — select a region";
+		return false;
+	}
+	if (!region->can_move ()) {
+		_snap.detail = L"move — region position locked";
 		return false;
 	}
 	try {
@@ -7067,6 +7075,162 @@ EngineHost::smoke_reverse ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-reverse exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+
+bool
+EngineHost::set_selection_position_locked (bool locked)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"position lock — select a region";
+		return false;
+	}
+	try {
+		if (region->position_locked () == locked) {
+			refresh_selection_snap ();
+			return true;
+		}
+		_impl->session->begin_reversible_command (
+			locked ? "position-lock region" : "position-unlock region");
+		region->clear_changes ();
+		region->set_position_locked (locked);
+		_impl->session->add_command (new StatefulDiffCommand (region));
+		_impl->session->commit_reversible_command ();
+
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+
+		std::fprintf (stderr, "airdour_win_shell: region position-lock %s\n",
+		              locked ? "on" : "off");
+		std::fflush (stderr);
+		_snap.detail = locked ? L"region position locked" : L"region position unlocked";
+		return _snap.selection_position_locked == locked;
+	} catch (...) {
+		_snap.detail = L"position lock failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_selection_position_locked ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"position lock — select a region";
+		return false;
+	}
+	return set_selection_position_locked (!region->position_locked ());
+}
+
+bool
+EngineHost::smoke_region_position_lock ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-region-position-lock failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-position-lock FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 1.2f)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-position-lock FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.3f)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-position-lock FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::shared_ptr<Region> region = _impl->selected_region.lock ();
+		if (!region) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-position-lock FAILED (no region)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float start0 = _snap.selection_start_sec;
+		if (!set_selection_position_locked (true)
+		    || !region->position_locked ()
+		    || !_snap.selection_position_locked
+		    || region->can_move ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-position-lock FAILED (lock on)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (move_selected_to (start0 + 0.25f)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-position-lock FAILED "
+			              "(move while locked)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (std::fabs (_snap.selection_start_sec - start0) > 0.001f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-position-lock FAILED "
+			              "(moved while locked)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!set_selection_position_locked (false)
+		    || region->position_locked ()
+		    || _snap.selection_position_locked
+		    || !region->can_move ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-position-lock FAILED (unlock)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!move_selected_to (start0 + 0.20f)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-position-lock FAILED "
+			              "(move after unlock)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-region-position-lock ok "
+		              "(lock blocks move → unlock)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-region-position-lock ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-region-position-lock exception: %s\n",
+		              e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17629,6 +17793,7 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_position_locked = false;
 	_snap.snap_enabled = false;
 	_snap.midi_step_enabled = false;
 	_snap.midi_chord_quality = 0;
@@ -18869,6 +19034,25 @@ EngineHost::smoke_pitch ()
 
 bool
 EngineHost::smoke_reverse ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_selection_position_locked (bool locked)
+{
+	(void)locked;
+	return false;
+}
+
+bool
+EngineHost::toggle_selection_position_locked ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_region_position_lock ()
 {
 	return false;
 }

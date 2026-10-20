@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_region_position_lock,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_region_position_lock && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_region_position_lock ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_region_position_lock) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-position-lock FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2537,6 +2553,21 @@ ShellWindow::do_remove_marker_at_playhead ()
 }
 
 void
+ShellWindow::do_toggle_region_position_lock ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.toggle_selection_position_locked ()) {
+		MessageBoxW (_hwnd, L"Select a region to position-lock.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::sync_history_from_engine ()
 {
 	_history.set_available (_engine_snap.session_ok);
@@ -3637,7 +3668,13 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			/* E = fit selection (Ctrl+E remains export). */
 			do_fit_selection ();
 		} else if (wparam == 'L' || wparam == 'l') {
-			do_toggle_loop ();
+			if ((GetKeyState (VK_CONTROL) & 0x8000)
+			    && (GetKeyState (VK_MENU) & 0x8000)) {
+				/* Ctrl+Alt+L = position-lock selected region. */
+				do_toggle_region_position_lock ();
+			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
+				do_toggle_loop ();
+			}
 		} else if (wparam == 'P' || wparam == 'p') {
 			if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
 				do_toggle_punch ();
@@ -6304,6 +6341,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
 		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
 		{ L"L / P", L"Loop · Punch" },
+		{ L"Ctrl+Alt+L", L"Position-lock selected region (blocks move)" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
