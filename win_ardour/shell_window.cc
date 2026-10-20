@@ -154,6 +154,7 @@ ShellWindow::ShellWindow ()
 	, _engine_snap ()
 	, _auto_last_write_sec (-1.f)
 	, _midi_cc_last_write_sec (-1.f)
+	, _auto_lane_kind (0)
 	, _midi_cc_number (7)
 {
 	enable_dpi_awareness ();
@@ -260,7 +261,13 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_pan_automation,
+                            bool smoke_auto_lane_unify,
+                            bool smoke_auto_state,
+                            bool smoke_pan_auto_state,
+                            bool smoke_send_auto_state,
+                            bool smoke_auto_state_unify)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -660,6 +667,90 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_automation) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-automation FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_pan_automation && _engine.snapshot ().session_ok) {
+		_auto_lane_kind = 1;
+		if (!_engine.smoke_pan_automation ()) {
+			_smoke_failed = true;
+		} else {
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_pan_automation) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-pan-automation FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_auto_lane_unify && _engine.snapshot ().session_ok) {
+		_auto_lane_kind = 0;
+		if (!_engine.smoke_auto_lane_unify ()) {
+			_smoke_failed = true;
+		} else {
+			_auto_lane_kind = 2; /* leave on Send after unify */
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_auto_lane_unify) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-auto-lane-unify FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_auto_state && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_auto_state ()) {
+			_smoke_failed = true;
+		} else {
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_auto_state) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-auto-state FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_pan_auto_state && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_pan_auto_state ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_pan_from_engine ();
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_pan_auto_state) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-pan-auto-state FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_send_auto_state && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_send_auto_state ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_send_from_engine ();
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_send_auto_state) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-auto-state FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_auto_state_unify && _engine.snapshot ().session_ok) {
+		_auto_lane_kind = 0;
+		if (!_engine.smoke_auto_state_unify ()) {
+			_smoke_failed = true;
+		} else {
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_auto_state_unify) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-auto-state-unify FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1232,24 +1323,94 @@ ShellWindow::sync_mixer_send_from_engine ()
 }
 
 void
+ShellWindow::cycle_auto_lane_kind ()
+{
+	_auto_lane_kind = (_auto_lane_kind + 1) % 3;
+	refresh_automation_lane ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+const wchar_t*
+ShellWindow::auto_state_label (int state_0_3)
+{
+	switch (state_0_3) {
+	case 1:
+		return L"Play";
+	case 2:
+		return L"Write";
+	case 3:
+		return L"Touch";
+	default:
+		return L"Off";
+	}
+}
+
+void
+ShellWindow::do_cycle_auto_state ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	switch (_auto_lane_kind) {
+	case 1:
+		_engine.cycle_track_pan_auto_state (0);
+		break;
+	case 2:
+		_engine.cycle_track_send_auto_state (0);
+		break;
+	default:
+		_engine.cycle_track_gain_auto_state (0);
+		break;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	refresh_automation_lane ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::refresh_automation_lane ()
 {
+	const wchar_t* kind = L"Gain";
+	int st_i = _engine_snap.track_gain_auto_state[0];
+	if (_auto_lane_kind == 1) {
+		kind = L"Pan";
+		st_i = _engine_snap.track_pan_auto_state[0];
+	} else if (_auto_lane_kind == 2) {
+		kind = L"Send";
+		st_i = _engine_snap.track_send_auto_state[0];
+	}
+	const wchar_t* st = auto_state_label (st_i);
 	if (_engine_snap.track_name[0][0] != L'\0') {
-		wchar_t auto_lab[48];
-		_snwprintf_s (auto_lab, _TRUNCATE, L"Gain · %s", _engine_snap.track_name[0]);
+		wchar_t auto_lab[64];
+		_snwprintf_s (auto_lab, _TRUNCATE, L"%s · %s · %s", kind, st, _engine_snap.track_name[0]);
 		_auto_lane.set_label (auto_lab);
 	} else {
-		_auto_lane.set_label (L"Gain · Audio 1");
+		wchar_t auto_lab[48];
+		_snwprintf_s (auto_lab, _TRUNCATE, L"%s · %s · Audio 1", kind, st);
+		_auto_lane.set_label (auto_lab);
 	}
 	float view0 = _lanes[0].strip.view_start_sec ();
 	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
 	float curve[AutomationLane::kMaxColumns];
 	size_t n = AutomationLane::kMaxColumns;
 	if (_engine.is_linked () && _engine_snap.session_ok) {
-		_engine.fill_gain_automation_curve (0, view0, span, curve, n);
+		if (_auto_lane_kind == 1) {
+			_engine.fill_pan_automation_curve (0, view0, span, curve, n);
+		} else if (_auto_lane_kind == 2) {
+			_engine.fill_send_automation_curve (0, view0, span, curve, n);
+		} else {
+			_engine.fill_gain_automation_curve (0, view0, span, curve, n);
+		}
 	} else {
+		float flat = _mixers[0].gain ();
+		if (_auto_lane_kind == 1) {
+			flat = _mixers[0].pan ();
+		} else if (_auto_lane_kind == 2) {
+			flat = _mixers[0].send ();
+		}
 		for (size_t i = 0; i < n; ++i) {
-			curve[i] = _mixers[0].gain ();
+			curve[i] = flat;
 		}
 	}
 	_auto_lane.set_curve (curve, n);
@@ -1258,8 +1419,16 @@ ShellWindow::refresh_automation_lane ()
 	float py[AutomationLane::kMaxPoints];
 	int npt = 0;
 	if (_engine.is_linked () && _engine_snap.session_ok) {
-		npt = _engine.fill_gain_automation_points (
-			0, view0, span, px, py, (int)AutomationLane::kMaxPoints);
+		if (_auto_lane_kind == 1) {
+			npt = _engine.fill_pan_automation_points (
+				0, view0, span, px, py, (int)AutomationLane::kMaxPoints);
+		} else if (_auto_lane_kind == 2) {
+			npt = _engine.fill_send_automation_points (
+				0, view0, span, px, py, (int)AutomationLane::kMaxPoints);
+		} else {
+			npt = _engine.fill_gain_automation_points (
+				0, view0, span, px, py, (int)AutomationLane::kMaxPoints);
+		}
 	}
 	_auto_lane.set_points (px, py, (size_t)std::max (0, npt));
 	_auto_lane.set_playhead_norm (_lanes[0].strip.playhead_norm ());
@@ -1278,7 +1447,15 @@ ShellWindow::write_automation_at (float x, float y)
 	    && std::fabs (time_sec - _auto_last_write_sec) < 0.035f) {
 		return;
 	}
-	if (_engine.write_track_gain_automation (0, time_sec, value)) {
+	bool ok = false;
+	if (_auto_lane_kind == 1) {
+		ok = _engine.write_track_pan_automation (0, time_sec, value);
+	} else if (_auto_lane_kind == 2) {
+		ok = _engine.write_track_send_automation (0, time_sec, value);
+	} else {
+		ok = _engine.write_track_gain_automation (0, time_sec, value);
+	}
+	if (ok) {
 		_auto_last_write_sec = time_sec;
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
@@ -3598,6 +3775,20 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else {
 				do_toggle_midi_scale ();
 			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'A' || wparam == 'a')) {
+			/* Alt+Shift+A — cycle editor auto lane Gain → Pan → Send. */
+			cycle_auto_lane_kind ();
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'Y' || wparam == 'y'
+		               || wparam == 'P' || wparam == 'p'
+		               || wparam == 'Q' || wparam == 'q')) {
+			/* Alt+Shift+Y — cycle AutoState for current lane (P/Q redirect). */
+			do_cycle_auto_state ();
 		} else if (wparam == VK_F8) {
 			/* F8 — cycle MIDI CC lane controller Volume→Mod→Expr. */
 			cycle_midi_cc_controller ();
@@ -4956,10 +5147,21 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	if (_auto_lane.hit (_auto_lane_bounds, x, y)
 	    && _engine.is_linked () && _engine_snap.session_ok) {
+		if (GetKeyState (VK_SHIFT) & 0x8000) {
+			/* Shift+click auto lane → cycle Gain → Pan → Send. */
+			cycle_auto_lane_kind ();
+			return true;
+		}
 		_drag = DragMode::AutoWrite;
 		_drag_index = 0;
 		_auto_last_write_sec = -1.f;
-		_engine.ensure_track_gain_automation (0);
+		if (_auto_lane_kind == 1) {
+			_engine.ensure_track_pan_automation (0);
+		} else if (_auto_lane_kind == 2) {
+			_engine.ensure_track_send_automation (0);
+		} else {
+			_engine.ensure_track_gain_automation (0);
+		}
 		write_automation_at (x, y);
 		SetCapture (_hwnd);
 		SetCursor (LoadCursorW (nullptr, IDC_CROSS));
@@ -6303,6 +6505,8 @@ ShellWindow::draw_help_overlay ()
 		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
 		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
+		{ L"Alt+Shift+A / Shift+click auto", L"Cycle Gain→Pan→Send automation lane" },
+		{ L"Alt+Shift+Y", L"Cycle auto Off→Play→Write→Touch (current lane)" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
