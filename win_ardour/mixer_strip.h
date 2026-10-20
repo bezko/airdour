@@ -44,6 +44,9 @@ public:
 
 	void set_muted (bool muted) { _muted = muted; }
 	bool muted () const { return _muted; }
+	/** 0=Main (Mn) 1=AllPoints (All) — mute points badge. */
+	void set_mute_points (int points_0_1) { _mute_points = (points_0_1 != 0) ? 1 : 0; }
+	int  mute_points () const { return _mute_points; }
 	void set_soloed (bool soloed) { _soloed = soloed; }
 	bool soloed () const { return _soloed; }
 
@@ -137,6 +140,7 @@ private:
 	float       _fx_param3;
 	bool        _armed;
 	bool        _muted;
+	int         _mute_points; /* 0=Main 1=All */
 	bool        _soloed;
 	bool        _fx_bypassed;
 	int         _fx_param_count; /* 1..3 */

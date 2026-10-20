@@ -40,6 +40,7 @@ MixerStrip::MixerStrip ()
 	, _fx_param3 (0.5f)
 	, _armed (false)
 	, _muted (false)
+	, _mute_points (0)
 	, _soloed (false)
 	, _fx_bypassed (false)
 	, _fx_param_count (1)
@@ -482,15 +483,18 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		rt->DrawTextW (arm_label, (UINT32)wcslen (arm_label), fmt_meta, _arm_btn, brand);
 	}
 
-	/* Mute — lit body wash when muted (includes solo-mute of others). */
-	if (_muted) {
-		body->SetOpacity (0.9f);
-		rt->FillRectangle (_mute_btn, body);
-		body->SetOpacity (1.f);
-		rt->DrawTextW (L"M", 1, fmt_meta, _mute_btn, brand);
-	} else {
-		rt->FillRectangle (_mute_btn, edge);
-		rt->DrawTextW (L"M", 1, fmt_meta, _mute_btn, brand);
+	/* Mute — lit body wash when muted; All badge when mute-points=AllPoints. */
+	{
+		const wchar_t* mlab = (_mute_points != 0) ? L"M·All" : L"M";
+		if (_muted) {
+			body->SetOpacity (0.9f);
+			rt->FillRectangle (_mute_btn, body);
+			body->SetOpacity (1.f);
+			rt->DrawTextW (mlab, (UINT32)wcslen (mlab), fmt_meta, _mute_btn, brand);
+		} else {
+			rt->FillRectangle (_mute_btn, edge);
+			rt->DrawTextW (mlab, (UINT32)wcslen (mlab), fmt_meta, _mute_btn, brand);
+		}
 	}
 
 	/* Solo — accent when self/effective solo. */

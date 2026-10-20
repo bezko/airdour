@@ -173,6 +173,7 @@ struct EngineSnapshot {
 	bool         track_armed[kMeters];
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
+	int          track_mute_points[kMeters]; /* 0=Main 1=AllPoints (MuteMaster bitmask view) */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
@@ -346,6 +347,15 @@ public:
 	 */
 	bool set_track_muted (int track, bool muted);
 	bool toggle_track_muted (int track);
+	/**
+	 * Mute points: Main (main out only) ↔ AllPoints (pre/post/listen/main).
+	 * Ctrl+click Mute. Snap 0=Main, 1=AllPoints.
+	 */
+	bool set_track_mute_points (int track, int points_0_main_1_all);
+	bool cycle_track_mute_points (int track);
+	int  track_mute_points (int track) const;
+	/** Main → AllPoints → Main. For --smoke-mute-points. */
+	bool smoke_mute_points ();
 	bool set_track_soloed (int track, bool soloed);
 	bool toggle_track_soloed (int track);
 

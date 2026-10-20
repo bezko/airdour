@@ -594,6 +594,7 @@ EngineHost::EngineHost ()
 		_snap.track_armed[i] = false;
 		_snap.track_frozen[i] = false;
 		_snap.track_muted[i] = false;
+		_snap.track_mute_points[i] = 0;
 		_snap.track_soloed[i] = false;
 		_snap.track_pan[i] = 0.5f;
 		_snap.track_send[i] = 0.f;
@@ -3131,6 +3132,7 @@ EngineHost::refresh_mute_solo_flags ()
 {
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_muted[i] = false;
+		_snap.track_mute_points[i] = 0;
 		_snap.track_soloed[i] = false;
 	}
 	_snap.midi_muted = false;
@@ -3144,6 +3146,9 @@ EngineHost::refresh_mute_solo_flags ()
 				std::shared_ptr<Route> r = _impl->tracks[i];
 				if (r->mute_control ()) {
 					_snap.track_muted[i] = r->muted ();
+					MuteMaster::MutePoint mp = r->mute_control ()->mute_points ();
+					_snap.track_mute_points[i] =
+						(mp == MuteMaster::AllPoints) ? 1 : 0;
 				}
 				if (r->solo_control ()) {
 					_snap.track_soloed[i] = r->soloed ();
@@ -3209,6 +3214,99 @@ EngineHost::toggle_track_muted (int track)
 	}
 	refresh_mute_solo_flags ();
 	return set_track_muted (track, !_snap.track_muted[track]);
+}
+
+bool
+EngineHost::set_track_mute_points (int track, int points_0_main_1_all)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
+	    || !_impl->tracks[track]->mute_control ()) {
+		return false;
+	}
+	points_0_main_1_all = (points_0_main_1_all != 0) ? 1 : 0;
+	try {
+		std::shared_ptr<MuteControl> mc = _impl->tracks[track]->mute_control ();
+		MuteMaster::MutePoint mp = (points_0_main_1_all == 1)
+			? MuteMaster::AllPoints
+			: MuteMaster::Main;
+		mc->set_mute_points (mp);
+		refresh_mute_solo_flags ();
+		_snap.detail = (points_0_main_1_all == 1)
+			? L"mute points All"
+			: L"mute points Main";
+		return _snap.track_mute_points[track] == points_0_main_1_all;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::cycle_track_mute_points (int track)
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	refresh_mute_solo_flags ();
+	int next = (_snap.track_mute_points[track] == 0) ? 1 : 0;
+	return set_track_mute_points (track, next);
+}
+
+int
+EngineHost::track_mute_points (int track) const
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return 0;
+	}
+	return _snap.track_mute_points[track];
+}
+
+bool
+EngineHost::smoke_mute_points ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-mute-points failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]
+		    || !_impl->tracks[0]->mute_control ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-points FAILED (no Audio1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_mute_points (0, 0) || _snap.track_mute_points[0] != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-points FAILED (Main got=%d)\n",
+			              _snap.track_mute_points[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_track_mute_points (0) || _snap.track_mute_points[0] != 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-points FAILED (All got=%d)\n",
+			              _snap.track_mute_points[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_track_mute_points (0) || _snap.track_mute_points[0] != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mute-points FAILED (restore Main got=%d)\n",
+			              _snap.track_mute_points[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-mute-points ok (Main↔AllPoints)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-mute-points ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mute-points exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 bool
@@ -18157,6 +18255,34 @@ bool
 EngineHost::toggle_track_muted (int track)
 {
 	(void)track;
+	return false;
+}
+
+bool
+EngineHost::set_track_mute_points (int track, int points_0_main_1_all)
+{
+	(void)track;
+	(void)points_0_main_1_all;
+	return false;
+}
+
+bool
+EngineHost::cycle_track_mute_points (int track)
+{
+	(void)track;
+	return false;
+}
+
+int
+EngineHost::track_mute_points (int track) const
+{
+	(void)track;
+	return 0;
+}
+
+bool
+EngineHost::smoke_mute_points ()
+{
 	return false;
 }
 
