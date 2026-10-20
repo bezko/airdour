@@ -60,6 +60,8 @@ struct EngineSnapshot {
 	float        selection_end_sec;
 	float        selection_fade_in_sec; /* AudioRegion fade-in length */
 	float        selection_fade_out_sec;
+	bool         selection_sync_marked; /* Region::sync_marked */
+	float        selection_sync_sec; /* absolute session time of sync point */
 	bool         loop_active; /* auto-loop Location exists with positive length */
 	bool         loop_playing; /* Session get_play_loop() */
 	float        loop_start_sec;
@@ -575,6 +577,14 @@ public:
 	bool normalize_selected (float target_dbfs = -1.f);
 
 	/**
+	 * Set selected Region sync point at transport playhead
+	 * (Region::set_sync_position). Ctrl+Alt+Y; Shift clears.
+	 */
+	bool set_selection_sync_at (float time_sec);
+	bool set_selection_sync_at_playhead ();
+	bool clear_selection_sync ();
+
+	/**
 	 * Strip silence from selected AudioRegion (find_silence + StripSilence Filter).
 	 * Threshold dBFS (default −40); min silence / fade in seconds.
 	 * Quiet spans removed; audible parts become one or more regions.
@@ -670,6 +680,12 @@ public:
 	 * For --smoke-normalize.
 	 */
 	bool smoke_normalize ();
+
+	/**
+	 * Import → select → locate mid → set sync → assert → clear.
+	 * For --smoke-region-sync.
+	 */
+	bool smoke_region_sync ();
 
 	/**
 	 * Import gated tone (silence gaps) → strip silence → ≥2 regions.

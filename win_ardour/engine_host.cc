@@ -673,6 +673,8 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_sync_marked = false;
+	_snap.selection_sync_sec = 0.f;
 	_snap.loop_active = false;
 	_snap.loop_playing = false;
 	_snap.loop_start_sec = 0.f;
@@ -4897,6 +4899,8 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_sync_marked = false;
+	_snap.selection_sync_sec = 0.f;
 	if (!_impl || !_impl->session) {
 		return;
 	}
@@ -4925,6 +4929,12 @@ EngineHost::refresh_selection_snap ()
 	_snap.selection_track = _impl->selected_track;
 	_snap.selection_start_sec = (float)start / (float)sr;
 	_snap.selection_end_sec = (float)(start + len) / (float)sr;
+	_snap.selection_sync_marked = region->sync_marked ();
+	if (_snap.selection_sync_marked) {
+		_snap.selection_sync_sec = (float)region->sync_position ().samples () / (float)sr;
+	} else {
+		_snap.selection_sync_sec = _snap.selection_start_sec;
+	}
 	std::shared_ptr<AudioRegion> ar = std::dynamic_pointer_cast<AudioRegion> (region);
 	if (ar) {
 		_snap.selection_fade_in_sec = (float)ar->fade_in_length ().samples () / (float)sr;
@@ -5081,6 +5091,8 @@ EngineHost::clear_region_selection ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_sync_marked = false;
+	_snap.selection_sync_sec = 0.f;
 }
 
 bool
@@ -7067,6 +7079,201 @@ EngineHost::smoke_reverse ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-reverse exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+
+bool
+EngineHost::set_selection_sync_at (float time_sec)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"sync — select a region";
+		return false;
+	}
+	try {
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		samplepos_t ph = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+		samplepos_t r0 = region->position_sample ();
+		samplepos_t r1 = r0 + region->length_samples ();
+		if (ph < r0 || ph > r1) {
+			_snap.detail = L"sync — time outside region";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("set region sync");
+		region->clear_changes ();
+		/* Force a property change when unmarked sync already equals start. */
+		if (!region->sync_marked ()) {
+			samplepos_t nudge = (ph + 1 <= r1) ? ph + 1 : ((ph > r0) ? ph - 1 : ph);
+			if (nudge != ph) {
+				region->set_sync_position (timepos_t (nudge));
+			}
+		}
+		region->set_sync_position (timepos_t (ph));
+		_impl->session->add_command (new StatefulDiffCommand (region));
+		_impl->session->commit_reversible_command ();
+
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+
+		std::fprintf (stderr, "airdour_win_shell: region sync @ %.3fs (marked=%d)\n",
+		              _snap.selection_sync_sec, _snap.selection_sync_marked ? 1 : 0);
+		std::fflush (stderr);
+		_snap.detail = L"region sync set";
+		return _snap.selection_sync_marked;
+	} catch (...) {
+		_snap.detail = L"sync set failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::set_selection_sync_at_playhead ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	/* locate_to updates _snap.transport_sec synchronously; transport_sample may lag. */
+	float t = _snap.transport_sec;
+	samplecnt_t sr = _impl->session->sample_rate ();
+	if (sr > 0) {
+		samplepos_t live = _impl->session->transport_sample ();
+		float live_sec = (float)live / (float)sr;
+		if (std::fabs (live_sec - t) < 0.05f) {
+			t = live_sec;
+		}
+	}
+	return set_selection_sync_at (t);
+}
+
+bool
+EngineHost::clear_selection_sync ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	std::shared_ptr<Region> region = _impl->selected_region.lock ();
+	if (!region) {
+		_snap.detail = L"sync clear — select a region";
+		return false;
+	}
+	try {
+		if (!region->sync_marked ()) {
+			refresh_selection_snap ();
+			_snap.detail = L"sync already clear";
+			return true;
+		}
+		_impl->session->begin_reversible_command ("clear region sync");
+		region->clear_changes ();
+		region->clear_sync_position ();
+		_impl->session->add_command (new StatefulDiffCommand (region));
+		_impl->session->commit_reversible_command ();
+
+		refresh_region_flags ();
+		refresh_selection_snap ();
+		refresh_history_flags ();
+
+		std::fprintf (stderr, "airdour_win_shell: region sync cleared\n");
+		std::fflush (stderr);
+		_snap.detail = L"region sync cleared";
+		return !_snap.selection_sync_marked;
+	} catch (...) {
+		_snap.detail = L"sync clear failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_region_sync ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-region-sync failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!import_test_tone (0, 440.f, 1.2f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (import)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!select_region_at (0, 0.3f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (select)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float s0 = _snap.selection_start_sec;
+		float e0 = _snap.selection_end_sec;
+		float mid = s0 + 0.40f;
+		if (mid >= e0 - 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (len)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_to (mid, false, 0.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (locate)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::shared_ptr<Region> region = _impl->selected_region.lock ();
+		if (!region) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (no region)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!set_selection_sync_at (mid)
+		    || !region->sync_marked ()
+		    || !_snap.selection_sync_marked
+		    || std::fabs (_snap.selection_sync_sec - mid) > 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-region-sync FAILED (set sync=%.3f want=%.3f marked=%d)\n",
+			              _snap.selection_sync_sec, mid, _snap.selection_sync_marked ? 1 : 0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!clear_selection_sync ()
+		    || region->sync_marked ()
+		    || _snap.selection_sync_marked) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-region-sync FAILED (clear)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-sync ok @ %.3fs\n", mid);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-region-sync ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-sync exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -17629,6 +17836,8 @@ EngineHost::EngineHost ()
 	_snap.selection_end_sec = 0.f;
 	_snap.selection_fade_in_sec = 0.f;
 	_snap.selection_fade_out_sec = 0.f;
+	_snap.selection_sync_marked = false;
+	_snap.selection_sync_sec = 0.f;
 	_snap.snap_enabled = false;
 	_snap.midi_step_enabled = false;
 	_snap.midi_chord_quality = 0;
@@ -18875,6 +19084,31 @@ EngineHost::smoke_reverse ()
 
 bool
 EngineHost::smoke_normalize ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_selection_sync_at (float time_sec)
+{
+	(void)time_sec;
+	return false;
+}
+
+bool
+EngineHost::set_selection_sync_at_playhead ()
+{
+	return false;
+}
+
+bool
+EngineHost::clear_selection_sync ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_region_sync ()
 {
 	return false;
 }
