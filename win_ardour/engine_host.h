@@ -14,6 +14,7 @@
 struct EngineMarkerSnap {
 	float        sec;
 	wchar_t      name[24];
+	bool         section; /* Location::is_section */
 };
 
 struct EngineMidiDeviceSnap {
@@ -729,6 +730,14 @@ public:
 
 	/** Add IsMark at time_sec (name auto if empty). */
 	bool add_marker_at (float time_sec, const std::string& name = std::string ());
+	bool add_section_marker_at (float time_sec,
+	                           const std::string& name = std::string ());
+	bool remove_section_marker_near (float time_sec, float slop_sec = 0.35f);
+	/** Rename nearest IsSection. Alt+Shift+S. */
+	bool rename_section_near (float time_sec, const std::string& name,
+	                          float slop_sec = 0.35f);
+	/** Add → rename → assert → remove. For --smoke-section-rename. */
+	bool smoke_section_rename ();
 	/** Remove nearest IsMark within slop_sec of time_sec. */
 	bool remove_marker_near (float time_sec, float slop_sec = 0.35f);
 	/** Locate transport to time_sec (optional snap to nearest mark within slop). */
