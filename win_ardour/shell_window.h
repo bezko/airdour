@@ -127,7 +127,8 @@ public:
 	                    bool smoke_midi_scale = false,
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
-	                    bool smoke_midi_pressure = false);
+	                    bool smoke_midi_pressure = false,
+	                    bool smoke_auto_state = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -195,6 +196,8 @@ private:
 	void draw_automation_lane ();
 	void refresh_automation_lane ();
 	void write_automation_at (float x, float y);
+	void do_cycle_gain_auto_state ();
+	static const wchar_t* gain_auto_state_label (int state_0_3);
 	void draw_midi_cc_lane ();
 	void refresh_midi_cc_lane ();
 	void write_midi_cc_at (float x, float y);
