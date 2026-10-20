@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -1058,6 +1059,15 @@ public:
 
 	/** Hit-test piano-roll; selects note under (time,pitch) if any. */
 	bool select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop = 0.f);
+	/**
+	 * Preview a pitch through MidiTrack immediate events (Reasonable Synth).
+	 * Note-on now; auto note-off ~180ms later via poll. For click audition.
+	 */
+	bool audition_midi_note (uint8_t pitch, uint8_t velocity = 100);
+	/** Force note-off for any pending audition. */
+	void silence_midi_audition ();
+	/** Add note → select/audition → verify immediate path. --smoke-midi-audition */
+	bool smoke_midi_audition ();
 	void clear_midi_note_selection ();
 	bool delete_selected_midi_note ();
 
@@ -1302,6 +1312,7 @@ private:
 	int  arp_pitch_at_step (int step) const;
 	bool midi_immediate_note (uint8_t status, uint8_t pitch, uint8_t velocity);
 	void arp_silence ();
+	void tick_midi_audition ();
 	void refresh_track_fx_snap ();
 	void refresh_track_comp_snap ();
 	void refresh_track_eq_snap ();
@@ -1361,6 +1372,8 @@ private:
 	int     _arp_pitch_count;
 	uint8_t _arp_held[kMaxArpPitches];
 	int     _arp_held_count;
+	int     _audition_pitch; /* −1 = silent */
+	std::chrono::steady_clock::time_point _audition_off_at;
 
 #ifdef AIRDOUR_WIN_SHELL_WITH_ENGINE
 	class Impl;

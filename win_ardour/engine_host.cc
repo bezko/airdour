@@ -580,6 +580,8 @@ EngineHost::EngineHost ()
 	, _arp_sounding (-1)
 	, _arp_pitch_count (0)
 	, _arp_held_count (0)
+	, _audition_pitch (-1)
+	, _audition_off_at ()
 	, _impl (new Impl)
 {
 	for (int i = 0; i < kMaxArpPitches; ++i) {
@@ -14080,6 +14082,8 @@ EngineHost::select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop
 	}
 	_impl->selected_midi_note_id = _snap.midi_notes[best].id;
 	refresh_midi_notes_snap ();
+	/* Click preview through the track synth (auto note-off via poll). */
+	audition_midi_note (_snap.midi_notes[best].pitch, _snap.midi_notes[best].velocity);
 	return true;
 }
 
@@ -16908,6 +16912,102 @@ EngineHost::midi_immediate_note (uint8_t status, uint8_t pitch, uint8_t velocity
 	}
 }
 
+void
+EngineHost::silence_midi_audition ()
+{
+	if (_audition_pitch < 0) {
+		return;
+	}
+	midi_immediate_note (0x80, (uint8_t)_audition_pitch, 0);
+	_audition_pitch = -1;
+}
+
+bool
+EngineHost::audition_midi_note (uint8_t pitch, uint8_t velocity)
+{
+	if (!ensure_midi_track () || !_impl || !_impl->midi_track) {
+		_snap.detail = L"MIDI audition: no MidiTrack";
+		return false;
+	}
+	silence_midi_audition ();
+	if (velocity < 1) {
+		velocity = 1;
+	}
+	if (!midi_immediate_note (0x90, pitch, velocity)) {
+		_snap.detail = L"MIDI audition: note-on failed";
+		return false;
+	}
+	_audition_pitch = (int)pitch;
+	_audition_off_at = std::chrono::steady_clock::now () + std::chrono::milliseconds (180);
+	_snap.detail = L"MIDI note audition";
+	return true;
+}
+
+void
+EngineHost::tick_midi_audition ()
+{
+	if (_audition_pitch < 0) {
+		return;
+	}
+	if (std::chrono::steady_clock::now () < _audition_off_at) {
+		return;
+	}
+	silence_midi_audition ();
+}
+
+bool
+EngineHost::smoke_midi_audition ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-audition failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!add_midi_note (64, 0.0f, 0.5f, 100)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		size_t before = _impl->midi_track->immediate_events ().read_space ();
+		if (!select_midi_note_at (0.1f, 64)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition FAILED (select)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		size_t after = _impl->midi_track->immediate_events ().read_space ();
+		if (_audition_pitch != 64 && after <= before) {
+			/* Process may have drained; explicit re-audition as fallback. */
+			if (!audition_midi_note (64, 100)) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition FAILED (audition)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		/* Advance past auto note-off window. */
+		_audition_off_at = std::chrono::steady_clock::now ();
+		tick_midi_audition ();
+		if (_audition_pitch >= 0) {
+			silence_midi_audition ();
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition ok (pitch=64)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-audition ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 int
 EngineHost::arp_pitch_at_step (int step) const
 {
@@ -17520,6 +17620,7 @@ EngineHost::poll ()
 {
 	refresh_snapshot ();
 	tick_arpeggiator (false);
+	tick_midi_audition ();
 }
 
 EngineSnapshot
@@ -17551,6 +17652,8 @@ EngineHost::EngineHost ()
 	, _arp_sounding (-1)
 	, _arp_pitch_count (0)
 	, _arp_held_count (0)
+	, _audition_pitch (-1)
+	, _audition_off_at ()
 {
 	for (int i = 0; i < kMaxArpPitches; ++i) {
 		_arp_pitches[i] = 0;
@@ -20188,6 +20291,31 @@ EngineHost::midi_immediate_note (uint8_t status, uint8_t pitch, uint8_t velocity
 	(void)status;
 	(void)pitch;
 	(void)velocity;
+	return false;
+}
+
+void
+EngineHost::silence_midi_audition ()
+{
+	_audition_pitch = -1;
+}
+
+bool
+EngineHost::audition_midi_note (uint8_t pitch, uint8_t velocity)
+{
+	(void)pitch;
+	(void)velocity;
+	return false;
+}
+
+void
+EngineHost::tick_midi_audition ()
+{
+}
+
+bool
+EngineHost::smoke_midi_audition ()
+{
 	return false;
 }
 
