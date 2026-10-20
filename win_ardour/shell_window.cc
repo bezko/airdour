@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_track_color)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -487,6 +488,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		/* Always scaffold a MIDI track + empty region so the piano-roll is live. */
 		_engine.ensure_midi_track ();
 		_engine.ensure_midi_region ();
+	}
+
+	if (ok && smoke_track_color && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_track_color ()) {
+			_smoke_failed = true;
+		} else {
+			sync_track_labels_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_track_color) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-color FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
 	}
 
 	if (ok && smoke_plugin && _engine.snapshot ().session_ok) {
@@ -1135,6 +1149,7 @@ ShellWindow::sync_track_labels_from_engine ()
 		}
 		wcsncpy_s (_lanes[i].label, lab, _TRUNCATE);
 		_mixers[i].set_label (lab);
+		_mixers[i].set_color (i < EngineSnapshot::kMeters ? _engine_snap.track_color[i] : 0);
 		_mixers[i].set_midi_strip (false);
 	}
 	const int mi = midi_mixer_index ();
@@ -1144,6 +1159,7 @@ ShellWindow::sync_track_labels_from_engine ()
 		} else {
 			_mixers[mi].set_label (L"MIDI 1");
 		}
+		_mixers[mi].set_color (0);
 		_mixers[mi].set_midi_strip (true);
 	}
 	if (na > 0 && _engine_snap.track_name[0][0] != L'\0') {
@@ -3738,7 +3754,28 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				st *= 12;
 			}
 			do_transpose_midi_notes (st);
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'C' || wparam == 'c')) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'C' || wparam == 'c')) {
+			/* Alt+C — cycle PresentationInfo color on focused audio track. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				int idx = _focus_audio_track;
+				if (_engine_snap.has_selection && _engine_snap.selection_track >= 0) {
+					idx = _engine_snap.selection_track;
+				}
+				if (idx < 0 || idx >= n_audio_lanes ()) {
+					idx = 0;
+				}
+				if (_engine.cycle_track_color (idx)) {
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_track_labels_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+				}
+			}
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'C' || wparam == 'c')) {
 			do_toggle_count_in ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'K' || wparam == 'k')) {
 			do_toggle_click ();
@@ -6307,6 +6344,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
+		{ L"Alt+C", L"Cycle focused track color" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
 		{ L"Home / 0", L"Follow transport (reset view)" },

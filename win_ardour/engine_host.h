@@ -202,6 +202,7 @@ struct EngineSnapshot {
 	static constexpr int kTrackNameLen = 32;
 	wchar_t      track_name[kMeters][kTrackNameLen]; /* Session Route names */
 	wchar_t      midi_track_name[kTrackNameLen];
+	uint32_t     track_color[kMeters]; /* PresentationInfo RGBA (RRGGBBAA); 0=unset */
 	float        track_gain[kMeters]; /* Route gain_control mirror after reorder */
 	bool         track_in_group[kMeters]; /* member of Session RouteGroup */
 	int          group_member_count; /* 0 = no shell group */
@@ -815,6 +816,15 @@ public:
 	/** Rename Session Track (fails if rec-armed or empty name). */
 	bool set_track_name (int track, const std::string& name);
 	bool set_midi_track_name (const std::string& name);
+	/**
+	 * Set PresentationInfo color (RRGGBBAA). 0 clears to unset.
+	 * For Alt+C cycle / --smoke-track-color.
+	 */
+	bool set_track_color (int track, uint32_t rgba);
+	/** Advance focused audio track through a fixed shell palette. */
+	bool cycle_track_color (int track);
+	/** Set → cycle → verify → restore. For --smoke-track-color. */
+	bool smoke_track_color ();
 	/**
 	 * Swap presentation_order with neighbour (delta −1 = up, +1 = down).
 	 * collect_tracks re-sorts so Editor/Mixer follow Session order.
