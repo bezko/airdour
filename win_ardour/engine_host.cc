@@ -9149,6 +9149,87 @@ EngineHost::smoke_punch ()
 	}
 }
 
+
+bool
+EngineHost::locate_punch_in ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_locations_snap ();
+	if (!_snap.punch_range_ok) {
+		_snap.detail = L"no punch range";
+		return false;
+	}
+	return locate_to (_snap.punch_start_sec, false, 0.f);
+}
+
+bool
+EngineHost::locate_punch_out ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_locations_snap ();
+	if (!_snap.punch_range_ok) {
+		_snap.detail = L"no punch range";
+		return false;
+	}
+	return locate_to (_snap.punch_end_sec, false, 0.f);
+}
+
+bool
+EngineHost::smoke_punch_navigate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-punch-navigate failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		if (!set_punch_range (0.5f, 2.5f) || !_snap.punch_range_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch-navigate FAILED (set)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_to (0.0f, false, 0.f)
+		    || std::fabs (_snap.transport_sec) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch-navigate FAILED (start)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_punch_in () || std::fabs (_snap.transport_sec - 0.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch-navigate FAILED (in got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_punch_out () || std::fabs (_snap.transport_sec - 2.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-punch-navigate FAILED (out got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		locate_to (0.f, false, 0.f);
+		std::fprintf (stderr, "airdour_win_shell: smoke-punch-navigate ok (0->0.5->2.5)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-punch-navigate ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-punch-navigate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::add_marker_at (float time_sec, const std::string& name)
 {
@@ -18981,6 +19062,24 @@ EngineHost::set_punch_enabled (bool enable)
 
 bool
 EngineHost::toggle_punch_enabled ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_punch_in ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_punch_out ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_punch_navigate ()
 {
 	return false;
 }

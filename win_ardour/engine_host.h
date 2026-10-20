@@ -726,6 +726,11 @@ public:
 	/** Arm/disarm Session punch-in + punch-out (record only inside range). */
 	bool set_punch_enabled (bool enable);
 	bool toggle_punch_enabled ();
+	/** Locate transport to punch in/out. Ctrl+Alt+[ / ]. */
+	bool locate_punch_in ();
+	bool locate_punch_out ();
+	/** Set punch → locate in → out. For --smoke-punch-navigate. */
+	bool smoke_punch_navigate ();
 
 	/** Add IsMark at time_sec (name auto if empty). */
 	bool add_marker_at (float time_sec, const std::string& name = std::string ());
