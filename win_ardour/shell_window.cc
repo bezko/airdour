@@ -260,7 +260,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_scale,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
-                            bool smoke_midi_pressure)
+                            bool smoke_midi_pressure,
+                            bool smoke_group_recenable)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -860,6 +861,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_group) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_group_recenable && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_group_recenable ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_group_from_engine ();
+			sync_mixer_arm_from_engine ();
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_group_recenable) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -6315,7 +6331,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
-		{ L"U", L"Apply / clear track group" },
+		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·arm)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
