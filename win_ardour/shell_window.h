@@ -128,7 +128,8 @@ public:
 	                    bool smoke_midi_cc = false,
 	                    bool smoke_midi_bend = false,
 	                    bool smoke_midi_pressure = false,
-	                    bool smoke_pan_automation = false);
+	                    bool smoke_pan_automation = false,
+	                    bool smoke_auto_lane_unify = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -431,6 +432,7 @@ private:
 	RecoveryPanel  _recovery;
 	float          _auto_last_write_sec;
 	float          _midi_cc_last_write_sec;
-	bool           _auto_lane_pan; /* false=Gain, true=Pan azimuth on Audio 1 */
+	/** Editor auto lane: 0=Gain 1=Pan 2=Send (Audio 1). Alt+Shift+A / Shift+click. */
+	int            _auto_lane_kind;
 	int            _midi_cc_number; /* 7 Vol / 1 Mod / 11 Expr / -1 Bend / -2 Pressure */
 };

@@ -399,7 +399,7 @@ public:
 
 	/**
 	 * Track pan azimuth AutomationList (PanAzimuthAutomation). Editor lane
-	 * when shell cycles Gain→Pan (Shift+click lane / Alt+Shift+A).
+	 * when shell cycles Gain→Pan→Send (Shift+click lane / Alt+Shift+A).
 	 */
 	bool ensure_track_pan_automation (int track = 0);
 	bool write_track_pan_automation (int track, float time_sec, float value_0_1);
@@ -417,6 +417,31 @@ public:
 	                                 int max_n);
 	/** Clear → L/C/R points → Play. For --smoke-pan-automation. */
 	bool smoke_pan_automation ();
+
+	/**
+	 * Aux send level AutomationList (BusSendLevel via InternalSend → Aux).
+	 * Editor lane when shell cycles Gain→Pan→Send.
+	 */
+	bool ensure_track_send_automation (int track = 0);
+	bool write_track_send_automation (int track, float time_sec, float value_0_1);
+	bool clear_track_send_automation (int track = 0);
+	bool fill_send_automation_curve (int track,
+	                                 float view_start_sec,
+	                                 float view_span_sec,
+	                                 float* y_0_1,
+	                                 size_t n);
+	int  fill_send_automation_points (int track,
+	                                  float view_start_sec,
+	                                  float view_span_sec,
+	                                  float* x_norm,
+	                                  float* y_0_1,
+	                                  int max_n);
+	/** Clear → 0/0.75/0.25 points → Play. For --smoke-send-automation. */
+	bool smoke_send_automation ();
+	/**
+	 * Gain + pan + send automation smokes (unify lane). For --smoke-auto-lane-unify.
+	 */
+	bool smoke_auto_lane_unify ();
 
 	/**
 	 * MidiModel CC AutomationList (region automation, BeatTime). Default CC7

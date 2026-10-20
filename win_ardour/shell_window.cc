@@ -154,7 +154,7 @@ ShellWindow::ShellWindow ()
 	, _engine_snap ()
 	, _auto_last_write_sec (-1.f)
 	, _midi_cc_last_write_sec (-1.f)
-	, _auto_lane_pan (false)
+	, _auto_lane_kind (0)
 	, _midi_cc_number (7)
 {
 	enable_dpi_awareness ();
@@ -262,7 +262,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_midi_cc,
                             bool smoke_midi_bend,
                             bool smoke_midi_pressure,
-                            bool smoke_pan_automation)
+                            bool smoke_pan_automation,
+                            bool smoke_auto_lane_unify)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -667,7 +668,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan_automation && _engine.snapshot ().session_ok) {
-		_auto_lane_pan = true;
+		_auto_lane_kind = 1;
 		if (!_engine.smoke_pan_automation ()) {
 			_smoke_failed = true;
 		} else {
@@ -676,6 +677,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_pan_automation) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan-automation FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_auto_lane_unify && _engine.snapshot ().session_ok) {
+		_auto_lane_kind = 0;
+		if (!_engine.smoke_auto_lane_unify ()) {
+			_smoke_failed = true;
+		} else {
+			_auto_lane_kind = 2; /* leave on Send after unify */
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_auto_lane_unify) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-auto-lane-unify FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1250,7 +1266,7 @@ ShellWindow::sync_mixer_send_from_engine ()
 void
 ShellWindow::cycle_auto_lane_kind ()
 {
-	_auto_lane_pan = !_auto_lane_pan;
+	_auto_lane_kind = (_auto_lane_kind + 1) % 3;
 	refresh_automation_lane ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
@@ -1258,7 +1274,12 @@ ShellWindow::cycle_auto_lane_kind ()
 void
 ShellWindow::refresh_automation_lane ()
 {
-	const wchar_t* kind = _auto_lane_pan ? L"Pan" : L"Gain";
+	const wchar_t* kind = L"Gain";
+	if (_auto_lane_kind == 1) {
+		kind = L"Pan";
+	} else if (_auto_lane_kind == 2) {
+		kind = L"Send";
+	}
 	if (_engine_snap.track_name[0][0] != L'\0') {
 		wchar_t auto_lab[48];
 		_snwprintf_s (auto_lab, _TRUNCATE, L"%s · %s", kind, _engine_snap.track_name[0]);
@@ -1273,13 +1294,20 @@ ShellWindow::refresh_automation_lane ()
 	float curve[AutomationLane::kMaxColumns];
 	size_t n = AutomationLane::kMaxColumns;
 	if (_engine.is_linked () && _engine_snap.session_ok) {
-		if (_auto_lane_pan) {
+		if (_auto_lane_kind == 1) {
 			_engine.fill_pan_automation_curve (0, view0, span, curve, n);
+		} else if (_auto_lane_kind == 2) {
+			_engine.fill_send_automation_curve (0, view0, span, curve, n);
 		} else {
 			_engine.fill_gain_automation_curve (0, view0, span, curve, n);
 		}
 	} else {
-		float flat = _auto_lane_pan ? _mixers[0].pan () : _mixers[0].gain ();
+		float flat = _mixers[0].gain ();
+		if (_auto_lane_kind == 1) {
+			flat = _mixers[0].pan ();
+		} else if (_auto_lane_kind == 2) {
+			flat = _mixers[0].send ();
+		}
 		for (size_t i = 0; i < n; ++i) {
 			curve[i] = flat;
 		}
@@ -1290,8 +1318,11 @@ ShellWindow::refresh_automation_lane ()
 	float py[AutomationLane::kMaxPoints];
 	int npt = 0;
 	if (_engine.is_linked () && _engine_snap.session_ok) {
-		if (_auto_lane_pan) {
+		if (_auto_lane_kind == 1) {
 			npt = _engine.fill_pan_automation_points (
+				0, view0, span, px, py, (int)AutomationLane::kMaxPoints);
+		} else if (_auto_lane_kind == 2) {
+			npt = _engine.fill_send_automation_points (
 				0, view0, span, px, py, (int)AutomationLane::kMaxPoints);
 		} else {
 			npt = _engine.fill_gain_automation_points (
@@ -1315,9 +1346,14 @@ ShellWindow::write_automation_at (float x, float y)
 	    && std::fabs (time_sec - _auto_last_write_sec) < 0.035f) {
 		return;
 	}
-	bool ok = _auto_lane_pan
-		? _engine.write_track_pan_automation (0, time_sec, value)
-		: _engine.write_track_gain_automation (0, time_sec, value);
+	bool ok = false;
+	if (_auto_lane_kind == 1) {
+		ok = _engine.write_track_pan_automation (0, time_sec, value);
+	} else if (_auto_lane_kind == 2) {
+		ok = _engine.write_track_send_automation (0, time_sec, value);
+	} else {
+		ok = _engine.write_track_gain_automation (0, time_sec, value);
+	}
 	if (ok) {
 		_auto_last_write_sec = time_sec;
 		_engine.poll ();
@@ -3642,7 +3678,7 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && (GetKeyState (VK_SHIFT) & 0x8000)
 		           && !(GetKeyState (VK_CONTROL) & 0x8000)
 		           && (wparam == 'A' || wparam == 'a')) {
-			/* Alt+Shift+A — cycle editor auto lane Gain ↔ Pan. */
+			/* Alt+Shift+A — cycle editor auto lane Gain → Pan → Send. */
 			cycle_auto_lane_kind ();
 		} else if (wparam == VK_F8) {
 			/* F8 — cycle MIDI CC lane controller Volume→Mod→Expr. */
@@ -5003,15 +5039,17 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	if (_auto_lane.hit (_auto_lane_bounds, x, y)
 	    && _engine.is_linked () && _engine_snap.session_ok) {
 		if (GetKeyState (VK_SHIFT) & 0x8000) {
-			/* Shift+click auto lane → cycle Gain ↔ Pan. */
+			/* Shift+click auto lane → cycle Gain → Pan → Send. */
 			cycle_auto_lane_kind ();
 			return true;
 		}
 		_drag = DragMode::AutoWrite;
 		_drag_index = 0;
 		_auto_last_write_sec = -1.f;
-		if (_auto_lane_pan) {
+		if (_auto_lane_kind == 1) {
 			_engine.ensure_track_pan_automation (0);
+		} else if (_auto_lane_kind == 2) {
+			_engine.ensure_track_send_automation (0);
 		} else {
 			_engine.ensure_track_gain_automation (0);
 		}
@@ -6358,7 +6396,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
 		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
-		{ L"Alt+Shift+A / Shift+click auto", L"Cycle Gain ↔ Pan automation lane" },
+		{ L"Alt+Shift+A / Shift+click auto", L"Cycle Gain→Pan→Send automation lane" },
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
