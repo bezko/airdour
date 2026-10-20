@@ -583,6 +583,11 @@ public:
 	bool ensure_selected_region_envelope ();
 	/** Sample selected region envelope across its length into y_0_1[n] (0..1). */
 	bool fill_selected_region_envelope_curve (float* y_0_1, size_t n);
+	/**
+	 * Nudge mid-point gain coeff on selected region envelope (±delta, clamped).
+	 * Ensures envelope first. Ctrl+Alt+↑/↓. For --smoke-region-envelope-nudge.
+	 */
+	bool nudge_selected_region_envelope_mid (float delta_coeff);
 
 	/**
 	 * Strip silence from selected AudioRegion (find_silence + StripSilence Filter).
@@ -686,6 +691,12 @@ public:
 	 * For --smoke-region-envelope.
 	 */
 	bool smoke_region_envelope ();
+
+	/**
+	 * Ensure → nudge mid up → assert rise → nudge down → restore.
+	 * For --smoke-region-envelope-nudge.
+	 */
+	bool smoke_region_envelope_nudge ();
 
 	/**
 	 * Import gated tone (silence gaps) → strip silence → ≥2 regions.

@@ -238,6 +238,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_reverse,
                             bool smoke_normalize,
                             bool smoke_region_envelope,
+                            bool smoke_region_envelope_nudge,
                             bool smoke_strip_silence,
                             bool smoke_consolidate,
                             bool smoke_freeze,
@@ -739,6 +740,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_region_envelope) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_region_envelope_nudge && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_region_envelope_nudge ()) {
+			_smoke_failed = true;
+		} else {
+			apply_region_selection_to_lanes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_region_envelope_nudge) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-envelope-nudge FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2752,6 +2766,23 @@ ShellWindow::do_ensure_region_envelope ()
 }
 
 void
+ShellWindow::do_nudge_region_envelope_mid (float delta_coeff)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine_snap.has_selection) {
+		return;
+	}
+	if (_engine.nudge_selected_region_envelope_mid (delta_coeff)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		apply_region_selection_to_lanes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::do_strip_silence_selection ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -3801,6 +3832,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		} else if (wparam == VK_F2) {
 			do_rename_focused_track ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == VK_UP || wparam == VK_DOWN)) {
+			/* Ctrl+Alt+↑/↓ = nudge region envelope mid gain. */
+			do_nudge_region_envelope_mid (wparam == VK_UP ? 0.08f : -0.08f);
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_UP) {
 			do_move_audio_track (-1);
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_DOWN) {
@@ -6390,6 +6426,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
 		{ L"Shift+E", L"Region gain envelope (unity→dip→unity)" },
+		{ L"Ctrl+Alt+↑/↓", L"Nudge region envelope mid gain" },
 	};
 
 	float y = card.top + 40.f * _dpi_scale;
