@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_section_marker,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,18 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_section_marker && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_section_marker ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_section_marker) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-section-marker FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2536,6 +2549,27 @@ ShellWindow::do_remove_marker_at_playhead ()
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+
+void
+ShellWindow::do_section_marker_at_playhead ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (GetKeyState (VK_SHIFT) & 0x8000) {
+		if (!_engine.remove_section_marker_near (_playhead_sec)) {
+			MessageBoxW (_hwnd, L"No section marker near playhead.",
+			             L"Airdour", MB_OK | MB_ICONWARNING);
+		}
+	} else if (!_engine.add_section_marker_at (_playhead_sec)) {
+		MessageBoxW (_hwnd, L"Could not add section marker.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 void
 ShellWindow::sync_history_from_engine ()
 {
@@ -3690,7 +3724,14 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_cut_midi_notes ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'V' || wparam == 'v')) {
 			do_paste_midi_notes ();
-		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'S' || wparam == 's')) {
+			/* Ctrl+Alt+S = section marker at playhead; +Shift = remove. */
+			do_section_marker_at_playhead ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'S' || wparam == 's')) {
 			do_save_session ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'S' || wparam == 's')) {
 			do_split_at_playhead ();
@@ -5731,11 +5772,21 @@ ShellWindow::draw_editor_ruler ()
 		_rt->FillRectangle (
 			D2D1::RectF (px - thick * 0.5f, rr.top, px + thick * 0.5f, rr.bottom),
 			_brush_marker);
-		const wchar_t* name = _engine_snap.markers[i].name;
-		if (name[0]) {
-			_rt->DrawTextW (name, (UINT32)wcslen (name), _fmt_meta,
+		wchar_t label[32];
+		if (_engine_snap.markers[i].section) {
+			if (_engine_snap.markers[i].name[0]) {
+				_snwprintf_s (label, _TRUNCATE, L"S %s",
+				              _engine_snap.markers[i].name);
+			} else {
+				wcsncpy_s (label, L"S", _TRUNCATE);
+			}
+		} else {
+			wcsncpy_s (label, _engine_snap.markers[i].name, _TRUNCATE);
+		}
+		if (label[0]) {
+			_rt->DrawTextW (label, (UINT32)wcslen (label), _fmt_meta,
 			                D2D1::RectF (px + 2.f * _dpi_scale, rr.top,
-			                             px + 48.f * _dpi_scale, rr.bottom),
+			                             px + 56.f * _dpi_scale, rr.bottom),
 			                _brush_marker);
 		}
 	}
@@ -6306,6 +6357,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
+		{ L"Ctrl+Alt+S", L"Section marker at playhead (Shift=remove)" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
