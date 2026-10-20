@@ -370,6 +370,13 @@ public:
 	/** Aux send level 0..1 (gain coeff) via InternalSend → Aux bus. */
 	bool  set_track_send (int track, float send_0_1);
 	float track_send (int track) const;
+	/**
+	 * Zero every audio track aux send (NoGroup).
+	 * For Alt+click send / --smoke-send-reset-all.
+	 */
+	bool reset_all_sends ();
+	/** Raise sends → reset_all → verify ≈0. For --smoke-send-reset-all. */
+	bool smoke_send_reset_all ();
 
 	/** Send 0 → 0.75 → 0.25 on Audio 1. For --smoke-send. */
 	bool smoke_send ();
