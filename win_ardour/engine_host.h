@@ -174,6 +174,7 @@ struct EngineSnapshot {
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
+	bool         track_solo_isolated[kMeters]; /* SoloIsolateControl self */
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
@@ -348,6 +349,15 @@ public:
 	bool toggle_track_muted (int track);
 	bool set_track_soloed (int track, bool soloed);
 	bool toggle_track_soloed (int track);
+
+	/**
+	 * Solo-isolate a track (SoloIsolateControl) so upstream solo doesn't mute it.
+	 * For Shift+click Solo / --smoke-solo-isolate.
+	 */
+	bool set_track_solo_isolated (int track, bool isolated);
+	bool toggle_track_solo_isolated (int track = 0);
+	/** Off → on → off on Audio 1. */
+	bool smoke_solo_isolate ();
 
 	/** MIDI track mute/solo (Session MidiTrack as Route). */
 	bool set_midi_muted (bool muted);
@@ -1283,6 +1293,7 @@ private:
 	void refresh_freeze_flags ();
 	void refresh_record_flags ();
 	void refresh_mute_solo_flags ();
+	void refresh_solo_isolate_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_send_flags ();
