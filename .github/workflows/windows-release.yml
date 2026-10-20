@@ -33,7 +33,7 @@ permissions:
 jobs:
   release-win64:
     name: Build and publish win64 release zip
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 60
 
     steps:

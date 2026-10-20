@@ -29,7 +29,7 @@ permissions:
 jobs:
   wasapi-smoke:
     name: WASAPI I/O smoke (MSVC x64)
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 30
 
     steps:
@@ -99,7 +99,7 @@ jobs:
   # Placeholder job documenting the next CI stage (deps). Does not fail the workflow.
   deps-notes:
     name: Deps bootstrap notes
-    runs-on: windows-latest
+    runs-on: windows-2022
     needs: wasapi-smoke
     steps:
       - name: Document vcpkg expectations
