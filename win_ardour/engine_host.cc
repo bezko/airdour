@@ -9298,6 +9298,77 @@ EngineHost::locate_to (float time_sec, bool snap_to_marker, float slop_sec)
 }
 
 bool
+EngineHost::locate_next_marker ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		samplepos_t here = (samplepos_t)std::llround ((double)_snap.transport_sec * (double)sr);
+		if (here < 0) {
+			here = 0;
+		}
+		timepos_t pos = locs->first_mark_after_flagged (
+			timepos_t (here), false, Location::IsMark);
+		if (pos == timepos_t::max (Temporal::AudioTime)) {
+			_snap.detail = L"no next marker";
+			return false;
+		}
+		return locate_to ((float)pos.samples () / (float)sr, false, 0.f);
+	} catch (...) {
+		_snap.detail = L"next marker failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::locate_prev_marker ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		Locations* locs = _impl->session->locations ();
+		if (!locs) {
+			return false;
+		}
+		samplecnt_t sr = _impl->session->sample_rate ();
+		if (sr <= 0 && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			return false;
+		}
+		samplepos_t here = (samplepos_t)std::llround ((double)_snap.transport_sec * (double)sr);
+		if (here < 1) {
+			_snap.detail = L"no prev marker";
+			return false;
+		}
+		timepos_t pos = locs->first_mark_before_flagged (
+			timepos_t (here), false, Location::IsMark);
+		if (pos == timepos_t::max (Temporal::AudioTime)) {
+			_snap.detail = L"no prev marker";
+			return false;
+		}
+		return locate_to ((float)pos.samples () / (float)sr, false, 0.f);
+	} catch (...) {
+		_snap.detail = L"prev marker failed";
+		return false;
+	}
+}
+
+bool
 EngineHost::scrub_to (float time_sec)
 {
 	/* Drag scrub: continuous locate, no mark snap (grid snap still applies). */
@@ -9451,6 +9522,68 @@ EngineHost::smoke_locate ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_marker_navigate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-marker-navigate failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		if (!add_marker_at (1.0f, "nav-a") || !add_marker_at (2.0f, "nav-b")) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate FAILED (add)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_to (0.5f, false, 0.f)
+		    || std::fabs (_snap.transport_sec - 0.5f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate FAILED (start 0.5)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_next_marker () || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate FAILED (next→1 got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_next_marker () || std::fabs (_snap.transport_sec - 2.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate FAILED (next→2 got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_prev_marker () || std::fabs (_snap.transport_sec - 1.0f) > 0.08f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate FAILED (prev→1 got=%.3f)\n",
+			              _snap.transport_sec);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		remove_marker_near (1.0f, 0.2f);
+		remove_marker_near (2.0f, 0.2f);
+		locate_to (0.f, false, 0.f);
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate ok (0.5→1→2→1)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-marker-navigate ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate exception: %s\n",
+		              e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -19230,6 +19363,18 @@ EngineHost::locate_to (float time_sec, bool snap_to_marker, float slop_sec)
 }
 
 bool
+EngineHost::locate_next_marker ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_prev_marker ()
+{
+	return false;
+}
+
+bool
 EngineHost::scrub_to (float time_sec)
 {
 	(void)time_sec;
@@ -19256,6 +19401,12 @@ EngineHost::stop_shuttle ()
 
 bool
 EngineHost::smoke_locate ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_marker_navigate ()
 {
 	return false;
 }

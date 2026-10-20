@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_marker_navigate,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,22 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_marker_navigate && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_marker_navigate ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			_playhead_sec = _engine_snap.transport_sec;
+			sync_transport_clock_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_marker_navigate) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-marker-navigate FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2537,6 +2554,36 @@ ShellWindow::do_remove_marker_at_playhead ()
 }
 
 void
+ShellWindow::do_locate_next_marker ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (_engine.locate_next_marker ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_playhead_sec = _engine_snap.transport_sec;
+		sync_transport_clock_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_locate_prev_marker ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (_engine.locate_prev_marker ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_playhead_sec = _engine_snap.transport_sec;
+		sync_transport_clock_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::sync_history_from_engine ()
 {
 	_history.set_available (_engine_snap.session_ok);
@@ -3767,6 +3814,15 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_move_audio_track (-1);
 		} else if ((GetKeyState (VK_MENU) & 0x8000) && wparam == VK_DOWN) {
 			do_move_audio_track (+1);
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == VK_LEFT || wparam == VK_RIGHT)) {
+			/* Ctrl+Alt+←/→ = previous / next marker. */
+			if (wparam == VK_RIGHT) {
+				do_locate_next_marker ();
+			} else {
+				do_locate_prev_marker ();
+			}
 		} else if ((GetKeyState (VK_MENU) & 0x8000)
 		           && (wparam == VK_LEFT || wparam == VK_RIGHT)) {
 			/* Alt+←/→ = MIDI note length ± (snap unit when snap on; else 50ms). */
@@ -6306,6 +6362,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"L / P", L"Loop · Punch" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
+		{ L"Ctrl+Alt+←/→", L"Previous / next marker" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },

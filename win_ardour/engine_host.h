@@ -733,6 +733,9 @@ public:
 	bool remove_marker_near (float time_sec, float slop_sec = 0.35f);
 	/** Locate transport to time_sec (optional snap to nearest mark within slop). */
 	bool locate_to (float time_sec, bool snap_to_marker = false, float slop_sec = 0.35f);
+	/** Locate to next / previous IsMark (Ctrl+Alt+←/→). */
+	bool locate_next_marker ();
+	bool locate_prev_marker ();
 	/**
 	 * Continuous scrub locate (no mark snap). Same Session request_locate path.
 	 * Used while dragging the editor ruler.
@@ -750,6 +753,11 @@ public:
 	 * For --smoke-locate. Does not leave transport rolling.
 	 */
 	bool smoke_locate ();
+
+	/**
+	 * Add marks @1s/@2s → next/prev locate tour. For --smoke-marker-navigate.
+	 */
+	bool smoke_marker_navigate ();
 
 	/**
 	 * Session range (current_start..current_end) or playlist fallback, seconds.
