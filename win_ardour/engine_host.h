@@ -756,6 +756,11 @@ public:
 	 * Used by Editor zoom-fit session.
 	 */
 	bool session_extent_sec (float* start_sec, float* end_sec) const;
+	/** Locate to session start/end. Ctrl+Home / Ctrl+End. */
+	bool locate_session_start ();
+	bool locate_session_end ();
+	/** Extent → mid → start → end. For --smoke-session-extent-navigate. */
+	bool smoke_session_extent_navigate ();
 	/**
 	 * Union of all audio (+ MIDI) region extents across tracks, seconds.
 	 * Used by Editor zoom-fit all regions.

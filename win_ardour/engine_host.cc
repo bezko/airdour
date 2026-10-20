@@ -9486,6 +9486,99 @@ EngineHost::session_extent_sec (float* start_sec, float* end_sec) const
 	return *end_sec > *start_sec;
 }
 
+
+bool
+EngineHost::locate_session_start ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	float s = 0.f;
+	float e = 0.f;
+	if (!session_extent_sec (&s, &e)) {
+		_snap.detail = L"no session extent";
+		return false;
+	}
+	return locate_to (s, false, 0.f);
+}
+
+bool
+EngineHost::locate_session_end ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	float s = 0.f;
+	float e = 0.f;
+	if (!session_extent_sec (&s, &e)) {
+		_snap.detail = L"no session extent";
+		return false;
+	}
+	return locate_to (e, false, 0.f);
+}
+
+bool
+EngineHost::smoke_session_extent_navigate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-session-extent-navigate failed — no Session";
+		return false;
+	}
+	try {
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+		float s0 = 0.f;
+		float e0 = 0.f;
+		if (!session_extent_sec (&s0, &e0) || (e0 - s0) < 0.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-session-extent-navigate FAILED (extent)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		float mid = s0 + (e0 - s0) * 0.5f;
+		if (!locate_to (mid, false, 0.f)
+		    || std::fabs (_snap.transport_sec - mid) > 0.12f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-session-extent-navigate FAILED (mid)\n");
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_session_start ()
+		    || std::fabs (_snap.transport_sec - s0) > 0.12f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-session-extent-navigate FAILED (start got=%.3f want=%.3f)\n",
+			              _snap.transport_sec, s0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		if (!locate_session_end ()
+		    || std::fabs (_snap.transport_sec - e0) > 0.12f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-session-extent-navigate FAILED (end got=%.3f want=%.3f)\n",
+			              _snap.transport_sec, e0);
+			std::fflush (stderr);
+			set_snap_enabled (snap_was);
+			return false;
+		}
+		locate_to (s0, false, 0.f);
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-session-extent-navigate ok (%.2f->%.2f)\n",
+		              s0, e0);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-session-extent-navigate ok";
+		set_snap_enabled (snap_was);
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-session-extent-navigate exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::regions_extent_sec (float* start_sec, float* end_sec) const
 {
@@ -19269,6 +19362,24 @@ EngineHost::session_extent_sec (float* start_sec, float* end_sec) const
 	if (end_sec) {
 		*end_sec = 0.f;
 	}
+	return false;
+}
+
+bool
+EngineHost::locate_session_start ()
+{
+	return false;
+}
+
+bool
+EngineHost::locate_session_end ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_session_extent_navigate ()
+{
 	return false;
 }
 
