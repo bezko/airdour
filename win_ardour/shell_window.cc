@@ -228,6 +228,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_group,
                             bool smoke_monitor,
                             bool smoke_locate,
+                            bool smoke_zoom_punch,
                             bool smoke_zoom,
                             bool smoke_history,
                             bool smoke_prefs,
@@ -890,6 +891,37 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_locate) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_zoom_punch && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_zoom_punch ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_transport_punch_from_engine ();
+			float before = _lanes[0].strip.view_span_sec ();
+			do_zoom_to_punch ();
+			float span = _lanes[0].strip.view_span_sec ();
+			/* fit_range pad_frac=0.06 → span ≈ 2.0 * 1.12 = 2.24 */
+			if (span < 1.8f || span > 2.8f) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-zoom-punch FAILED (span=%.2f before=%.2f)\n",
+				              span, before);
+				_smoke_failed = true;
+			} else {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-zoom-punch ok (span=%.2fs)\n",
+				              span);
+			}
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_zoom_punch) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-punch FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1995,6 +2027,22 @@ ShellWindow::do_fit_all_regions ()
 		return;
 	}
 	do_fit_session ();
+}
+
+void
+ShellWindow::do_zoom_to_punch ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (!_engine_snap.punch_range_ok
+	    || _engine_snap.punch_end_sec <= _engine_snap.punch_start_sec) {
+		return;
+	}
+	fit_shared_range (_engine_snap.punch_start_sec, _engine_snap.punch_end_sec);
+	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
@@ -3638,6 +3686,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_fit_selection ();
 		} else if (wparam == 'L' || wparam == 'l') {
 			do_toggle_loop ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'P' || wparam == 'p')) {
+			/* Ctrl+Alt+P = zoom editor to punch range. */
+			do_zoom_to_punch ();
 		} else if (wparam == 'P' || wparam == 'p') {
 			if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
 				do_toggle_punch ();
@@ -6304,6 +6357,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
 		{ L"F8", L"MIDI auto lane · CC7→CC1→CC11→Bend→Pressure" },
 		{ L"L / P", L"Loop · Punch" },
+		{ L"Ctrl+Alt+P", L"Zoom editor to punch range" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
 		{ L"C / K", L"Count-in · Click (metronome)" },

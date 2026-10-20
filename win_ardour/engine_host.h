@@ -726,6 +726,8 @@ public:
 	/** Arm/disarm Session punch-in + punch-out (record only inside range). */
 	bool set_punch_enabled (bool enable);
 	bool toggle_punch_enabled ();
+	/** Set punch 0.5–2.5s for --smoke-zoom-punch (shell fits view). */
+	bool smoke_zoom_punch ();
 
 	/** Add IsMark at time_sec (name auto if empty). */
 	bool add_marker_at (float time_sec, const std::string& name = std::string ());

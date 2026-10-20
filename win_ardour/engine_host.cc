@@ -9149,6 +9149,39 @@ EngineHost::smoke_punch ()
 	}
 }
 
+
+bool
+EngineHost::smoke_zoom_punch ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-zoom-punch failed — no Session";
+		return false;
+	}
+	try {
+		if (!set_punch_range (0.5f, 2.5f) || !_snap.punch_range_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-punch FAILED (set)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (std::fabs (_snap.punch_start_sec - 0.5f) > 0.05f
+		    || std::fabs (_snap.punch_end_sec - 2.5f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-zoom-punch FAILED (snap)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-punch range ok [0.50..2.50]\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-zoom-punch range ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-punch exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 bool
 EngineHost::add_marker_at (float time_sec, const std::string& name)
 {
@@ -18981,6 +19014,12 @@ EngineHost::set_punch_enabled (bool enable)
 
 bool
 EngineHost::toggle_punch_enabled ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_zoom_punch ()
 {
 	return false;
 }
