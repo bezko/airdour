@@ -1610,6 +1610,10 @@ ShellWindow::sync_mixer_solo_isolate_from_engine ()
 	}
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_solo_isolated (_engine_snap.track_solo_isolated[i]);
+	}
+}
+
+void
 ShellWindow::sync_mixer_solo_safe_from_engine ()
 {
 	const int na = n_audio_lanes ();

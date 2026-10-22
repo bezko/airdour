@@ -315,6 +315,7 @@ private:
 	void sync_mixer_arm_from_engine ();
 	void sync_mixer_mute_solo_from_engine ();
 	void sync_mixer_solo_isolate_from_engine ();
+	void sync_mixer_solo_safe_from_engine ();
 	void sync_mixer_pan_from_engine ();
 	void sync_mixer_send_from_engine ();
 	void sync_mixer_fx_from_engine ();

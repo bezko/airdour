@@ -411,6 +411,7 @@ public:
 	bool toggle_track_solo_isolated (int track = 0);
 	/** Off → on → off on Audio 1. */
 	bool smoke_solo_isolate ();
+	/**
 	 * Solo-safe a track (SoloSafeControl) so other solos don't mute it.
 	 * For Ctrl+click Solo / --smoke-solo-safe.
 	 */
