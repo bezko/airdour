@@ -717,6 +717,13 @@ public:
 
 	/** Clear PeakMeter max-peak / clip latch on Audio track (0..kMeters-1). */
 	bool clear_track_meter_clip (int track);
+	/**
+	 * Clear clip latch on every audio track PeakMeter.
+	 * For Alt+click meter / --smoke-clear-meter-clips.
+	 */
+	bool clear_all_meter_clips ();
+	/** Mark snap clips then clear_all; verify none remain. */
+	bool smoke_clear_meter_clips ();
 
 	/** Session-level record enable (maybe_enable_record / disable_record). */
 	bool set_session_record (bool enable);

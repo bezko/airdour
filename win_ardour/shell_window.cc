@@ -567,6 +567,17 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("disarm-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-disarm-all FAILED (no session)\n");
+	if (ok && has_smoke ("clear-meter-clips") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_clear_meter_clips ()) {
+			_smoke_failed = true;
+		} else {
+			for (int i = 0; i < kMixerStripsMax; ++i) {
+				_mixers[i].clear_meter_clip ();
+			}
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("clear-meter-clips")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-meter-clips FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -6931,18 +6942,34 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
-	/* Click meter → clear peak-hold clip latch (PeakMeter::reset_max). */
+	/* Click meter → clear peak-hold clip latch (PeakMeter::reset_max).
+	 * Alt+click → clear every strip's clip latch. */
 	int meter_i = hit_mixer_meter (x, y);
-	if (meter_i >= 0 && _mixers[meter_i].meter_clipped ()) {
-		_mixers[meter_i].clear_meter_clip ();
-		if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
-		    && _engine.snapshot ().session_ok) {
-			_engine.clear_track_meter_clip (meter_i);
-			_engine.poll ();
-			_engine_snap = _engine.snapshot ();
+	if (meter_i >= 0) {
+		const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
+		if (alt) {
+			for (int i = 0; i < kMixerStripsMax; ++i) {
+				_mixers[i].clear_meter_clip ();
+			}
+			if (_engine.is_linked () && _engine.snapshot ().session_ok) {
+				_engine.clear_all_meter_clips ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+			}
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
 		}
-		InvalidateRect (_hwnd, nullptr, FALSE);
-		return true;
+		if (_mixers[meter_i].meter_clipped ()) {
+			_mixers[meter_i].clear_meter_clip ();
+			if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
+			    && _engine.snapshot ().session_ok) {
+				_engine.clear_track_meter_clip (meter_i);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+			}
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
 	}
 
 	int fxpi3 = hit_mixer_fx_param3 (x, y);
@@ -8548,6 +8575,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+click fader", L"Reset all faders to unity" },
 		{ L"Alt+click Arm", L"Disarm all audio tracks" },
 		{ L"Alt+U", L"Clear all solos (audio + MIDI)" },
+		{ L"Alt+click meter", L"Clear all PeakMeter clip latches" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
