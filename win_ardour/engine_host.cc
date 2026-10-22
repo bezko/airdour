@@ -3013,6 +3013,91 @@ EngineHost::set_track_gain (int track, float linear)
 }
 
 bool
+EngineHost::reset_all_faders ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		collect_tracks ();
+		ensure_midi_track ();
+		int n = 0;
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			if (!_impl->tracks[i] || !_impl->tracks[i]->gain_control ()) {
+				continue;
+			}
+			_impl->tracks[i]->gain_control ()->set_value (1.0, Controllable::NoGroup);
+			_track_gain[i] = (float)_impl->tracks[i]->gain_control ()->get_value ();
+			_snap.track_gain[i] = _track_gain[i];
+			++n;
+		}
+		if (_impl->midi_track && _impl->midi_track->gain_control ()) {
+			_impl->midi_track->gain_control ()->set_value (1.0, Controllable::NoGroup);
+			++n;
+		}
+		_gain = _track_gain[0];
+		_snap.gain = _gain;
+		std::fprintf (stderr, "airdour_win_shell: reset all faders to unity (%d)\n", n);
+		std::fflush (stderr);
+		_snap.detail = L"all faders → unity";
+		return n > 0;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: reset_all_faders: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_fader_reset_all ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-fader-reset-all failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		ensure_midi_track ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fader-reset-all FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			set_track_gain ((int)i, 0.35f);
+		}
+		set_midi_gain (0.35f);
+		if (!reset_all_faders ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fader-reset-all FAILED (reset)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			float g = _snap.track_gain[i];
+			if (g < 0.95f || g > 1.05f) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-fader-reset-all FAILED (a%zu=%.3f)\n",
+				              i, g);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-fader-reset-all ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-fader-reset-all ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-fader-reset-all exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::set_midi_gain (float linear)
 {
 	linear = std::max (0.f, std::min (1.f, linear));
@@ -27010,6 +27095,18 @@ bool
 EngineHost::set_midi_gain (float linear)
 {
 	(void)linear;
+	return false;
+}
+
+bool
+EngineHost::reset_all_faders ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_fader_reset_all ()
+{
 	return false;
 }
 

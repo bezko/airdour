@@ -549,6 +549,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("send-reset-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send-reset-all FAILED (no session)\n");
+	if (ok && has_smoke ("fader-reset-all") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_fader_reset_all ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_gains_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("fader-reset-all")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-fader-reset-all FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -6925,6 +6934,16 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	int mi = hit_mixer_fader (x, y);
 	if (mi >= 0) {
+		const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
+		if (alt && _engine.is_linked () && _engine.snapshot ().session_ok) {
+			/* Alt+click fader → all strips to unity. */
+			_engine.reset_all_faders ();
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_gains_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
 		_drag = DragMode::Fader;
 		_drag_index = mi;
 		_mixers[mi].drag_to (y);
@@ -8389,6 +8408,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+click Solo", L"Toggle solo-safe (Ss)" },
 		{ L"Alt+click pan", L"Center all track pans" },
 		{ L"Alt+click send", L"Zero all aux sends" },
+		{ L"Alt+click fader", L"Reset all faders to unity" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
