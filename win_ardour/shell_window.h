@@ -209,6 +209,7 @@ private:
 	void draw_editor_pane ();
 	void draw_automation_lane ();
 	void cycle_auto_lane_kind ();
+	int  auto_lane_track () const;
 	void refresh_automation_lane ();
 	void write_automation_at (float x, float y);
 	void do_cycle_auto_state ();

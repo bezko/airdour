@@ -959,7 +959,18 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	if (ok && smoke_pan_automation && engine_session_ok ()) {
 		_auto_lane_kind = 1;
 		if (!_engine.smoke_pan_automation ()) {
-	if (ok && has_smoke ("auto-lane-focus") && _engine.snapshot ().session_ok) {
+			_smoke_failed = true;
+		} else {
+			refresh_automation_lane ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_pan_automation) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-pan-automation FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("auto-lane-focus") && engine_session_ok ()) {
 		/* Focus Audio 2 so the D2D lane label/curve target matches smoke writes. */
 		_focus_audio_track = 1;
 		if (!_engine.smoke_auto_lane_focus ()) {
@@ -968,8 +979,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			refresh_automation_lane ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_pan_automation) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-pan-automation FAILED (no session)\n");
 	} else if (has_smoke ("auto-lane-focus")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-auto-lane-focus FAILED (no session)\n");
 		_smoke_failed = true;
@@ -1047,7 +1056,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_edit && engine_session_ok ()) {
-	if (ok && smoke_edit && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_edit ()) {
 			_smoke_failed = true;
 		} else {
@@ -2044,33 +2052,25 @@ ShellWindow::do_cycle_auto_state ()
 void
 ShellWindow::refresh_automation_lane ()
 {
+	const int track = auto_lane_track ();
 	const wchar_t* kind = L"Gain";
-	int st_i = _engine_snap.track_gain_auto_state[0];
+	int st_i = _engine_snap.track_gain_auto_state[track];
 	if (_auto_lane_kind == 1) {
 		kind = L"Pan";
-		st_i = _engine_snap.track_pan_auto_state[0];
+		st_i = _engine_snap.track_pan_auto_state[track];
 	} else if (_auto_lane_kind == 2) {
 		kind = L"Send";
-		st_i = _engine_snap.track_send_auto_state[0];
+		st_i = _engine_snap.track_send_auto_state[track];
 	}
 	const wchar_t* st = auto_state_label (st_i);
-	if (_engine_snap.track_name[0][0] != L'\0') {
+	if (_engine_snap.track_name[track][0] != L'\0') {
 		wchar_t auto_lab[64];
-		_snwprintf_s (auto_lab, _TRUNCATE, L"%s · %s · %s", kind, st, _engine_snap.track_name[0]);
-		_auto_lane.set_label (auto_lab);
-	} else {
-		wchar_t auto_lab[48];
-		_snwprintf_s (auto_lab, _TRUNCATE, L"%s · %s · Audio 1", kind, st);
-	const int track = auto_lane_track ();
-	if (track >= 0 && track < EngineSnapshot::kMeters
-	    && _engine_snap.track_name[track][0] != L'\0') {
-		wchar_t auto_lab[48];
-		_snwprintf_s (auto_lab, _TRUNCATE, L"Gain · %s",
+		_snwprintf_s (auto_lab, _TRUNCATE, L"%s · %s · %s", kind, st,
 		              _engine_snap.track_name[track]);
 		_auto_lane.set_label (auto_lab);
 	} else {
-		wchar_t auto_lab[32];
-		_snwprintf_s (auto_lab, _TRUNCATE, L"Gain · Audio %d", track + 1);
+		wchar_t auto_lab[48];
+		_snwprintf_s (auto_lab, _TRUNCATE, L"%s · %s · Audio %d", kind, st, track + 1);
 		_auto_lane.set_label (auto_lab);
 	}
 	float view0 = _lanes[0].strip.view_start_sec ();
@@ -2079,26 +2079,21 @@ ShellWindow::refresh_automation_lane ()
 	size_t n = AutomationLane::kMaxColumns;
 	if (_engine.is_linked () && _engine_snap.session_ok) {
 		if (_auto_lane_kind == 1) {
-			_engine.fill_pan_automation_curve (0, view0, span, curve, n);
+			_engine.fill_pan_automation_curve (track, view0, span, curve, n);
 		} else if (_auto_lane_kind == 2) {
-			_engine.fill_send_automation_curve (0, view0, span, curve, n);
+			_engine.fill_send_automation_curve (track, view0, span, curve, n);
 		} else {
-			_engine.fill_gain_automation_curve (0, view0, span, curve, n);
+			_engine.fill_gain_automation_curve (track, view0, span, curve, n);
 		}
 	} else {
-		float flat = _mixers[0].gain ();
+		float flat = (track >= 0 && track < kMixerStripsMax) ? _mixers[track].gain () : 0.5f;
 		if (_auto_lane_kind == 1) {
-			flat = _mixers[0].pan ();
+			flat = (track >= 0 && track < kMixerStripsMax) ? _mixers[track].pan () : 0.f;
 		} else if (_auto_lane_kind == 2) {
-			flat = _mixers[0].send ();
+			flat = (track >= 0 && track < kMixerStripsMax) ? _mixers[track].send () : 0.f;
 		}
 		for (size_t i = 0; i < n; ++i) {
 			curve[i] = flat;
-		_engine.fill_gain_automation_curve (track, view0, span, curve, n);
-	} else {
-		float g = (track >= 0 && track < kMixerStripsMax) ? _mixers[track].gain () : 0.5f;
-		for (size_t i = 0; i < n; ++i) {
-			curve[i] = g;
 		}
 	}
 	_auto_lane.set_curve (curve, n);
@@ -2109,16 +2104,14 @@ ShellWindow::refresh_automation_lane ()
 	if (_engine.is_linked () && _engine_snap.session_ok) {
 		if (_auto_lane_kind == 1) {
 			npt = _engine.fill_pan_automation_points (
-				0, view0, span, px, py, (int)AutomationLane::kMaxPoints);
+				track, view0, span, px, py, (int)AutomationLane::kMaxPoints);
 		} else if (_auto_lane_kind == 2) {
 			npt = _engine.fill_send_automation_points (
-				0, view0, span, px, py, (int)AutomationLane::kMaxPoints);
+				track, view0, span, px, py, (int)AutomationLane::kMaxPoints);
 		} else {
 			npt = _engine.fill_gain_automation_points (
-				0, view0, span, px, py, (int)AutomationLane::kMaxPoints);
+				track, view0, span, px, py, (int)AutomationLane::kMaxPoints);
 		}
-		npt = _engine.fill_gain_automation_points (
-			track, view0, span, px, py, (int)AutomationLane::kMaxPoints);
 	}
 	_auto_lane.set_points (px, py, (size_t)std::max (0, npt));
 	_auto_lane.set_playhead_norm (_lanes[0].strip.playhead_norm ());
@@ -2140,14 +2133,13 @@ ShellWindow::write_automation_at (float x, float y)
 	}
 	bool ok = false;
 	if (_auto_lane_kind == 1) {
-		ok = _engine.write_track_pan_automation (0, time_sec, value);
+		ok = _engine.write_track_pan_automation (track, time_sec, value);
 	} else if (_auto_lane_kind == 2) {
-		ok = _engine.write_track_send_automation (0, time_sec, value);
+		ok = _engine.write_track_send_automation (track, time_sec, value);
 	} else {
-		ok = _engine.write_track_gain_automation (0, time_sec, value);
+		ok = _engine.write_track_gain_automation (track, time_sec, value);
 	}
 	if (ok) {
-	if (_engine.write_track_gain_automation (track, time_sec, value)) {
 		_auto_last_write_sec = time_sec;
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
