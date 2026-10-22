@@ -781,7 +781,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("solo-isolate")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (no session)\n");
-	if (ok && has_smoke ("track-comment") && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("track-comment") && engine_session_ok ()) {
 		if (!_engine.smoke_track_comment ()) {
 			_smoke_failed = true;
 		} else {
@@ -860,7 +864,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan && engine_session_ok ()) {
-	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
@@ -1820,6 +1823,10 @@ ShellWindow::sync_mixer_solo_safe_from_engine ()
 	}
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_solo_safe (_engine_snap.track_solo_safe[i]);
+	}
+}
+
+void
 ShellWindow::sync_mixer_comment_from_engine ()
 {
 	const int na = n_audio_lanes ();
