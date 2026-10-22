@@ -269,6 +269,7 @@ struct EngineSnapshot {
 	bool         group_shares_mute;
 	bool         group_shares_solo;
 	bool         group_shares_gain;
+	bool         group_shares_recenable;
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
 	bool         mixer_narrow; /* shell UI: compact strip width */
@@ -1296,8 +1297,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 
 	/**
 	 * Create/replace the shell Session RouteGroup ("Group 1") from audio
-	 * indices (≥2). Shares mute + solo + gain when active. Honest scope:
-	 * one group, no VCA/subgroup/recenable.
+	 * indices (≥2). Shares mute + solo + gain + rec-enable when active.
+	 * Honest scope: one group, no VCA/subgroup.
 	 */
 	bool create_route_group (const int* indices, int n);
 	/** Remove shell RouteGroup members (and drop empty group). */
@@ -1309,6 +1310,11 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Group Audio 0+1; mute/solo/gain propagate; clear. For --smoke-group.
 	 */
 	bool smoke_group ();
+	/**
+	 * Group Audio 0+1; arm propagates via UseGroup; clear isolates.
+	 * For --smoke-group-recenable.
+	 */
+	bool smoke_group_recenable ();
 
 	/**
 	 * Ensure Session monitor bus + MonitorProcessor (add_monitor_section).

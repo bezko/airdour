@@ -648,6 +648,7 @@ EngineHost::EngineHost ()
 	_snap.group_shares_mute = false;
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
+	_snap.group_shares_recenable = false;
 	_snap.group_name[0] = L'\0';
 	_snap.mixer_narrow = false;
 	_snap.monitor_ok = false;
@@ -3501,6 +3502,9 @@ EngineHost::set_track_armed (int track, bool armed)
 			refresh_record_flags ();
 			return _snap.track_armed[track] == armed;
 		}, 400);
+		_impl->tracks[track]->rec_enable_control ()->set_value (
+			armed ? 1.0 : 0.0, Controllable::UseGroup);
+		/* Mirror peers after UseGroup propagation. */
 		refresh_record_flags ();
 		_snap.detail = armed ? L"track armed for record" : L"track disarmed";
 		return _snap.track_armed[track] == armed;
@@ -12559,6 +12563,7 @@ EngineHost::refresh_group_flags ()
 	_snap.group_shares_mute = false;
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
+	_snap.group_shares_recenable = false;
 	_snap.group_name[0] = L'\0';
 	if (!_impl) {
 		return;
@@ -12577,6 +12582,7 @@ EngineHost::refresh_group_flags ()
 		_snap.group_shares_mute = rg->is_mute ();
 		_snap.group_shares_solo = rg->is_solo ();
 		_snap.group_shares_gain = rg->is_gain ();
+		_snap.group_shares_recenable = rg->is_recenable ();
 		int n = 0;
 		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
 			if (_impl->tracks[i] && _impl->tracks[i]->route_group () == rg) {
@@ -12607,12 +12613,12 @@ EngineHost::create_route_group (const int* indices, int n)
 			}
 			_impl->session->add_route_group (rg);
 		}
-		/* Honest scope: mute + solo + gain only. */
+		/* Honest scope: mute + solo + gain + rec-enable. */
 		rg->set_active (true, nullptr);
 		rg->set_mute (true);
 		rg->set_solo (true);
 		rg->set_gain (true);
-		rg->set_recenable (false);
+		rg->set_recenable (true);
 		rg->set_select (false);
 		rg->set_route_active (false);
 		rg->set_color (false);
@@ -12640,7 +12646,7 @@ EngineHost::create_route_group (const int* indices, int n)
 		_impl->shell_group = rg;
 		refresh_group_flags ();
 		_snap.detail = L"route group ready";
-		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain\n",
+		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain/rec\n",
 		              rg->name ().c_str (), _snap.group_member_count);
 		std::fflush (stderr);
 		return _snap.group_member_count >= 2;
@@ -12800,6 +12806,98 @@ EngineHost::smoke_group ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_group_recenable ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-group-recenable failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_snap.audio_track_count < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (need ≥2 audio)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const int idxs[2] = { 0, 1 };
+		if (!create_route_group (idxs, 2) || _snap.group_member_count < 2
+		    || !_snap.group_shares_recenable
+		    || !_snap.track_in_group[0] || !_snap.track_in_group[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (create)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		set_track_armed (0, false);
+		set_track_armed (1, false);
+		refresh_record_flags ();
+		if (!set_track_armed (0, true)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (arm 0)\n");
+			std::fflush (stderr);
+			clear_route_group ();
+			return false;
+		}
+		wait_until ([&] () {
+			refresh_record_flags ();
+			return _snap.track_armed[0] && _snap.track_armed[1];
+		});
+		if (!_snap.track_armed[0] || !_snap.track_armed[1]) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-group-recenable FAILED (arm propagate %d/%d)\n",
+			              (int)_snap.track_armed[0], (int)_snap.track_armed[1]);
+			std::fflush (stderr);
+			clear_route_group ();
+			return false;
+		}
+		if (!set_track_armed (0, false)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (disarm 0)\n");
+			std::fflush (stderr);
+			clear_route_group ();
+			return false;
+		}
+		wait_until ([&] () {
+			refresh_record_flags ();
+			return !_snap.track_armed[0] && !_snap.track_armed[1];
+		});
+		if (_snap.track_armed[0] || _snap.track_armed[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (disarm)\n");
+			std::fflush (stderr);
+			clear_route_group ();
+			return false;
+		}
+		if (!clear_route_group () || _snap.group_member_count != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		set_track_armed (0, true);
+		wait_until ([&] () {
+			refresh_record_flags ();
+			return _snap.track_armed[0];
+		});
+		if (!_snap.track_armed[0] || _snap.track_armed[1]) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-group-recenable FAILED (ungrouped arm %d/%d)\n",
+			              (int)_snap.track_armed[0], (int)_snap.track_armed[1]);
+			std::fflush (stderr);
+			set_track_armed (0, false);
+			return false;
+		}
+		set_track_armed (0, false);
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable ok (arm + clear)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-group-recenable ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable exception: %s\n",
+		              e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -28374,6 +28472,7 @@ EngineHost::EngineHost ()
 	_snap.group_shares_mute = false;
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
+	_snap.group_shares_recenable = false;
 	_snap.group_name[0] = L'\0';
 	_snap.mixer_narrow = false;
 	_snap.monitor_ok = false;
@@ -30526,6 +30625,12 @@ EngineHost::toggle_route_group_active ()
 
 bool
 EngineHost::smoke_group ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_group_recenable ()
 {
 	return false;
 }

@@ -1251,6 +1251,22 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_monitor && engine_session_ok ()) {
+	if (ok && has_smoke ("group-recenable") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_group_recenable ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_group_from_engine ();
+			sync_mixer_arm_from_engine ();
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("group-recenable")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_monitor && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_monitor ()) {
 			_smoke_failed = true;
 		} else {
@@ -9103,6 +9119,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+U", L"Clear all solos (audio + MIDI)" },
 		{ L"Alt+click meter", L"Clear all PeakMeter clip latches" },
 		{ L"Alt+click Solo", L"Exclusive solo (clear other solos)" },
+		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·arm)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
