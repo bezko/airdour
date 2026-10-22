@@ -516,6 +516,14 @@ public:
 	bool smoke_send_auto_state ();
 
 	/**
+	 * Reset one audio strip: fader → unity, pan → center, aux send → 0.
+	 * For Alt+dbl-click mixer / Alt+Shift+R / --smoke-strip-mixer-reset.
+	 */
+	bool reset_strip_mixer (int track = 0);
+	/** Dirty gain/pan/send then reset_strip → verify. */
+	bool smoke_strip_mixer_reset ();
+
+	/**
 	 * Track fader AutomationList (GainAutomation). Enable Play, write points,
 	 * sample curve for Editor automation lane.
 	 */

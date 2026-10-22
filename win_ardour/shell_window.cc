@@ -768,6 +768,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && has_smoke ("strip-mixer-reset") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_strip_mixer_reset ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_gains_from_engine ();
+			sync_mixer_pan_from_engine ();
+			sync_mixer_send_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("strip-mixer-reset")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_automation && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_automation ()) {
 			_smoke_failed = true;
@@ -5610,6 +5625,29 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			/* Ctrl+Shift+R = range marker ← selection. */
 			do_range_marker_from_selection ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'R' || wparam == 'r')) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'R' || wparam == 'r')) {
+			/* Alt+Shift+R — reset focused strip fader/pan/send. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				int ti = _focus_audio_track;
+				if (ti < 0) {
+					ti = 0;
+				}
+				if (ti < n_audio_lanes ()) {
+					_engine.reset_strip_mixer (ti);
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_mixer_gains_from_engine ();
+					sync_mixer_pan_from_engine ();
+					sync_mixer_send_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+				}
+			}
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'R' || wparam == 'r')) {
 			/* R = pitch +1 st; Shift+R = −1 st (duration held). */
 			do_pitch_shift_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? -1.f : 1.f);
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'V' || wparam == 'v')) {
@@ -5798,6 +5836,28 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 	case WM_LBUTTONDBLCLK: {
 		float x, y;
 		client_from_lparam (lparam, &x, &y);
+		/* Alt+dbl-click fader/pan/send → reset that strip (unity/center/0). */
+		if ((GetKeyState (VK_MENU) & 0x8000) && _engine.is_linked ()
+		    && _engine_snap.session_ok) {
+			int si = hit_mixer_fader (x, y);
+			if (si < 0) {
+				si = hit_mixer_pan (x, y);
+			}
+			if (si < 0) {
+				si = hit_mixer_send (x, y);
+			}
+			if (si >= 0 && si < n_audio_lanes ()) {
+				_focus_audio_track = si;
+				_engine.reset_strip_mixer (si);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_gains_from_engine ();
+				sync_mixer_pan_from_engine ();
+				sync_mixer_send_from_engine ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return 0;
+			}
+		}
 		int lab = hit_mixer_label (x, y);
 		if (lab >= 0) {
 			const int mi = midi_mixer_index ();
@@ -8358,6 +8418,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
+		{ L"Alt+Shift+R / Alt+dbl-click strip", L"Reset strip fader·pan·send" },
 		{ L"V", L"Reverse selected audio region" },
 		{ L"N", L"Normalize selection to −1 dBFS" },
 		{ L"I", L"Strip silence (−40 dBFS threshold)" },
