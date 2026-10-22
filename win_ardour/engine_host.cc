@@ -19976,6 +19976,71 @@ EngineHost::track_fx_param (int track) const
 	return _snap.track_fx_param;
 }
 
+bool
+EngineHost::reset_track_fx_param (int track, int which_1_to_3)
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters || which_1_to_3 < 1 || which_1_to_3 > 3) {
+		return false;
+	}
+	/* Insert defaults mirror EngineHost ctor / session seed. */
+	const float kBlend = 0.3f;
+	const float kCompThr = 1.f;
+	const float kCompRatio = (4.f - 1.f) / 19.f;
+	const float kEq = 0.5f;
+	const float kDelayTime = std::log (160.f) / std::log (8000.f);
+	const float kDelayFb = 0.2f;
+	const float kLimCeil = (-0.3f - (-20.f)) / 20.f;
+	const float kLimRel = (100.f - 1.f) / 1999.f;
+	const float kGateThr = (-40.f - (-60.f)) / 60.f;
+	const float kGateHold = (50.f - 1.f) / 499.f;
+
+	bool ok = false;
+	if (track == 0) {
+		if (which_1_to_3 == 1) {
+			ok = set_track_fx_param (0, kBlend);
+		}
+	} else if (track == 1) {
+		if (which_1_to_3 == 1) {
+			ok = set_track_comp_threshold_norm (1, kCompThr);
+		} else if (which_1_to_3 == 2) {
+			ok = set_track_comp_ratio_norm (1, kCompRatio);
+		}
+	} else if (track == 2) {
+		if (which_1_to_3 == 1) {
+			ok = set_track_eq_gain_l_norm (2, kEq);
+		} else if (which_1_to_3 == 2) {
+			ok = set_track_eq_gain_m_norm (2, kEq);
+		} else {
+			ok = set_track_eq_gain_h_norm (2, kEq);
+		}
+	} else if (track == 3) {
+		if (which_1_to_3 == 1) {
+			ok = set_track_delay_time_norm (3, kDelayTime);
+		} else if (which_1_to_3 == 2) {
+			ok = set_track_delay_feedback_norm (3, kDelayFb);
+		}
+	} else if (track == 4) {
+		if (which_1_to_3 == 1) {
+			ok = set_track_limiter_ceiling_norm (4, kLimCeil);
+		} else if (which_1_to_3 == 2) {
+			ok = set_track_limiter_release_norm (4, kLimRel);
+		}
+	} else if (track == 5) {
+		if (which_1_to_3 == 1) {
+			ok = set_track_gate_threshold_norm (5, kGateThr);
+		} else if (which_1_to_3 == 2) {
+			ok = set_track_gate_hold_norm (5, kGateHold);
+		}
+	}
+	if (ok) {
+		std::fprintf (stderr, "airdour_win_shell: reset FX param track=%d which=%d\n",
+		              track + 1, which_1_to_3);
+		std::fflush (stderr);
+		_snap.detail = L"FX param reset";
+	}
+	return ok;
+}
+
 void
 EngineHost::refresh_track_comp_snap ()
 {
@@ -22806,6 +22871,53 @@ EngineHost::smoke_plugin_insert ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-plugin exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_fx_param_reset ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-fx-param-reset failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fx-param-reset FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!insert_track_fx (0) || !_snap.track_fx_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fx-param-reset FAILED (insert)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_fx_param (0, 0.85f) || _snap.track_fx_param < 0.75f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fx-param-reset FAILED (nudge got=%.3f)\n",
+			              _snap.track_fx_param);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!reset_track_fx_param (0, 1)
+		    || _snap.track_fx_param < 0.25f || _snap.track_fx_param > 0.35f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-fx-param-reset FAILED (reset got=%.3f want≈0.30)\n",
+			              _snap.track_fx_param);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-fx-param-reset ok (Blend→%.3f)\n",
+		              _snap.track_fx_param);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-fx-param-reset ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-fx-param-reset exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -30257,6 +30369,20 @@ EngineHost::set_track_comp_sidechain (int track, int src_track, bool enable)
 
 bool
 EngineHost::smoke_plugin_insert ()
+{
+	return false;
+}
+
+bool
+EngineHost::reset_track_fx_param (int track, int which_1_to_3)
+{
+	(void)track;
+	(void)which_1_to_3;
+	return false;
+}
+
+bool
+EngineHost::smoke_fx_param_reset ()
 {
 	return false;
 }

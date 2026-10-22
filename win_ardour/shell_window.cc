@@ -596,6 +596,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && has_smoke ("fx-param-reset") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_fx_param_reset ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_fx_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("fx-param-reset")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-fx-param-reset FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_comp && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_comp ()) {
 			_smoke_failed = true;
@@ -5913,6 +5926,26 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				sync_mixer_pan_from_engine ();
 				sync_mixer_send_from_engine ();
 				InvalidateRect (_hwnd, nullptr, FALSE);
+		/* Double-click FX param → insert default (before rename). */
+		if (_engine.is_linked () && _engine_snap.session_ok) {
+			int which = 0;
+			int fxi = -1;
+			if ((fxi = hit_mixer_fx_param3 (x, y)) >= 0
+			    && _mixers[fxi].has_fx () && _mixers[fxi].fx_param_count () >= 3) {
+				which = 3;
+			} else if ((fxi = hit_mixer_fx_param2 (x, y)) >= 0
+			           && _mixers[fxi].has_fx () && _mixers[fxi].fx_param_count () >= 2) {
+				which = 2;
+			} else if ((fxi = hit_mixer_fx_param (x, y)) >= 0 && _mixers[fxi].has_fx ()) {
+				which = 1;
+			}
+			if (which > 0 && fxi >= 0 && fxi < n_audio_lanes ()) {
+				if (_engine.reset_track_fx_param (fxi, which)) {
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_mixer_fx_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+				}
 				return 0;
 			}
 		}
@@ -8578,6 +8611,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
 		{ L"F2", L"Rename focused track" },
+		{ L"Dbl-click FX param", L"Reset FX knob to insert default" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"Alt+Shift+click Arm", L"Arm all audio tracks" },
 		{ L"U", L"Apply / clear track group" },
