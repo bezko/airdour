@@ -223,6 +223,7 @@ struct EngineSnapshot {
 	bool         track_solo_safe[kMeters]; /* SoloSafeControl — ignore others' solo */
 	static constexpr int kCommentLen = 40;
 	wchar_t      track_comment[kMeters][kCommentLen]; /* Route::comment() */
+	bool         track_phase_invert[kMeters]; /* PhaseControl any channel inverted */
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	/** Pan AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
 	int          track_pan_auto_state[kMeters];
@@ -442,6 +443,14 @@ public:
 	bool toggle_track_solo_safe (int track = 0);
 	/** Off → on → off on Audio 1. */
 	bool smoke_solo_safe ();
+/**
+	 * Invert polarity on every channel of an audio track (PhaseControl).
+	 * For Alt+Shift+I / Alt+click strip label / --smoke-phase-invert.
+	 */
+	bool set_track_phase_invert (int track, bool invert);
+	bool toggle_track_phase_invert (int track = 0);
+	/** Off → on → off on Audio 1. For --smoke-phase-invert. */
+	bool smoke_phase_invert ();
 
 	/** MIDI track mute/solo (Session MidiTrack as Route). */
 	bool set_midi_muted (bool muted);
@@ -1780,6 +1789,7 @@ private:
 	void refresh_solo_isolate_flags ();
 	void refresh_solo_safe_flags ();
 	void refresh_track_comment_flags ();
+	void refresh_phase_invert_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_pan_auto_state_flags ();

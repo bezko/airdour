@@ -781,6 +781,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("solo-isolate")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (no session)\n");
+	if (ok && has_smoke ("phase-invert") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_phase_invert ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_phase_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("phase-invert")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-phase-invert FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -864,6 +873,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan && engine_session_ok ()) {
+	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
@@ -1835,6 +1845,14 @@ ShellWindow::sync_mixer_comment_from_engine ()
 	}
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_has_comment (_engine_snap.track_comment[i][0] != L'\0');
+ShellWindow::sync_mixer_phase_from_engine ()
+{
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < kMixerStripsMax; ++i) {
+		_mixers[i].set_phase_inverted (false);
+	}
+	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
+		_mixers[i].set_phase_inverted (_engine_snap.track_phase_invert[i]);
 	}
 }
 
@@ -5855,7 +5873,27 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && (wparam == 'N' || wparam == 'n')) {
 			/* N = normalize selection to −1 dBFS. */
 			do_normalize_selection (-1.f);
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'I' || wparam == 'i')) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'I' || wparam == 'i')) {
+			/* Alt+Shift+I — toggle polarity invert on focused strip. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				int ti = _focus_audio_track;
+				if (ti < 0) {
+					ti = 0;
+				}
+				if (ti < n_audio_lanes ()) {
+					_engine.toggle_track_phase_invert (ti);
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_mixer_phase_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+				}
+			}
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'I' || wparam == 'i')) {
 			/* I = strip silence on selection (−40 dBFS threshold). */
 			do_strip_silence_selection ();
 		} else if ((GetKeyState (VK_MENU) & 0x8000)
@@ -6996,6 +7034,13 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_comment_from_engine ();
+			    && _engine.is_linked () && _engine_snap.session_ok) {
+				/* Alt+click label → toggle polarity invert. */
+				_focus_audio_track = lab;
+				_engine.toggle_track_phase_invert (lab);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_phase_from_engine ();
 				InvalidateRect (_hwnd, nullptr, FALSE);
 				return true;
 			}
@@ -8098,6 +8143,7 @@ ShellWindow::on_tick ()
 	sync_mixer_solo_isolate_from_engine ();
 	sync_mixer_solo_safe_from_engine ();
 	sync_mixer_comment_from_engine ();
+	sync_mixer_phase_from_engine ();
 	sync_mixer_pan_from_engine ();
 	sync_mixer_send_from_engine ();
 	sync_monitor_from_engine ();
@@ -8722,6 +8768,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"N", L"Normalize selection to −1 dBFS" },
 		{ L"Alt+Shift+N / Alt+Shift+click label", L"Toggle track comment (Cm)" },
 		{ L"I", L"Strip silence (−40 dBFS threshold)" },
+		{ L"Alt+Shift+I / Alt+click label", L"Toggle strip polarity invert (Ø)" },
 		{ L"B", L"Consolidate / bounce selection in place" },
 		{ L"Alt+B / Alt+click FX", L"Bypass all ACE inserts" },
 		{ L"Alt+Shift+B / Alt+Shift+click FX", L"Activate all ACE inserts" },

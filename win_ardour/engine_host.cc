@@ -63,6 +63,7 @@
 #include "ardour/solo_control.h"
 #include "ardour/solo_isolate_control.h"
 #include "ardour/solo_safe_control.h"
+#include "ardour/phase_control.h"
 #include "ardour/gain_control.h"
 #include "ardour/plugin.h"
 #include "ardour/plugin_insert.h"
@@ -629,6 +630,7 @@ EngineHost::EngineHost ()
 		_snap.track_solo_isolated[i] = false;
 		_snap.track_solo_safe[i] = false;
 		_snap.track_comment[i][0] = L'\0';
+		_snap.track_phase_invert[i] = false;
 		_snap.track_pan[i] = 0.5f;
 		_snap.track_pan_auto_state[i] = 0;
 		_snap.track_send[i] = 0.f;
@@ -4605,6 +4607,121 @@ EngineHost::smoke_track_comment ()
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-track-comment exception: %s\n",
 		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+void
+EngineHost::refresh_phase_invert_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_phase_invert[i] = false;
+	}
+	if (!_impl) {
+		return;
+	}
+	try {
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]
+			    && _impl->tracks[i]->phase_control ()) {
+				_snap.track_phase_invert[i] = _impl->tracks[i]->phase_control ()->any ();
+			}
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::set_track_phase_invert (int track, bool invert)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	collect_tracks ();
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
+	    || !_impl->tracks[track]->phase_control ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<PhaseControl> pc = _impl->tracks[track]->phase_control ();
+		if (pc->size () == 0) {
+			uint32_t n = 0;
+			if (_impl->tracks[track]->n_inputs ().n_audio () > 0) {
+				n = _impl->tracks[track]->n_inputs ().n_audio ();
+			} else if (_impl->tracks[track]->n_outputs ().n_audio () > 0) {
+				n = _impl->tracks[track]->n_outputs ().n_audio ();
+			}
+			if (n == 0) {
+				n = 2;
+			}
+			pc->resize (n);
+		}
+		for (uint32_t c = 0; c < (uint32_t)pc->size (); ++c) {
+			pc->set_phase_invert (c, invert);
+		}
+		refresh_phase_invert_flags ();
+		_snap.detail = invert ? L"phase inverted" : L"phase normal";
+		std::fprintf (stderr, "airdour_win_shell: Audio %d phase invert=%d\n",
+		              track + 1, invert ? 1 : 0);
+		std::fflush (stderr);
+		return _snap.track_phase_invert[track] == invert;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: phase invert: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_track_phase_invert (int track)
+{
+	refresh_phase_invert_flags ();
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	return set_track_phase_invert (track, !_snap.track_phase_invert[track]);
+}
+
+bool
+EngineHost::smoke_phase_invert ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-phase-invert failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-phase-invert FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_phase_invert (0, false) || _snap.track_phase_invert[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-phase-invert FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_phase_invert (0, true) || !_snap.track_phase_invert[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-phase-invert FAILED (invert on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_phase_invert (0, false) || _snap.track_phase_invert[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-phase-invert FAILED (invert off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-phase-invert ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-phase-invert ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-phase-invert exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -27566,6 +27683,7 @@ EngineHost::refresh_snapshot ()
 			refresh_solo_isolate_flags ();
 			refresh_solo_safe_flags ();
 			refresh_track_comment_flags ();
+			refresh_phase_invert_flags ();
 			refresh_pan_flags ();
 			refresh_pan_auto_state_flags ();
 			refresh_send_flags ();
@@ -28408,6 +28526,15 @@ EngineHost::mute_all_tracks ()
 EngineHost::clear_all_solos ()
 EngineHost::clear_all_mutes ()
 EngineHost::exclusive_solo_track (int track)
+EngineHost::set_track_phase_invert (int track, bool invert)
+{
+	(void)track;
+	(void)invert;
+	return false;
+}
+
+bool
+EngineHost::toggle_track_phase_invert (int track)
 {
 	(void)track;
 	return false;
@@ -28415,6 +28542,7 @@ EngineHost::exclusive_solo_track (int track)
 
 bool
 EngineHost::exclusive_solo_midi ()
+EngineHost::smoke_phase_invert ()
 {
 	return false;
 }
@@ -28440,6 +28568,11 @@ EngineHost::smoke_solo_all ()
 	return false;
 }
 
+
+void
+EngineHost::refresh_phase_invert_flags ()
+{
+}
 
 void
 EngineHost::refresh_pan_flags ()
