@@ -6258,6 +6258,10 @@ EngineHost::smoke_auto_state ()
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"smoke-auto-state failed — no Session";
+EngineHost::smoke_auto_lane_focus ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-auto-lane-focus failed — no Session";
 		return false;
 	}
 	try {
@@ -6541,6 +6545,39 @@ EngineHost::smoke_pan_automation ()
 		if (!al || al->size () < 3) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-pan-automation FAILED (size=%u)\n",
 			              al ? (unsigned)al->size () : 0u);
+		if ((int)_impl->tracks.size () < 2 || !_impl->tracks[0] || !_impl->tracks[1]
+		    || !_impl->tracks[0]->gain_control () || !_impl->tracks[1]->gain_control ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-auto-lane-focus FAILED (need ≥2 audio)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!clear_track_gain_automation (0) || !clear_track_gain_automation (1)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-auto-lane-focus FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Write on Audio 2 (index 1) — focused-track lane target. */
+		if (!write_track_gain_automation (1, 0.0f, 0.25f)
+		    || !write_track_gain_automation (1, 2.0f, 0.85f)
+		    || !write_track_gain_automation (1, 4.0f, 0.45f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-auto-lane-focus FAILED (write)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::shared_ptr<AutomationList> al0 = _impl->tracks[0]->gain_control ()->alist ();
+		std::shared_ptr<AutomationList> al1 = _impl->tracks[1]->gain_control ()->alist ();
+		if (al0 && !al0->empty ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-auto-lane-focus FAILED (Audio1 not empty size=%u)\n",
+			              (unsigned)al0->size ());
+			std::fflush (stderr);
+			return false;
+		}
+		if (!al1 || al1->size () < 3) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-auto-lane-focus FAILED (Audio2 size=%u)\n",
+			              al1 ? (unsigned)al1->size () : 0u);
 			std::fflush (stderr);
 			return false;
 		}
@@ -6552,6 +6589,10 @@ EngineHost::smoke_pan_automation ()
 		if (mid < 0.45f || mid > 0.55f) {
 			std::fprintf (stderr,
 			              "airdour_win_shell: smoke-pan-automation FAILED (eval@2s=%.3f)\n",
+		float mid = (float)al1->eval (timepos_t ((samplepos_t)(2 * sr)));
+		if (mid < 0.80f || mid > 0.90f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-auto-lane-focus FAILED (eval@2s=%.3f)\n",
 			              mid);
 			std::fflush (stderr);
 			return false;
@@ -6560,6 +6601,20 @@ EngineHost::smoke_pan_automation ()
 		    || _impl->tracks[0]->pan_azimuth_control ()->automation_state () != Play) {
 			std::fprintf (stderr,
 			              "airdour_win_shell: smoke-pan-automation FAILED (state!=Play)\n");
+		float pts[8];
+		float py[8];
+		int n = fill_gain_automation_points (1, 0.f, 8.f, pts, py, 8);
+		if (n < 3) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-auto-lane-focus FAILED (fill pts=%d)\n", n);
+			std::fflush (stderr);
+			return false;
+		}
+		int n0 = fill_gain_automation_points (0, 0.f, 8.f, pts, py, 8);
+		if (n0 != 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-auto-lane-focus FAILED (Audio1 fill=%d)\n",
+			              n0);
 			std::fflush (stderr);
 			return false;
 		}
@@ -6994,6 +7049,13 @@ EngineHost::smoke_auto_state_unify ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-auto-state-unify exception: %s\n",
+		              "airdour_win_shell: smoke-auto-lane-focus ok (Audio2 pts=%u eval@2s=%.2f; Audio1 empty)\n",
+		              (unsigned)al1->size (), mid);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-auto-lane-focus ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-auto-lane-focus exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -29674,6 +29736,7 @@ EngineHost::cycle_track_auto_state_for_lane (int track, int lane_kind)
 
 bool
 EngineHost::smoke_auto_state_unify ()
+EngineHost::smoke_auto_lane_focus ()
 {
 	return false;
 }

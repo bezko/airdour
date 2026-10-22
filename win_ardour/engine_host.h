@@ -681,6 +681,11 @@ public:
 	 * For each lane kind: Off then cycle ×4 asserting snap. For --smoke-auto-state-unify.
 	 */
 	bool smoke_auto_state_unify ();
+	/**
+	 * Clear Audio 0+1; write gain auto on Audio 2 (index 1); verify Audio 1
+	 * empty and Audio 2 eval. For --smoke-auto-lane-focus (focused-track lane).
+	 */
+	bool smoke_auto_lane_focus ();
 
 	/**
 	 * MidiModel CC AutomationList (region automation, BeatTime). Default CC7

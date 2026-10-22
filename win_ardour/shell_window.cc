@@ -959,6 +959,10 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	if (ok && smoke_pan_automation && engine_session_ok ()) {
 		_auto_lane_kind = 1;
 		if (!_engine.smoke_pan_automation ()) {
+	if (ok && has_smoke ("auto-lane-focus") && _engine.snapshot ().session_ok) {
+		/* Focus Audio 2 so the D2D lane label/curve target matches smoke writes. */
+		_focus_audio_track = 1;
+		if (!_engine.smoke_auto_lane_focus ()) {
 			_smoke_failed = true;
 		} else {
 			refresh_automation_lane ();
@@ -966,6 +970,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (smoke_pan_automation) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan-automation FAILED (no session)\n");
+	} else if (has_smoke ("auto-lane-focus")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-auto-lane-focus FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1041,6 +1047,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_edit && engine_session_ok ()) {
+	if (ok && smoke_edit && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_edit ()) {
 			_smoke_failed = true;
 		} else {
@@ -1826,13 +1833,7 @@ ShellWindow::sync_track_labels_from_engine ()
 		}
 		_mixers[mi].set_midi_strip (true);
 	}
-	if (na > 0 && _engine_snap.track_name[0][0] != L'\0') {
-		wchar_t auto_lab[48];
-		_snwprintf_s (auto_lab, _TRUNCATE, L"Gain · %s", _engine_snap.track_name[0]);
-		_auto_lane.set_label (auto_lab);
-	} else {
-		_auto_lane.set_label (L"Gain · Audio 1");
-	}
+	refresh_automation_lane ();
 }
 
 void
@@ -1977,6 +1978,23 @@ ShellWindow::sync_mixer_send_from_engine ()
 	}
 }
 
+int
+ShellWindow::auto_lane_track () const
+{
+	int t = _focus_audio_track;
+	const int na = n_audio_lanes ();
+	if (t < 0) {
+		t = 0;
+	}
+	if (na > 0 && t >= na) {
+		t = na - 1;
+	}
+	if (t >= EngineSnapshot::kMeters) {
+		t = EngineSnapshot::kMeters - 1;
+	}
+	return t;
+}
+
 void
 ShellWindow::cycle_auto_lane_kind ()
 {
@@ -2043,6 +2061,16 @@ ShellWindow::refresh_automation_lane ()
 	} else {
 		wchar_t auto_lab[48];
 		_snwprintf_s (auto_lab, _TRUNCATE, L"%s · %s · Audio 1", kind, st);
+	const int track = auto_lane_track ();
+	if (track >= 0 && track < EngineSnapshot::kMeters
+	    && _engine_snap.track_name[track][0] != L'\0') {
+		wchar_t auto_lab[48];
+		_snwprintf_s (auto_lab, _TRUNCATE, L"Gain · %s",
+		              _engine_snap.track_name[track]);
+		_auto_lane.set_label (auto_lab);
+	} else {
+		wchar_t auto_lab[32];
+		_snwprintf_s (auto_lab, _TRUNCATE, L"Gain · Audio %d", track + 1);
 		_auto_lane.set_label (auto_lab);
 	}
 	float view0 = _lanes[0].strip.view_start_sec ();
@@ -2066,6 +2094,11 @@ ShellWindow::refresh_automation_lane ()
 		}
 		for (size_t i = 0; i < n; ++i) {
 			curve[i] = flat;
+		_engine.fill_gain_automation_curve (track, view0, span, curve, n);
+	} else {
+		float g = (track >= 0 && track < kMixerStripsMax) ? _mixers[track].gain () : 0.5f;
+		for (size_t i = 0; i < n; ++i) {
+			curve[i] = g;
 		}
 	}
 	_auto_lane.set_curve (curve, n);
@@ -2084,6 +2117,8 @@ ShellWindow::refresh_automation_lane ()
 			npt = _engine.fill_gain_automation_points (
 				0, view0, span, px, py, (int)AutomationLane::kMaxPoints);
 		}
+		npt = _engine.fill_gain_automation_points (
+			track, view0, span, px, py, (int)AutomationLane::kMaxPoints);
 	}
 	_auto_lane.set_points (px, py, (size_t)std::max (0, npt));
 	_auto_lane.set_playhead_norm (_lanes[0].strip.playhead_norm ());
@@ -2095,6 +2130,7 @@ ShellWindow::write_automation_at (float x, float y)
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
 	}
+	const int track = auto_lane_track ();
 	float time_sec = _lanes[0].strip.time_at_x (_auto_lane_bounds, x);
 	float value = _auto_lane.value_at_y (_auto_lane_bounds, y);
 	/* Thin writes while dragging — skip near-duplicate times. */
@@ -2111,6 +2147,7 @@ ShellWindow::write_automation_at (float x, float y)
 		ok = _engine.write_track_gain_automation (0, time_sec, value);
 	}
 	if (ok) {
+	if (_engine.write_track_gain_automation (track, time_sec, value)) {
 		_auto_last_write_sec = time_sec;
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
@@ -4021,6 +4058,7 @@ ShellWindow::do_move_audio_track (int delta)
 	sync_mixer_pan_from_engine ();
 	sync_mixer_send_from_engine ();
 	apply_region_selection_to_lanes ();
+	refresh_automation_lane ();
 	layout_panes ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
@@ -4221,6 +4259,7 @@ ShellWindow::do_toggle_group_pick (int audio_index)
 	_group_pick[audio_index] = !_group_pick[audio_index];
 	_focus_audio_track = audio_index;
 	sync_mixer_group_from_engine ();
+	refresh_automation_lane ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
@@ -6354,6 +6393,7 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				prompt_rename_track (0, true);
 			} else if (lab < n_audio_lanes ()) {
 				_focus_audio_track = lab;
+				refresh_automation_lane ();
 				prompt_rename_track (lab, false);
 			}
 			return 0;
@@ -6361,6 +6401,7 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		int ed = hit_editor_lane_label (x, y);
 		if (ed >= 0) {
 			_focus_audio_track = ed;
+			refresh_automation_lane ();
 			prompt_rename_track (ed, false);
 			return 0;
 		}
@@ -7276,6 +7317,8 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				return true;
 			}
 			_focus_audio_track = lab;
+			refresh_automation_lane ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
 			_drag = DragMode::TrackReorderPending;
 			_drag_index = lab;
 			_pan_down_x = x;
@@ -7289,6 +7332,8 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	int ed_lab = hit_editor_lane_label (x, y);
 	if (ed_lab >= 0) {
 		_focus_audio_track = ed_lab;
+		refresh_automation_lane ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
 
@@ -8180,6 +8225,7 @@ ShellWindow::on_mouse_up ()
 			sync_mixer_pan_from_engine ();
 			sync_mixer_send_from_engine ();
 			apply_region_selection_to_lanes ();
+			refresh_automation_lane ();
 			layout_panes ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
 		}
@@ -9119,6 +9165,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+click meter", L"Clear all PeakMeter clip latches" },
 		{ L"Alt+click Solo", L"Exclusive solo (clear other solos)" },
 		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·arm)" },
+		{ L"Click track label", L"Focus track · gain auto lane follows" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
