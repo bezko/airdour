@@ -1305,7 +1305,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("mixer-scroll")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mixer-scroll FAILED (no session)\n");
-	if (ok && has_smoke ("group-color") && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("group-color") && engine_session_ok ()) {
 		if (!_engine.smoke_group_color ()) {
 			_smoke_failed = true;
 		} else {
@@ -4501,7 +4505,6 @@ ShellWindow::do_apply_or_clear_group ()
 
 void
 ShellWindow::do_toggle_group_relative ()
-ShellWindow::do_cycle_group_color ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
@@ -4510,6 +4513,21 @@ ShellWindow::do_cycle_group_color ()
 		return;
 	}
 	_engine.toggle_route_group_relative ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_group_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_cycle_group_color ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (_engine_snap.group_member_count < 2) {
+		return;
+	}
 	_engine.cycle_route_group_color ();
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();

@@ -303,6 +303,7 @@ private:
 	void do_scroll_mixer (float delta_px);
 	bool smoke_mixer_scroll_layout ();
 	void do_toggle_group_relative ();
+	void do_cycle_group_color ();
 	void do_toggle_monitor_dim ();
 	void do_toggle_monitor_mono ();
 	void do_toggle_monitor_cut ();
