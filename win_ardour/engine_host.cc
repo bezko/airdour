@@ -3403,6 +3403,20 @@ EngineHost::refresh_record_flags ()
 	}
 }
 
+/** Controllable::RealTime — applied on the process thread. */
+static bool
+wait_until (std::function<bool ()> pred, int timeout_ms = 400)
+{
+	const int step = 20;
+	for (int waited = 0; waited < timeout_ms; waited += step) {
+		if (pred ()) {
+			return true;
+		}
+		Sleep ((DWORD)step);
+	}
+	return pred ();
+}
+
 bool
 EngineHost::set_track_armed (int track, bool armed)
 {
@@ -3440,6 +3454,7 @@ EngineHost::toggle_track_armed (int track)
 
 bool
 EngineHost::disarm_all_tracks ()
+EngineHost::arm_all_tracks ()
 {
 	if (!_impl || !_impl->session) {
 		return false;
@@ -3449,6 +3464,7 @@ EngineHost::disarm_all_tracks ()
 		int n = 0;
 		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
 			if (set_track_armed ((int)i, false)) {
+			if (set_track_armed ((int)i, true)) {
 				++n;
 			}
 		}
@@ -3459,6 +3475,18 @@ EngineHost::disarm_all_tracks ()
 		return n > 0;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: disarm_all_tracks: %s\n", e.what ());
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			if (!_snap.track_armed[i]) {
+				_snap.detail = L"arm all — track still disarmed";
+				return false;
+			}
+		}
+		std::fprintf (stderr, "airdour_win_shell: armed all tracks (%d)\n", n);
+		std::fflush (stderr);
+		_snap.detail = L"all tracks armed";
+		return n > 0;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: arm_all_tracks: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -3471,6 +3499,10 @@ EngineHost::smoke_disarm_all ()
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"smoke-disarm-all failed — no Session";
+EngineHost::smoke_arm_all ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-arm-all failed — no Session";
 		return false;
 	}
 	try {
@@ -3493,6 +3525,22 @@ EngineHost::smoke_disarm_all ()
 		}
 		if (!disarm_all_tracks ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-disarm-all FAILED (disarm)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-arm-all FAILED (tracks)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Start disarmed so arm_all has work to do. */
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			set_track_armed ((int)i, false);
+		}
+		refresh_record_flags ();
+		if (_snap.track_armed[0] || _snap.track_armed[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-arm-all FAILED (pre-disarm)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!arm_all_tracks ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-arm-all FAILED (arm_all)\n");
 			std::fflush (stderr);
 			return false;
 		}
@@ -3500,6 +3548,9 @@ EngineHost::smoke_disarm_all ()
 			if (_snap.track_armed[i]) {
 				std::fprintf (stderr,
 				              "airdour_win_shell: smoke-disarm-all FAILED (still armed %zu)\n",
+			if (!_snap.track_armed[i]) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-arm-all FAILED (still disarmed %zu)\n",
 				              i);
 				std::fflush (stderr);
 				return false;
@@ -3511,6 +3562,12 @@ EngineHost::smoke_disarm_all ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-disarm-all exception: %s\n", e.what ());
+		std::fprintf (stderr, "airdour_win_shell: smoke-arm-all ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-arm-all ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-arm-all exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -27212,12 +27269,14 @@ EngineHost::toggle_track_armed (int track)
 
 bool
 EngineHost::disarm_all_tracks ()
+EngineHost::arm_all_tracks ()
 {
 	return false;
 }
 
 bool
 EngineHost::smoke_disarm_all ()
+EngineHost::smoke_arm_all ()
 {
 	return false;
 }

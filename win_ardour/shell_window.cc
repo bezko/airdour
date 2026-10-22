@@ -729,6 +729,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("solo-safe")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-solo-safe FAILED (no session)\n");
+	if (ok && has_smoke ("arm-all") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_arm_all ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_arm_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("arm-all")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-arm-all FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -6694,6 +6703,12 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			} else if (alt) {
 				/* Alt+click Arm → disarm every audio track. */
 				_engine.disarm_all_tracks ();
+			const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
+			if (!_engine.start ()) {
+				_engine_snap = _engine.snapshot ();
+			} else if (alt && shift) {
+				/* Alt+Shift+click Arm → arm every audio track. */
+				_engine.arm_all_tracks ();
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_arm_from_engine ();
@@ -8419,6 +8434,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
+		{ L"Alt+Shift+click Arm", L"Arm all audio tracks" },
 		{ L"U", L"Apply / clear track group" },
 		{ L"Shift+click Solo", L"Toggle solo-isolate (Si)" },
 		{ L"Ctrl+click Solo", L"Toggle solo-safe (Ss)" },
