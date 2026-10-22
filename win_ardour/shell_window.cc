@@ -527,6 +527,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		_engine.ensure_midi_region ();
 	}
 
+	if (ok && has_smoke ("pan-reset-all") && _engine.snapshot ().session_ok) {
+		if (!_engine.has_smoke ("pan-reset-all") ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_pan_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("pan-reset-all")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-pan-reset-all FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_plugin && _engine.snapshot ().session_ok) {
 		if (_engine.smoke_plugin_insert ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-plugin ok\n");
@@ -6712,6 +6725,16 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	int pan_i = hit_mixer_pan (x, y);
 	if (pan_i >= 0) {
+		const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
+		if (alt && _engine.is_linked () && _engine.snapshot ().session_ok) {
+			/* Alt+click pan → center every audio strip. */
+			_engine.reset_all_pans ();
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_pan_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
 		_drag = DragMode::Pan;
 		_drag_index = pan_i;
 		if (_mixers[pan_i].drag_pan_to (x)) {
@@ -8341,6 +8364,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"U", L"Apply / clear track group" },
 		{ L"Shift+click Solo", L"Toggle solo-isolate (Si)" },
 		{ L"Ctrl+click Solo", L"Toggle solo-safe (Ss)" },
+		{ L"Alt+click pan", L"Center all track pans" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },

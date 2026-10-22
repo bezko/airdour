@@ -3999,6 +3999,86 @@ EngineHost::track_pan (int track) const
 }
 
 bool
+EngineHost::reset_all_pans ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		collect_tracks ();
+		int n = 0;
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			if (!_impl->tracks[i] || !_impl->tracks[i]->pan_azimuth_control ()) {
+				continue;
+			}
+			if (set_track_pan ((int)i, 0.5f)) {
+				++n;
+			}
+		}
+		std::fprintf (stderr, "airdour_win_shell: reset all pans to center (%d)\n", n);
+		std::fflush (stderr);
+		_snap.detail = L"all pans → center";
+		return n > 0;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: reset_all_pans: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_pan_reset_all ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-pan-reset-all failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if ((int)_impl->tracks.size () < 2 || !_impl->tracks[0] || !_impl->tracks[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pan-reset-all FAILED (tracks)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_pan (0, 0.0f) || !set_track_pan (1, 1.0f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pan-reset-all FAILED (seed)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!reset_all_pans ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-pan-reset-all FAILED (reset)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			if (!_impl->tracks[i] || !_impl->tracks[i]->pan_azimuth_control ()) {
+				continue;
+			}
+			float p = _snap.track_pan[i];
+			if (p < 0.45f || p > 0.55f) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-pan-reset-all FAILED (a%zu=%.3f)\n",
+				              i, p);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-pan-reset-all ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-pan-reset-all ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-pan-reset-all exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::smoke_pan ()
 {
 	if (!_impl || !_impl->session) {
@@ -27006,6 +27086,18 @@ EngineHost::track_pan (int track) const
 {
 	(void)track;
 	return 0.5f;
+}
+
+bool
+EngineHost::reset_all_pans ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_pan_reset_all ()
+{
+	return false;
 }
 
 bool

@@ -459,6 +459,13 @@ public:
 	 */
 	bool set_track_pan_auto_state (int track, int state_0_off_1_play_2_write_3_touch);
 	bool cycle_track_pan_auto_state (int track = 0);
+	/**
+	 * Center every audio track pan (0.5, NoGroup).
+	 * For Alt+click pan / --smoke-pan-reset-all.
+	 */
+	bool reset_all_pans ();
+	/** Pan L/R then reset_all → verify center. For --smoke-pan-reset-all. */
+	bool smoke_pan_reset_all ();
 
 	/** Pan L → C → R on Audio 1. For --smoke-pan. */
 	bool smoke_pan ();
