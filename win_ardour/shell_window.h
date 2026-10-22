@@ -476,6 +476,10 @@ void do_toggle_selection_muted ();
 	D2D1_RECT_F _auto_lane_bounds;
 	D2D1_RECT_F _midi_cc_lane_bounds;
 	D2D1_RECT_F _mixer_pane;
+	D2D1_RECT_F _mixer_strips_clip; /* strips area left of History (for scroll clip) */
+	float       _mixer_scroll_x; /* px; strips content offset */
+	float       _mixer_scroll_max; /* layout-computed */
+	float       _mixer_force_min_w; /* smoke: force min strip width (0 = default) */
 	D2D1_RECT_F _status_bar;
 
 	ID2D1Factory*             _d2d_factory;
