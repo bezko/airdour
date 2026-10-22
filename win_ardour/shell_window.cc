@@ -558,6 +558,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("fader-reset-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-fader-reset-all FAILED (no session)\n");
+	if (ok && has_smoke ("disarm-all") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_disarm_all ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_arm_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("disarm-all")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-disarm-all FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -6679,8 +6688,15 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	int arm = hit_mixer_arm (x, y);
 	if (arm >= 0) {
 		if (_engine.is_linked ()) {
+			const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
 			if (!_engine.start ()) {
 				_engine_snap = _engine.snapshot ();
+			} else if (alt) {
+				/* Alt+click Arm → disarm every audio track. */
+				_engine.disarm_all_tracks ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_arm_from_engine ();
 			} else {
 				if (arm == midi_mixer_index ()) {
 					_engine.toggle_midi_armed ();
@@ -8409,6 +8425,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+click pan", L"Center all track pans" },
 		{ L"Alt+click send", L"Zero all aux sends" },
 		{ L"Alt+click fader", L"Reset all faders to unity" },
+		{ L"Alt+click Arm", L"Disarm all audio tracks" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
