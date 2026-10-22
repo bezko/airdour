@@ -781,7 +781,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("solo-isolate")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (no session)\n");
-	if (ok && has_smoke ("phase-invert") && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("phase-invert") && engine_session_ok ()) {
 		if (!_engine.smoke_phase_invert ()) {
 			_smoke_failed = true;
 		} else {
@@ -873,7 +877,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan && engine_session_ok ()) {
-	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
@@ -1845,6 +1848,10 @@ ShellWindow::sync_mixer_comment_from_engine ()
 	}
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_has_comment (_engine_snap.track_comment[i][0] != L'\0');
+	}
+}
+
+void
 ShellWindow::sync_mixer_phase_from_engine ()
 {
 	const int na = n_audio_lanes ();
@@ -7034,6 +7041,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_comment_from_engine ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return true;
+			}
+			if ((GetKeyState (VK_MENU) & 0x8000)
 			    && _engine.is_linked () && _engine_snap.session_ok) {
 				/* Alt+click label → toggle polarity invert. */
 				_focus_audio_track = lab;

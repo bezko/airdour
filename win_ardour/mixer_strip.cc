@@ -475,6 +475,16 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 			_label_rc.right - 20.f * dpi_scale, _label_rc.top + 1.f * dpi_scale,
 			_label_rc.right - 2.f * dpi_scale, _label_rc.top + 15.f * dpi_scale);
 		accent->SetOpacity (0.7f);
+		rt->FillRectangle (badge, accent);
+		accent->SetOpacity (1.f);
+		DWRITE_TEXT_ALIGNMENT ta_b = fmt_meta->GetTextAlignment ();
+		DWRITE_PARAGRAPH_ALIGNMENT pa_b = fmt_meta->GetParagraphAlignment ();
+		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
+		fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+		rt->DrawTextW (L"Cm", 2, fmt_meta, badge, brand);
+		fmt_meta->SetTextAlignment (ta_b);
+		fmt_meta->SetParagraphAlignment (pa_b);
+	}
 	if (_phase_inverted && !_midi_strip) {
 		/* Ø badge — polarity inverted (PhaseControl). */
 		D2D1_RECT_F badge = D2D1::RectF (
@@ -487,7 +497,6 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		DWRITE_PARAGRAPH_ALIGNMENT pa_b = fmt_meta->GetParagraphAlignment ();
 		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
 		fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-		rt->DrawTextW (L"Cm", 2, fmt_meta, badge, brand);
 		rt->DrawTextW (L"\x00D8", 1, fmt_meta, badge, brand);
 		fmt_meta->SetTextAlignment (ta_b);
 		fmt_meta->SetParagraphAlignment (pa_b);
