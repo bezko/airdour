@@ -1240,7 +1240,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_monitor && engine_session_ok ()) {
 	if (ok && has_smoke ("narrow-mixer")) {
 		if (!_engine.smoke_narrow_mixer ()) {
 			_smoke_failed = true;
@@ -1251,7 +1250,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_monitor && _engine.snapshot ().session_ok) {
+	if (ok && smoke_monitor && engine_session_ok ()) {
 		if (!_engine.smoke_monitor ()) {
 			_smoke_failed = true;
 		} else {
@@ -5970,9 +5969,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 					InvalidateRect (_hwnd, nullptr, FALSE);
 				}
 			}
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
-		           && !(GetKeyState (VK_MENU) & 0x8000)
-		           && (wparam == 'N' || wparam == 'n')) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
 		           && (wparam == 'W' || wparam == 'w')) {
 			/* Alt+Shift+W — toggle narrow mixer strips. */
 			_engine.toggle_mixer_narrow ();

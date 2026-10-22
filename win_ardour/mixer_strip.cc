@@ -167,6 +167,7 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 
 	float fx_h = 18.f * dpi_scale;
 	if (_midi_strip || _narrow) {
+		_trim_track = D2D1::RectF (0, 0, 0, 0);
 		_pan_track = D2D1::RectF (0, 0, 0, 0);
 		_send_track = D2D1::RectF (0, 0, 0, 0);
 		_fx_btn = D2D1::RectF (0, 0, 0, 0);
@@ -615,8 +616,8 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 				body, 1.f);
 		}
 
-	if (!_midi_strip && !_narrow) {
-		/* Pan azimuth track — L · C · R */
+		if (!_narrow) {
+			/* Pan azimuth track — L · C · R */
 		rt->FillRectangle (_pan_track, edge);
 		float pw = _pan_track.right - _pan_track.left;
 		float kn_cx = _pan_track.left + pw * _pan;
@@ -684,6 +685,7 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 				draw_param (_fx_param_track3, _fx_param3, 0.45f);
 			}
 		}
+	}
 	}
 
 	fmt_meta->SetTextAlignment (ta_m);

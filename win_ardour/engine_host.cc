@@ -12808,7 +12808,6 @@ EngineHost::smoke_group ()
 void
 EngineHost::refresh_monitor_flags ()
 {
-	_snap.mixer_narrow = false;
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
 	_snap.monitor_mono = false;
