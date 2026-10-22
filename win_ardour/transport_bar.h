@@ -144,6 +144,8 @@ public:
 
 	void set_group_active (bool on) { _group_active = on; }
 	bool group_active () const { return _group_active; }
+	void set_group_relative (bool on) { _group_relative = on; }
+	bool group_relative () const { return _group_relative; }
 
 	void set_spectrum_enabled (bool on) { _spectrum_enabled = on; }
 	bool spectrum_enabled () const { return _spectrum_enabled; }
@@ -274,6 +276,7 @@ private:
 	bool        _count_in_enabled;
 	bool        _click_enabled;
 	bool        _group_active;
+	bool        _group_relative;
 	bool        _spectrum_enabled;
 	bool        _correlation_enabled;
 	bool        _loudness_enabled;

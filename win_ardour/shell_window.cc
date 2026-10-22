@@ -1276,6 +1276,16 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("group-recenable")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (no session)\n");
+	if (ok && has_smoke ("group-relative") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_group_relative ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_group_from_engine ();
+			sync_mixer_gains_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("group-relative")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-relative FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1864,6 +1874,8 @@ ShellWindow::sync_mixer_group_from_engine ()
 	}
 	_transport.set_group_active (_engine_snap.group_member_count >= 2
 	                             && _engine_snap.group_active);
+	_transport.set_group_relative (_engine_snap.group_member_count >= 2
+	                              && _engine_snap.group_relative);
 	_transport.set_spectrum_enabled (_engine_snap.spectrum_enabled);
 	_transport.set_correlation_enabled (_engine_snap.correlation_enabled);
 	_transport.set_loudness_enabled (_engine_snap.loudness_enabled);
@@ -4398,6 +4410,22 @@ ShellWindow::do_apply_or_clear_group ()
 }
 
 void
+ShellWindow::do_toggle_group_relative ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (_engine_snap.group_member_count < 2) {
+		return;
+	}
+	_engine.toggle_route_group_relative ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_group_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_nudge_tempo (float delta)
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -6307,6 +6335,14 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
 				do_apply_or_clear_group ();
 			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'G' || wparam == 'g')) {
+			/* Alt+Shift+G — toggle RouteGroup relative gain. */
+			do_toggle_group_relative ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'U' || wparam == 'u')) {
+			do_apply_or_clear_group ();
 		}
 		
 		return 0;
@@ -7064,7 +7100,13 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 	if (th == TransportHit::Group) {
-		do_apply_or_clear_group ();
+		if ((GetKeyState (VK_MENU) & 0x8000)
+		    && !(GetKeyState (VK_SHIFT) & 0x8000)) {
+			/* Alt+click Grp → toggle relative gain linking. */
+			do_toggle_group_relative ();
+		} else {
+			do_apply_or_clear_group ();
+		}
 		return true;
 	}
 	if (th == TransportHit::FitSession) {
@@ -9158,6 +9200,8 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+click Solo", L"Exclusive solo (clear other solos)" },
 		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·arm)" },
 		{ L"Click track label", L"Focus track · gain auto lane follows" },
+		{ L"U / Shift+U", L"Apply / clear track group" },
+		{ L"Alt+Shift+G / Alt+Grp", L"Toggle group relative gain" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },

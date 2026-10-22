@@ -89,6 +89,7 @@ TransportBar::TransportBar ()
 	, _count_in_enabled (false)
 	, _click_enabled (false)
 	, _group_active (false)
+	, _group_relative (false)
 	, _spectrum_enabled (false)
 	, _correlation_enabled (false)
 	, _loudness_enabled (false)
@@ -504,7 +505,8 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_remove_track_btn, L"−T", false);
 	draw_btn (_track_up_btn, L"▲", false);
 	draw_btn (_track_dn_btn, L"▼", false);
-	draw_btn (_group_btn, L"Grp", _group_active);
+	draw_btn (_group_btn, _group_relative ? L"Rel" : L"Grp",
+	          _group_active || _group_relative);
 
 	/* Shuttle strip: track + thumb. */
 	{

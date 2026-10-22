@@ -645,6 +645,7 @@ EngineHost::EngineHost ()
 	_snap.midi_track_name[0] = L'\0';
 	_snap.group_member_count = 0;
 	_snap.group_active = false;
+	_snap.group_relative = false;
 	_snap.group_shares_mute = false;
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
@@ -12650,6 +12651,7 @@ EngineHost::refresh_group_flags ()
 	}
 	_snap.group_member_count = 0;
 	_snap.group_active = false;
+	_snap.group_relative = false;
 	_snap.group_shares_mute = false;
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
@@ -12669,6 +12671,7 @@ EngineHost::refresh_group_flags ()
 		}
 		copy_name_to_snap (_snap.group_name, EngineSnapshot::kGroupNameLen, rg->name ());
 		_snap.group_active = rg->is_active ();
+		_snap.group_relative = rg->is_relative ();
 		_snap.group_shares_mute = rg->is_mute ();
 		_snap.group_shares_solo = rg->is_solo ();
 		_snap.group_shares_gain = rg->is_gain ();
@@ -12816,6 +12819,41 @@ EngineHost::toggle_route_group_active ()
 }
 
 bool
+EngineHost::set_route_group_relative (bool enable)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		std::shared_ptr<RouteGroup> rg = _impl->shell_group;
+		if (!rg) {
+			rg = _impl->session->route_group_by_name ("Group 1");
+			_impl->shell_group = rg;
+		}
+		if (!rg) {
+			_snap.detail = L"no group for relative";
+			return false;
+		}
+		rg->set_relative (enable, nullptr);
+		refresh_group_flags ();
+		std::fprintf (stderr, "airdour_win_shell: RouteGroup relative=%d\n",
+		              (int)_snap.group_relative);
+		std::fflush (stderr);
+		_snap.detail = enable ? L"group relative" : L"group absolute";
+		return _snap.group_relative == enable;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_route_group_relative ()
+{
+	refresh_group_flags ();
+	return set_route_group_relative (!_snap.group_relative);
+}
+
+bool
 EngineHost::smoke_group ()
 {
 	if (!_impl || !_impl->session) {
@@ -12908,12 +12946,21 @@ EngineHost::smoke_group_recenable ()
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"smoke-group-recenable failed — no Session";
+EngineHost::smoke_group_relative ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-group-relative failed — no Session";
 		return false;
 	}
 	try {
 		collect_tracks ();
 		if (_snap.audio_track_count < 2) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (need ≥2 audio)\n");
+		if (_snap.audio_track_count < 2
+		    || !_impl->tracks[0] || !_impl->tracks[1]
+		    || !_impl->tracks[0]->gain_control ()
+		    || !_impl->tracks[1]->gain_control ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-relative FAILED (need ≥2)\n");
 			std::fflush (stderr);
 			return false;
 		}
@@ -12930,6 +12977,13 @@ EngineHost::smoke_group_recenable ()
 		refresh_record_flags ();
 		if (!set_track_armed (0, true)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (arm 0)\n");
+		if (!create_route_group (idxs, 2) || _snap.group_member_count < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-relative FAILED (create)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_route_group_relative (true) || !_snap.group_relative) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-relative FAILED (enable)\n");
 			std::fflush (stderr);
 			clear_route_group ();
 			return false;
@@ -12987,6 +13041,48 @@ EngineHost::smoke_group_recenable ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable exception: %s\n",
+		/* Toggle relative off→on so push_to_groups always re-applies Mode. */
+		_impl->shell_group->set_relative (false, nullptr);
+		_impl->shell_group->set_relative (true, nullptr);
+		/* Seed asymmetric levels without group linking. */
+		_impl->tracks[0]->gain_control ()->set_value (0.40, Controllable::NoGroup);
+		_impl->tracks[1]->gain_control ()->set_value (0.20, Controllable::NoGroup);
+		float seed0 = (float)_impl->tracks[0]->gain_control ()->get_value ();
+		float seed1 = (float)_impl->tracks[1]->gain_control ()->get_value ();
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-relative seed=%.3f/%.3f rel=%d\n",
+		              seed0, seed1, (int)_impl->shell_group->is_relative ());
+		std::fflush (stderr);
+		/* Relative UseGroup: ×2 on Audio 1 → peer ×2 via GainControlGroup::inc_gain. */
+		_impl->tracks[0]->gain_control ()->set_value (0.80, Controllable::UseGroup);
+		Sleep (80);
+		float g0 = (float)_impl->tracks[0]->gain_control ()->get_value ();
+		float g1 = (float)_impl->tracks[1]->gain_control ()->get_value ();
+		_snap.track_gain[0] = g0;
+		_snap.track_gain[1] = g1;
+		_track_gain[0] = g0;
+		_track_gain[1] = g1;
+		if (std::fabs (g0 - 0.80f) > 0.08f || std::fabs (g1 - 0.40f) > 0.08f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-group-relative FAILED (got %.2f/%.2f want 0.80/0.40)\n",
+			              g0, g1);
+			std::fflush (stderr);
+			clear_route_group ();
+			return false;
+		}
+		if (!set_route_group_relative (false) || _snap.group_relative) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-relative FAILED (absolute)\n");
+			std::fflush (stderr);
+			clear_route_group ();
+			return false;
+		}
+		clear_route_group ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-group-relative ok (0.40/0.20 → 0.80/0.40)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-group-relative ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-relative exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -28559,6 +28655,7 @@ EngineHost::EngineHost ()
 	_snap.midi_track_name[0] = L'\0';
 	_snap.group_member_count = 0;
 	_snap.group_active = false;
+	_snap.group_relative = false;
 	_snap.group_shares_mute = false;
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
@@ -30727,6 +30824,20 @@ EngineHost::smoke_group ()
 
 bool
 EngineHost::smoke_group_recenable ()
+EngineHost::set_route_group_relative (bool enable)
+{
+	(void)enable;
+	return false;
+}
+
+bool
+EngineHost::toggle_route_group_relative ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_group_relative ()
 {
 	return false;
 }

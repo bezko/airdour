@@ -266,6 +266,7 @@ struct EngineSnapshot {
 	bool         track_in_group[kMeters]; /* member of Session RouteGroup */
 	int          group_member_count; /* 0 = no shell group */
 	bool         group_active; /* RouteGroup::is_active */
+	bool         group_relative; /* RouteGroup::is_relative — proportional gain */
 	bool         group_shares_mute;
 	bool         group_shares_solo;
 	bool         group_shares_gain;
@@ -1310,6 +1311,9 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool clear_route_group ();
 	bool set_route_group_active (bool enable);
 	bool toggle_route_group_active ();
+	/** Relative (proportional) gain linking. Alt+Shift+G / --smoke-group-relative. */
+	bool set_route_group_relative (bool enable);
+	bool toggle_route_group_relative ();
 
 	/**
 	 * Group Audio 0+1; mute/solo/gain propagate; clear. For --smoke-group.
@@ -1320,6 +1324,11 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-group-recenable.
 	 */
 	bool smoke_group_recenable ();
+/**
+	 * Group; enable relative; NoGroup seed 0.40/0.20; UseGroup ×2 on Audio 1
+	 * → peers 0.80/0.40. For --smoke-group-relative.
+	 */
+	bool smoke_group_relative ();
 
 	/**
 	 * Ensure Session monitor bus + MonitorProcessor (add_monitor_section).
