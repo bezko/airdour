@@ -142,11 +142,8 @@ private:
 	bool        _armed;
 	bool        _muted;
 	bool        _soloed;
-<<<<<<< HEAD
 	bool        _solo_isolated;
-=======
 	bool        _solo_safe;
->>>>>>> origin/pr/48
 	bool        _fx_bypassed;
 	int         _fx_param_count; /* 1..3 */
 	bool        _midi_strip;
