@@ -753,6 +753,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		if (!_engine.smoke_clear_solos ()) {
 	if (ok && has_smoke ("clear-mutes") && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_clear_mutes ()) {
+	if (ok && has_smoke ("exclusive-solo") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_exclusive_solo ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_mute_solo_from_engine ();
@@ -762,6 +764,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-clear-solos FAILED (no session)\n");
 	} else if (has_smoke ("clear-mutes")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes FAILED (no session)\n");
+	} else if (has_smoke ("exclusive-solo")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-exclusive-solo FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -6879,6 +6883,15 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_mute_solo_from_engine ();
+			const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
+			if (solo_i == midi_mixer_index ()) {
+				if (alt) {
+					_engine.exclusive_solo_midi ();
+				} else {
+					_engine.toggle_midi_soloed ();
+				}
+			} else if (alt) {
+				_engine.exclusive_solo_track (solo_i);
 			} else {
 				_engine.toggle_track_soloed (solo_i);
 				_engine.poll ();
@@ -8576,6 +8589,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+click Arm", L"Disarm all audio tracks" },
 		{ L"Alt+U", L"Clear all solos (audio + MIDI)" },
 		{ L"Alt+click meter", L"Clear all PeakMeter clip latches" },
+		{ L"Alt+click Solo", L"Exclusive solo (clear other solos)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
