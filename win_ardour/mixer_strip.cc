@@ -42,6 +42,7 @@ MixerStrip::MixerStrip ()
 	, _muted (false)
 	, _soloed (false)
 	, _solo_isolated (false)
+	, _solo_safe (false)
 	, _fx_bypassed (false)
 	, _fx_param_count (1)
 	, _midi_strip (false)
@@ -490,12 +491,12 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		rt->DrawTextW (L"M", 1, fmt_meta, _mute_btn, brand);
 	}
 
-	/* Solo — accent when self/effective solo; Si when solo-isolated. */
+	/* Solo — accent when self/effective solo; Si when solo-isolated, Ss when safe. */
 	if (_soloed) {
 		accent->SetOpacity (0.85f);
 		rt->FillRectangle (_solo_btn, accent);
 		accent->SetOpacity (1.f);
-	} else if (_solo_isolated) {
+	} else if (_solo_isolated || _solo_safe) {
 		body->SetOpacity (0.55f);
 		rt->FillRectangle (_solo_btn, body);
 		body->SetOpacity (1.f);
@@ -503,7 +504,7 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		rt->FillRectangle (_solo_btn, edge);
 	}
 	{
-		const wchar_t* s_lab = _solo_isolated ? L"Si" : L"S";
+		const wchar_t* s_lab = _solo_isolated ? L"Si" : (_solo_safe ? L"Ss" : L"S");
 		rt->DrawTextW (s_lab, (UINT32)wcslen (s_lab), fmt_meta, _solo_btn, brand);
 	}
 

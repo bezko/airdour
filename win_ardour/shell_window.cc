@@ -676,6 +676,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && has_smoke ("solo-safe") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_solo_safe ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_solo_safe_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("solo-safe")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-safe FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
@@ -1597,6 +1610,14 @@ ShellWindow::sync_mixer_solo_isolate_from_engine ()
 	}
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_solo_isolated (_engine_snap.track_solo_isolated[i]);
+ShellWindow::sync_mixer_solo_safe_from_engine ()
+{
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < kMixerStripsMax; ++i) {
+		_mixers[i].set_solo_safe (false);
+	}
+	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
+		_mixers[i].set_solo_safe (_engine_snap.track_solo_safe[i]);
 	}
 }
 
@@ -6656,12 +6677,19 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	if (solo_i >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
 			const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
+			const bool ctrl = (GetKeyState (VK_CONTROL) & 0x8000) != 0;
 			if (shift && solo_i != midi_mixer_index ()) {
 				/* Shift+click Solo → toggle solo-isolate. */
 				_engine.toggle_track_solo_isolated (solo_i);
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_solo_isolate_from_engine ();
+			} else if (ctrl && solo_i != midi_mixer_index ()) {
+				/* Ctrl+click Solo → toggle solo-safe. */
+				_engine.toggle_track_solo_safe (solo_i);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_solo_safe_from_engine ();
 			} else if (solo_i == midi_mixer_index ()) {
 				_engine.toggle_midi_soloed ();
 				_engine.poll ();
@@ -7610,6 +7638,7 @@ ShellWindow::on_tick ()
 	sync_mixer_fx_from_engine ();
 	sync_mixer_mute_solo_from_engine ();
 	sync_mixer_solo_isolate_from_engine ();
+	sync_mixer_solo_safe_from_engine ();
 	sync_mixer_pan_from_engine ();
 	sync_mixer_send_from_engine ();
 	sync_monitor_from_engine ();
@@ -8307,6 +8336,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"U", L"Apply / clear track group" },
 		{ L"Shift+click Solo", L"Toggle solo-isolate (Si)" },
+		{ L"Ctrl+click Solo", L"Toggle solo-safe (Ss)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },

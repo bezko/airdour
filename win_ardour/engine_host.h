@@ -220,6 +220,7 @@ struct EngineSnapshot {
 	/** Gain AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
 	int          track_gain_auto_state[kMeters];
 	bool         track_solo_isolated[kMeters]; /* SoloIsolateControl self */
+	bool         track_solo_safe[kMeters]; /* SoloSafeControl — ignore others' solo */
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	/** Pan AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
 	int          track_pan_auto_state[kMeters];
@@ -410,6 +411,13 @@ public:
 	bool toggle_track_solo_isolated (int track = 0);
 	/** Off → on → off on Audio 1. */
 	bool smoke_solo_isolate ();
+	 * Solo-safe a track (SoloSafeControl) so other solos don't mute it.
+	 * For Ctrl+click Solo / --smoke-solo-safe.
+	 */
+	bool set_track_solo_safe (int track, bool safe);
+	bool toggle_track_solo_safe (int track = 0);
+	/** Off → on → off on Audio 1. */
+	bool smoke_solo_safe ();
 
 	/** MIDI track mute/solo (Session MidiTrack as Route). */
 	bool set_midi_muted (bool muted);
@@ -1661,6 +1669,7 @@ private:
 	void refresh_mute_solo_flags ();
 	void refresh_gain_auto_state_flags ();
 	void refresh_solo_isolate_flags ();
+	void refresh_solo_safe_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_pan_auto_state_flags ();
