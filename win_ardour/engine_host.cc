@@ -13155,10 +13155,6 @@ EngineHost::smoke_monitor_dim_level ()
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"smoke-monitor-dim-level failed — no Session";
-EngineHost::smoke_solo_boost ()
-{
-	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-solo-boost failed — no Session";
 		return false;
 	}
 	try {
@@ -13206,6 +13202,23 @@ EngineHost::smoke_solo_boost ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-monitor-dim-level exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_solo_boost ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-solo-boost failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_monitor_section ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-solo-boost FAILED (ensure)\n");
 			std::fflush (stderr);
 			return false;

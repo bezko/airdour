@@ -302,6 +302,7 @@ private:
 	void do_toggle_monitor_dim ();
 	void do_toggle_monitor_mono ();
 	void do_toggle_monitor_cut ();
+	void do_cycle_monitor_solo_boost ();
 	void do_clear_all_solos ();
 	void do_clear_all_mutes ();
 	void sync_monitor_from_engine ();
