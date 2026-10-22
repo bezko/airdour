@@ -889,8 +889,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_send && engine_session_ok ()) {
-	if (ok && has_smoke ("strip-trim") && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("strip-trim") && engine_session_ok ()) {
 		if (!_engine.smoke_strip_trim ()) {
 			_smoke_failed = true;
 		} else {
@@ -1874,6 +1873,10 @@ ShellWindow::sync_mixer_phase_from_engine ()
 	}
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_phase_inverted (_engine_snap.track_phase_invert[i]);
+	}
+}
+
+void
 ShellWindow::sync_mixer_trim_from_engine ()
 {
 	const int na = n_audio_lanes ();
@@ -5838,28 +5841,25 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
 				do_apply_crossfade ();
 			}
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'T' || wparam == 't')) {
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'F' || wparam == 'f')) {
-			do_apply_crossfade ();
-		} else if ((GetKeyState (VK_MENU) & 0x8000)
-		           && (GetKeyState (VK_SHIFT) & 0x8000)
-		           && !(GetKeyState (VK_CONTROL) & 0x8000)
-		           && (wparam == 'T' || wparam == 't')) {
-			/* Alt+Shift+T — reset focused strip trim to unity. */
-			if (_engine.is_linked () && _engine_snap.session_ok) {
-				int ti = _focus_audio_track;
-				if (ti < 0) {
-					ti = 0;
+			} else if ((GetKeyState (VK_MENU) & 0x8000)
+			           && (GetKeyState (VK_SHIFT) & 0x8000)
+			           && !(GetKeyState (VK_CONTROL) & 0x8000)
+			           && (wparam == 'T' || wparam == 't')) {
+				/* Alt+Shift+T — reset focused strip trim to unity. */
+				if (_engine.is_linked () && _engine_snap.session_ok) {
+					int ti = _focus_audio_track;
+					if (ti < 0) {
+						ti = 0;
+					}
+					if (ti < n_audio_lanes ()) {
+						_engine.set_track_trim (ti, 1.f);
+						_engine.poll ();
+						_engine_snap = _engine.snapshot ();
+						sync_mixer_trim_from_engine ();
+						InvalidateRect (_hwnd, nullptr, FALSE);
+					}
 				}
-				if (ti < n_audio_lanes ()) {
-					_engine.set_track_trim (ti, 1.f);
-					_engine.poll ();
-					_engine_snap = _engine.snapshot ();
-					sync_mixer_trim_from_engine ();
-					InvalidateRect (_hwnd, nullptr, FALSE);
-				}
-			}
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
 		           && !(GetKeyState (VK_MENU) & 0x8000)
 		           && (wparam == 'T' || wparam == 't')) {
 			/* T = stretch 1.5×; Shift+T = compress 0.75× (pitch unchanged). */
@@ -6198,6 +6198,7 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				}
 				return 0;
 			}
+		}
 		int trim_i = hit_mixer_trim (x, y);
 		if (trim_i >= 0 && _engine.is_linked () && _engine_snap.session_ok) {
 			/* Double-click trim → unity (0 dB). */

@@ -4286,6 +4286,110 @@ EngineHost::refresh_solo_isolate_flags ()
 {
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_solo_isolated[i] = false;
+	}
+	if (!_impl) {
+		return;
+	}
+	try {
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]
+			    && _impl->tracks[i]->solo_isolate_control ()) {
+				_snap.track_solo_isolated[i] =
+					_impl->tracks[i]->solo_isolate_control ()->self_solo_isolated ();
+			}
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::set_track_solo_isolated (int track, bool isolated)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	collect_tracks ();
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
+	    || !_impl->tracks[track]->solo_isolate_control ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<SoloIsolateControl> sic =
+			_impl->tracks[track]->solo_isolate_control ();
+		_impl->session->set_control (sic, isolated ? 1.0 : 0.0, Controllable::NoGroup);
+		wait_until ([&] () {
+			refresh_solo_isolate_flags ();
+			return _snap.track_solo_isolated[track] == isolated;
+		}, 400);
+		refresh_solo_isolate_flags ();
+		std::fprintf (stderr, "airdour_win_shell: Audio %d solo-isolate=%d\n",
+		              track + 1, isolated ? 1 : 0);
+		std::fflush (stderr);
+		_snap.detail = isolated ? L"solo isolated" : L"solo isolate off";
+		return _snap.track_solo_isolated[track] == isolated;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: solo-isolate: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_track_solo_isolated (int track)
+{
+	refresh_solo_isolate_flags ();
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	return set_track_solo_isolated (track, !_snap.track_solo_isolated[track]);
+}
+
+bool
+EngineHost::smoke_solo_isolate ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-solo-isolate failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]
+		    || !_impl->tracks[0]->solo_isolate_control ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_solo_isolated (0, false) || _snap.track_solo_isolated[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_solo_isolated (0, true) || !_snap.track_solo_isolated[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_solo_isolated (0, false) || _snap.track_solo_isolated[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-solo-isolate ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 namespace {
 
 float
@@ -4330,9 +4434,6 @@ EngineHost::refresh_trim_flags ()
 	try {
 		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 			if (i < (int)_impl->tracks.size () && _impl->tracks[i]
-			    && _impl->tracks[i]->solo_isolate_control ()) {
-				_snap.track_solo_isolated[i] =
-					_impl->tracks[i]->solo_isolate_control ()->self_solo_isolated ();
 			    && _impl->tracks[i]->trim_control ()) {
 				float c = (float)_impl->tracks[i]->trim_control ()->get_value ();
 				_snap.track_trim[i] = c;
@@ -4344,7 +4445,6 @@ EngineHost::refresh_trim_flags ()
 }
 
 bool
-EngineHost::set_track_solo_isolated (int track, bool isolated)
 EngineHost::set_track_trim (int track, float linear)
 {
 	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
@@ -4352,25 +4452,6 @@ EngineHost::set_track_trim (int track, float linear)
 	}
 	collect_tracks ();
 	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
-	    || !_impl->tracks[track]->solo_isolate_control ()) {
-		return false;
-	}
-	try {
-		std::shared_ptr<SoloIsolateControl> sic =
-			_impl->tracks[track]->solo_isolate_control ();
-		_impl->session->set_control (sic, isolated ? 1.0 : 0.0, Controllable::NoGroup);
-		wait_until ([&] () {
-			refresh_solo_isolate_flags ();
-			return _snap.track_solo_isolated[track] == isolated;
-		}, 400);
-		refresh_solo_isolate_flags ();
-		std::fprintf (stderr, "airdour_win_shell: Audio %d solo-isolate=%d\n",
-		              track + 1, isolated ? 1 : 0);
-		std::fflush (stderr);
-		_snap.detail = isolated ? L"solo isolated" : L"solo isolate off";
-		return _snap.track_solo_isolated[track] == isolated;
-	} catch (std::exception& e) {
-		std::fprintf (stderr, "airdour_win_shell: solo-isolate: %s\n", e.what ());
 	    || !_impl->tracks[track]->trim_control ()) {
 		return false;
 	}
@@ -4405,20 +4486,6 @@ EngineHost::set_track_trim (int track, float linear)
 }
 
 bool
-EngineHost::toggle_track_solo_isolated (int track)
-{
-	refresh_solo_isolate_flags ();
-	if (track < 0 || track >= EngineSnapshot::kMeters) {
-		return false;
-	}
-	return set_track_solo_isolated (track, !_snap.track_solo_isolated[track]);
-}
-
-bool
-EngineHost::smoke_solo_isolate ()
-{
-	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-solo-isolate failed — no Session";
 EngineHost::set_track_trim_norm (int track, float norm_0_1)
 {
 	return set_track_trim (track, trim_coeff_from_norm (norm_0_1));
@@ -4452,32 +4519,6 @@ EngineHost::smoke_strip_trim ()
 	try {
 		collect_tracks ();
 		if (_impl->tracks.empty () || !_impl->tracks[0]
-		    || !_impl->tracks[0]->solo_isolate_control ()) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (track)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!set_track_solo_isolated (0, false) || _snap.track_solo_isolated[0]) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (clear)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!set_track_solo_isolated (0, true) || !_snap.track_solo_isolated[0]) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (on)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!set_track_solo_isolated (0, false) || _snap.track_solo_isolated[0]) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (off)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate ok\n");
-		std::fflush (stderr);
-		_snap.detail = L"smoke-solo-isolate ok";
-		return true;
-	} catch (std::exception& e) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate exception: %s\n",
 		    || !_impl->tracks[0]->trim_control ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-strip-trim FAILED (track)\n");
 			std::fflush (stderr);
