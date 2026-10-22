@@ -580,6 +580,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-clear-meter-clips FAILED (no session)\n");
 	if (ok && has_smoke ("fx-bypass-all") && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_fx_bypass_all ()) {
+	if (ok && has_smoke ("fx-activate-all") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_fx_activate_all ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_fx_from_engine ();
@@ -587,6 +589,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("fx-bypass-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-fx-bypass-all FAILED (no session)\n");
+	} else if (has_smoke ("fx-activate-all")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -5737,6 +5741,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			/* Alt+B — bypass every shell ACE insert (Reverb…Gate). */
 			if (_engine.is_linked () && _engine_snap.session_ok) {
 				_engine.set_all_fx_bypassed (true);
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'B' || wparam == 'b')) {
+			/* Alt+Shift+B — activate every shell ACE insert (Reverb…Gate). */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				_engine.set_all_fx_bypassed (false);
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_fx_from_engine ();
@@ -7117,6 +7127,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			if (alt) {
 				/* Alt+click FX → bypass every shell ACE insert. */
 				_engine.set_all_fx_bypassed (true);
+			const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
+			if (alt && shift) {
+				/* Alt+Shift+click FX → activate every shell ACE insert. */
+				_engine.set_all_fx_bypassed (false);
 			} else if (fxi == 5) {
 				if (_mixers[fxi].has_fx ()) {
 					_engine.toggle_track_gate_bypass (fxi);
@@ -8566,6 +8580,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"I", L"Strip silence (−40 dBFS threshold)" },
 		{ L"B", L"Consolidate / bounce selection in place" },
 		{ L"Alt+B / Alt+click FX", L"Bypass all ACE inserts" },
+		{ L"Alt+Shift+B / Alt+Shift+click FX", L"Activate all ACE inserts" },
 		{ L"Z", L"Freeze / unfreeze focused audio track" },
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"Q / Qnt", L"Quantize MIDI notes to snap grid" },

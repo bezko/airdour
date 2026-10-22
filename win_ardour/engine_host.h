@@ -1305,6 +1305,13 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool set_all_fx_bypassed (bool bypassed);
 	/** Ensure inserts → bypass all → verify → activate all. */
 	bool smoke_fx_bypass_all ();
+/**
+	 * Bypass or activate every shell ACE insert (Reverb…Gate).
+	 * For Alt+Shift+B activate-all / --smoke-fx-activate-all.
+	 */
+	bool set_all_fx_bypassed (bool bypassed);
+	/** Bypass all → activate all → verify none bypassed. */
+	bool smoke_fx_activate_all ();
 
 	/**
 	 * Set ACE Reverb Blend (wet mix) 0..1 via PluginInsert AutomationControl.

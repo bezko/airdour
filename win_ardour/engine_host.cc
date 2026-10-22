@@ -19980,6 +19980,10 @@ EngineHost::smoke_fx_bypass_all ()
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"smoke-fx-bypass-all failed — no Session";
+EngineHost::smoke_fx_activate_all ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-fx-activate-all failed — no Session";
 		return false;
 	}
 	try {
@@ -19991,11 +19995,13 @@ EngineHost::smoke_fx_bypass_all ()
 		}
 		if (!set_all_fx_bypassed (false)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-fx-bypass-all FAILED (activate)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all FAILED (need 6 audio)\n");
 			std::fflush (stderr);
 			return false;
 		}
 		if (!set_all_fx_bypassed (true)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-fx-bypass-all FAILED (bypass)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all FAILED (bypass)\n");
 			std::fflush (stderr);
 			return false;
 		}
@@ -20020,6 +20026,28 @@ EngineHost::smoke_fx_bypass_all ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-fx-bypass-all exception: %s\n", e.what ());
+			std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all FAILED (bypass flags)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_all_fx_bypassed (false)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all FAILED (activate)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_fx_bypassed || _snap.track_comp_bypassed
+		    || _snap.track_eq_bypassed || _snap.track_delay_bypassed
+		    || _snap.track_limiter_bypassed || _snap.track_gate_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all FAILED (still bypassed)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-fx-activate-all ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -30394,6 +30422,7 @@ EngineHost::set_all_fx_bypassed (bool bypassed)
 
 bool
 EngineHost::smoke_fx_bypass_all ()
+EngineHost::smoke_fx_activate_all ()
 {
 	return false;
 }
