@@ -650,6 +650,8 @@ EngineHost::EngineHost ()
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
 	_snap.group_shares_recenable = false;
+	_snap.group_shares_color = false;
+	_snap.group_rgba = 0;
 	_snap.group_name[0] = L'\0';
 	_snap.mixer_narrow = false;
 	_snap.monitor_ok = false;
@@ -12656,6 +12658,8 @@ EngineHost::refresh_group_flags ()
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
 	_snap.group_shares_recenable = false;
+	_snap.group_shares_color = false;
+	_snap.group_rgba = 0;
 	_snap.group_name[0] = L'\0';
 	if (!_impl) {
 		return;
@@ -12676,6 +12680,8 @@ EngineHost::refresh_group_flags ()
 		_snap.group_shares_solo = rg->is_solo ();
 		_snap.group_shares_gain = rg->is_gain ();
 		_snap.group_shares_recenable = rg->is_recenable ();
+		_snap.group_shares_color = rg->is_color ();
+		_snap.group_rgba = rg->rgba ();
 		int n = 0;
 		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
 			if (_impl->tracks[i] && _impl->tracks[i]->route_group () == rg) {
@@ -12707,6 +12713,7 @@ EngineHost::create_route_group (const int* indices, int n)
 			_impl->session->add_route_group (rg);
 		}
 		/* Honest scope: mute + solo + gain + rec-enable. */
+		/* Honest scope: mute + solo + gain + color. */
 		rg->set_active (true, nullptr);
 		rg->set_mute (true);
 		rg->set_solo (true);
@@ -12714,7 +12721,8 @@ EngineHost::create_route_group (const int* indices, int n)
 		rg->set_recenable (true);
 		rg->set_select (false);
 		rg->set_route_active (false);
-		rg->set_color (false);
+		rg->set_color (true);
+		rg->set_rgba (0xC45C26FF); /* terracotta default */
 		rg->set_monitoring (false);
 		rg->set_sursend_enable (false);
 
@@ -12740,6 +12748,7 @@ EngineHost::create_route_group (const int* indices, int n)
 		refresh_group_flags ();
 		_snap.detail = L"route group ready";
 		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain/rec\n",
+		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain/color\n",
 		              rg->name ().c_str (), _snap.group_member_count);
 		std::fflush (stderr);
 		return _snap.group_member_count >= 2;
@@ -12820,6 +12829,7 @@ EngineHost::toggle_route_group_active ()
 
 bool
 EngineHost::set_route_group_relative (bool enable)
+EngineHost::set_route_group_rgba (uint32_t rgba)
 {
 	if (!_impl || !_impl->session) {
 		return false;
@@ -12841,6 +12851,19 @@ EngineHost::set_route_group_relative (bool enable)
 		std::fflush (stderr);
 		_snap.detail = enable ? L"group relative" : L"group absolute";
 		return _snap.group_relative == enable;
+			_snap.detail = L"no group for color";
+			return false;
+		}
+		if (!rg->is_color ()) {
+			rg->set_color (true);
+		}
+		rg->set_rgba (rgba);
+		refresh_group_flags ();
+		std::fprintf (stderr, "airdour_win_shell: RouteGroup color=0x%08X\n",
+		              (unsigned)_snap.group_rgba);
+		std::fflush (stderr);
+		_snap.detail = L"group color set";
+		return _snap.group_rgba == rgba;
 	} catch (...) {
 		return false;
 	}
@@ -12851,6 +12874,33 @@ EngineHost::toggle_route_group_relative ()
 {
 	refresh_group_flags ();
 	return set_route_group_relative (!_snap.group_relative);
+EngineHost::cycle_route_group_color ()
+{
+	static const uint32_t kPalette[] = {
+		0xC45C26FF, /* terracotta */
+		0x2F6F4EFF, /* forest */
+		0x1F5C8AFF, /* steel blue */
+		0xB8860BFF, /* dark goldenrod */
+		0x6B4F3AFF, /* umber */
+		0x3D7A6AFF, /* teal */
+		0x8B3A3AFF, /* brick */
+		0x4A5568FF, /* slate */
+	};
+	static const int kN = (int)(sizeof (kPalette) / sizeof (kPalette[0]));
+	refresh_group_flags ();
+	if (_snap.group_member_count < 2) {
+		_snap.detail = L"cycle group color — no group";
+		return false;
+	}
+	uint32_t cur = _snap.group_rgba;
+	int next = 0;
+	for (int i = 0; i < kN; ++i) {
+		if (kPalette[i] == cur) {
+			next = (i + 1) % kN;
+			break;
+		}
+	}
+	return set_route_group_rgba (kPalette[next]);
 }
 
 bool
@@ -13025,12 +13075,17 @@ EngineHost::smoke_group_recenable ()
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"smoke-group-recenable failed — no Session";
+EngineHost::smoke_group_color ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-group-color failed — no Session";
 		return false;
 	}
 	try {
 		collect_tracks ();
 		if (_snap.audio_track_count < 2) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (need ≥2 audio)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-color FAILED (need ≥2)\n");
 			std::fflush (stderr);
 			return false;
 		}
@@ -13047,6 +13102,15 @@ EngineHost::smoke_group_recenable ()
 		refresh_record_flags ();
 		if (!set_track_armed (0, true)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (arm 0)\n");
+		if (!create_route_group (idxs, 2) || !_snap.group_shares_color
+		    || _snap.group_rgba == 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-color FAILED (create)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const uint32_t first = _snap.group_rgba;
+		if (!cycle_route_group_color () || _snap.group_rgba == first) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-color FAILED (cycle)\n");
 			std::fflush (stderr);
 			clear_route_group ();
 			return false;
@@ -13059,6 +13123,8 @@ EngineHost::smoke_group_recenable ()
 			std::fprintf (stderr,
 			              "airdour_win_shell: smoke-group-recenable FAILED (arm propagate %d/%d)\n",
 			              (int)_snap.track_armed[0], (int)_snap.track_armed[1]);
+		if (!set_route_group_rgba (first) || _snap.group_rgba != first) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-color FAILED (restore)\n");
 			std::fflush (stderr);
 			clear_route_group ();
 			return false;
@@ -13104,6 +13170,14 @@ EngineHost::smoke_group_recenable ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable exception: %s\n",
+		clear_route_group ();
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-color ok (0x%08X)\n",
+		              (unsigned)first);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-group-color ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-color exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -28681,6 +28755,8 @@ EngineHost::EngineHost ()
 	_snap.group_shares_solo = false;
 	_snap.group_shares_gain = false;
 	_snap.group_shares_recenable = false;
+	_snap.group_shares_color = false;
+	_snap.group_rgba = 0;
 	_snap.group_name[0] = L'\0';
 	_snap.mixer_narrow = false;
 	_snap.monitor_ok = false;
@@ -30847,11 +30923,15 @@ bool
 EngineHost::set_route_group_relative (bool enable)
 {
 	(void)enable;
+EngineHost::set_route_group_rgba (uint32_t rgba)
+{
+	(void)rgba;
 	return false;
 }
 
 bool
 EngineHost::toggle_route_group_relative ()
+EngineHost::cycle_route_group_color ()
 {
 	return false;
 }
@@ -30864,6 +30944,7 @@ EngineHost::smoke_group_relative ()
 
 bool
 EngineHost::smoke_group_recenable ()
+EngineHost::smoke_group_color ()
 {
 	return false;
 }

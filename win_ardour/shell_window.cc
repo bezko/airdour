@@ -1305,6 +1305,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("mixer-scroll")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mixer-scroll FAILED (no session)\n");
+	if (ok && has_smoke ("group-color") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_group_color ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_group_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("group-color")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-color FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1890,6 +1899,11 @@ ShellWindow::sync_mixer_group_from_engine ()
 		bool in = (i < na && i < EngineSnapshot::kMeters && _engine_snap.track_in_group[i]);
 		_mixers[i].set_in_group (in);
 		_mixers[i].set_group_picked (_group_pick[i]);
+		uint32_t rgba = 0;
+		if (in && _engine_snap.group_shares_color) {
+			rgba = _engine_snap.group_rgba;
+		}
+		_mixers[i].set_group_rgba (rgba);
 	}
 	_transport.set_group_active (_engine_snap.group_member_count >= 2
 	                             && _engine_snap.group_active);
@@ -4487,6 +4501,7 @@ ShellWindow::do_apply_or_clear_group ()
 
 void
 ShellWindow::do_toggle_group_relative ()
+ShellWindow::do_cycle_group_color ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
@@ -4495,6 +4510,7 @@ ShellWindow::do_toggle_group_relative ()
 		return;
 	}
 	_engine.toggle_route_group_relative ();
+	_engine.cycle_route_group_color ();
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_mixer_group_from_engine ();
@@ -6442,6 +6458,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			/* Alt+Shift+←/→ — scroll mixer strips when overflowing. */
 			float step = 64.f * _dpi_scale;
 			do_scroll_mixer (wparam == VK_RIGHT ? step : -step);
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'C' || wparam == 'c')) {
+			/* Alt+Shift+C — cycle RouteGroup color palette. */
+			do_cycle_group_color ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'U' || wparam == 'u')) {
 			do_apply_or_clear_group ();
 		}
@@ -9316,6 +9338,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"U / Shift+U", L"Apply / clear track group" },
 		{ L"Alt+Shift+G / Alt+Grp", L"Toggle group relative gain" },
 		{ L"Alt+Shift+←/→ · wheel", L"Scroll mixer strips when overflowing" },
+		{ L"Alt+Shift+C", L"Cycle track group color (G bar)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },

@@ -271,6 +271,8 @@ struct EngineSnapshot {
 	bool         group_shares_solo;
 	bool         group_shares_gain;
 	bool         group_shares_recenable;
+	bool         group_shares_color;
+	uint32_t     group_rgba; /* RouteGroup color RRGGBBAA when shares color */
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
 	bool         mixer_narrow; /* shell UI: compact strip width */
@@ -1304,6 +1306,7 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	/**
 	 * Create/replace the shell Session RouteGroup ("Group 1") from audio
 	 * indices (≥2). Shares mute + solo + gain + rec-enable when active.
+	 * indices (≥2). Shares mute + solo + gain + color when active.
 	 * Honest scope: one group, no VCA/subgroup.
 	 */
 	bool create_route_group (const int* indices, int n);
@@ -1314,6 +1317,9 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	/** Relative (proportional) gain linking. Alt+Shift+G / --smoke-group-relative. */
 	bool set_route_group_relative (bool enable);
 	bool toggle_route_group_relative ();
+	/** Group color (RRGGBBAA). Alt+Shift+C / --smoke-group-color. */
+	bool set_route_group_rgba (uint32_t rgba);
+	bool cycle_route_group_color ();
 
 	/**
 	 * Group Audio 0+1; mute/solo/gain propagate; clear. For --smoke-group.
@@ -1329,6 +1335,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * → peers 0.80/0.40. For --smoke-group-relative.
 	 */
 	bool smoke_group_relative ();
+	/** Create group; cycle palette; restore. For --smoke-group-color. */
+	bool smoke_group_color ();
 
 	/**
 	 * Ensure Session monitor bus + MonitorProcessor (add_monitor_section).

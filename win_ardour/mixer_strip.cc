@@ -53,6 +53,7 @@ MixerStrip::MixerStrip ()
 	, _narrow (false)
 	, _in_group (false)
 	, _group_picked (false)
+	, _group_rgba (0)
 {
 	wcsncpy_s (_label, L"Track", _TRUNCATE);
 	_fx_label[0] = L'\0';
@@ -496,9 +497,21 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		D2D1::RectF (_strip.left, _strip.top, _strip.left + 3.f * dpi_scale, _strip.bottom),
 		_muted ? body : accent);
 
-	/* Group indicator: top accent bar + "G"; pick shows a second edge wash. */
+	/* Group indicator: top accent bar + "G"; pick shows a second edge wash.
+	 * When RouteGroup shares color, bar uses group RRGGBBAA. */
 	if (_in_group || _group_picked) {
 		ID2D1SolidColorBrush* bar = _in_group ? accent : edge;
+		ID2D1SolidColorBrush* owned = nullptr;
+		if (_in_group && _group_rgba != 0) {
+			float cr = ((float)((_group_rgba >> 24) & 0xff)) / 255.f;
+			float cg = ((float)((_group_rgba >> 16) & 0xff)) / 255.f;
+			float cb = ((float)((_group_rgba >> 8) & 0xff)) / 255.f;
+			float ca = ((float)(_group_rgba & 0xff)) / 255.f;
+			if (SUCCEEDED (rt->CreateSolidColorBrush (
+				    D2D1::ColorF (cr, cg, cb, ca), &owned)) && owned) {
+				bar = owned;
+			}
+		}
 		rt->FillRectangle (
 			D2D1::RectF (_strip.left + 3.f * dpi_scale, _strip.top,
 			             _strip.right, _strip.top + 3.f * dpi_scale),
@@ -511,6 +524,9 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 			                            _strip.right - 4.f * dpi_scale, _strip.top + 18.f * dpi_scale),
 			               brand);
 			fmt_meta->SetTextAlignment (ta_g);
+		}
+		if (owned) {
+			owned->Release ();
 		}
 	}
 
