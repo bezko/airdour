@@ -1294,7 +1294,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("group-relative")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group-relative FAILED (no session)\n");
-	if (ok && has_smoke ("mixer-scroll") && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("mixer-scroll") && engine_session_ok ()) {
 		if (!smoke_mixer_scroll_layout ()) {
 			_smoke_failed = true;
 		}
@@ -4371,6 +4375,9 @@ ShellWindow::do_clear_all_mutes ()
 		sync_mixer_mute_solo_from_engine ();
 		InvalidateRect (_hwnd, nullptr, FALSE);
 	}
+}
+
+void
 ShellWindow::do_scroll_mixer (float delta_px)
 {
 	if (std::fabs (delta_px) < 0.01f) {
@@ -5509,11 +5516,10 @@ ShellWindow::layout_panes ()
 	float narrow_w = 52.f * _dpi_scale;
 	float strip_w = (_engine_snap.mixer_narrow && equal_w > narrow_w)
 		? narrow_w : equal_w;
-	float min_w = 64.f * _dpi_scale;
+	float min_w = _engine_snap.mixer_narrow ? narrow_w : 64.f * _dpi_scale;
 	if (_mixer_force_min_w > 1.f) {
 		min_w = _mixer_force_min_w * _dpi_scale;
 	}
-	float strip_w = equal_w;
 	if (strip_w < min_w) {
 		strip_w = min_w;
 	}
@@ -5533,7 +5539,6 @@ ShellWindow::layout_panes ()
 		_mixers[i].set_narrow (false);
 	}
 	for (int i = 0; i < n_mix; ++i) {
-		float x0 = _mixer_pane.left + mix_inset + (float)i * (strip_w + strip_gap);
 		_mixers[i].set_narrow (_engine_snap.mixer_narrow && !_mixers[i].is_midi_strip ());
 		float x0 = strips_left + (float)i * (strip_w + strip_gap) - _mixer_scroll_x;
 		_mixers[i].layout (D2D1::RectF (x0, mix_top, x0 + strip_w, mix_bot), _dpi_scale);

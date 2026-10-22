@@ -300,6 +300,8 @@ private:
 	void do_rename_focused_track ();
 	void do_toggle_group_pick (int audio_index);
 	void do_apply_or_clear_group ();
+	void do_scroll_mixer (float delta_px);
+	bool smoke_mixer_scroll_layout ();
 	void do_toggle_group_relative ();
 	void do_toggle_monitor_dim ();
 	void do_toggle_monitor_mono ();
