@@ -13089,6 +13089,9 @@ EngineHost::smoke_narrow_mixer ()
 	std::fflush (stderr);
 	_snap.detail = L"smoke-narrow-mixer ok";
 	return true;
+}
+
+bool
 EngineHost::smoke_monitor_dim_level ()
 {
 	if (!_impl || !_impl->session) {

@@ -1264,8 +1264,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_locate && engine_session_ok ()) {
-	if (ok && has_smoke ("monitor-dim-level") && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("monitor-dim-level") && engine_session_ok ()) {
 		if (!_engine.smoke_monitor_dim_level ()) {
 			_smoke_failed = true;
 		} else {
@@ -1278,7 +1277,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_locate && _engine.snapshot ().session_ok) {
+	if (ok && smoke_locate && engine_session_ok ()) {
 		if (!_engine.smoke_locate ()) {
 			_smoke_failed = true;
 		} else {
@@ -5994,6 +5993,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			_engine_snap = _engine.snapshot ();
 			layout_panes ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
 		           && (wparam == 'D' || wparam == 'd')) {
 			/* Alt+Shift+D — cycle monitor dim depth −20/−12/−6. */
 			if (_engine.is_linked () && _engine_snap.session_ok) {
