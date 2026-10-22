@@ -4,6 +4,7 @@
 
 #include "monitor_strip.h"
 
+#include <cstdio>
 #include <cstring>
 
 namespace {
@@ -23,6 +24,7 @@ MonitorStrip::MonitorStrip ()
 	, _mute_btn ()
 	, _available (false)
 	, _dim (false)
+	, _dim_db (-12.f)
 	, _mono (false)
 	, _mute (false)
 {
@@ -101,7 +103,9 @@ MonitorStrip::draw (ID2D1RenderTarget* rt,
 	};
 
 	if (_available) {
-		draw_btn (_dim_btn, L"Dim", _dim);
+		wchar_t dim_label[16];
+		_snwprintf_s (dim_label, _TRUNCATE, L"Dim %.0f", _dim_db);
+		draw_btn (_dim_btn, dim_label, _dim);
 		draw_btn (_mono_btn, L"Mono", _mono);
 		draw_btn (_mute_btn, L"Mute", _mute);
 	} else {

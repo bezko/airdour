@@ -274,6 +274,7 @@ struct EngineSnapshot {
 	bool         mixer_narrow; /* shell UI: compact strip width */
 	bool         monitor_ok; /* Session monitor_out + MonitorProcessor */
 	bool         monitor_dim; /* MonitorProcessor::dim_all */
+	float        monitor_dim_db; /* dim_level −20..0 dB (default −12) */
 	bool         monitor_mono;
 	bool         monitor_cut; /* cut_all = monitor mute */
 	float        transport_sec;
@@ -1315,6 +1316,10 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool ensure_monitor_section ();
 	bool set_monitor_dim (bool enable);
 	bool toggle_monitor_dim ();
+	/** Dim attenuation dB (−20..0). For Shift+click Dim / Alt+Shift+D. */
+	bool set_monitor_dim_level_db (float db);
+	/** Cycle −20 → −12 → −6 → −20. */
+	bool cycle_monitor_dim_level ();
 	bool set_monitor_mono (bool enable);
 	bool toggle_monitor_mono ();
 	bool set_monitor_cut (bool enable); /* mute / cut_all */
@@ -1324,6 +1329,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Ensure monitor; dim→mono→cut on then off. For --smoke-monitor.
 	 */
 	bool smoke_monitor ();
+	/** −20 → −12 → −6 → restore −12. For --smoke-monitor-dim-level. */
+	bool smoke_monitor_dim_level ();
 
 	/**
 	 * Shell mixer strip width: narrow (compact) vs equal-fill.
