@@ -302,7 +302,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
-		_engine_snap = _engine.snapshot ();
+		refresh_engine_snap ();
 		return false;
 	}
 	/* --timeout smokes: autosave off (unless --smoke-recovery). */
@@ -329,7 +329,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_import && _engine.snapshot ().session_ok) {
+	if (ok && smoke_import && engine_session_ok ()) {
 		if (_engine.import_test_tone (0, 220.f, 2.f)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-import ok (track 0)\n");
 		} else {
@@ -338,21 +338,24 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_save_load && _engine.snapshot ().session_ok) {
-		if (!_engine.snapshot ().track_has_regions[0]) {
+	if (ok && smoke_save_load && engine_session_ok ()) {
+		refresh_engine_snap ();
+		if (!_engine_snap.track_has_regions[0]) {
 			_engine.import_test_tone (0, 330.f, 1.5f);
 		}
-		if (_engine.reload_session () && _engine.snapshot ().track_has_regions[0]) {
+		const bool reloaded = _engine.reload_session ();
+		refresh_engine_snap ();
+		if (reloaded && _engine_snap.track_has_regions[0]) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-save-load ok (regions restored)\n");
 		} else {
 			std::fprintf (stderr, "airdour_win_shell: smoke-save-load FAILED (saved=%d regions0=%d)\n",
-			              _engine.snapshot ().session_saved ? 1 : 0,
-			              _engine.snapshot ().track_has_regions[0] ? 1 : 0);
+			              _engine_snap.session_saved ? 1 : 0,
+			              _engine_snap.track_has_regions[0] ? 1 : 0);
 		}
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_export && _engine.snapshot ().session_ok) {
+	if (ok && smoke_export && engine_session_ok ()) {
 		std::string exported;
 		if (_engine.smoke_export_wav (&exported)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-export ok → %s\n", exported.c_str ());
@@ -362,7 +365,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_undo && _engine.snapshot ().session_ok) {
+	if (ok && smoke_undo && engine_session_ok ()) {
 		if (_engine.smoke_undo ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-undo ok\n");
 		} else {
@@ -371,7 +374,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_loop && _engine.snapshot ().session_ok) {
+	if (ok && smoke_loop && engine_session_ok ()) {
 		if (_engine.smoke_loop_markers ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-loop ok\n");
 		} else {
@@ -380,7 +383,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_midi_edit && _engine.snapshot ().session_ok) {
+	if (ok && smoke_midi_edit && engine_session_ok ()) {
 		if (_engine.smoke_midi_edit ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit ok\n");
 		} else {
@@ -388,7 +391,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_quantize && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi_quantize && engine_session_ok ()) {
 		if (!_engine.smoke_midi_quantize ()) {
 			_smoke_failed = true;
 		}
@@ -397,7 +400,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-quantize FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_transpose && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi_transpose && engine_session_ok ()) {
 		if (!_engine.smoke_midi_transpose ()) {
 			_smoke_failed = true;
 		}
@@ -406,7 +409,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_velocity && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi_velocity && engine_session_ok ()) {
 		if (!_engine.smoke_midi_velocity ()) {
 			_smoke_failed = true;
 		}
@@ -415,7 +418,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_length && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi_length && engine_session_ok ()) {
 		if (!_engine.smoke_midi_length ()) {
 			_smoke_failed = true;
 		}
@@ -424,7 +427,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-length FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_clipboard && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi_clipboard && engine_session_ok ()) {
 		if (!_engine.smoke_midi_clipboard ()) {
 			_smoke_failed = true;
 		}
@@ -433,7 +436,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_humanize && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi_humanize && engine_session_ok ()) {
 		if (!_engine.smoke_midi_humanize ()) {
 			_smoke_failed = true;
 		}
@@ -442,7 +445,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-humanize FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_step && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi_step && engine_session_ok ()) {
 		if (!_engine.smoke_midi_step ()) {
 			_smoke_failed = true;
 		}
@@ -451,7 +454,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-step FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_chord && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi_chord && engine_session_ok ()) {
 		if (!_engine.smoke_midi_chord ()) {
 			_smoke_failed = true;
 		}
@@ -460,7 +463,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-chord FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_arp && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi_arp && engine_session_ok ()) {
 		if (!_engine.smoke_midi_arp ()) {
 			_smoke_failed = true;
 		}
@@ -469,7 +472,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_scale && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi_scale && engine_session_ok ()) {
 		if (!_engine.smoke_midi_scale ()) {
 			_smoke_failed = true;
 		}
@@ -478,7 +481,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-scale FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_cc && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi_cc && engine_session_ok ()) {
 		if (!_engine.smoke_midi_cc ()) {
 			_smoke_failed = true;
 		} else {
@@ -489,7 +492,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_bend && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi_bend && engine_session_ok ()) {
 		if (!_engine.smoke_midi_bend ()) {
 			_smoke_failed = true;
 		} else {
@@ -501,7 +504,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-bend FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_pressure && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi_pressure && engine_session_ok ()) {
 		if (!_engine.smoke_midi_pressure ()) {
 			_smoke_failed = true;
 		} else {
@@ -513,7 +516,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-pressure FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi && engine_session_ok ()) {
 		if (_engine.smoke_midi ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi ok\n");
 		} else {
@@ -521,13 +524,13 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (ok && _engine.snapshot ().session_ok) {
+	} else if (ok && engine_session_ok ()) {
 		/* Always scaffold a MIDI track + empty region so the piano-roll is live. */
 		_engine.ensure_midi_track ();
 		_engine.ensure_midi_region ();
 	}
 
-	if (ok && has_smoke ("pan-reset-all") && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("pan-reset-all") && engine_session_ok ()) {
 		if (!_engine.smoke_pan_reset_all ()) {
 			_smoke_failed = true;
 		} else {
@@ -540,7 +543,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && has_smoke ("send-reset-all") && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("send-reset-all") && engine_session_ok ()) {
 		if (!_engine.smoke_send_reset_all ()) {
 			_smoke_failed = true;
 		} else {
@@ -549,7 +552,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("send-reset-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send-reset-all FAILED (no session)\n");
-	if (ok && has_smoke ("fader-reset-all") && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("fader-reset-all") && engine_session_ok ()) {
 		if (!_engine.smoke_fader_reset_all ()) {
 			_smoke_failed = true;
 		} else {
@@ -558,7 +565,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("fader-reset-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-fader-reset-all FAILED (no session)\n");
-	if (ok && has_smoke ("disarm-all") && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("disarm-all") && engine_session_ok ()) {
 		if (!_engine.smoke_disarm_all ()) {
 			_smoke_failed = true;
 		} else {
@@ -567,7 +578,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("disarm-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-disarm-all FAILED (no session)\n");
-	if (ok && has_smoke ("clear-meter-clips") && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("clear-meter-clips") && engine_session_ok ()) {
 		if (!_engine.smoke_clear_meter_clips ()) {
 			_smoke_failed = true;
 		} else {
@@ -578,10 +593,12 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("clear-meter-clips")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-clear-meter-clips FAILED (no session)\n");
-	if (ok && has_smoke ("fx-bypass-all") && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("fx-bypass-all") && engine_session_ok ()) {
 		if (!_engine.smoke_fx_bypass_all ()) {
-	if (ok && has_smoke ("fx-activate-all") && _engine.snapshot ().session_ok) {
-		if (!_engine.smoke_fx_activate_all ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_fx_from_engine ();
@@ -589,13 +606,24 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("fx-bypass-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-fx-bypass-all FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("fx-activate-all") && engine_session_ok ()) {
+		if (!_engine.smoke_fx_activate_all ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_fx_from_engine ();
+		}
+		std::fflush (stderr);
 	} else if (has_smoke ("fx-activate-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-fx-activate-all FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_plugin && _engine.snapshot ().session_ok) {
+	if (ok && smoke_plugin && engine_session_ok ()) {
 		if (_engine.smoke_plugin_insert ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-plugin ok\n");
 		} else {
@@ -609,7 +637,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && has_smoke ("fx-param-reset") && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("fx-param-reset") && engine_session_ok ()) {
 		if (!_engine.smoke_fx_param_reset ()) {
 			_smoke_failed = true;
 		} else {
@@ -622,7 +650,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_comp && _engine.snapshot ().session_ok) {
+	if (ok && smoke_comp && engine_session_ok ()) {
 		if (!_engine.smoke_comp ()) {
 			_smoke_failed = true;
 		} else {
@@ -635,7 +663,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_eq && _engine.snapshot ().session_ok) {
+	if (ok && smoke_eq && engine_session_ok ()) {
 		if (!_engine.smoke_eq ()) {
 			_smoke_failed = true;
 		} else {
@@ -648,7 +676,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_delay && _engine.snapshot ().session_ok) {
+	if (ok && smoke_delay && engine_session_ok ()) {
 		if (!_engine.smoke_delay ()) {
 			_smoke_failed = true;
 		} else {
@@ -661,7 +689,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_limiter && _engine.snapshot ().session_ok) {
+	if (ok && smoke_limiter && engine_session_ok ()) {
 		if (!_engine.smoke_limiter ()) {
 			_smoke_failed = true;
 		} else {
@@ -674,7 +702,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_gate && _engine.snapshot ().session_ok) {
+	if (ok && smoke_gate && engine_session_ok ()) {
 		if (!_engine.smoke_gate ()) {
 			_smoke_failed = true;
 		} else {
@@ -687,7 +715,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_spectrum && _engine.snapshot ().session_ok) {
+	if (ok && smoke_spectrum && engine_session_ok ()) {
 		if (!_engine.smoke_spectrum ()) {
 			_smoke_failed = true;
 		}
@@ -698,7 +726,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_correlation && _engine.snapshot ().session_ok) {
+	if (ok && smoke_correlation && engine_session_ok ()) {
 		if (!_engine.smoke_correlation ()) {
 			_smoke_failed = true;
 		}
@@ -709,7 +737,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_loudness && _engine.snapshot ().session_ok) {
+	if (ok && smoke_loudness && engine_session_ok ()) {
 		if (!_engine.smoke_loudness ()) {
 			_smoke_failed = true;
 		}
@@ -720,7 +748,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_vst3 && _engine.snapshot ().session_ok) {
+	if (ok && smoke_vst3 && engine_session_ok ()) {
 		if (!_engine.smoke_vst3 ()) {
 			_smoke_failed = true;
 		}
@@ -731,7 +759,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_mute_solo && _engine.snapshot ().session_ok) {
+	if (ok && smoke_mute_solo && engine_session_ok ()) {
 		if (!_engine.smoke_mute_solo ()) {
 			_smoke_failed = true;
 		} else {
@@ -744,7 +772,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && has_smoke ("solo-isolate") && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("solo-isolate") && engine_session_ok ()) {
 		if (!_engine.smoke_solo_isolate ()) {
 			_smoke_failed = true;
 		} else {
@@ -757,7 +785,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && has_smoke ("solo-safe") && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("solo-safe") && engine_session_ok ()) {
 		if (!_engine.smoke_solo_safe ()) {
 			_smoke_failed = true;
 		} else {
@@ -766,7 +794,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("solo-safe")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-solo-safe FAILED (no session)\n");
-	if (ok && has_smoke ("arm-all") && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("arm-all") && engine_session_ok ()) {
 		if (!_engine.smoke_arm_all ()) {
 			_smoke_failed = true;
 		} else {
@@ -775,12 +807,12 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("arm-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-arm-all FAILED (no session)\n");
-	if (ok && has_smoke ("clear-solos") && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("clear-solos") && engine_session_ok ()) {
 		if (!_engine.smoke_clear_solos ()) {
-	if (ok && has_smoke ("clear-mutes") && _engine.snapshot ().session_ok) {
-		if (!_engine.smoke_clear_mutes ()) {
-	if (ok && has_smoke ("exclusive-solo") && _engine.snapshot ().session_ok) {
-		if (!_engine.smoke_exclusive_solo ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_mute_solo_from_engine ();
@@ -788,15 +820,37 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("clear-solos")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-clear-solos FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("clear-mutes") && engine_session_ok ()) {
+		if (!_engine.smoke_clear_mutes ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_mute_solo_from_engine ();
+		}
+		std::fflush (stderr);
 	} else if (has_smoke ("clear-mutes")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("exclusive-solo") && engine_session_ok ()) {
+		if (!_engine.smoke_exclusive_solo ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_mute_solo_from_engine ();
+		}
+		std::fflush (stderr);
 	} else if (has_smoke ("exclusive-solo")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-exclusive-solo FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
+	if (ok && smoke_pan && engine_session_ok ()) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
@@ -809,7 +863,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_send && _engine.snapshot ().session_ok) {
+	if (ok && smoke_send && engine_session_ok ()) {
 		if (!_engine.smoke_send ()) {
 			_smoke_failed = true;
 		} else {
@@ -822,7 +876,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && has_smoke ("strip-mixer-reset") && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("strip-mixer-reset") && engine_session_ok ()) {
 		if (!_engine.smoke_strip_mixer_reset ()) {
 			_smoke_failed = true;
 		} else {
@@ -837,7 +891,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_automation && _engine.snapshot ().session_ok) {
+	if (ok && smoke_automation && engine_session_ok ()) {
 		if (!_engine.smoke_automation ()) {
 			_smoke_failed = true;
 		} else {
@@ -850,7 +904,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_pan_automation && _engine.snapshot ().session_ok) {
+	if (ok && smoke_pan_automation && engine_session_ok ()) {
 		_auto_lane_kind = 1;
 		if (!_engine.smoke_pan_automation ()) {
 			_smoke_failed = true;
@@ -864,7 +918,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_auto_lane_unify && _engine.snapshot ().session_ok) {
+	if (ok && smoke_auto_lane_unify && engine_session_ok ()) {
 		_auto_lane_kind = 0;
 		if (!_engine.smoke_auto_lane_unify ()) {
 			_smoke_failed = true;
@@ -879,7 +933,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_auto_state && _engine.snapshot ().session_ok) {
+	if (ok && smoke_auto_state && engine_session_ok ()) {
 		if (!_engine.smoke_auto_state ()) {
 			_smoke_failed = true;
 		} else {
@@ -892,7 +946,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_pan_auto_state && _engine.snapshot ().session_ok) {
+	if (ok && smoke_pan_auto_state && engine_session_ok ()) {
 		if (!_engine.smoke_pan_auto_state ()) {
 			_smoke_failed = true;
 		} else {
@@ -906,7 +960,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_send_auto_state && _engine.snapshot ().session_ok) {
+	if (ok && smoke_send_auto_state && engine_session_ok ()) {
 		if (!_engine.smoke_send_auto_state ()) {
 			_smoke_failed = true;
 		} else {
@@ -920,7 +974,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_auto_state_unify && _engine.snapshot ().session_ok) {
+	if (ok && smoke_auto_state_unify && engine_session_ok ()) {
 		_auto_lane_kind = 0;
 		if (!_engine.smoke_auto_state_unify ()) {
 			_smoke_failed = true;
@@ -934,7 +988,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_edit && _engine.snapshot ().session_ok) {
+	if (ok && smoke_edit && engine_session_ok ()) {
 		if (!_engine.smoke_edit ()) {
 			_smoke_failed = true;
 		} else {
@@ -947,7 +1001,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_stretch && _engine.snapshot ().session_ok) {
+	if (ok && smoke_stretch && engine_session_ok ()) {
 		if (!_engine.smoke_stretch ()) {
 			_smoke_failed = true;
 		} else {
@@ -960,7 +1014,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_pitch && _engine.snapshot ().session_ok) {
+	if (ok && smoke_pitch && engine_session_ok ()) {
 		if (!_engine.smoke_pitch ()) {
 			_smoke_failed = true;
 		} else {
@@ -973,7 +1027,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_reverse && _engine.snapshot ().session_ok) {
+	if (ok && smoke_reverse && engine_session_ok ()) {
 		if (!_engine.smoke_reverse ()) {
 			_smoke_failed = true;
 		} else {
@@ -986,7 +1040,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_normalize && _engine.snapshot ().session_ok) {
+	if (ok && smoke_normalize && engine_session_ok ()) {
 		if (!_engine.smoke_normalize ()) {
 			_smoke_failed = true;
 		} else {
@@ -999,7 +1053,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_strip_silence && _engine.snapshot ().session_ok) {
+	if (ok && smoke_strip_silence && engine_session_ok ()) {
 		if (!_engine.smoke_strip_silence ()) {
 			_smoke_failed = true;
 		} else {
@@ -1012,7 +1066,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_consolidate && _engine.snapshot ().session_ok) {
+	if (ok && smoke_consolidate && engine_session_ok ()) {
 		if (!_engine.smoke_consolidate ()) {
 			_smoke_failed = true;
 		} else {
@@ -1025,7 +1079,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_freeze && _engine.snapshot ().session_ok) {
+	if (ok && smoke_freeze && engine_session_ok ()) {
 		if (!_engine.smoke_freeze ()) {
 			_smoke_failed = true;
 		} else {
@@ -1039,7 +1093,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_snap && _engine.snapshot ().session_ok) {
+	if (ok && smoke_snap && engine_session_ok ()) {
 		if (!_engine.smoke_snap ()) {
 			_smoke_failed = true;
 		}
@@ -1050,7 +1104,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_punch && _engine.snapshot ().session_ok) {
+	if (ok && smoke_punch && engine_session_ok ()) {
 		if (!_engine.smoke_punch ()) {
 			_smoke_failed = true;
 		} else {
@@ -1063,7 +1117,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_tempo && _engine.snapshot ().session_ok) {
+	if (ok && smoke_tempo && engine_session_ok ()) {
 		if (!_engine.smoke_tempo ()) {
 			_smoke_failed = true;
 		} else {
@@ -1076,7 +1130,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_click && _engine.snapshot ().session_ok) {
+	if (ok && smoke_click && engine_session_ok ()) {
 		if (!_engine.smoke_click ()) {
 			_smoke_failed = true;
 		} else {
@@ -1089,7 +1143,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_tracks && _engine.snapshot ().session_ok) {
+	if (ok && smoke_tracks && engine_session_ok ()) {
 		if (!_engine.smoke_tracks ()) {
 			_smoke_failed = true;
 		} else {
@@ -1103,7 +1157,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_rename && _engine.snapshot ().session_ok) {
+	if (ok && smoke_rename && engine_session_ok ()) {
 		if (!_engine.smoke_rename ()) {
 			_smoke_failed = true;
 		} else {
@@ -1118,7 +1172,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_group && _engine.snapshot ().session_ok) {
+	if (ok && smoke_group && engine_session_ok ()) {
 		if (!_engine.smoke_group ()) {
 			_smoke_failed = true;
 		} else {
@@ -1134,7 +1188,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_monitor && _engine.snapshot ().session_ok) {
+	if (ok && smoke_monitor && engine_session_ok ()) {
 		if (!_engine.smoke_monitor ()) {
 			_smoke_failed = true;
 		} else {
@@ -1148,12 +1202,12 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_locate && _engine.snapshot ().session_ok) {
+	if (ok && smoke_locate && engine_session_ok ()) {
 		if (!_engine.smoke_locate ()) {
 			_smoke_failed = true;
 		} else {
 			_engine.poll ();
-			_engine_snap = _engine.snapshot ();
+			refresh_engine_snap ();
 			_playhead_sec = _engine_snap.transport_sec;
 			sync_transport_clock_from_engine ();
 		}
@@ -1164,12 +1218,12 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_locate_selection && _engine.snapshot ().session_ok) {
+	if (ok && smoke_locate_selection && engine_session_ok ()) {
 		if (!_engine.smoke_locate_selection ()) {
 			_smoke_failed = true;
 		} else {
 			_engine.poll ();
-			_engine_snap = _engine.snapshot ();
+			refresh_engine_snap ();
 			_playhead_sec = _engine_snap.transport_sec;
 			sync_transport_clock_from_engine ();
 			apply_region_selection_to_lanes ();
@@ -1196,7 +1250,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "zoom-punch", [this]() {
 		if (!_engine.smoke_zoom_punch ()) return false;
 		_engine.poll ();
-		_engine_snap = _engine.snapshot ();
+		refresh_engine_snap ();
 		sync_transport_punch_from_engine ();
 		float before = _lanes[0].strip.view_span_sec ();
 		do_zoom_to_punch ();
@@ -1212,7 +1266,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "zoom-loop", [this]() {
 		if (!_engine.smoke_zoom_loop ()) return false;
 		_engine.poll ();
-		_engine_snap = _engine.snapshot ();
+		refresh_engine_snap ();
 		sync_transport_loop_from_engine ();
 		apply_loop_to_lanes ();
 		float before = _lanes[0].strip.view_span_sec ();
@@ -1229,7 +1283,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "zoom-selection", [this]() {
 		if (!_engine.smoke_zoom_selection ()) return false;
 		_engine.poll ();
-		_engine_snap = _engine.snapshot ();
+		refresh_engine_snap ();
 		apply_region_selection_to_lanes ();
 		float before = _lanes[0].strip.view_span_sec ();
 		float want = _engine_snap.selection_end_sec - _engine_snap.selection_start_sec;
@@ -1247,7 +1301,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "zoom-session", [this]() {
 		if (!_engine.smoke_zoom_session ()) return false;
 		_engine.poll ();
-		_engine_snap = _engine.snapshot ();
+		refresh_engine_snap ();
 		float before = _lanes[0].strip.view_span_sec ();
 		float s0 = 0.f, e0 = 0.f;
 		float want = 2.f;
@@ -1268,7 +1322,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "zoom-regions", [this]() {
 		if (!_engine.smoke_zoom_regions ()) return false;
 		_engine.poll ();
-		_engine_snap = _engine.snapshot ();
+		refresh_engine_snap ();
 		float before = _lanes[0].strip.view_span_sec ();
 		float s0 = 0.f, e0 = 0.f;
 		float want = 2.f;
@@ -1288,7 +1342,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	});
 	run_smoke_check (ok, "center-playhead", [this]() {
 		if (!_engine.smoke_center_playhead ()) return false;
-		_engine_snap = _engine.snapshot ();
+		refresh_engine_snap ();
 		_playhead_sec = _engine_snap.transport_sec;
 		sync_transport_clock_from_engine ();
 		_lanes[0].strip.set_view_window (0.f, 2.f);
@@ -1308,7 +1362,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	});
 	run_smoke_check (ok, "zoom-playhead", [this]() {
 		if (!_engine.smoke_zoom_playhead ()) return false;
-		_engine_snap = _engine.snapshot ();
+		refresh_engine_snap ();
 		_playhead_sec = _engine_snap.transport_sec;
 		sync_transport_clock_from_engine ();
 		_lanes[0].strip.set_view_window (0.f, 8.f);
@@ -1329,7 +1383,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	});
 	run_smoke_check (ok, "scroll-playhead", [this]() {
 		if (!_engine.smoke_scroll_playhead ()) return false;
-		_engine_snap = _engine.snapshot ();
+		refresh_engine_snap ();
 		_playhead_sec = _engine_snap.transport_sec;
 		sync_transport_clock_from_engine ();
 		_lanes[0].strip.set_view_window (0.f, 2.f);
@@ -1405,12 +1459,12 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		return CairoWaveBlit::smoke_offline ();
 	});
 
-	if (ok && smoke_zoom && _engine.snapshot ().session_ok) {
+	if (ok && smoke_zoom && engine_session_ok ()) {
 		if (!_engine.smoke_zoom ()) {
 			_smoke_failed = true;
 		} else {
 			_engine.poll ();
-			_engine_snap = _engine.snapshot ();
+			refresh_engine_snap ();
 			apply_region_selection_to_lanes ();
 			float before = _lanes[0].strip.view_span_sec ();
 			do_fit_session ();
@@ -1439,12 +1493,12 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_history && _engine.snapshot ().session_ok) {
+	if (ok && smoke_history && engine_session_ok ()) {
 		if (!_engine.smoke_history ()) {
 			_smoke_failed = true;
 		} else {
 			_engine.poll ();
-			_engine_snap = _engine.snapshot ();
+			refresh_engine_snap ();
 			sync_history_from_engine ();
 			layout_panes ();
 		}
@@ -1455,12 +1509,12 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_prefs && _engine.snapshot ().session_ok) {
+	if (ok && smoke_prefs && engine_session_ok ()) {
 		if (!_engine.smoke_prefs ()) {
 			_smoke_failed = true;
 		} else {
 			_engine.poll ();
-			_engine_snap = _engine.snapshot ();
+			refresh_engine_snap ();
 			sync_prefs_from_engine ();
 		}
 		std::fflush (stderr);
@@ -1470,12 +1524,12 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_recent && _engine.snapshot ().session_ok) {
+	if (ok && smoke_recent && engine_session_ok ()) {
 		if (!_engine.smoke_recent ()) {
 			_smoke_failed = true;
 		} else {
 			_engine.poll ();
-			_engine_snap = _engine.snapshot ();
+			refresh_engine_snap ();
 			sync_recent_from_engine ();
 		}
 		std::fflush (stderr);
@@ -1485,7 +1539,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_recovery && _engine.snapshot ().session_ok) {
+	if (ok && smoke_recovery && engine_session_ok ()) {
 		if (!_engine.smoke_recovery ()) {
 			_smoke_failed = true;
 		}
@@ -1507,7 +1561,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_record && _engine.snapshot ().session_ok) {
+	if (ok && smoke_record && engine_session_ok ()) {
 		_smoke_record = SmokeRecordPhase::NeedArm;
 		std::fprintf (stderr, "airdour_win_shell: smoke-record scheduled (arm → ~1.2s take)\n");
 		std::fflush (stderr);
@@ -1516,7 +1570,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		_engine.transport_play ();
 	}
 	_engine.poll ();
-	_engine_snap = _engine.snapshot ();
+	refresh_engine_snap ();
 	sync_mixer_arm_from_engine ();
 	sync_mixer_fx_from_engine ();
 	sync_transport_loop_from_engine ();
@@ -1529,7 +1583,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	if (_engine.is_linked () && _engine_snap.session_ok) {
 		_engine.ensure_monitor_section ();
 		_engine.poll ();
-		_engine_snap = _engine.snapshot ();
+		refresh_engine_snap ();
 	}
 	sync_monitor_from_engine ();
 	sync_history_from_engine ();
@@ -1556,6 +1610,18 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		}
 	}
 	return ok;
+}
+
+void
+ShellWindow::refresh_engine_snap ()
+{
+	_engine_snap = _engine.snapshot ();
+}
+
+bool
+ShellWindow::engine_session_ok ()
+{
+	return _engine.snapshot ().session_ok;
 }
 
 void
@@ -4063,12 +4129,24 @@ ShellWindow::do_toggle_monitor_cut ()
 
 void
 ShellWindow::do_clear_all_solos ()
-ShellWindow::do_clear_all_mutes ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
 	}
 	if (_engine.clear_all_solos ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_mute_solo_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
+ShellWindow::do_clear_all_mutes ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
 	if (_engine.clear_all_mutes ()) {
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
@@ -5626,6 +5704,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			if ((GetKeyState (VK_MENU) & 0x8000) && (GetKeyState (VK_SHIFT) & 0x8000)) {
 				/* Alt+Shift+M = mute all audio tracks + MIDI. */
 				do_mute_all_tracks ();
+			} else if ((GetKeyState (VK_MENU) & 0x8000)
+			           && !(GetKeyState (VK_SHIFT) & 0x8000)
+			           && !(GetKeyState (VK_CONTROL) & 0x8000)) {
+				/* Alt+M = clear all mutes. */
+				do_clear_all_mutes ();
 			} else if ((GetKeyState (VK_CONTROL) & 0x8000)
 			    && !(GetKeyState (VK_SHIFT) & 0x8000)
 			    && !(GetKeyState (VK_MENU) & 0x8000)) {
@@ -5640,16 +5723,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				/* Ctrl+Alt+M = toggle CD flag on marker at playhead. */
 				do_toggle_marker_cd_at_playhead ();
 			} else if (GetKeyState (VK_SHIFT) & 0x8000) {
-		} else if ((GetKeyState (VK_MENU) & 0x8000) && (wparam == 'M' || wparam == 'm')
-		           && !(GetKeyState (VK_CONTROL) & 0x8000)) {
-			/* Alt+M = clear all mutes (M alone = marker). */
-			do_clear_all_mutes ();
-		} else if (!(GetKeyState (VK_MENU) & 0x8000) && (wparam == 'M' || wparam == 'm')) {
-			if (GetKeyState (VK_SHIFT) & 0x8000) {
 				do_remove_marker_at_playhead ();
 			} else {
 				do_add_marker_at_playhead ();
 			}
+		
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Z' || wparam == 'z')) {
 			do_undo ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
@@ -5736,17 +5814,24 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			/* I = strip silence on selection (−40 dBFS threshold). */
 			do_strip_silence_selection ();
 		} else if ((GetKeyState (VK_MENU) & 0x8000)
-		           && !(GetKeyState (VK_CONTROL) & 0x8000)
-		           && (wparam == 'B' || wparam == 'b')) {
-			/* Alt+B — bypass every shell ACE insert (Reverb…Gate). */
-			if (_engine.is_linked () && _engine_snap.session_ok) {
-				_engine.set_all_fx_bypassed (true);
 		           && (GetKeyState (VK_SHIFT) & 0x8000)
 		           && !(GetKeyState (VK_CONTROL) & 0x8000)
 		           && (wparam == 'B' || wparam == 'b')) {
 			/* Alt+Shift+B — activate every shell ACE insert (Reverb…Gate). */
 			if (_engine.is_linked () && _engine_snap.session_ok) {
 				_engine.set_all_fx_bypassed (false);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_fx_from_engine ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && !(GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'B' || wparam == 'b')) {
+			/* Alt+B — bypass every shell ACE insert (Reverb…Gate). */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				_engine.set_all_fx_bypassed (true);
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_fx_from_engine ();
@@ -5913,18 +5998,16 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			if ((GetKeyState (VK_MENU) & 0x8000) && (GetKeyState (VK_SHIFT) & 0x8000)) {
 				/* Alt+Shift+U = solo all audio tracks + MIDI. */
 				do_solo_all_tracks ();
+			} else if ((GetKeyState (VK_MENU) & 0x8000)
+			           && !(GetKeyState (VK_SHIFT) & 0x8000)
+			           && !(GetKeyState (VK_CONTROL) & 0x8000)) {
+				/* Alt+U = clear all solos. */
+				do_clear_all_solos ();
 			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
 				do_apply_or_clear_group ();
 			}
-		} else if ((GetKeyState (VK_MENU) & 0x8000) && (wparam == 'U' || wparam == 'u')
-		           && !(GetKeyState (VK_CONTROL) & 0x8000)) {
-			/* Alt+U = clear all solos (U alone = track group). */
-			do_clear_all_solos ();
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
-		           && !(GetKeyState (VK_MENU) & 0x8000)
-		           && (wparam == 'U' || wparam == 'u')) {
-			do_apply_or_clear_group ();
 		}
+		
 		return 0;
 	case WM_MOUSEWHEEL:
 		if (on_mouse_wheel (wparam, lparam)) {
@@ -5958,6 +6041,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				sync_mixer_pan_from_engine ();
 				sync_mixer_send_from_engine ();
 				InvalidateRect (_hwnd, nullptr, FALSE);
+				return 0;
+			}
+		}
 		/* Double-click FX param → insert default (before rename). */
 		if (_engine.is_linked () && _engine_snap.session_ok) {
 			int which = 0;
@@ -6881,17 +6967,18 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	if (arm >= 0) {
 		if (_engine.is_linked ()) {
 			const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
-			if (!_engine.start ()) {
-				_engine_snap = _engine.snapshot ();
-			} else if (alt) {
-				/* Alt+click Arm → disarm every audio track. */
-				_engine.disarm_all_tracks ();
 			const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
 			if (!_engine.start ()) {
 				_engine_snap = _engine.snapshot ();
 			} else if (alt && shift) {
 				/* Alt+Shift+click Arm → arm every audio track. */
 				_engine.arm_all_tracks ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_arm_from_engine ();
+			} else if (alt) {
+				/* Alt+click Arm → disarm every audio track. */
+				_engine.disarm_all_tracks ();
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_arm_from_engine ();
@@ -6910,6 +6997,7 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
+	
 	int mute_i = hit_mixer_mute (x, y);
 	if (mute_i >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
@@ -6931,36 +7019,32 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
 			const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
 			const bool ctrl = (GetKeyState (VK_CONTROL) & 0x8000) != 0;
+			const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
 			if (shift && solo_i != midi_mixer_index ()) {
 				/* Shift+click Solo → toggle solo-isolate. */
 				_engine.toggle_track_solo_isolated (solo_i);
-				_engine.poll ();
-				_engine_snap = _engine.snapshot ();
-				sync_mixer_solo_isolate_from_engine ();
 			} else if (ctrl && solo_i != midi_mixer_index ()) {
 				/* Ctrl+click Solo → toggle solo-safe. */
 				_engine.toggle_track_solo_safe (solo_i);
-				_engine.poll ();
-				_engine_snap = _engine.snapshot ();
-				sync_mixer_solo_safe_from_engine ();
 			} else if (solo_i == midi_mixer_index ()) {
-				_engine.toggle_midi_soloed ();
-				_engine.poll ();
-				_engine_snap = _engine.snapshot ();
-				sync_mixer_mute_solo_from_engine ();
-			const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
-			if (solo_i == midi_mixer_index ()) {
 				if (alt) {
 					_engine.exclusive_solo_midi ();
 				} else {
 					_engine.toggle_midi_soloed ();
 				}
 			} else if (alt) {
+				/* Alt+click Solo → exclusive solo. */
 				_engine.exclusive_solo_track (solo_i);
 			} else {
 				_engine.toggle_track_soloed (solo_i);
-				_engine.poll ();
-				_engine_snap = _engine.snapshot ();
+			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			if (shift) {
+				sync_mixer_solo_isolate_from_engine ();
+			} else if (ctrl) {
+				sync_mixer_solo_safe_from_engine ();
+			} else {
 				sync_mixer_mute_solo_from_engine ();
 			}
 		}
@@ -6968,6 +7052,7 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
+	
 	int pan_i = hit_mixer_pan (x, y);
 	if (pan_i >= 0) {
 		const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
@@ -7124,13 +7209,13 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	if (fxi >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
 			const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
-			if (alt) {
-				/* Alt+click FX → bypass every shell ACE insert. */
-				_engine.set_all_fx_bypassed (true);
 			const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
 			if (alt && shift) {
 				/* Alt+Shift+click FX → activate every shell ACE insert. */
 				_engine.set_all_fx_bypassed (false);
+			} else if (alt) {
+				/* Alt+click FX → bypass every shell ACE insert. */
+				_engine.set_all_fx_bypassed (true);
 			} else if (fxi == 5) {
 				if (_mixers[fxi].has_fx ()) {
 					_engine.toggle_track_gate_bypass (fxi);
@@ -7179,7 +7264,7 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
-	int mi = hit_mixer_fader (x, y);
+		int mi = hit_mixer_fader (x, y);
 	if (mi >= 0) {
 		const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
 		if (alt && _engine.is_linked () && _engine.snapshot ().session_ok) {

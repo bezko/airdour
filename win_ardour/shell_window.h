@@ -302,6 +302,7 @@ private:
 	void do_toggle_monitor_mono ();
 	void do_toggle_monitor_cut ();
 	void do_clear_all_solos ();
+	void do_clear_all_mutes ();
 	void sync_monitor_from_engine ();
 	int  n_audio_lanes () const;
 	int  n_mixer_strips () const;
@@ -326,6 +327,9 @@ private:
 	void sync_transport_clock_from_engine ();
 	void apply_shared_view (int source_lane);
 	void reset_shared_view ();
+	/* Keep EngineSnapshot copies out of large callers' frames (attach_engine). */
+	void refresh_engine_snap ();
+	bool engine_session_ok ();
 	void fit_shared_range (float start_sec, float end_sec);
 	void do_fit_session ();
 	void do_fit_selection ();
