@@ -80,6 +80,10 @@ public:
 	void set_midi_strip (bool midi) { _midi_strip = midi; }
 	bool is_midi_strip () const { return _midi_strip; }
 
+	/** Compact mixer: hide pan / send / FX (keep Arm + M/S + fader + meter). */
+	void set_narrow (bool narrow) { _narrow = narrow; }
+	bool narrow () const { return _narrow; }
+
 	/** Session RouteGroup membership + Shift-pick for upcoming Grp. */
 	void set_in_group (bool in_group) { _in_group = in_group; }
 	bool in_group () const { return _in_group; }
@@ -165,6 +169,7 @@ private:
 	bool        _fx_bypassed;
 	int         _fx_param_count; /* 1..3 */
 	bool        _midi_strip;
+	bool        _narrow;
 	bool        _in_group;
 	bool        _group_picked;
 };

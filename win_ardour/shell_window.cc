@@ -1241,6 +1241,17 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_monitor && engine_session_ok ()) {
+	if (ok && has_smoke ("narrow-mixer")) {
+		if (!_engine.smoke_narrow_mixer ()) {
+			_smoke_failed = true;
+		} else {
+			_engine_snap = _engine.snapshot ();
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_monitor && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_monitor ()) {
 			_smoke_failed = true;
 		} else {
@@ -5311,12 +5322,17 @@ ShellWindow::layout_panes ()
 		mon_w = 48.f * _dpi_scale;
 		strips_inner = mix_inner - mon_w - hist_w - strip_gap * 2.f;
 	}
-	float strip_w = (strips_inner - strip_gap * (float)(n_mix - 1)) / (float)n_mix;
+	float equal_w = (strips_inner - strip_gap * (float)(n_mix - 1)) / (float)n_mix;
+	float narrow_w = 52.f * _dpi_scale;
+	float strip_w = (_engine_snap.mixer_narrow && equal_w > narrow_w)
+		? narrow_w : equal_w;
 	for (int i = 0; i < kMixerStripsMax; ++i) {
 		_mixers[i].layout (D2D1::RectF (0, 0, 0, 0), _dpi_scale);
+		_mixers[i].set_narrow (false);
 	}
 	for (int i = 0; i < n_mix; ++i) {
 		float x0 = _mixer_pane.left + mix_inset + (float)i * (strip_w + strip_gap);
+		_mixers[i].set_narrow (_engine_snap.mixer_narrow && !_mixers[i].is_midi_strip ());
 		_mixers[i].layout (D2D1::RectF (x0, mix_top, x0 + strip_w, mix_bot), _dpi_scale);
 	}
 	float mon_x = _mixer_pane.right - mix_inset - mon_w;
@@ -5957,6 +5973,14 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
 		           && !(GetKeyState (VK_MENU) & 0x8000)
 		           && (wparam == 'N' || wparam == 'n')) {
+		           && (wparam == 'W' || wparam == 'w')) {
+			/* Alt+Shift+W — toggle narrow mixer strips. */
+			_engine.toggle_mixer_narrow ();
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			layout_panes ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'N' || wparam == 'n')) {
 			/* N = normalize selection to −1 dBFS. */
 			do_normalize_selection (-1.f);
 		} else if ((GetKeyState (VK_MENU) & 0x8000)
@@ -8909,6 +8933,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"V", L"Reverse selected audio region" },
 		{ L"N", L"Normalize selection to −1 dBFS" },
 		{ L"Alt+Shift+N / Alt+Shift+click label", L"Toggle track comment (Cm)" },
+		{ L"Alt+Shift+W", L"Toggle narrow mixer strips" },
 		{ L"I", L"Strip silence (−40 dBFS threshold)" },
 		{ L"Alt+Shift+I / Alt+click label", L"Toggle strip polarity invert (Ø)" },
 		{ L"B", L"Consolidate / bounce selection in place" },

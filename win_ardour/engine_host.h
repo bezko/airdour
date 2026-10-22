@@ -271,6 +271,7 @@ struct EngineSnapshot {
 	bool         group_shares_gain;
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
+	bool         mixer_narrow; /* shell UI: compact strip width */
 	bool         monitor_ok; /* Session monitor_out + MonitorProcessor */
 	bool         monitor_dim; /* MonitorProcessor::dim_all */
 	bool         monitor_mono;
@@ -1323,6 +1324,14 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Ensure monitor; dim→mono→cut on then off. For --smoke-monitor.
 	 */
 	bool smoke_monitor ();
+
+	/**
+	 * Shell mixer strip width: narrow (compact) vs equal-fill.
+	 * For Alt+Shift+W / --smoke-narrow-mixer.
+	 */
+	bool set_mixer_narrow (bool narrow);
+	bool toggle_mixer_narrow ();
+	bool smoke_narrow_mixer ();
 
 	/** Refresh BBT + timecode clock fields from Session transport. */
 	void refresh_clock_snap ();

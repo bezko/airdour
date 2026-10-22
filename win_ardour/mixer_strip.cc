@@ -50,6 +50,7 @@ MixerStrip::MixerStrip ()
 	, _fx_bypassed (false)
 	, _fx_param_count (1)
 	, _midi_strip (false)
+	, _narrow (false)
 	, _in_group (false)
 	, _group_picked (false)
 {
@@ -165,7 +166,9 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 	y = _mute_btn.bottom + gap;
 
 	float fx_h = 18.f * dpi_scale;
-	if (_midi_strip) {
+	if (_midi_strip || _narrow) {
+		_pan_track = D2D1::RectF (0, 0, 0, 0);
+		_send_track = D2D1::RectF (0, 0, 0, 0);
 		_fx_btn = D2D1::RectF (0, 0, 0, 0);
 		_fx_param_track = D2D1::RectF (0, 0, 0, 0);
 		_fx_param_track2 = D2D1::RectF (0, 0, 0, 0);
@@ -307,7 +310,7 @@ MixerStrip::drag_trim_to (float x)
 bool
 MixerStrip::hit_pan (float x, float y) const
 {
-	if (_midi_strip) {
+	if (_midi_strip || _narrow) {
 		return false;
 	}
 	float pad = 4.f;
@@ -318,7 +321,7 @@ MixerStrip::hit_pan (float x, float y) const
 bool
 MixerStrip::drag_pan_to (float x)
 {
-	if (_midi_strip) {
+	if (_midi_strip || _narrow) {
 		return false;
 	}
 	float w = _pan_track.right - _pan_track.left;
@@ -337,7 +340,7 @@ MixerStrip::drag_pan_to (float x)
 bool
 MixerStrip::hit_send (float x, float y) const
 {
-	if (_midi_strip) {
+	if (_midi_strip || _narrow) {
 		return false;
 	}
 	float pad = 4.f;
@@ -348,7 +351,7 @@ MixerStrip::hit_send (float x, float y) const
 bool
 MixerStrip::drag_send_to (float x)
 {
-	if (_midi_strip) {
+	if (_midi_strip || _narrow) {
 		return false;
 	}
 	float w = _send_track.right - _send_track.left;
@@ -367,7 +370,7 @@ MixerStrip::drag_send_to (float x)
 bool
 MixerStrip::hit_fx (float x, float y) const
 {
-	if (_midi_strip) {
+	if (_midi_strip || _narrow) {
 		return false;
 	}
 	return contains (_fx_btn, x, y);
@@ -376,7 +379,7 @@ MixerStrip::hit_fx (float x, float y) const
 bool
 MixerStrip::hit_fx_param (float x, float y) const
 {
-	if (_midi_strip || _fx_label[0] == L'\0') {
+	if (_midi_strip || _narrow || _fx_label[0] == L'\0') {
 		return false;
 	}
 	float pad = 4.f;
@@ -403,7 +406,7 @@ MixerStrip::drag_fx_param_to (float x)
 bool
 MixerStrip::hit_fx_param2 (float x, float y) const
 {
-	if (_midi_strip || _fx_param_count < 2 || _fx_label[0] == L'\0') {
+	if (_midi_strip || _narrow || _fx_param_count < 2 || _fx_label[0] == L'\0') {
 		return false;
 	}
 	float pad = 4.f;
@@ -430,7 +433,7 @@ MixerStrip::drag_fx_param2_to (float x)
 bool
 MixerStrip::hit_fx_param3 (float x, float y) const
 {
-	if (_midi_strip || _fx_param_count < 3 || _fx_label[0] == L'\0') {
+	if (_midi_strip || _narrow || _fx_param_count < 3 || _fx_label[0] == L'\0') {
 		return false;
 	}
 	float pad = 4.f;
@@ -612,6 +615,7 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 				body, 1.f);
 		}
 
+	if (!_midi_strip && !_narrow) {
 		/* Pan azimuth track — L · C · R */
 		rt->FillRectangle (_pan_track, edge);
 		float pw = _pan_track.right - _pan_track.left;
@@ -710,7 +714,9 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 
 	wchar_t db[48];
 	float db_v = (_gain <= 0.0001f) ? -96.f : (20.f * log10f (_gain));
-	if (!_midi_strip) {
+	if (_narrow && !_midi_strip) {
+		_snwprintf_s (db, _TRUNCATE, L"%.0f", db_v);
+	} else if (!_midi_strip) {
 		const wchar_t* pan_txt = L"C";
 		if (_pan < 0.45f) {
 			pan_txt = L"L";
