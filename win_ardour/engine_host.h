@@ -467,9 +467,17 @@ public:
 	bool smoke_midi_arm ();
 
 	/**
+	 * Clear solo on every audio track + MIDI (Controllable::NoGroup).
+	 * For Alt+U / --smoke-clear-solos.
+	 */
+	bool clear_all_solos ();
+
+	/**
 	 * Mute/solo Audio 1 + MIDI round-trip; clear. For --smoke-mute-solo.
 	 */
 	bool smoke_mute_solo ();
+	/** Solo Audio 1 + MIDI → clear_all_solos → none soloed. */
+	bool smoke_clear_solos ();
 
 	/** Pan azimuth 0=L … 0.5=C … 1=R via Route::pan_azimuth_control. */
 	bool  set_track_pan (int track, float pan_0_1);

@@ -301,6 +301,7 @@ private:
 	void do_toggle_monitor_dim ();
 	void do_toggle_monitor_mono ();
 	void do_toggle_monitor_cut ();
+	void do_clear_all_solos ();
 	void sync_monitor_from_engine ();
 	int  n_audio_lanes () const;
 	int  n_mixer_strips () const;

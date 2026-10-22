@@ -738,6 +738,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("arm-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-arm-all FAILED (no session)\n");
+	if (ok && has_smoke ("clear-solos") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_clear_solos ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_mute_solo_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("clear-solos")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-solos FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -4008,6 +4017,20 @@ ShellWindow::do_toggle_monitor_cut ()
 }
 
 void
+ShellWindow::do_clear_all_solos ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (_engine.clear_all_solos ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_mute_solo_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+}
+
+void
 ShellWindow::do_apply_or_clear_group ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
@@ -5821,6 +5844,14 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
 				do_apply_or_clear_group ();
 			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000) && (wparam == 'U' || wparam == 'u')
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)) {
+			/* Alt+U = clear all solos (U alone = track group). */
+			do_clear_all_solos ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'U' || wparam == 'u')) {
+			do_apply_or_clear_group ();
 		}
 		return 0;
 	case WM_MOUSEWHEEL:
@@ -8503,6 +8534,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+click send", L"Zero all aux sends" },
 		{ L"Alt+click fader", L"Reset all faders to unity" },
 		{ L"Alt+click Arm", L"Disarm all audio tracks" },
+		{ L"Alt+U", L"Clear all solos (audio + MIDI)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
