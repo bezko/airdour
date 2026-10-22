@@ -154,6 +154,7 @@ private:
 		FxParam, /* drag Mixer FX param 1 (Blend / Comp thr / EQ L / Delay time / Limiter ceil / Gate thr) */
 		FxParam2, /* drag Mixer FX param 2 (Comp ratio / EQ mid / Delay fb / Limiter release / Gate hold) */
 		FxParam3, /* drag Mixer FX param 3 (EQ High) */
+		Trim, /* drag Mixer preamp trim */
 		Pan, /* drag Mixer pan azimuth */
 		Send, /* drag Mixer aux send level */
 		AutoWrite, /* click/drag Editor automation lane */
@@ -409,6 +410,7 @@ void do_toggle_selection_muted ();
 	int  hit_mixer_arm (float x, float y) const;
 	int  hit_mixer_mute (float x, float y) const;
 	int  hit_mixer_solo (float x, float y) const;
+	int  hit_mixer_trim (float x, float y) const;
 	int  hit_mixer_pan (float x, float y) const;
 	int  hit_mixer_send (float x, float y) const;
 	int  hit_mixer_meter (float x, float y) const;

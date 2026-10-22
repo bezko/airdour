@@ -55,6 +55,12 @@ public:
 	void set_phase_inverted (bool inverted) { _phase_inverted = inverted; }
 	bool phase_inverted () const { return _phase_inverted; }
 
+	/** Preamp trim UI 0..1 (0.5 = unity / 0 dB; audio strips only). */
+	void  set_trim (float trim_0_1);
+	float trim () const { return _trim; }
+	bool  hit_trim (float x, float y) const;
+	bool  drag_trim_to (float x);
+
 	/** Pan azimuth 0=L … 0.5=C … 1=R (audio strips only). */
 	void  set_pan (float pan_0_1);
 	float pan () const { return _pan; }
@@ -130,6 +136,7 @@ private:
 	D2D1_RECT_F _arm_btn;
 	D2D1_RECT_F _mute_btn;
 	D2D1_RECT_F _solo_btn;
+	D2D1_RECT_F _trim_track;
 	D2D1_RECT_F _pan_track;
 	D2D1_RECT_F _send_track;
 	D2D1_RECT_F _fx_btn;
@@ -138,6 +145,7 @@ private:
 	D2D1_RECT_F _fx_param_track3;
 	LevelMeter  _meter;
 	float       _gain;
+	float       _trim;
 	float       _pan;
 	float       _send;
 	float       _fx_param;

@@ -631,6 +631,8 @@ EngineHost::EngineHost ()
 		_snap.track_solo_safe[i] = false;
 		_snap.track_comment[i][0] = L'\0';
 		_snap.track_phase_invert[i] = false;
+		_snap.track_trim[i] = 1.f;
+		_snap.track_trim_norm[i] = 0.5f;
 		_snap.track_pan[i] = 0.5f;
 		_snap.track_pan_auto_state[i] = 0;
 		_snap.track_send[i] = 0.f;
@@ -4284,6 +4286,43 @@ EngineHost::refresh_solo_isolate_flags ()
 {
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_solo_isolated[i] = false;
+namespace {
+
+float
+trim_norm_from_coeff (float coeff)
+{
+	float db = accurate_coefficient_to_dB (std::max (0.0001f, coeff));
+	float n = (db - (-20.f)) / 40.f;
+	if (n < 0.f) {
+		n = 0.f;
+	}
+	if (n > 1.f) {
+		n = 1.f;
+	}
+	return n;
+}
+
+float
+trim_coeff_from_norm (float norm_0_1)
+{
+	float n = norm_0_1;
+	if (n < 0.f) {
+		n = 0.f;
+	}
+	if (n > 1.f) {
+		n = 1.f;
+	}
+	return dB_to_coefficient (-20.f + n * 40.f);
+}
+
+} /* namespace */
+
+void
+EngineHost::refresh_trim_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_trim[i] = 1.f;
+		_snap.track_trim_norm[i] = 0.5f;
 	}
 	if (!_impl) {
 		return;
@@ -4294,6 +4333,10 @@ EngineHost::refresh_solo_isolate_flags ()
 			    && _impl->tracks[i]->solo_isolate_control ()) {
 				_snap.track_solo_isolated[i] =
 					_impl->tracks[i]->solo_isolate_control ()->self_solo_isolated ();
+			    && _impl->tracks[i]->trim_control ()) {
+				float c = (float)_impl->tracks[i]->trim_control ()->get_value ();
+				_snap.track_trim[i] = c;
+				_snap.track_trim_norm[i] = trim_norm_from_coeff (c);
 			}
 		}
 	} catch (...) {
@@ -4302,6 +4345,7 @@ EngineHost::refresh_solo_isolate_flags ()
 
 bool
 EngineHost::set_track_solo_isolated (int track, bool isolated)
+EngineHost::set_track_trim (int track, float linear)
 {
 	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
 		return false;
@@ -4327,6 +4371,32 @@ EngineHost::set_track_solo_isolated (int track, bool isolated)
 		return _snap.track_solo_isolated[track] == isolated;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: solo-isolate: %s\n", e.what ());
+	    || !_impl->tracks[track]->trim_control ()) {
+		return false;
+	}
+	try {
+		float c = linear;
+		if (c < 0.1f) {
+			c = 0.1f;
+		}
+		if (c > 10.f) {
+			c = 10.f;
+		}
+		std::shared_ptr<GainControl> tc = _impl->tracks[track]->trim_control ();
+		_impl->session->set_control (tc, (double)c, Controllable::NoGroup);
+		wait_until ([&] () {
+			refresh_trim_flags ();
+			return std::fabs (_snap.track_trim[track] - c) < 0.02f;
+		}, 400);
+		refresh_trim_flags ();
+		std::fprintf (stderr, "airdour_win_shell: Audio %d trim=%.3f (%.1f dB)\n",
+		              track + 1, _snap.track_trim[track],
+		              accurate_coefficient_to_dB (_snap.track_trim[track]));
+		std::fflush (stderr);
+		_snap.detail = L"trim set";
+		return std::fabs (_snap.track_trim[track] - c) < 0.05f;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: strip-trim: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -4349,6 +4419,34 @@ EngineHost::smoke_solo_isolate ()
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"smoke-solo-isolate failed — no Session";
+EngineHost::set_track_trim_norm (int track, float norm_0_1)
+{
+	return set_track_trim (track, trim_coeff_from_norm (norm_0_1));
+}
+
+float
+EngineHost::track_trim (int track) const
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return 1.f;
+	}
+	return _snap.track_trim[track];
+}
+
+float
+EngineHost::track_trim_norm (int track) const
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return 0.5f;
+	}
+	return _snap.track_trim_norm[track];
+}
+
+bool
+EngineHost::smoke_strip_trim ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-strip-trim failed — no Session";
 		return false;
 	}
 	try {
@@ -4380,6 +4478,43 @@ EngineHost::smoke_solo_isolate ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate exception: %s\n",
+		    || !_impl->tracks[0]->trim_control ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-trim FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_trim (0, 1.f) || std::fabs (_snap.track_trim[0] - 1.f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-trim FAILED (unity got=%.3f)\n",
+			              _snap.track_trim[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		float m6 = dB_to_coefficient (-6.f);
+		if (!set_track_trim (0, m6) || std::fabs (_snap.track_trim[0] - m6) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-trim FAILED (−6dB got=%.3f)\n",
+			              _snap.track_trim[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		float p6 = dB_to_coefficient (6.f);
+		if (!set_track_trim (0, p6) || std::fabs (_snap.track_trim[0] - p6) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-trim FAILED (+6dB got=%.3f)\n",
+			              _snap.track_trim[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_trim (0, 1.f) || std::fabs (_snap.track_trim[0] - 1.f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-strip-trim FAILED (restore got=%.3f)\n",
+			              _snap.track_trim[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-strip-trim ok (unity/−6/+6/unity)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-strip-trim ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-strip-trim exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -27684,6 +27819,7 @@ EngineHost::refresh_snapshot ()
 			refresh_solo_safe_flags ();
 			refresh_track_comment_flags ();
 			refresh_phase_invert_flags ();
+			refresh_trim_flags ();
 			refresh_pan_flags ();
 			refresh_pan_auto_state_flags ();
 			refresh_send_flags ();
@@ -27793,6 +27929,8 @@ EngineHost::EngineHost ()
 		_snap.track_gain_auto_state[i] = 0;
 		_snap.track_pan_auto_state[i] = 0;
 		_snap.track_comment[i][0] = L'\0';
+		_snap.track_trim[i] = 1.f;
+		_snap.track_trim_norm[i] = 0.5f;
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
 		_snap.track_send_auto_state[i] = 0;
@@ -28572,6 +28710,47 @@ EngineHost::smoke_solo_all ()
 void
 EngineHost::refresh_phase_invert_flags ()
 {
+}
+
+void
+EngineHost::refresh_trim_flags ()
+{
+}
+
+bool
+EngineHost::set_track_trim (int track, float linear)
+{
+	(void)track;
+	(void)linear;
+	return false;
+}
+
+bool
+EngineHost::set_track_trim_norm (int track, float norm_0_1)
+{
+	(void)track;
+	(void)norm_0_1;
+	return false;
+}
+
+float
+EngineHost::track_trim (int track) const
+{
+	(void)track;
+	return 1.f;
+}
+
+float
+EngineHost::track_trim_norm (int track) const
+{
+	(void)track;
+	return 0.5f;
+}
+
+bool
+EngineHost::smoke_strip_trim ()
+{
+	return false;
 }
 
 void
