@@ -1276,7 +1276,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("group-recenable")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (no session)\n");
-	if (ok && has_smoke ("group-relative") && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("group-relative") && engine_session_ok ()) {
 		if (!_engine.smoke_group_relative ()) {
 			_smoke_failed = true;
 		} else {
