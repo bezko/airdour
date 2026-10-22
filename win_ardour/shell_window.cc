@@ -1250,8 +1250,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_monitor && engine_session_ok ()) {
-	if (ok && has_smoke ("group-recenable") && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("group-recenable") && engine_session_ok ()) {
 		if (!_engine.smoke_group_recenable ()) {
 			_smoke_failed = true;
 		} else {
