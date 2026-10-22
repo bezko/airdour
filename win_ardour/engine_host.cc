@@ -4412,6 +4412,92 @@ EngineHost::track_send (int track) const
 }
 
 bool
+EngineHost::reset_all_sends ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		if (!ensure_aux_sends ()) {
+			_snap.detail = L"reset sends — no Aux";
+			return false;
+		}
+		collect_tracks ();
+		int n = 0;
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			if (set_track_send ((int)i, 0.f)) {
+				++n;
+			}
+		}
+		std::fprintf (stderr, "airdour_win_shell: reset all sends to 0 (%d)\n", n);
+		std::fflush (stderr);
+		_snap.detail = L"all sends → 0";
+		return n > 0;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: reset_all_sends: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_send_reset_all ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-send-reset-all failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_aux_sends () || !_snap.aux_bus_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-reset-all FAILED (no Aux)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		collect_tracks ();
+		int seeded = 0;
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			if (set_track_send ((int)i, 0.6f)) {
+				++seeded;
+			}
+		}
+		if (seeded < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-reset-all FAILED (seed)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!reset_all_sends ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-reset-all FAILED (reset)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			if (!_snap.track_send_ok[i]) {
+				continue;
+			}
+			if (_snap.track_send[i] > 0.05f) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-send-reset-all FAILED (a%zu=%.3f)\n",
+				              i, _snap.track_send[i]);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-reset-all ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-send-reset-all ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-reset-all exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::smoke_send ()
 {
 	if (!_impl || !_impl->session) {
@@ -27156,6 +27242,18 @@ EngineHost::track_send (int track) const
 {
 	(void)track;
 	return 0.f;
+}
+
+bool
+EngineHost::reset_all_sends ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_send_reset_all ()
+{
+	return false;
 }
 
 bool

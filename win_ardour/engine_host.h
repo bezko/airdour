@@ -481,6 +481,13 @@ public:
 	 */
 	bool set_track_send_auto_state (int track, int state_0_off_1_play_2_write_3_touch);
 	bool cycle_track_send_auto_state (int track = 0);
+	/**
+	 * Zero every audio track aux send (NoGroup).
+	 * For Alt+click send / --smoke-send-reset-all.
+	 */
+	bool reset_all_sends ();
+	/** Raise sends → reset_all → verify ≈0. For --smoke-send-reset-all. */
+	bool smoke_send_reset_all ();
 
 	/** Send 0 → 0.75 → 0.25 on Audio 1. For --smoke-send. */
 	bool smoke_send ();

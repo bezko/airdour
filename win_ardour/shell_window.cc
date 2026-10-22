@@ -528,7 +528,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && has_smoke ("pan-reset-all") && _engine.snapshot ().session_ok) {
-		if (!_engine.has_smoke ("pan-reset-all") ()) {
+		if (!_engine.smoke_pan_reset_all ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_pan_from_engine ();
@@ -536,6 +536,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("pan-reset-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan-reset-all FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("send-reset-all") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_send_reset_all ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_send_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("send-reset-all")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-reset-all FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -6751,6 +6764,16 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	int send_i = hit_mixer_send (x, y);
 	if (send_i >= 0) {
+		const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
+		if (alt && _engine.is_linked () && _engine.snapshot ().session_ok) {
+			/* Alt+click send → zero every aux send. */
+			_engine.reset_all_sends ();
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_send_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
 		_drag = DragMode::Send;
 		_drag_index = send_i;
 		if (_mixers[send_i].drag_send_to (x)) {
@@ -8365,6 +8388,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Shift+click Solo", L"Toggle solo-isolate (Si)" },
 		{ L"Ctrl+click Solo", L"Toggle solo-safe (Ss)" },
 		{ L"Alt+click pan", L"Center all track pans" },
+		{ L"Alt+click send", L"Zero all aux sends" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
