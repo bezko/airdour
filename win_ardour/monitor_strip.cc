@@ -22,11 +22,13 @@ MonitorStrip::MonitorStrip ()
 	, _dim_btn ()
 	, _mono_btn ()
 	, _mute_btn ()
+	, _boost_btn ()
 	, _available (false)
 	, _dim (false)
 	, _dim_db (-12.f)
 	, _mono (false)
 	, _mute (false)
+	, _solo_boost_db (0.f)
 {
 }
 
@@ -43,6 +45,8 @@ MonitorStrip::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	_mono_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
 	y = _mono_btn.bottom + gap;
 	_mute_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
+	y = _mute_btn.bottom + gap;
+	_boost_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
 }
 
 MonitorHit
@@ -59,6 +63,9 @@ MonitorStrip::hit_test (float x, float y) const
 	}
 	if (contains (_mute_btn, x, y)) {
 		return MonitorHit::Mute;
+	}
+	if (contains (_boost_btn, x, y)) {
+		return MonitorHit::Boost;
 	}
 	return MonitorHit::None;
 }
@@ -108,6 +115,9 @@ MonitorStrip::draw (ID2D1RenderTarget* rt,
 		draw_btn (_dim_btn, dim_label, _dim);
 		draw_btn (_mono_btn, L"Mono", _mono);
 		draw_btn (_mute_btn, L"Mute", _mute);
+		wchar_t boost_label[16];
+		_snwprintf_s (boost_label, _TRUNCATE, L"Boost +%.0f", _solo_boost_db);
+		draw_btn (_boost_btn, boost_label, _solo_boost_db > 0.5f);
 	} else {
 		rt->FillRectangle (_dim_btn, edge);
 		rt->DrawTextW (L"—", 1, fmt_meta, _dim_btn, body);

@@ -1266,6 +1266,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 
 	if (ok && has_smoke ("monitor-dim-level") && engine_session_ok ()) {
 		if (!_engine.smoke_monitor_dim_level ()) {
+	if (ok && has_smoke ("solo-boost") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_solo_boost ()) {
 			_smoke_failed = true;
 		} else {
 			sync_monitor_from_engine ();
@@ -1273,11 +1275,14 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("monitor-dim-level")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-monitor-dim-level FAILED (no session)\n");
+	} else if (has_smoke ("solo-boost")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-boost FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
 	if (ok && smoke_locate && engine_session_ok ()) {
+	if (ok && smoke_locate && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_locate ()) {
 			_smoke_failed = true;
 		} else {
@@ -4204,6 +4209,7 @@ ShellWindow::sync_monitor_from_engine ()
 	_monitor.set_dim_db (_engine_snap.monitor_dim_db);
 	_monitor.set_mono (_engine_snap.monitor_mono);
 	_monitor.set_mute (_engine_snap.monitor_cut);
+	_monitor.set_solo_boost_db (_engine_snap.monitor_solo_boost_db);
 }
 
 void
@@ -4247,6 +4253,7 @@ ShellWindow::do_toggle_monitor_cut ()
 
 void
 ShellWindow::do_clear_all_solos ()
+ShellWindow::do_cycle_monitor_solo_boost ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
@@ -4271,6 +4278,11 @@ ShellWindow::do_clear_all_mutes ()
 		sync_mixer_mute_solo_from_engine ();
 		InvalidateRect (_hwnd, nullptr, FALSE);
 	}
+	_engine.cycle_monitor_solo_boost ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_monitor_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
@@ -6095,6 +6107,16 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
 				do_toggle_click ();
 			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'K' || wparam == 'k')) {
+			/* Alt+Shift+K — cycle monitor solo boost 0/+3/+6. */
+			do_cycle_monitor_solo_boost ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'K' || wparam == 'k')) {
+			do_toggle_click ();
 		} else if (wparam == VK_OEM_MINUS || wparam == VK_SUBTRACT) {
 			do_nudge_tempo (-1.f);
 		} else if (wparam == VK_OEM_PLUS || wparam == VK_ADD) {
@@ -7058,6 +7080,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (mh == MonitorHit::Mute) {
 		do_toggle_monitor_cut ();
+		return true;
+	}
+	if (mh == MonitorHit::Boost) {
+		do_cycle_monitor_solo_boost ();
 		return true;
 	}
 
@@ -9040,6 +9066,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+Alt+±", L"Zoom around playhead" },
 		{ L"Alt+M", L"Clear all mutes (audio + MIDI)" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
+		{ L"Alt+Shift+K / Boost", L"Cycle monitor solo boost 0/+3/+6 dB" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
 		{ L"Home / 0", L"Follow transport (reset view)" },

@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Compact D2D monitor strip: Dim / Mono / Mute (cut) for Session MonitorProcessor.
+ * Compact D2D monitor strip: Dim / Mono / Mute / Boost for Session MonitorProcessor.
  */
 
 #pragma once
@@ -21,7 +21,8 @@ enum class MonitorHit {
 	None,
 	Dim,
 	Mono,
-	Mute
+	Mute,
+	Boost
 };
 
 class MonitorStrip
@@ -42,6 +43,8 @@ public:
 	bool mono () const { return _mono; }
 	void set_mute (bool on) { _mute = on; }
 	bool mute () const { return _mute; }
+	void set_solo_boost_db (float db) { _solo_boost_db = db; }
+	float solo_boost_db () const { return _solo_boost_db; }
 
 	MonitorHit hit_test (float x, float y) const;
 
@@ -62,9 +65,11 @@ private:
 	D2D1_RECT_F _dim_btn;
 	D2D1_RECT_F _mono_btn;
 	D2D1_RECT_F _mute_btn;
+	D2D1_RECT_F _boost_btn;
 	bool        _available;
 	bool        _dim;
 	float       _dim_db;
 	bool        _mono;
 	bool        _mute;
+	float       _solo_boost_db;
 };
