@@ -60,6 +60,7 @@
 #include "ardour/automation_control.h"
 #include "ardour/automation_list.h"
 #include "ardour/mute_control.h"
+#include "ardour/monitor_control.h"
 #include "ardour/solo_control.h"
 #include "ardour/solo_isolate_control.h"
 #include "ardour/solo_safe_control.h"
@@ -633,6 +634,7 @@ EngineHost::EngineHost ()
 		_snap.track_phase_invert[i] = false;
 		_snap.track_trim[i] = 1.f;
 		_snap.track_trim_norm[i] = 0.5f;
+		_snap.track_monitor_choice[i] = 0;
 		_snap.track_pan[i] = 0.5f;
 		_snap.track_pan_auto_state[i] = 0;
 		_snap.track_send[i] = 0.f;
@@ -652,6 +654,7 @@ EngineHost::EngineHost ()
 	_snap.group_shares_recenable = false;
 	_snap.group_shares_color = false;
 	_snap.group_rgba = 0;
+	_snap.group_shares_monitoring = false;
 	_snap.group_name[0] = L'\0';
 	_snap.mixer_narrow = false;
 	_snap.monitor_ok = false;
@@ -3725,6 +3728,108 @@ EngineHost::refresh_mute_solo_flags ()
 		}
 	} catch (...) {
 	}
+}
+
+/** Mute/Solo are Controllable::RealTime — applied on the process thread. */
+static bool
+wait_until (std::function<bool ()> pred, int timeout_ms = 400)
+{
+	const int step = 20;
+	for (int waited = 0; waited < timeout_ms; waited += step) {
+		if (pred ()) {
+			return true;
+		}
+		Sleep ((DWORD)step);
+	}
+	return pred ();
+}
+
+void
+EngineHost::refresh_monitor_choice_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_monitor_choice[i] = 0;
+	}
+	if (!_impl) {
+		return;
+	}
+	try {
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]
+			    && _impl->tracks[i]->monitoring_control ()) {
+				MonitorChoice mc =
+					_impl->tracks[i]->monitoring_control ()->monitoring_choice ();
+				if (mc == MonitorInput) {
+					_snap.track_monitor_choice[i] = 1;
+				} else if (mc == MonitorDisk) {
+					_snap.track_monitor_choice[i] = 2;
+				} else {
+					_snap.track_monitor_choice[i] = 0; /* Auto (and Cue→Auto) */
+				}
+			}
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	collect_tracks ();
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
+	    || !_impl->tracks[track]->monitoring_control ()) {
+		return false;
+	}
+	if (choice_0_auto_1_in_2_disk < 0 || choice_0_auto_1_in_2_disk > 2) {
+		return false;
+	}
+	try {
+		MonitorChoice mc = MonitorAuto;
+		if (choice_0_auto_1_in_2_disk == 1) {
+			mc = MonitorInput;
+		} else if (choice_0_auto_1_in_2_disk == 2) {
+			mc = MonitorDisk;
+		}
+		std::shared_ptr<MonitorControl> ctrl =
+			_impl->tracks[track]->monitoring_control ();
+		_impl->session->set_control (ctrl, (double)mc, Controllable::UseGroup);
+		wait_until ([&] () {
+			refresh_monitor_choice_flags ();
+			return _snap.track_monitor_choice[track] == choice_0_auto_1_in_2_disk;
+		}, 400);
+		refresh_monitor_choice_flags ();
+		const char* name = (mc == MonitorInput) ? "Input"
+		                 : (mc == MonitorDisk) ? "Disk" : "Auto";
+		std::fprintf (stderr,
+		              "airdour_win_shell: Audio %d monitor=%s (got=%d want=%d)\n",
+		              track + 1, name, _snap.track_monitor_choice[track],
+		              choice_0_auto_1_in_2_disk);
+		std::fflush (stderr);
+		_snap.detail = (mc == MonitorInput) ? L"monitor Input"
+		             : (mc == MonitorDisk) ? L"monitor Disk" : L"monitor Auto";
+		return _snap.track_monitor_choice[track] == choice_0_auto_1_in_2_disk;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: set_track_monitor_choice: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::cycle_track_monitor_choice (int track)
+{
+	refresh_monitor_choice_flags ();
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	int next = (_snap.track_monitor_choice[track] + 1) % 3;
+	return set_track_monitor_choice (track, next);
 }
 
 bool
@@ -12660,6 +12765,7 @@ EngineHost::refresh_group_flags ()
 	_snap.group_shares_recenable = false;
 	_snap.group_shares_color = false;
 	_snap.group_rgba = 0;
+	_snap.group_shares_monitoring = false;
 	_snap.group_name[0] = L'\0';
 	if (!_impl) {
 		return;
@@ -12682,6 +12788,7 @@ EngineHost::refresh_group_flags ()
 		_snap.group_shares_recenable = rg->is_recenable ();
 		_snap.group_shares_color = rg->is_color ();
 		_snap.group_rgba = rg->rgba ();
+		_snap.group_shares_monitoring = rg->is_monitoring ();
 		int n = 0;
 		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
 			if (_impl->tracks[i] && _impl->tracks[i]->route_group () == rg) {
@@ -12713,6 +12820,7 @@ EngineHost::create_route_group (const int* indices, int n)
 			_impl->session->add_route_group (rg);
 		}
 		/* Honest scope: mute + solo + gain + color. */
+		/* Honest scope: mute + solo + gain + monitoring. */
 		rg->set_active (true, nullptr);
 		rg->set_mute (true);
 		rg->set_solo (true);
@@ -12723,6 +12831,8 @@ EngineHost::create_route_group (const int* indices, int n)
 		rg->set_color (true);
 		rg->set_rgba (0xC45C26FF); /* terracotta default */
 		rg->set_monitoring (false);
+		rg->set_color (false);
+		rg->set_monitoring (true);
 		rg->set_sursend_enable (false);
 
 		rg->clear ();
@@ -12747,6 +12857,7 @@ EngineHost::create_route_group (const int* indices, int n)
 		refresh_group_flags ();
 		_snap.detail = L"route group ready";
 		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain/color\n",
+		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain/mon\n",
 		              rg->name ().c_str (), _snap.group_member_count);
 		std::fflush (stderr);
 		return _snap.group_member_count >= 2;
@@ -13093,12 +13204,17 @@ EngineHost::smoke_group_recenable ()
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"smoke-group-recenable failed — no Session";
+EngineHost::smoke_group_monitoring ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-group-monitoring failed — no Session";
 		return false;
 	}
 	try {
 		collect_tracks ();
 		if (_snap.audio_track_count < 2) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (need ≥2 audio)\n");
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-monitoring FAILED (need ≥2 audio)\n");
 			std::fflush (stderr);
 			return false;
 		}
@@ -13115,6 +13231,20 @@ EngineHost::smoke_group_recenable ()
 		refresh_record_flags ();
 		if (!set_track_armed (0, true)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (arm 0)\n");
+		    || !_snap.group_shares_monitoring
+		    || !_snap.track_in_group[0] || !_snap.track_in_group[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-monitoring FAILED (create)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_monitor_choice (0, 0) || !set_track_monitor_choice (1, 0)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-monitoring FAILED (reset Auto)\n");
+			std::fflush (stderr);
+			clear_route_group ();
+			return false;
+		}
+		if (!set_track_monitor_choice (0, 1)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-monitoring FAILED (Input 0)\n");
 			std::fflush (stderr);
 			clear_route_group ();
 			return false;
@@ -13127,12 +13257,21 @@ EngineHost::smoke_group_recenable ()
 			std::fprintf (stderr,
 			              "airdour_win_shell: smoke-group-recenable FAILED (arm propagate %d/%d)\n",
 			              (int)_snap.track_armed[0], (int)_snap.track_armed[1]);
+			refresh_monitor_choice_flags ();
+			return _snap.track_monitor_choice[0] == 1 && _snap.track_monitor_choice[1] == 1;
+		});
+		if (_snap.track_monitor_choice[0] != 1 || _snap.track_monitor_choice[1] != 1) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-group-monitoring FAILED (Input propagate %d/%d)\n",
+			              _snap.track_monitor_choice[0], _snap.track_monitor_choice[1]);
 			std::fflush (stderr);
 			clear_route_group ();
 			return false;
 		}
 		if (!set_track_armed (0, false)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (disarm 0)\n");
+		if (!set_track_monitor_choice (0, 2)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-monitoring FAILED (Disk 0)\n");
 			std::fflush (stderr);
 			clear_route_group ();
 			return false;
@@ -13143,6 +13282,13 @@ EngineHost::smoke_group_recenable ()
 		});
 		if (_snap.track_armed[0] || _snap.track_armed[1]) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-group-recenable FAILED (disarm)\n");
+			refresh_monitor_choice_flags ();
+			return _snap.track_monitor_choice[0] == 2 && _snap.track_monitor_choice[1] == 2;
+		});
+		if (_snap.track_monitor_choice[0] != 2 || _snap.track_monitor_choice[1] != 2) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-group-monitoring FAILED (Disk propagate %d/%d)\n",
+			              _snap.track_monitor_choice[0], _snap.track_monitor_choice[1]);
 			std::fflush (stderr);
 			clear_route_group ();
 			return false;
@@ -13222,6 +13368,37 @@ EngineHost::smoke_group_color ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group-color exception: %s\n",
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-monitoring FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_monitor_choice (0, 1)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-monitoring FAILED (ungrouped set)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		wait_until ([&] () {
+			refresh_monitor_choice_flags ();
+			return _snap.track_monitor_choice[0] == 1;
+		});
+		if (_snap.track_monitor_choice[0] != 1 || _snap.track_monitor_choice[1] == 1) {
+			/* Peer should stay Disk (2) after clear — not follow Input. */
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-group-monitoring FAILED (ungrouped %d/%d)\n",
+			              _snap.track_monitor_choice[0], _snap.track_monitor_choice[1]);
+			std::fflush (stderr);
+			set_track_monitor_choice (0, 0);
+			set_track_monitor_choice (1, 0);
+			return false;
+		}
+		set_track_monitor_choice (0, 0);
+		set_track_monitor_choice (1, 0);
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-monitoring ok (Input/Disk + clear)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-group-monitoring ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-monitoring exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -28673,6 +28850,7 @@ EngineHost::refresh_snapshot ()
 			refresh_phase_invert_flags ();
 			refresh_trim_flags ();
 			refresh_listen_mode_flags ();
+			refresh_monitor_choice_flags ();
 			refresh_pan_flags ();
 			refresh_pan_auto_state_flags ();
 			refresh_send_flags ();
@@ -28784,6 +28962,7 @@ EngineHost::EngineHost ()
 		_snap.track_comment[i][0] = L'\0';
 		_snap.track_trim[i] = 1.f;
 		_snap.track_trim_norm[i] = 0.5f;
+		_snap.track_monitor_choice[i] = 0;
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
 		_snap.track_send_auto_state[i] = 0;
@@ -28801,6 +28980,7 @@ EngineHost::EngineHost ()
 	_snap.group_shares_recenable = false;
 	_snap.group_shares_color = false;
 	_snap.group_rgba = 0;
+	_snap.group_shares_monitoring = false;
 	_snap.group_name[0] = L'\0';
 	_snap.mixer_narrow = false;
 	_snap.monitor_ok = false;
@@ -30976,6 +31156,7 @@ EngineHost::set_route_group_rgba (uint32_t rgba)
 bool
 EngineHost::toggle_route_group_relative ()
 EngineHost::cycle_route_group_color ()
+EngineHost::smoke_group_monitoring ()
 {
 	return false;
 }
@@ -30983,6 +31164,10 @@ EngineHost::cycle_route_group_color ()
 bool
 EngineHost::smoke_group_relative ()
 {
+EngineHost::set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk)
+{
+	(void)track;
+	(void)choice_0_auto_1_in_2_disk;
 	return false;
 }
 
@@ -30991,6 +31176,17 @@ EngineHost::smoke_group_recenable ()
 EngineHost::smoke_group_color ()
 {
 	return false;
+}
+
+EngineHost::cycle_track_monitor_choice (int track)
+{
+	(void)track;
+	return false;
+}
+
+void
+EngineHost::refresh_monitor_choice_flags ()
+{
 }
 
 void

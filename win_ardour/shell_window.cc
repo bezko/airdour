@@ -1311,6 +1311,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 
 	if (ok && has_smoke ("group-color") && engine_session_ok ()) {
 		if (!_engine.smoke_group_color ()) {
+	if (ok && has_smoke ("group-monitoring") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_group_monitoring ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_group_from_engine ();
@@ -1318,6 +1320,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("group-color")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group-color FAILED (no session)\n");
+	} else if (has_smoke ("group-monitoring")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-monitoring FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}

@@ -226,6 +226,8 @@ struct EngineSnapshot {
 	bool         track_phase_invert[kMeters]; /* PhaseControl any channel inverted */
 	float        track_trim[kMeters]; /* TrimAutomation linear coeff (−20..+20 dB) */
 	float        track_trim_norm[kMeters]; /* UI 0..1 (0.5 = unity / 0 dB) */
+	/** MonitorChoice: 0=Auto 1=Input 2=Disk (MonitorCue unused in shell). */
+	int          track_monitor_choice[kMeters];
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	/** Pan AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
 	int          track_pan_auto_state[kMeters];
@@ -273,6 +275,7 @@ struct EngineSnapshot {
 	bool         group_shares_recenable;
 	bool         group_shares_color;
 	uint32_t     group_rgba; /* RouteGroup color RRGGBBAA when shares color */
+	bool         group_shares_monitoring;
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
 	bool         mixer_narrow; /* shell UI: compact strip width */
@@ -1307,6 +1310,7 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Create/replace the shell Session RouteGroup ("Group 1") from audio
 	 * indices (≥2). Shares mute + solo + gain + rec-enable when active.
 	 * indices (≥2). Shares mute + solo + gain + color when active.
+	 * indices (≥2). Shares mute + solo + gain + monitoring when active.
 	 * Honest scope: one group, no VCA/subgroup.
 	 */
 	bool create_route_group (const int* indices, int n);
@@ -1337,6 +1341,18 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool smoke_group_relative ();
 	/** Create group; cycle palette; restore. For --smoke-group-color. */
 	bool smoke_group_color ();
+/**
+	 * Group Audio 0+1; input-monitor choice propagates via UseGroup; clear
+	 * isolates. For --smoke-group-monitoring.
+	 */
+	bool smoke_group_monitoring ();
+
+	/**
+	 * Track input monitor choice (MonitorControl): Auto / Input / Disk.
+	 * Uses UseGroup so RouteGroup monitoring share propagates peers.
+	 */
+	bool set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk);
+	bool cycle_track_monitor_choice (int track = 0);
 
 	/**
 	 * Ensure Session monitor bus + MonitorProcessor (add_monitor_section).
@@ -1868,6 +1884,7 @@ private:
 	void refresh_phase_invert_flags ();
 	void refresh_trim_flags ();
 	void refresh_listen_mode_flags ();
+	void refresh_monitor_choice_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_pan_auto_state_flags ();
