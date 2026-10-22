@@ -46,6 +46,7 @@ MixerStrip::MixerStrip ()
 	, _solo_safe (false)
 	, _has_comment (false)
 	, _phase_inverted (false)
+	, _listen_mode (0)
 	, _fx_bypassed (false)
 	, _fx_param_count (1)
 	, _midi_strip (false)
@@ -583,6 +584,23 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 	{
 		const wchar_t* s_lab = _solo_isolated ? L"Si" : (_solo_safe ? L"Ss" : L"S");
 		rt->DrawTextW (s_lab, (UINT32)wcslen (s_lab), fmt_meta, _solo_btn, brand);
+	/* Solo / PFL / AFL — accent when self/effective solo or listen. */
+	{
+		const wchar_t* solo_glyph = L"S";
+		if (_listen_mode == 1) {
+			solo_glyph = L"P";
+		} else if (_listen_mode == 2) {
+			solo_glyph = L"A";
+		}
+		if (_soloed) {
+			accent->SetOpacity (0.85f);
+			rt->FillRectangle (_solo_btn, accent);
+			accent->SetOpacity (1.f);
+			rt->DrawTextW (solo_glyph, 1, fmt_meta, _solo_btn, brand);
+		} else {
+			rt->FillRectangle (_solo_btn, edge);
+			rt->DrawTextW (solo_glyph, 1, fmt_meta, _solo_btn, brand);
+		}
 	}
 
 	if (!_midi_strip) {

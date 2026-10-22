@@ -781,6 +781,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("solo-isolate")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (no session)\n");
+	if (ok && has_smoke ("listen-mode") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_listen_mode ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_listen_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("listen-mode")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-listen-mode FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -877,6 +886,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan && engine_session_ok ()) {
+	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
@@ -1882,6 +1892,11 @@ ShellWindow::sync_mixer_trim_from_engine ()
 	const int na = n_audio_lanes ();
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_trim (_engine_snap.track_trim_norm[i]);
+ShellWindow::sync_mixer_listen_from_engine ()
+{
+	const int n = n_mixer_strips ();
+	for (int i = 0; i < n; ++i) {
+		_mixers[i].set_listen_mode (_engine_snap.listen_mode);
 	}
 }
 
@@ -5675,6 +5690,21 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				/* Alt+O = toggle region opaque / transparent. */
 				do_toggle_selection_opaque ();
 			}
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'L' || wparam == 'l')) {
+			/* Alt+Shift+L — cycle Solo → PFL → AFL → Solo. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				_engine.cycle_listen_mode ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_listen_from_engine ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			}
+		} else if (!(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'L' || wparam == 'l')) {
+			do_toggle_loop ();
 		} else if (wparam == 'P' || wparam == 'p') {
 			if ((GetKeyState (VK_CONTROL) & 0x8000)
 			    && (GetKeyState (VK_SHIFT) & 0x8000)
@@ -8247,6 +8277,7 @@ ShellWindow::on_tick ()
 	sync_mixer_comment_from_engine ();
 	sync_mixer_phase_from_engine ();
 	sync_mixer_trim_from_engine ();
+	sync_mixer_listen_from_engine ();
 	sync_mixer_pan_from_engine ();
 	sync_mixer_send_from_engine ();
 	sync_monitor_from_engine ();
@@ -8896,6 +8927,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+Shift+A / Shift+click auto", L"Cycle Gain→Pan→Send automation lane" },
 		{ L"Alt+Shift+Y", L"Cycle auto Off→Play→Write→Touch (current lane)" },
 		{ L"L / P", L"Loop · Punch" },
+		{ L"Alt+Shift+L", L"Cycle Solo → PFL → AFL (listen mode)" },
 		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
 		{ L"M / Shift+M", L"Add / remove marker" },
 		{ L"Ctrl+Alt+←/→", L"Previous / next marker" },
