@@ -583,24 +583,15 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 	}
 	{
 		const wchar_t* s_lab = _solo_isolated ? L"Si" : (_solo_safe ? L"Ss" : L"S");
-		rt->DrawTextW (s_lab, (UINT32)wcslen (s_lab), fmt_meta, _solo_btn, brand);
-	/* Solo / PFL / AFL — accent when self/effective solo or listen. */
-	{
-		const wchar_t* solo_glyph = L"S";
-		if (_listen_mode == 1) {
-			solo_glyph = L"P";
-		} else if (_listen_mode == 2) {
-			solo_glyph = L"A";
+		const wchar_t* solo_glyph = s_lab;
+		if (!_solo_isolated && !_solo_safe) {
+			if (_listen_mode == 1) {
+				solo_glyph = L"P";
+			} else if (_listen_mode == 2) {
+				solo_glyph = L"A";
+			}
 		}
-		if (_soloed) {
-			accent->SetOpacity (0.85f);
-			rt->FillRectangle (_solo_btn, accent);
-			accent->SetOpacity (1.f);
-			rt->DrawTextW (solo_glyph, 1, fmt_meta, _solo_btn, brand);
-		} else {
-			rt->FillRectangle (_solo_btn, edge);
-			rt->DrawTextW (solo_glyph, 1, fmt_meta, _solo_btn, brand);
-		}
+		rt->DrawTextW (solo_glyph, (UINT32)wcslen (solo_glyph), fmt_meta, _solo_btn, brand);
 	}
 
 	if (!_midi_strip) {
