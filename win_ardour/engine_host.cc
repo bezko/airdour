@@ -628,6 +628,7 @@ EngineHost::EngineHost ()
 		_snap.track_gain_auto_state[i] = 0;
 		_snap.track_solo_isolated[i] = false;
 		_snap.track_solo_safe[i] = false;
+		_snap.track_comment[i][0] = L'\0';
 		_snap.track_pan[i] = 0.5f;
 		_snap.track_pan_auto_state[i] = 0;
 		_snap.track_send[i] = 0.f;
@@ -4486,6 +4487,123 @@ EngineHost::smoke_solo_safe ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-solo-safe exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+void
+EngineHost::refresh_track_comment_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_comment[i][0] = L'\0';
+	}
+	if (!_impl) {
+		return;
+	}
+	try {
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]) {
+				std::string cmt = _impl->tracks[i]->comment ();
+				if (cmt.empty ()) {
+					_snap.track_comment[i][0] = L'\0';
+				} else {
+					copy_name_to_snap (_snap.track_comment[i],
+					                   EngineSnapshot::kCommentLen, cmt);
+				}
+			}
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::set_track_comment (int track, const char* utf8)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	collect_tracks ();
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	try {
+		std::string cmt = utf8 ? utf8 : "";
+		_impl->tracks[track]->set_comment (cmt, this);
+		refresh_track_comment_flags ();
+		std::fprintf (stderr, "airdour_win_shell: Audio %d comment=\"%s\"\n",
+		              track + 1, cmt.c_str ());
+		std::fflush (stderr);
+		_snap.detail = cmt.empty () ? L"comment cleared" : L"comment set";
+		std::wstring got (_snap.track_comment[track]);
+		std::wstring want = utf8_to_wide (cmt);
+		return got == want;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: track-comment: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::clear_track_comment (int track)
+{
+	return set_track_comment (track, "");
+}
+
+bool
+EngineHost::toggle_track_comment (int track)
+{
+	refresh_track_comment_flags ();
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (_snap.track_comment[track][0] != L'\0') {
+		return clear_track_comment (track);
+	}
+	return set_track_comment (track, "note");
+}
+
+bool
+EngineHost::smoke_track_comment ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-track-comment failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-track-comment FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!clear_track_comment (0) || _snap.track_comment[0][0] != L'\0') {
+			std::fprintf (stderr, "airdour_win_shell: smoke-track-comment FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_comment (0, "smoke") || wcscmp (_snap.track_comment[0], L"smoke") != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-track-comment FAILED (set)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!clear_track_comment (0) || _snap.track_comment[0][0] != L'\0') {
+			std::fprintf (stderr, "airdour_win_shell: smoke-track-comment FAILED (clear2)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-comment ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-track-comment ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-comment exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -27447,6 +27565,7 @@ EngineHost::refresh_snapshot ()
 			refresh_gain_auto_state_flags ();
 			refresh_solo_isolate_flags ();
 			refresh_solo_safe_flags ();
+			refresh_track_comment_flags ();
 			refresh_pan_flags ();
 			refresh_pan_auto_state_flags ();
 			refresh_send_flags ();
@@ -27555,6 +27674,7 @@ EngineHost::EngineHost ()
 		_snap.track_frozen[i] = false;
 		_snap.track_gain_auto_state[i] = 0;
 		_snap.track_pan_auto_state[i] = 0;
+		_snap.track_comment[i][0] = L'\0';
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
 		_snap.track_send_auto_state[i] = 0;
@@ -28236,6 +28356,10 @@ EngineHost::set_track_solo_safe (int track, bool safe)
 {
 	(void)track;
 	(void)safe;
+EngineHost::set_track_comment (int track, const char* utf8)
+{
+	(void)track;
+	(void)utf8;
 	return false;
 }
 
@@ -28244,6 +28368,7 @@ EngineHost::toggle_midi_armed ()
 {
 EngineHost::toggle_track_solo_isolated (int track)
 EngineHost::toggle_track_solo_safe (int track)
+EngineHost::clear_track_comment (int track)
 {
 	(void)track;
 	return false;
@@ -28253,6 +28378,14 @@ bool
 EngineHost::smoke_midi_arm ()
 EngineHost::smoke_solo_isolate ()
 EngineHost::smoke_solo_safe ()
+EngineHost::toggle_track_comment (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::smoke_track_comment ()
 {
 	return false;
 }
@@ -28260,6 +28393,7 @@ EngineHost::smoke_solo_safe ()
 void
 EngineHost::refresh_solo_isolate_flags ()
 EngineHost::refresh_solo_safe_flags ()
+EngineHost::refresh_track_comment_flags ()
 {
 }
 

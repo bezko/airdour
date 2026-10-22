@@ -781,6 +781,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("solo-isolate")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (no session)\n");
+	if (ok && has_smoke ("track-comment") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_track_comment ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_comment_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("track-comment")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-comment FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -851,6 +860,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan && engine_session_ok ()) {
+	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
@@ -1810,6 +1820,14 @@ ShellWindow::sync_mixer_solo_safe_from_engine ()
 	}
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_solo_safe (_engine_snap.track_solo_safe[i]);
+ShellWindow::sync_mixer_comment_from_engine ()
+{
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < kMixerStripsMax; ++i) {
+		_mixers[i].set_has_comment (false);
+	}
+	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
+		_mixers[i].set_has_comment (_engine_snap.track_comment[i][0] != L'\0');
 	}
 }
 
@@ -5807,7 +5825,27 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'V' || wparam == 'v')) {
 			/* V = reverse selected audio region. */
 			do_reverse_selection ();
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'N' || wparam == 'n')) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'N' || wparam == 'n')) {
+			/* Alt+Shift+N — toggle Route comment ("note") on focused strip. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				int ti = _focus_audio_track;
+				if (ti < 0) {
+					ti = 0;
+				}
+				if (ti < n_audio_lanes ()) {
+					_engine.toggle_track_comment (ti);
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_mixer_comment_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+				}
+			}
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'N' || wparam == 'n')) {
 			/* N = normalize selection to −1 dBFS. */
 			do_normalize_selection (-1.f);
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'I' || wparam == 'i')) {
@@ -6942,6 +6980,18 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			return true;
 		}
 		if (lab < n_audio_lanes ()) {
+			if ((GetKeyState (VK_MENU) & 0x8000)
+			    && (GetKeyState (VK_SHIFT) & 0x8000)
+			    && _engine.is_linked () && _engine_snap.session_ok) {
+				/* Alt+Shift+click label → toggle Route comment. */
+				_focus_audio_track = lab;
+				_engine.toggle_track_comment (lab);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_comment_from_engine ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return true;
+			}
 			if (GetKeyState (VK_SHIFT) & 0x8000) {
 				do_toggle_group_pick (lab);
 				return true;
@@ -8040,6 +8090,7 @@ ShellWindow::on_tick ()
 	sync_mixer_mute_solo_from_engine ();
 	sync_mixer_solo_isolate_from_engine ();
 	sync_mixer_solo_safe_from_engine ();
+	sync_mixer_comment_from_engine ();
 	sync_mixer_pan_from_engine ();
 	sync_mixer_send_from_engine ();
 	sync_monitor_from_engine ();
@@ -8662,6 +8713,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+Shift+R / Alt+dbl-click strip", L"Reset strip fader·pan·send" },
 		{ L"V", L"Reverse selected audio region" },
 		{ L"N", L"Normalize selection to −1 dBFS" },
+		{ L"Alt+Shift+N / Alt+Shift+click label", L"Toggle track comment (Cm)" },
 		{ L"I", L"Strip silence (−40 dBFS threshold)" },
 		{ L"B", L"Consolidate / bounce selection in place" },
 		{ L"Alt+B / Alt+click FX", L"Bypass all ACE inserts" },

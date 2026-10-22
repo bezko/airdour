@@ -50,6 +50,8 @@ public:
 	bool solo_isolated () const { return _solo_isolated; }
 	void set_solo_safe (bool safe) { _solo_safe = safe; }
 	bool solo_safe () const { return _solo_safe; }
+	void set_has_comment (bool has) { _has_comment = has; }
+	bool has_comment () const { return _has_comment; }
 
 	/** Pan azimuth 0=L … 0.5=C … 1=R (audio strips only). */
 	void  set_pan (float pan_0_1);
@@ -144,6 +146,7 @@ private:
 	bool        _soloed;
 	bool        _solo_isolated;
 	bool        _solo_safe;
+	bool        _has_comment;
 	bool        _fx_bypassed;
 	int         _fx_param_count; /* 1..3 */
 	bool        _midi_strip;
