@@ -3825,6 +3825,7 @@ EngineHost::smoke_midi_arm ()
 
 bool
 EngineHost::mute_all_tracks ()
+EngineHost::clear_all_mutes ()
 {
 	if (!_impl || !_impl->session) {
 		return false;
@@ -3839,6 +3840,8 @@ EngineHost::mute_all_tracks ()
 				std::shared_ptr<MuteControl> mc = _impl->tracks[i]->mute_control ();
 				if (mc->get_value () < 0.5) {
 					_impl->session->set_control (mc, 1.0, Controllable::NoGroup);
+				if (mc->get_value () > 0.5) {
+					_impl->session->set_control (mc, 0.0, Controllable::NoGroup);
 					any = true;
 				}
 			}
@@ -3847,6 +3850,9 @@ EngineHost::mute_all_tracks ()
 		    && _impl->midi_track->mute_control ()->get_value () < 0.5) {
 			_impl->session->set_control (
 				_impl->midi_track->mute_control (), 1.0, Controllable::NoGroup);
+		    && _impl->midi_track->mute_control ()->get_value () > 0.5) {
+			_impl->session->set_control (
+				_impl->midi_track->mute_control (), 0.0, Controllable::NoGroup);
 			any = true;
 		}
 		wait_until ([&] () {
@@ -4185,6 +4191,31 @@ EngineHost::smoke_solo_safe ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: clear solos exception: %s\n", e.what ());
+			for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+				if (_snap.track_muted[i]) {
+					return false;
+				}
+			}
+			return !_snap.midi_muted;
+		});
+		refresh_mute_solo_flags ();
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (_snap.track_muted[i]) {
+				_snap.detail = L"clear mutes — audio still muted";
+				return false;
+			}
+		}
+		if (_snap.midi_muted) {
+			_snap.detail = L"clear mutes — MIDI still muted";
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: clear all mutes%s\n",
+		              any ? "" : " (none were on)");
+		std::fflush (stderr);
+		_snap.detail = L"all mutes cleared";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: clear mutes exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -7411,6 +7442,10 @@ EngineHost::smoke_clear_solos ()
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"smoke-clear-solos failed — no Session";
+EngineHost::smoke_clear_mutes ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-clear-mutes failed — no Session";
 		return false;
 	}
 	try {
@@ -7546,6 +7581,40 @@ EngineHost::smoke_solo_all ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-clear-solos exception: %s\n", e.what ());
+			std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes FAILED (tracks)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		set_track_muted (0, false);
+		set_midi_muted (false);
+		if (!set_track_muted (0, true) || !_snap.track_muted[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes FAILED (mute Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_midi_muted (true) || !_snap.midi_muted) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes FAILED (mute MIDI)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!clear_all_mutes ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_muted[0] || _snap.midi_muted) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-clear-mutes FAILED (still muted a=%d m=%d)\n",
+			              _snap.track_muted[0] ? 1 : 0, _snap.midi_muted ? 1 : 0);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-clear-mutes ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -27576,6 +27645,7 @@ EngineHost::smoke_mute_solo ()
 bool
 EngineHost::mute_all_tracks ()
 EngineHost::clear_all_solos ()
+EngineHost::clear_all_mutes ()
 {
 	return false;
 }
@@ -27583,6 +27653,7 @@ EngineHost::clear_all_solos ()
 bool
 EngineHost::smoke_mute_all ()
 EngineHost::smoke_clear_solos ()
+EngineHost::smoke_clear_mutes ()
 {
 	return false;
 }

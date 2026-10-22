@@ -740,6 +740,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-arm-all FAILED (no session)\n");
 	if (ok && has_smoke ("clear-solos") && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_clear_solos ()) {
+	if (ok && has_smoke ("clear-mutes") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_clear_mutes ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_mute_solo_from_engine ();
@@ -747,6 +749,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("clear-solos")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-clear-solos FAILED (no session)\n");
+	} else if (has_smoke ("clear-mutes")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-mutes FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -4018,11 +4022,13 @@ ShellWindow::do_toggle_monitor_cut ()
 
 void
 ShellWindow::do_clear_all_solos ()
+ShellWindow::do_clear_all_mutes ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
 	}
 	if (_engine.clear_all_solos ()) {
+	if (_engine.clear_all_mutes ()) {
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 		sync_mixer_mute_solo_from_engine ();
@@ -5593,6 +5599,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				/* Ctrl+Alt+M = toggle CD flag on marker at playhead. */
 				do_toggle_marker_cd_at_playhead ();
 			} else if (GetKeyState (VK_SHIFT) & 0x8000) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000) && (wparam == 'M' || wparam == 'm')
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)) {
+			/* Alt+M = clear all mutes (M alone = marker). */
+			do_clear_all_mutes ();
+		} else if (!(GetKeyState (VK_MENU) & 0x8000) && (wparam == 'M' || wparam == 'm')) {
+			if (GetKeyState (VK_SHIFT) & 0x8000) {
 				do_remove_marker_at_playhead ();
 			} else {
 				do_add_marker_at_playhead ();
@@ -8516,6 +8528,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+Alt+↑/↓", L"Nudge region envelope mid gain" },
 		{ L"Tab / Shift+Tab", L"Cycle region selection" },
 		{ L"Ctrl+Alt+±", L"Zoom around playhead" },
+		{ L"Alt+M", L"Clear all mutes (audio + MIDI)" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
