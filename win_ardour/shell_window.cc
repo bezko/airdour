@@ -663,6 +663,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && has_smoke ("solo-isolate") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_solo_isolate ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_solo_isolate_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("solo-isolate")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
@@ -1572,6 +1585,18 @@ ShellWindow::sync_mixer_mute_solo_from_engine ()
 	if (mi >= 0 && mi < kMixerStripsMax) {
 		_mixers[mi].set_muted (_engine_snap.midi_muted);
 		_mixers[mi].set_soloed (_engine_snap.midi_soloed);
+	}
+}
+
+void
+ShellWindow::sync_mixer_solo_isolate_from_engine ()
+{
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < kMixerStripsMax; ++i) {
+		_mixers[i].set_solo_isolated (false);
+	}
+	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
+		_mixers[i].set_solo_isolated (_engine_snap.track_solo_isolated[i]);
 	}
 }
 
@@ -6630,14 +6655,24 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	int solo_i = hit_mixer_solo (x, y);
 	if (solo_i >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
-			if (solo_i == midi_mixer_index ()) {
+			const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
+			if (shift && solo_i != midi_mixer_index ()) {
+				/* Shift+click Solo → toggle solo-isolate. */
+				_engine.toggle_track_solo_isolated (solo_i);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_solo_isolate_from_engine ();
+			} else if (solo_i == midi_mixer_index ()) {
 				_engine.toggle_midi_soloed ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_mute_solo_from_engine ();
 			} else {
 				_engine.toggle_track_soloed (solo_i);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_mute_solo_from_engine ();
 			}
-			_engine.poll ();
-			_engine_snap = _engine.snapshot ();
-			sync_mixer_mute_solo_from_engine ();
 		}
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
@@ -7574,6 +7609,7 @@ ShellWindow::on_tick ()
 	}
 	sync_mixer_fx_from_engine ();
 	sync_mixer_mute_solo_from_engine ();
+	sync_mixer_solo_isolate_from_engine ();
 	sync_mixer_pan_from_engine ();
 	sync_mixer_send_from_engine ();
 	sync_monitor_from_engine ();
@@ -8270,6 +8306,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F2", L"Rename focused track" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"U", L"Apply / clear track group" },
+		{ L"Shift+click Solo", L"Toggle solo-isolate (Si)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
