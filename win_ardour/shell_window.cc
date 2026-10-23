@@ -959,6 +959,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 
 	if (ok && has_smoke ("clear-solos") && engine_session_ok ()) {
 		if (!_engine.smoke_clear_solos ()) {
+	if (ok && smoke_mute_points && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_mute_points ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_mute_solo_from_engine ();
@@ -966,6 +968,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("clear-solos")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-clear-solos FAILED (no session)\n");
+	} else if (smoke_mute_points) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mute-points FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -997,6 +1001,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan && engine_session_ok ()) {
+	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
@@ -2178,11 +2183,13 @@ ShellWindow::sync_mixer_mute_solo_from_engine ()
 	const int mi = midi_mixer_index ();
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_muted (_engine_snap.track_muted[i]);
+		_mixers[i].set_mute_points (_engine_snap.track_mute_points[i]);
 		_mixers[i].set_soloed (_engine_snap.track_soloed[i]);
 		_mixers[i].set_route_active (_engine_snap.track_active[i]);
 	}
 	if (mi >= 0 && mi < kMixerStripsMax) {
 		_mixers[mi].set_muted (_engine_snap.midi_muted);
+		_mixers[mi].set_mute_points (0);
 		_mixers[mi].set_soloed (_engine_snap.midi_soloed);
 		_mixers[mi].set_route_active (true);
 	}
@@ -7987,7 +7994,12 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	int mute_i = hit_mixer_mute (x, y);
 	if (mute_i >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
-			if (mute_i == midi_mixer_index ()) {
+			if ((GetKeyState (VK_CONTROL) & 0x8000) != 0
+			    && mute_i != midi_mixer_index ()
+			    && mute_i < EngineSnapshot::kMeters) {
+				/* Ctrl+click Mute → cycle mute points Main↔AllPoints. */
+				_engine.cycle_track_mute_points (mute_i);
+			} else if (mute_i == midi_mixer_index ()) {
 				_engine.toggle_midi_muted ();
 			} else {
 				_engine.toggle_track_muted (mute_i);

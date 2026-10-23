@@ -219,6 +219,7 @@ struct EngineSnapshot {
 	bool         track_record_safe[kMeters]; /* Track::rec_safe_control latch */
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
+	int          track_mute_points[kMeters]; /* 0=Main 1=AllPoints (MuteMaster bitmask view) */
 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
 	/** Gain AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
 	int          track_gain_auto_state[kMeters];
@@ -483,6 +484,15 @@ public:
 	 */
 	bool set_track_muted (int track, bool muted);
 	bool toggle_track_muted (int track);
+	/**
+	 * Mute points: Main (main out only) ↔ AllPoints (pre/post/listen/main).
+	 * Ctrl+click Mute. Snap 0=Main, 1=AllPoints.
+	 */
+	bool set_track_mute_points (int track, int points_0_main_1_all);
+	bool cycle_track_mute_points (int track);
+	int  track_mute_points (int track) const;
+	/** Main → AllPoints → Main. For --smoke-mute-points. */
+	bool smoke_mute_points ();
 	bool set_track_soloed (int track, bool soloed);
 	bool toggle_track_soloed (int track);
 

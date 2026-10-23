@@ -50,6 +50,7 @@ MixerStrip::MixerStrip ()
 	, _monitor_peer_count (0)
 	, _record_safe (false)
 	, _muted (false)
+	, _mute_points (0)
 	, _soloed (false)
 	, _solo_isolated (false)
 	, _solo_safe (false)
@@ -683,15 +684,18 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		rt->DrawTextW (mon_label, (UINT32)wcslen (mon_label), fmt_meta, _mon_btn, brand);
 	}
 
-	/* Mute — lit body wash when muted (includes solo-mute of others). */
-	if (_muted) {
-		body->SetOpacity (0.9f);
-		rt->FillRectangle (_mute_btn, body);
-		body->SetOpacity (1.f);
-		rt->DrawTextW (L"M", 1, fmt_meta, _mute_btn, brand);
-	} else {
-		rt->FillRectangle (_mute_btn, edge);
-		rt->DrawTextW (L"M", 1, fmt_meta, _mute_btn, brand);
+	/* Mute — lit body wash when muted; All badge when mute-points=AllPoints. */
+	{
+		const wchar_t* mlab = (_mute_points != 0) ? L"M·All" : L"M";
+		if (_muted) {
+			body->SetOpacity (0.9f);
+			rt->FillRectangle (_mute_btn, body);
+			body->SetOpacity (1.f);
+			rt->DrawTextW (mlab, (UINT32)wcslen (mlab), fmt_meta, _mute_btn, brand);
+		} else {
+			rt->FillRectangle (_mute_btn, edge);
+			rt->DrawTextW (mlab, (UINT32)wcslen (mlab), fmt_meta, _mute_btn, brand);
+		}
 	}
 
 	/* Solo — accent when self/effective solo; Si when solo-isolated, Ss when safe. */
