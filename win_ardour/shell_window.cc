@@ -1391,7 +1391,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("group-route-active")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group-route-active FAILED (no session)\n");
-	if (ok && smoke_group_select && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("group-select") && engine_session_ok ()) {
 		if (!_engine.smoke_group_select ()) {
 			_smoke_failed = true;
 		} else {
@@ -1399,8 +1403,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			layout_panes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_group_select) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("group-select") FAILED (no session)\n");
+	} else if (has_smoke ("group-select")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-select FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
