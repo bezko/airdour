@@ -523,6 +523,25 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && engine_session_ok ()) {
+	} else if (ok && smoke_vca && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_vca ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_vca) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vca FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_vca_status && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_vca_status ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_vca_status) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("vca-status") FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
 		if (_engine.smoke_midi ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi ok\n");
 		} else {
@@ -4658,6 +4677,7 @@ ShellWindow::do_apply_or_clear_group ()
 
 void
 ShellWindow::do_toggle_group_relative ()
+ShellWindow::do_toggle_vca_assign ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
@@ -4702,6 +4722,17 @@ ShellWindow::do_cycle_group_color ()
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_mixer_group_from_engine ();
+	if (!_engine.ensure_vca_master ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	const bool on = _engine_snap.vca_slave_count < 1;
+	_engine.assign_track_to_vca (0, on);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
@@ -6361,7 +6392,14 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && (wparam == 'R' || wparam == 'r')) {
 			/* R = pitch +1 st; Shift+R = −1 st (duration held). */
 			do_pitch_shift_selection ((GetKeyState (VK_SHIFT) & 0x8000) ? -1.f : 1.f);
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'V' || wparam == 'v')) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'V' || wparam == 'v')) {
+			/* Alt+Shift+V — ensure VCA + toggle Audio 1 assign. */
+			do_toggle_vca_assign ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'V' || wparam == 'v')
+		           && !(GetKeyState (VK_MENU) & 0x8000)) {
 			/* V = reverse selected audio region. */
 			do_reverse_selection ();
 		} else if ((GetKeyState (VK_MENU) & 0x8000)
@@ -9636,6 +9674,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+Shift+E", L"Toggle track active (group shares)" },
 		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·select)" },
 		{ L"Mon / Alt+Shift+O", L"Cycle monitor Auto → In → Disk" },
+		{ L"Alt+Shift+V", L"VCA assign Audio 1 (status line)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
@@ -9823,24 +9862,30 @@ ShellWindow::on_paint ()
 	if (dsp > 100.f) {
 		dsp = 100.f;
 	}
+	wchar_t vca_frag[96] = L"";
+	if (_engine_snap.vca_ok) {
+		_snwprintf_s (vca_frag, _TRUNCATE, L"  ·  VCA 1 · slaves=%d · g=%.2f",
+		              _engine_snap.vca_slave_count, _engine_snap.vca_gain);
+	}
 	if (_engine_snap.running) {
 		_snwprintf_s (status, _TRUNCATE,
-		              L"Engine  %s  ·  %u Hz  ·  period %u  ·  DSP %.1f%%  ·  cb %lluµs avg  ·  xruns %llu  ·  %s",
+		              L"Engine  %s  ·  %u Hz  ·  period %u  ·  DSP %.1f%%  ·  cb %lluµs avg  ·  xruns %llu%s  ·  %s",
 		              _engine_snap.backend.c_str (),
 		              _engine_snap.sample_rate,
 		              _engine_snap.period_frames,
 		              dsp,
 		              (unsigned long long)_engine_snap.callback_avg_us,
 		              (unsigned long long)_engine_snap.xrun_count,
+		              vca_frag,
 		              _engine_snap.detail.c_str ());
 	} else if (_engine_snap.available) {
 		_snwprintf_s (status, _TRUNCATE,
-		              L"Engine idle  ·  DSP %.1f%%  ·  %d tracks  ·  %s",
-		              dsp, kTracks, _engine_snap.detail.c_str ());
+		              L"Engine idle  ·  DSP %.1f%%  ·  %d tracks%s  ·  %s",
+		              dsp, kTracks, vca_frag, _engine_snap.detail.c_str ());
 	} else {
 		_snwprintf_s (status, _TRUNCATE,
-		              L"UI shell  ·  %d tracks  ·  %s",
-		              kTracks, _engine_snap.detail.c_str ());
+		              L"UI shell  ·  %d tracks%s  ·  %s",
+		              kTracks, vca_frag, _engine_snap.detail.c_str ());
 	}
 
 	const float meter_w = 96.f * _dpi_scale;

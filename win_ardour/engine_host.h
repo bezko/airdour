@@ -289,6 +289,9 @@ struct EngineSnapshot {
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
 	bool         mixer_narrow; /* shell UI: compact strip width */
+	bool         vca_ok; /* Session VCA master exists */
+	int          vca_slave_count; /* tracks assigned to shell VCA */
+	float        vca_gain; /* VCA gain_control linear */
 	bool         monitor_ok; /* Session monitor_out + MonitorProcessor */
 	bool         monitor_dim; /* MonitorProcessor::dim_all */
 	float        monitor_dim_db; /* dim_level −20..0 dB (default −12) */
@@ -1367,6 +1370,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * indices (≥2). Shares mute + solo + gain + select when active.
 	 * indices (≥2). Shares mute + solo + gain + monitoring when active.
 	 * Honest scope: one group, no VCA/subgroup.
+	 * indices (≥2). Shares mute + solo + gain when active. Honest scope:
+	 * one group, no subgroup. VCA is a separate stub (ensure_vca_master).
 	 */
 	bool create_route_group (const int* indices, int n);
 	/** Remove shell RouteGroup members (and drop empty group). */
@@ -1426,6 +1431,25 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-group-select.
 	 */
 	bool smoke_group_select ();
+
+	/**
+	 * Session VCA master stub (no mixer chrome). Create "VCA 1", assign
+	 * strip gain, set master gain. Honest scope: engine/smoke only.
+	 */
+	bool ensure_vca_master ();
+	bool assign_track_to_vca (int track, bool on);
+	bool set_vca_gain (float linear_0_1);
+	bool clear_vca_master ();
+	/**
+	 * Create VCA → assign Audio 1 → verify slave → set gain → clear.
+	 * For --smoke-vca.
+	 */
+	bool smoke_vca ();
+	/**
+	 * Create VCA → assign → set gain; assert status snap fields; clear.
+	 * For --smoke-vca-status (status-line chrome path).
+	 */
+	bool smoke_vca_status ();
 
 	/**
 	 * Ensure Session monitor bus + MonitorProcessor (add_monitor_section).
@@ -1966,6 +1990,7 @@ private:
 	void refresh_send_flags ();
 	void refresh_send_auto_state_flags ();
 	void refresh_group_flags ();
+	void refresh_vca_flags ();
 	void refresh_monitor_flags ();
 	bool ensure_aux_sends ();
 	void refresh_history_flags ();
