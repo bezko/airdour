@@ -48,6 +48,7 @@ MixerStrip::MixerStrip ()
 	, _armed (false)
 	, _monitor_choice (0)
 	, _monitor_peer_count (0)
+	, _record_safe (false)
 	, _muted (false)
 	, _soloed (false)
 	, _solo_isolated (false)
@@ -663,6 +664,10 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 	rt->FillRectangle (_arm_btn, _armed ? accent : edge);
 	if (!_midi_strip) {
 		const wchar_t* arm_label = _armed ? L"R · armed" : L"R · arm";
+		rt->FillRectangle (_arm_btn, _armed ? accent : edge);
+		const wchar_t* arm_label =
+			_record_safe ? L"R · Rs"
+			: (_armed ? L"R · armed" : L"R · arm");
 		rt->DrawTextW (arm_label, (UINT32)wcslen (arm_label), fmt_meta, _arm_btn, brand);
 
 		/* Mon — Auto / In / Disk; ·N peer badge when group shares monitoring. */

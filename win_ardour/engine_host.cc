@@ -642,6 +642,7 @@ EngineHost::EngineHost ()
 		_snap.track_meter_type[i] = 0; /* Peak */
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
+		_snap.track_record_safe[i] = false;
 		_snap.track_frozen[i] = false;
 		_snap.track_muted[i] = false;
 		_snap.track_soloed[i] = false;
@@ -2097,6 +2098,7 @@ EngineHost::destroy_session ()
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
+		_snap.track_record_safe[i] = false;
 		_snap.track_frozen[i] = false;
 	}
 }
@@ -3751,6 +3753,7 @@ EngineHost::refresh_record_flags ()
 	_snap.midi_armed = false;
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_armed[i] = false;
+		_snap.track_record_safe[i] = false;
 	}
 	if (!_impl || !_impl->session) {
 		return;
@@ -3763,6 +3766,11 @@ EngineHost::refresh_record_flags ()
 			    && _impl->tracks[i]->rec_enable_control ()) {
 				_snap.track_armed[i] =
 					_impl->tracks[i]->rec_enable_control ()->get_value () >= 0.5;
+			}
+			if (i < (int)_impl->tracks.size () && _impl->tracks[i]
+			    && _impl->tracks[i]->rec_safe_control ()) {
+				_snap.track_record_safe[i] =
+					_impl->tracks[i]->rec_safe_control ()->get_value () >= 0.5;
 			}
 		}
 		if (_impl->midi_track && _impl->midi_track->rec_enable_control ()) {
@@ -3794,6 +3802,23 @@ EngineHost::set_track_armed (int track, bool armed)
 		_impl->tracks[track]->rec_enable_control ()->set_value (
 			armed ? 1.0 : 0.0, Controllable::UseGroup);
 		/* Mirror peers after UseGroup propagation. */
+		if (armed) {
+			refresh_record_flags ();
+			if (_snap.track_record_safe[track]) {
+				_snap.detail = L"arm refused — record safe";
+				return false;
+			}
+		}
+		_impl->tracks[track]->rec_enable_control ()->set_value (
+			armed ? 1.0 : 0.0, Controllable::NoGroup);
+		/* RealTime Controllable — brief wait for process to apply. */
+		for (int n = 0; n < 30; ++n) {
+			refresh_record_flags ();
+			if (_snap.track_armed[track] == armed) {
+				break;
+			}
+			Sleep (15);
+		}
 		refresh_record_flags ();
 		_snap.detail = armed ? L"track armed for record" : L"track disarmed";
 		return _snap.track_armed[track] == armed;
@@ -4027,6 +4052,7 @@ EngineHost::refresh_monitor_choice_flags ()
 
 bool
 EngineHost::set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk)
+EngineHost::set_track_record_safe (int track, bool safe)
 {
 	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
 		return false;
@@ -4069,6 +4095,51 @@ EngineHost::set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk)
 		              e.what ());
 		std::fflush (stderr);
 		return false;
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
+	    || !_impl->tracks[track]->rec_safe_control ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AudioTrack> tr = _impl->tracks[track];
+		refresh_record_flags ();
+		if (safe && _snap.track_armed[track]) {
+			/* Engaging safe while armed: disarm first (Track::can_be_record_safe). */
+			set_track_armed (track, false);
+		}
+		if (safe && !tr->can_be_record_safe ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: record-safe blocked "
+			              "(writable=%d recordable=%d armed=%.0f)\n",
+			              _impl->session->writable () ? 1 : 0,
+			              tr->recordable () ? 1 : 0,
+			              tr->rec_enable_control ()
+			                      ? tr->rec_enable_control ()->get_value ()
+			                      : -1.0);
+			std::fflush (stderr);
+			return false;
+		}
+		std::shared_ptr<AutomationControl> rs = tr->rec_safe_control ();
+		/* RealTime Controllable — queue via Session then wait for process. */
+		_impl->session->set_control (rs, safe ? 1.0 : 0.0, Controllable::NoGroup);
+		for (int n = 0; n < 40; ++n) {
+			refresh_record_flags ();
+			if (_snap.track_record_safe[track] == safe) {
+				break;
+			}
+			Sleep (15);
+		}
+		refresh_record_flags ();
+		/* DiskWriter mirror can lag the Controllable; wait for can_be_record_enabled. */
+		if (!safe) {
+			for (int n = 0; n < 40; ++n) {
+				if (tr->can_be_record_enabled ()) {
+					break;
+				}
+				Sleep (15);
+			}
+		}
+		_snap.detail = safe ? L"record safe on" : L"record safe off";
+		return _snap.track_record_safe[track] == safe;
 	} catch (...) {
 		return false;
 	}
@@ -4090,6 +4161,20 @@ EngineHost::smoke_input_monitor ()
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"smoke-input-monitor failed — no Session";
+EngineHost::toggle_track_record_safe (int track)
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	refresh_record_flags ();
+	return set_track_record_safe (track, !_snap.track_record_safe[track]);
+}
+
+bool
+EngineHost::smoke_record_safe ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-record-safe failed — no Session";
 		return false;
 	}
 	try {
@@ -4190,6 +4275,44 @@ EngineHost::smoke_mon_peer_badge ()
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mon-peer-badge exception: %s\n",
 		              e.what ());
+		    || !_impl->tracks[0]->rec_safe_control ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (no Audio1/Rs)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_record_safe (0, false) || _snap.track_record_safe[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_record_safe (0, true) || !_snap.track_record_safe[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (set safe)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (set_track_armed (0, true) || _snap.track_armed[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (arm while safe)\n");
+			std::fflush (stderr);
+			set_track_record_safe (0, false);
+			return false;
+		}
+		if (!set_track_record_safe (0, false) || _snap.track_record_safe[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (clear2)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_armed (0, true) || !_snap.track_armed[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (arm after clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		set_track_armed (0, false);
+		std::fprintf (stderr, "airdour_win_shell: smoke-record-safe ok (safe blocks arm)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-record-safe ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-record-safe exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -30609,6 +30732,7 @@ EngineHost::refresh_snapshot ()
 			for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 				_snap.track_has_regions[i] = false;
 				_snap.track_armed[i] = false;
+				_snap.track_record_safe[i] = false;
 				_snap.track_frozen[i] = false;
 			}
 			/* Closest honest engine path without Session: AudioEngine sample clock. */
@@ -30681,6 +30805,7 @@ EngineHost::EngineHost ()
 		_snap.track_meter_type[i] = 0; /* Peak */
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
+		_snap.track_record_safe[i] = false;
 		_snap.track_frozen[i] = false;
 		_snap.track_gain_auto_state[i] = 0;
 		_snap.track_pan_auto_state[i] = 0;
@@ -31318,11 +31443,16 @@ EngineHost::set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk)
 {
 	(void)track;
 	(void)choice_0_auto_1_in_2_disk;
+EngineHost::set_track_record_safe (int track, bool safe)
+{
+	(void)track;
+	(void)safe;
 	return false;
 }
 
 bool
 EngineHost::cycle_track_monitor_choice (int track)
+EngineHost::toggle_track_record_safe (int track)
 {
 	(void)track;
 	return false;
@@ -31330,6 +31460,7 @@ EngineHost::cycle_track_monitor_choice (int track)
 
 bool
 EngineHost::smoke_input_monitor ()
+EngineHost::smoke_record_safe ()
 {
 	return false;
 }

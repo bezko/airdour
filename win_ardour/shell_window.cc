@@ -933,6 +933,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 
 	if (ok && has_smoke ("arm-all") && engine_session_ok ()) {
 		if (!_engine.smoke_arm_all ()) {
+	if (ok && smoke_record_safe && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_record_safe ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_arm_from_engine ();
@@ -940,6 +942,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("arm-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-arm-all FAILED (no session)\n");
+	} else if (smoke_record_safe) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("record-safe") FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -984,6 +988,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan && engine_session_ok ()) {
+	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
@@ -2131,12 +2136,16 @@ ShellWindow::sync_mixer_arm_from_engine ()
 	const int mi = midi_mixer_index ();
 	for (int i = 0; i < kMixerStripsMax; ++i) {
 		_mixers[i].set_armed (false);
+		_mixers[i].set_record_safe (false);
 	}
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_armed (_engine_snap.track_armed[i]);
+		_mixers[i].set_record_safe (_engine_snap.track_record_safe[i]);
 	}
 	if (mi >= 0 && mi < kMixerStripsMax) {
 		_mixers[mi].set_armed (_engine_snap.midi_armed);
+		_mixers[mi].set_armed (false);
+		_mixers[mi].set_record_safe (false);
 	}
 	_transport.set_record_armed (_engine_snap.session_record_armed);
 }
@@ -7933,6 +7942,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			} else if (alt) {
 				/* Alt+click Arm → disarm every audio track. */
 				_engine.disarm_all_tracks ();
+			} else if ((GetKeyState (VK_CONTROL) & 0x8000) != 0
+			           && arm < EngineSnapshot::kMeters) {
+				/* Ctrl+click Arm → has_smoke ("record-safe") latch. */
+				_engine.toggle_track_record_safe (arm);
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_arm_from_engine ();

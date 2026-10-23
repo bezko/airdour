@@ -43,6 +43,9 @@ public:
 
 	void set_armed (bool armed) { _armed = armed; }
 	bool armed () const { return _armed; }
+	/** Record-safe latch (Rs badge on Arm). */
+	void set_record_safe (bool safe) { _record_safe = safe; }
+	bool record_safe () const { return _record_safe; }
 
 	/** 0=Auto 1=Input 2=Disk — Mon button (audio strips). */
 	void set_monitor_choice (int choice_0_1_2);
@@ -204,6 +207,7 @@ private:
 	bool        _armed;
 	int         _monitor_choice; /* 0=Auto 1=Input 2=Disk */
 	int         _monitor_peer_count;
+	bool        _record_safe;
 	bool        _muted;
 	bool        _soloed;
 	bool        _solo_isolated;
