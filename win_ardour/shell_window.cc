@@ -957,10 +957,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && has_smoke ("mute-points") && engine_session_ok ()) {
+		if (!_engine.smoke_mute_points ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_mute_solo_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("mute-points")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mute-points FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && has_smoke ("clear-solos") && engine_session_ok ()) {
 		if (!_engine.smoke_clear_solos ()) {
-	if (ok && smoke_mute_points && _engine.snapshot ().session_ok) {
-		if (!_engine.smoke_mute_points ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_mute_solo_from_engine ();
@@ -968,8 +979,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("clear-solos")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-clear-solos FAILED (no session)\n");
-	} else if (smoke_mute_points) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-mute-points FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1001,7 +1010,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan && engine_session_ok ()) {
-	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
