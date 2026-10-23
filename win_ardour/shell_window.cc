@@ -255,6 +255,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_pan_width,
                             bool smoke_send,
                             bool smoke_send_mute,
+                            bool smoke_send_pan,
                             bool smoke_automation,
                             bool smoke_edit,
                             bool smoke_snap,
@@ -1091,10 +1092,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && has_smoke ("send-pan") && engine_session_ok ()) {
+		if (!_engine.smoke_send_pan ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_send_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("send-pan")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
 	if (ok && has_smoke ("send-mute") && engine_session_ok ()) {
 		if (!_engine.smoke_send_mute ()) {
-	if (ok && smoke_send_pan && _engine.snapshot ().session_ok) {
-		if (!_engine.smoke_send_pan ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_send_from_engine ();
@@ -1102,14 +1114,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("send-mute")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send-mute FAILED (no session)\n");
-	} else if (smoke_send_pan) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("send-pan") FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
 	if (ok && smoke_automation && engine_session_ok ()) {
-	if (ok && smoke_automation && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_automation ()) {
 			_smoke_failed = true;
 		} else {
@@ -8139,13 +8148,6 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			InvalidateRect (_hwnd, nullptr, FALSE);
 			return true;
 		}
-		_drag = DragMode::Send;
-		_drag_index = send_i;
-		if (_mixers[send_i].drag_send_to (x)) {
-			_engine.set_track_send (send_i, _mixers[send_i].send ());
-			_engine.poll ();
-			_engine_snap = _engine.snapshot ();
-			sync_mixer_send_from_engine ();
 		const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
 		if (shift && _mixers[send_i].send_pan_ok ()) {
 			/* Shift+drag send → aux send pan azimuth. */
@@ -8645,6 +8647,10 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 	if (_drag == DragMode::AuxReturn) {
 		if (_monitor.drag_aux_return_to (y)) {
 			do_set_aux_return (_monitor.aux_return ());
+		}
+		return true;
+	}
+
 	if (_drag == DragMode::SendPan && _drag_index >= 0 && _drag_index < kTracks) {
 		if (_mixers[_drag_index].drag_send_pan_to (x)) {
 			_engine.set_track_send_pan (

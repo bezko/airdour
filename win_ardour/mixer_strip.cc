@@ -808,7 +808,6 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 			fmt_meta->SetTextAlignment (ta_w);
 		}
 
-		/* Aux send level → Aux bus (dim when Processor-muted). */
 		/* Aux send level → Aux bus; pan knob when send panner present. */
 		rt->FillRectangle (_send_track, edge);
 		{
@@ -821,6 +820,7 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 			accent->SetOpacity (1.f);
 			if (_send_muted) {
 				rt->DrawTextW (L"Sm", 2, fmt_meta, _send_track, body);
+			}
 			if (_send_pan_ok) {
 				float kn_cx = _send_track.left + sw * _send_pan;
 				float kn_w = 6.f * dpi_scale;

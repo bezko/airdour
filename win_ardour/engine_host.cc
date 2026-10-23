@@ -6343,11 +6343,14 @@ EngineHost::refresh_send_flags ()
 			_snap.track_send_muted[i] = !send->active ();
 			float g = (float)send->gain_control ()->get_value ();
 			_snap.track_send[i] = std::max (0.f, std::min (1.f, g));
-			if (send->panner_shell () && send->panner_shell ()->pannable ()
-			    && send->panner_shell ()->pannable ()->pan_azimuth_control) {
+			/* Use the send's own panner: pannable() may alias the route panner
+			 * when the send panner is linked to the route. */
+			std::shared_ptr<Pannable> spannable = send->panner_shell ()
+				? send->panner_shell ()->unlinked_pannable () : nullptr;
+			if (spannable && spannable->pan_azimuth_control) {
 				_snap.track_send_pan_ok[i] = true;
-				_snap.track_send_pan[i] = (float)send->panner_shell ()
-					->pannable ()->pan_azimuth_control->get_value ();
+				_snap.track_send_pan[i] =
+					(float)spannable->pan_azimuth_control->get_value ();
 			}
 		}
 	} catch (...) {
@@ -7124,15 +7127,15 @@ EngineHost::set_track_send_pan (int track, float pan_0_1)
 	try {
 		std::shared_ptr<Send> send =
 			_impl->tracks[track]->internal_send_for (_impl->aux_bus);
-		if (!send || !send->panner_shell () || !send->panner_shell ()->pannable ()
-		    || !send->panner_shell ()->pannable ()->pan_azimuth_control) {
+		std::shared_ptr<Pannable> spannable = (send && send->panner_shell ())
+			? send->panner_shell ()->unlinked_pannable () : nullptr;
+		if (!spannable || !spannable->pan_azimuth_control) {
 			std::fprintf (stderr, "airdour_win_shell: send pan missing on Audio %d\n",
 			              track + 1);
 			std::fflush (stderr);
 			return false;
 		}
-		std::shared_ptr<AutomationControl> pan =
-			send->panner_shell ()->pannable ()->pan_azimuth_control;
+		std::shared_ptr<AutomationControl> pan = spannable->pan_azimuth_control;
 		_impl->session->set_control (pan, (double)pan_0_1, Controllable::NoGroup);
 		wait_until ([&] () {
 			refresh_send_flags ();

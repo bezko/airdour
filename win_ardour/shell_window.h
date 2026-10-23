@@ -93,6 +93,7 @@ public:
 	                    bool smoke_pan_width = false,
 	                    bool smoke_send = false,
 	                    bool smoke_send_mute = false,
+	                    bool smoke_send_pan = false,
 	                    bool smoke_automation = false,
 	                    bool smoke_edit = false,
 	                    bool smoke_snap = false,
@@ -162,6 +163,7 @@ private:
 		Pan, /* drag Mixer pan azimuth */
 		PanWidth, /* Shift+drag Mixer pan → stereo width */
 		Send, /* drag Mixer aux send level */
+		SendPan, /* Shift+drag Mixer aux send → pan azimuth */
 		AuxReturn, /* drag Monitor Aux return fader */
 		AutoWrite, /* click/drag Editor automation lane */
 		MidiCcWrite, /* click/drag MIDI CC7 automation lane */
