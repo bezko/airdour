@@ -42,6 +42,8 @@ MixerStrip::MixerStrip ()
 	, _pan_width_ok (false)
 	, _send (0.f)
 	, _send_muted (false)
+	, _send_pan (0.5f)
+	, _send_pan_ok (false)
 	, _fx_param (0.3f)
 	, _fx_param2 (0.16f)
 	, _fx_param3 (0.5f)
@@ -153,6 +155,12 @@ void
 MixerStrip::set_send (float send_0_1)
 {
 	_send = std::max (0.f, std::min (1.f, send_0_1));
+}
+
+void
+MixerStrip::set_send_pan (float pan_0_1)
+{
+	_send_pan = std::max (0.f, std::min (1.f, pan_0_1));
 }
 
 void
@@ -444,6 +452,25 @@ MixerStrip::drag_send_to (float x)
 		return false;
 	}
 	_send = v;
+	return true;
+}
+
+bool
+MixerStrip::drag_send_pan_to (float x)
+{
+	if (_midi_strip || !_send_pan_ok) {
+		return false;
+	}
+	float w = _send_track.right - _send_track.left;
+	if (w < 1.f) {
+		return false;
+	}
+	float t = (x - _send_track.left) / w;
+	float v = std::max (0.f, std::min (1.f, t));
+	if (v == _send_pan) {
+		return false;
+	}
+	_send_pan = v;
 	return true;
 }
 
@@ -782,6 +809,7 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		}
 
 		/* Aux send level → Aux bus (dim when Processor-muted). */
+		/* Aux send level → Aux bus; pan knob when send panner present. */
 		rt->FillRectangle (_send_track, edge);
 		{
 			float sw = _send_track.right - _send_track.left;
@@ -793,6 +821,23 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 			accent->SetOpacity (1.f);
 			if (_send_muted) {
 				rt->DrawTextW (L"Sm", 2, fmt_meta, _send_track, body);
+			if (_send_pan_ok) {
+				float kn_cx = _send_track.left + sw * _send_pan;
+				float kn_w = 6.f * dpi_scale;
+				rt->FillRectangle (
+					D2D1::RectF (kn_cx - kn_w * 0.5f, _send_track.top,
+					             kn_cx + kn_w * 0.5f, _send_track.bottom),
+					body);
+				DWRITE_TEXT_ALIGNMENT ta_p = fmt_meta->GetTextAlignment ();
+				fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_TRAILING);
+				rt->DrawTextW (
+					L"P", 1, fmt_meta,
+					D2D1::RectF (_send_track.right - 12.f * dpi_scale,
+					             _send_track.top - 1.f * dpi_scale,
+					             _send_track.right + 2.f * dpi_scale,
+					             _send_track.bottom + 1.f * dpi_scale),
+					body);
+				fmt_meta->SetTextAlignment (ta_p);
 			}
 		}
 

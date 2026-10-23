@@ -246,6 +246,8 @@ struct EngineSnapshot {
 	/** Send AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
 	int          track_send_auto_state[kMeters];
 	bool         track_send_muted[kMeters]; /* Send Processor !active() */
+	float        track_send_pan[kMeters]; /* send pan azimuth 0=L … 0.5=C … 1=R */
+	bool         track_send_pan_ok[kMeters]; /* send pan_azimuth_control present */
 	bool         aux_bus_ok; /* Session Aux audio bus exists */
 	float        aux_return; /* Aux bus fader gain coeff 0..1 (unity=1) */
 	bool         midi_muted;
@@ -683,6 +685,15 @@ public:
 	float aux_return () const;
 	/** Ensure Aux → set 0.5 → set 1.0. For --smoke-aux-return. */
 	bool smoke_aux_return ();
+
+	/**
+	 * Aux send pan azimuth 0=L … 0.5=C … 1=R via Send pannable.
+	 * Shift+drag send.
+	 */
+	bool  set_track_send_pan (int track, float pan_0_1);
+	float track_send_pan (int track) const;
+	/** L → R → C on Audio 1 send. For --smoke-send-pan. */
+	bool smoke_send_pan ();
 
 	/**
 	 * Track fader AutomationList (GainAutomation). Enable Play, write points,
