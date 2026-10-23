@@ -1042,6 +1042,16 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("pan-width")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan-width FAILED (no session)\n");
+	if (ok && smoke_mixer_reset && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_mixer_reset ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_gains_from_engine ();
+			sync_mixer_pan_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_mixer_reset) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("mixer-reset") FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1060,6 +1070,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_send && engine_session_ok ()) {
+	if (ok && smoke_send && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_send ()) {
 			_smoke_failed = true;
 		} else {
@@ -1072,7 +1083,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && has_smoke ("strip-mixer-reset") && engine_session_ok ()) {
+	if (ok && has_smoke ("strip-has_smoke ("mixer-reset")") && engine_session_ok ()) {
 		if (!_engine.smoke_strip_mixer_reset ()) {
 			_smoke_failed = true;
 		} else {
@@ -1081,8 +1092,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			sync_mixer_send_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (has_smoke ("strip-mixer-reset")) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset FAILED (no session)\n");
+	} else if (has_smoke ("strip-has_smoke ("mixer-reset")")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-strip-has_smoke ("mixer-reset") FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -6974,6 +6985,32 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		}
 		if (_monitor.hit_aux_return (x, y)) {
 			do_set_aux_return (1.f); /* unity */
+		/* Double-click fader → unity; pan → center (before rename hit). */
+		int fi = hit_mixer_fader (x, y);
+		if (fi >= 0 && _engine.is_linked () && _engine_snap.session_ok) {
+			_mixers[fi].set_gain (1.f);
+			if (fi == midi_mixer_index ()) {
+				_engine.set_midi_gain (1.f);
+			} else {
+				_engine.set_track_gain (fi, 1.f);
+				if (fi == 0) {
+					_engine_snap.gain = 1.f;
+				}
+			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_gains_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return 0;
+		}
+		int pi = hit_mixer_pan (x, y);
+		if (pi >= 0 && _engine.is_linked () && _engine_snap.session_ok) {
+			_mixers[pi].set_pan (0.5f);
+			_engine.set_track_pan (pi, 0.5f);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_pan_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
 			return 0;
 		}
 		int lab = hit_mixer_label (x, y);
@@ -9922,6 +9959,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
 		{ L"F2", L"Rename focused track" },
 		{ L"Dbl-click FX param", L"Reset FX knob to insert default" },
+		{ L"Dbl-click fader/pan", L"Reset fader → unity · pan → center" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"Alt+Shift+click Arm", L"Arm all audio tracks" },
 		{ L"U", L"Apply / clear track group" },

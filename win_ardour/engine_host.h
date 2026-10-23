@@ -646,6 +646,12 @@ public:
 	/** Full → 0 → full. For --smoke-pan-width. */
 	bool smoke_pan_width ();
 
+	/**
+	 * Audio 1 fader → unity (1.0) and pan → center (0.5).
+	 * For double-click mixer reset / --smoke-mixer-reset.
+	 */
+	bool smoke_mixer_reset ();
+
 	/** Aux send level 0..1 (gain coeff) via InternalSend → Aux bus. */
 	bool  set_track_send (int track, float send_0_1);
 	float track_send (int track) const;
