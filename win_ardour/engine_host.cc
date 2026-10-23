@@ -679,6 +679,10 @@ EngineHost::EngineHost ()
 	_snap.vca_ok = false;
 	_snap.vca_slave_count = 0;
 	_snap.vca_gain = 1.f;
+	_snap.vca_ok = false;
+	_snap.vca_slave_count = 0;
+	_snap.vca_gain = 1.f;
+	_snap.group_has_vca_master = false;
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
 	_snap.monitor_dim_db = -12.f;
@@ -13358,6 +13362,7 @@ EngineHost::refresh_group_flags ()
 	_snap.group_shares_route_active = false;
 	_snap.group_shares_select = false;
 	_snap.group_shares_monitoring = false;
+	_snap.group_has_vca_master = false;
 	_snap.group_name[0] = L'\0';
 	if (!_impl) {
 		return;
@@ -13384,6 +13389,7 @@ EngineHost::refresh_group_flags ()
 		_snap.group_shares_route_active = rg->is_route_active ();
 		_snap.group_shares_select = rg->is_select ();
 		_snap.group_shares_monitoring = rg->is_monitoring ();
+		_snap.group_has_vca_master = rg->has_control_master ();
 		int n = 0;
 		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
 			if (_impl->tracks[i] && _impl->tracks[i]->route_group () == rg) {
@@ -14584,6 +14590,331 @@ EngineHost::smoke_vca_status ()
 		return false;
 	} catch (...) {
 		clear_vca_master ();
+		return false;
+	}
+}
+
+void
+EngineHost::refresh_vca_flags ()
+{
+	_snap.vca_ok = false;
+	_snap.vca_slave_count = 0;
+	_snap.vca_gain = 1.f;
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	try {
+		std::shared_ptr<VCA> vca = _impl->shell_vca;
+		if (!vca) {
+			return;
+		}
+		_snap.vca_ok = true;
+		if (vca->gain_control ()) {
+			_snap.vca_gain = (float)vca->gain_control ()->get_value ();
+		}
+		int slaves = 0;
+		for (size_t i = 0; i < _impl->tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			if (_impl->tracks[i] && _impl->tracks[i]->slaved_to (vca)) {
+				++slaves;
+			}
+		}
+		_snap.vca_slave_count = slaves;
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::ensure_vca_master ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		if (_impl->shell_vca) {
+			refresh_vca_flags ();
+			return _snap.vca_ok;
+		}
+		VCAList created = _impl->session->vca_manager ().create_vca (1, "VCA %n");
+		if (created.empty () || !created.front ()) {
+			_snap.detail = L"VCA create failed";
+			return false;
+		}
+		_impl->shell_vca = created.front ();
+		refresh_vca_flags ();
+		_snap.detail = L"VCA 1 ready";
+		std::fprintf (stderr, "airdour_win_shell: VCA master ready (no mixer chrome)\n");
+		std::fflush (stderr);
+		return _snap.vca_ok;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: ensure_vca_master: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"VCA failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"VCA failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::assign_track_to_vca (int track, bool on)
+{
+	if (!ensure_vca_master ()) {
+		return false;
+	}
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"VCA assign — bad track";
+		return false;
+	}
+	try {
+		std::shared_ptr<VCA> vca = _impl->shell_vca;
+		std::shared_ptr<AudioTrack> t = _impl->tracks[track];
+		if (on) {
+			if (!t->slaved_to (vca)) {
+				t->assign (vca);
+			}
+		} else {
+			if (t->slaved_to (vca)) {
+				t->unassign (vca);
+			}
+		}
+		refresh_vca_flags ();
+		_snap.detail = on ? L"VCA assigned" : L"VCA unassigned";
+		return on ? t->slaved_to (vca) : !t->slaved_to (vca);
+	} catch (...) {
+		_snap.detail = L"VCA assign failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::set_vca_gain (float linear_0_1)
+{
+	if (!ensure_vca_master ()) {
+		return false;
+	}
+	try {
+		linear_0_1 = std::max (0.f, std::min (2.f, linear_0_1));
+		std::shared_ptr<GainControl> gc = _impl->shell_vca->gain_control ();
+		if (!gc) {
+			return false;
+		}
+		gc->set_value (linear_0_1, Controllable::NoGroup);
+		refresh_vca_flags ();
+		_snap.detail = L"VCA gain set";
+		return std::fabs (_snap.vca_gain - linear_0_1) < 0.05f;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::clear_vca_master ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	try {
+		std::shared_ptr<VCA> vca = _impl->shell_vca;
+		if (!vca) {
+			refresh_vca_flags ();
+			return true;
+		}
+		for (size_t i = 0; i < _impl->tracks.size (); ++i) {
+			if (_impl->tracks[i] && _impl->tracks[i]->slaved_to (vca)) {
+				_impl->tracks[i]->unassign (vca);
+			}
+		}
+		_impl->session->vca_manager ().remove_vca (vca);
+		_impl->shell_vca.reset ();
+		refresh_vca_flags ();
+		_snap.detail = L"VCA cleared";
+		return !_snap.vca_ok;
+	} catch (...) {
+		_impl->shell_vca.reset ();
+		refresh_vca_flags ();
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_vca ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-vca failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vca FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_vca_master ();
+		if (!ensure_vca_master () || !_snap.vca_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vca FAILED (create)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!assign_track_to_vca (0, true) || _snap.vca_slave_count < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vca FAILED (assign slaves=%d)\n",
+			              _snap.vca_slave_count);
+			std::fflush (stderr);
+			clear_vca_master ();
+			return false;
+		}
+		if (!_impl->tracks[0]->slaved_to (_impl->shell_vca)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vca FAILED (slaved_to)\n");
+			std::fflush (stderr);
+			clear_vca_master ();
+			return false;
+		}
+		std::shared_ptr<GainControl> tgc = _impl->tracks[0]->gain_control ();
+		if (!tgc || !tgc->slaved ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vca FAILED (gain not slaved)\n");
+			std::fflush (stderr);
+			clear_vca_master ();
+			return false;
+		}
+		if (!set_vca_gain (0.5f) || std::fabs (_snap.vca_gain - 0.5f) > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vca FAILED (vca gain=%.2f)\n",
+			              _snap.vca_gain);
+			std::fflush (stderr);
+			clear_vca_master ();
+			return false;
+		}
+		if (!assign_track_to_vca (0, false) || _snap.vca_slave_count != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vca FAILED (unassign)\n");
+			std::fflush (stderr);
+			clear_vca_master ();
+			return false;
+		}
+		if (!clear_vca_master () || _snap.vca_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vca FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-vca ok (create/assign/gain/clear)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-vca ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vca exception: %s\n", e.what ());
+		std::fflush (stderr);
+		clear_vca_master ();
+		return false;
+	} catch (...) {
+		clear_vca_master ();
+		return false;
+	}
+}
+
+bool
+EngineHost::assign_route_group_to_vca (bool on)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (!ensure_vca_master ()) {
+		return false;
+	}
+	try {
+		std::shared_ptr<RouteGroup> rg = _impl->shell_group;
+		if (!rg) {
+			rg = _impl->session->route_group_by_name ("Group 1");
+			_impl->shell_group = rg;
+		}
+		refresh_group_flags ();
+		if (!rg || _snap.group_member_count < 2) {
+			_snap.detail = L"group→VCA — need RouteGroup (≥2)";
+			return false;
+		}
+		std::shared_ptr<VCA> vca = _impl->shell_vca;
+		if (on) {
+			rg->assign_master (vca);
+		} else {
+			rg->unassign_master (vca);
+		}
+		refresh_group_flags ();
+		refresh_vca_flags ();
+		_snap.detail = on ? L"group → VCA assigned" : L"group VCA cleared";
+		return on ? _snap.group_has_vca_master : !_snap.group_has_vca_master;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: assign_route_group_to_vca: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"group→VCA failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"group→VCA failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_group_vca ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-group-vca failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if ((int)_impl->tracks.size () < 2 || !_impl->tracks[0] || !_impl->tracks[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-vca FAILED (need Audio 1+2)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_vca_master ();
+		clear_route_group ();
+		int idxs[2] = { 0, 1 };
+		if (!create_route_group (idxs, 2) || _snap.group_member_count < 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-vca FAILED (group)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!assign_route_group_to_vca (true)
+		    || !_snap.group_has_vca_master
+		    || _snap.vca_slave_count < 2) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-group-vca FAILED "
+			              "(assign master=%d slaves=%d)\n",
+			              (int)_snap.group_has_vca_master, _snap.vca_slave_count);
+			std::fflush (stderr);
+			clear_vca_master ();
+			clear_route_group ();
+			return false;
+		}
+		if (!_impl->tracks[0]->slaved_to (_impl->shell_vca)
+		    || !_impl->tracks[1]->slaved_to (_impl->shell_vca)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-vca FAILED (slaved_to)\n");
+			std::fflush (stderr);
+			clear_vca_master ();
+			clear_route_group ();
+			return false;
+		}
+		if (!assign_route_group_to_vca (false) || _snap.group_has_vca_master) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-group-vca FAILED (unassign)\n");
+			std::fflush (stderr);
+			clear_vca_master ();
+			clear_route_group ();
+			return false;
+		}
+		clear_vca_master ();
+		clear_route_group ();
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-vca ok (assign_master + clear)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-group-vca ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-vca exception: %s\n", e.what ());
+		std::fflush (stderr);
+		clear_vca_master ();
+		clear_route_group ();
+		return false;
+	} catch (...) {
+		clear_vca_master ();
+		clear_route_group ();
 		return false;
 	}
 }
@@ -30175,6 +30506,10 @@ EngineHost::EngineHost ()
 	_snap.vca_ok = false;
 	_snap.vca_slave_count = 0;
 	_snap.vca_gain = 1.f;
+	_snap.vca_ok = false;
+	_snap.vca_slave_count = 0;
+	_snap.vca_gain = 1.f;
+	_snap.group_has_vca_master = false;
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
 	_snap.monitor_dim_db = -12.f;
@@ -32564,6 +32899,57 @@ EngineHost::smoke_vca ()
 
 bool
 EngineHost::smoke_vca_status ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_vca_flags ()
+{
+}
+
+bool
+EngineHost::ensure_vca_master ()
+{
+	return false;
+}
+
+bool
+EngineHost::assign_track_to_vca (int track, bool on)
+{
+	(void)track;
+	(void)on;
+	return false;
+}
+
+bool
+EngineHost::set_vca_gain (float linear_0_1)
+{
+	(void)linear_0_1;
+	return false;
+}
+
+bool
+EngineHost::clear_vca_master ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_vca ()
+{
+	return false;
+}
+
+bool
+EngineHost::assign_route_group_to_vca (bool on)
+{
+	(void)on;
+	return false;
+}
+
+bool
+EngineHost::smoke_group_vca ()
 {
 	return false;
 }
