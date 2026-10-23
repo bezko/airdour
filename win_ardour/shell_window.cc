@@ -526,6 +526,16 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && engine_session_ok ()) {
+	} else if (ok && smoke_master_fx && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_master_fx ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (smoke_master_fx) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("master-fx") FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
 		if (_engine.smoke_midi ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi ok\n");
 		} else {
@@ -4618,6 +4628,8 @@ ShellWindow::do_set_aux_return (float gain_0_1)
 	_engine_snap = _engine.snapshot ();
 	sync_monitor_from_engine ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
+	_monitor.set_master_lim_ok (_engine_snap.master_fx_ok);
+	_monitor.set_master_lim_bypassed (_engine_snap.master_fx_bypassed);
 }
 
 void
@@ -4661,6 +4673,7 @@ ShellWindow::do_toggle_monitor_cut ()
 
 void
 ShellWindow::do_clear_all_solos ()
+ShellWindow::do_toggle_master_fx ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
@@ -4680,6 +4693,7 @@ ShellWindow::do_cycle_monitor_solo_boost ()
 		return;
 	}
 	_engine.cycle_monitor_solo_boost ();
+	_engine.toggle_master_fx_bypass ();
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_monitor_from_engine ();
@@ -7765,6 +7779,8 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		SetCapture (_hwnd);
 		SetCursor (LoadCursorW (nullptr, IDC_SIZENS));
 		InvalidateRect (_hwnd, nullptr, FALSE);
+	if (mh == MonitorHit::MasterLim) {
+		do_toggle_master_fx ();
 		return true;
 	}
 
@@ -9798,6 +9814,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+Z / Y", L"Undo / Redo" },
 		{ L"Ctrl+S / O / E", L"Save / Open browse / Export" },
 		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
+		{ L"MLim (Monitor)", L"Master ACE Limiter bypass toggle" },
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },
 		{ L"Alt+Shift+T / dbl-click trim", L"Reset strip preamp trim to 0 dB" },

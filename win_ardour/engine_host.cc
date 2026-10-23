@@ -551,6 +551,11 @@ public:
 	float           track_limiter_release_ms;
 	std::string     track_limiter_name;
 	std::weak_ptr<PluginInsert> track_limiter;
+	bool            master_fx_ok;
+	bool            master_fx_bypassed;
+	float           master_fx_ceiling_db;
+	std::string     master_fx_name;
+	std::weak_ptr<PluginInsert> master_fx;
 	bool            track_gate_ok;
 	bool            track_gate_bypassed;
 	float           track_gate_threshold_db;
@@ -596,6 +601,9 @@ public:
 		, track_limiter_bypassed (false)
 		, track_limiter_ceiling_db (-0.3f)
 		, track_limiter_release_ms (100.f)
+		, master_fx_ok (false)
+		, master_fx_bypassed (false)
+		, master_fx_ceiling_db (-0.3f)
 		, track_gate_ok (false)
 		, track_gate_bypassed (false)
 		, track_gate_threshold_db (-40.f)
@@ -700,6 +708,10 @@ EngineHost::EngineHost ()
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
 	_snap.monitor_dim_db = -12.f;
+	_snap.master_fx_ok = false;
+	_snap.master_fx_bypassed = false;
+	_snap.master_fx_ceiling_db = -0.3f;
+	_snap.master_fx_name.clear ();
 	_snap.monitor_mono = false;
 	_snap.monitor_cut = false;
 	_snap.monitor_solo_boost_db = 0.f;
@@ -1949,6 +1961,8 @@ EngineHost::ensure_session ()
 
 		step ("aux bus + sends");
 		ensure_aux_sends ();
+		/* Best-effort ACE Limiter on master (post-fader bus insert). */
+		insert_master_fx ();
 
 		_snap.audio_track_count = (int)_impl->tracks.size ();
 		_snap.midi_track_count = _impl->midi_track ? 1 : 0;
@@ -1962,6 +1976,7 @@ EngineHost::ensure_session ()
 		refresh_track_delay_snap ();
 		refresh_track_limiter_snap ();
 		refresh_track_gate_snap ();
+		refresh_master_fx_snap ();
 		step ("ready");
 		return true;
 	} catch (SessionException& e) {
@@ -15489,6 +15504,10 @@ EngineHost::refresh_monitor_flags ()
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
 	_snap.monitor_dim_db = -12.f;
+	_snap.master_fx_ok = false;
+	_snap.master_fx_bypassed = false;
+	_snap.master_fx_ceiling_db = -0.3f;
+	_snap.master_fx_name.clear ();
 	_snap.monitor_mono = false;
 	_snap.monitor_cut = false;
 	_snap.monitor_solo_boost_db = 0.f;
@@ -25283,6 +25302,242 @@ EngineHost::smoke_limiter ()
 	}
 }
 
+void
+EngineHost::refresh_master_fx_snap ()
+{
+	_snap.master_fx_ok = false;
+	_snap.master_fx_bypassed = false;
+	_snap.master_fx_ceiling_db = _impl ? _impl->master_fx_ceiling_db : -0.3f;
+	_snap.master_fx_name.clear ();
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	std::shared_ptr<Route> master = _impl->session->master_out ();
+	if (!master) {
+		return;
+	}
+	std::string name;
+	std::shared_ptr<PluginInsert> pi = _impl->master_fx.lock ();
+	if (!pi) {
+		pi = find_ace_limiter_insert (master, &name);
+		if (pi) {
+			_impl->master_fx = pi;
+			_impl->master_fx_name = name;
+		}
+	} else {
+		name = _impl->master_fx_name;
+	}
+	if (!pi) {
+		return;
+	}
+	_snap.master_fx_ok = true;
+	_snap.master_fx_bypassed = !pi->active ();
+	_impl->master_fx_bypassed = _snap.master_fx_bypassed;
+	_snap.master_fx_name = utf8_to_wide (
+	    name.empty () ? (_impl->master_fx_name.empty () ? "ACE Limiter" : _impl->master_fx_name)
+	                  : name);
+	try {
+		std::shared_ptr<AutomationControl> ceil = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceLimiterCeilingPort));
+		if (ceil) {
+			_impl->master_fx_ceiling_db = (float)ceil->get_value ();
+			_snap.master_fx_ceiling_db = _impl->master_fx_ceiling_db;
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::insert_master_fx ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"master fx: no Session";
+		return false;
+	}
+	std::shared_ptr<Route> master = _impl->session->master_out ();
+	if (!master) {
+		_snap.detail = L"master fx: no master_out";
+		return false;
+	}
+	std::string existing;
+	std::shared_ptr<PluginInsert> already = find_ace_limiter_insert (master, &existing);
+	if (already) {
+		_impl->master_fx = already;
+		_impl->master_fx_ok = true;
+		_impl->master_fx_name = existing.empty () ? "ACE Limiter" : existing;
+		refresh_master_fx_snap ();
+		return true;
+	}
+	ensure_plugins_scanned ();
+	try {
+		PluginInfoPtr info = find_ace_limiter_info ();
+		if (!info) {
+			_snap.detail = L"ACE Limiter not found for master";
+			std::fprintf (stderr, "airdour_win_shell: ACE Limiter LV2 missing (master)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		PluginPtr plugin = info->load (*_impl->session);
+		if (!plugin) {
+			_snap.detail = L"master ACE Limiter load failed";
+			return false;
+		}
+		std::shared_ptr<PluginInsert> pi (
+		    new PluginInsert (*_impl->session, *master, plugin));
+		pi->set_strict_io (true);
+		if (master->add_processor (pi, PostFader) != 0) {
+			_snap.detail = L"master ACE Limiter add_processor failed";
+			return false;
+		}
+		_impl->master_fx = pi;
+		_impl->master_fx_ok = true;
+		_impl->master_fx_bypassed = !pi->active ();
+		_impl->master_fx_name = info->name.empty () ? "ACE Limiter" : info->name;
+		try {
+			std::shared_ptr<AutomationControl> ceil = pi->automation_control (
+			    Evoral::Parameter (PluginAutomation, 0, kAceLimiterCeilingPort));
+			if (ceil) {
+				_impl->master_fx_ceiling_db = (float)ceil->get_value ();
+			}
+		} catch (...) {
+		}
+		refresh_master_fx_snap ();
+		std::fprintf (stderr, "airdour_win_shell: Limiter \"%s\" on Master (post-fader)\n",
+		              _impl->master_fx_name.c_str ());
+		std::fflush (stderr);
+		_snap.detail = L"ACE Limiter on Master";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: insert_master_fx: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_master_fx_bypassed (bool bypassed)
+{
+	if (!insert_master_fx ()) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->master_fx.lock ();
+	if (!pi) {
+		std::shared_ptr<Route> master = _impl->session->master_out ();
+		pi = master ? find_ace_limiter_insert (master) : std::shared_ptr<PluginInsert> ();
+		if (!pi) {
+			return false;
+		}
+		_impl->master_fx = pi;
+	}
+	try {
+		if (bypassed) {
+			pi->deactivate ();
+		} else {
+			pi->activate ();
+		}
+		_impl->master_fx_bypassed = !pi->active ();
+		refresh_master_fx_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_master_fx_bypass ()
+{
+	refresh_master_fx_snap ();
+	return set_master_fx_bypassed (!_snap.master_fx_bypassed);
+}
+
+bool
+EngineHost::set_master_fx_ceiling_db (float db)
+{
+	if (!insert_master_fx ()) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->master_fx.lock ();
+	if (!pi) {
+		return false;
+	}
+	db = std::max (-20.f, std::min (0.f, db));
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, kAceLimiterCeilingPort));
+		if (!ac) {
+			return false;
+		}
+		ac->set_value (db, Controllable::NoGroup);
+		_impl->master_fx_ceiling_db = (float)ac->get_value ();
+		refresh_master_fx_snap ();
+		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_master_fx ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-master-fx failed — no Session";
+		return false;
+	}
+	try {
+		if (!insert_master_fx () || !_snap.master_fx_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-master-fx FAILED (insert)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::shared_ptr<Route> master = _impl->session->master_out ();
+		std::string verified;
+		if (!master || !find_ace_limiter_insert (master, &verified)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-master-fx FAILED (not on master)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_master_fx_bypassed (false) || _snap.master_fx_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-master-fx FAILED (bypass clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_master_fx_ceiling_db (-2.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-master-fx FAILED (ceiling)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.master_fx_ceiling_db < -2.5f || _snap.master_fx_ceiling_db > -1.5f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-master-fx FAILED (ceil=%.1f)\n",
+			              _snap.master_fx_ceiling_db);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!toggle_master_fx_bypass () || !_snap.master_fx_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-master-fx FAILED (bypass on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!toggle_master_fx_bypass () || _snap.master_fx_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-master-fx FAILED (bypass off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-master-fx ok (fx=%s ceil=%.1f)\n",
+		              verified.c_str (), _snap.master_fx_ceiling_db);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-master-fx ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-master-fx exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
 
 void
 EngineHost::refresh_track_gate_snap ()
@@ -31086,6 +31341,10 @@ EngineHost::EngineHost ()
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
 	_snap.monitor_dim_db = -12.f;
+	_snap.master_fx_ok = false;
+	_snap.master_fx_bypassed = false;
+	_snap.master_fx_ceiling_db = -0.3f;
+	_snap.master_fx_name.clear ();
 	_snap.monitor_mono = false;
 	_snap.monitor_cut = false;
 	_snap.monitor_solo_boost_db = 0.f;
@@ -35026,6 +35285,47 @@ EngineHost::set_track_limiter_release_norm (int track, float norm_0_1)
 
 bool
 EngineHost::smoke_limiter ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_master_fx_snap ()
+{
+	_snap.master_fx_ok = false;
+	_snap.master_fx_bypassed = false;
+	_snap.master_fx_ceiling_db = -0.3f;
+	_snap.master_fx_name.clear ();
+}
+
+bool
+EngineHost::insert_master_fx ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_master_fx_bypassed (bool bypassed)
+{
+	(void)bypassed;
+	return false;
+}
+
+bool
+EngineHost::toggle_master_fx_bypass ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_master_fx_ceiling_db (float db)
+{
+	(void)db;
+	return false;
+}
+
+bool
+EngineHost::smoke_master_fx ()
 {
 	return false;
 }

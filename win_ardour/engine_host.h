@@ -307,6 +307,10 @@ struct EngineSnapshot {
 	bool         monitor_mono;
 	bool         monitor_cut; /* cut_all = monitor mute */
 	float        monitor_solo_boost_db; /* solo_boost_level 0..+10 dB (default 0) */
+	bool         master_fx_ok; /* ACE Limiter on master_out (post-fader) */
+	bool         master_fx_bypassed;
+	float        master_fx_ceiling_db; /* −20..0 */
+	std::wstring master_fx_name;
 	float        transport_sec;
 	float        transport_speed; /* Session actual_speed (−N..+N); 1 = play */
 	int          bbt_bars; /* TempoMap BBT at playhead (1-based) */
@@ -1540,6 +1544,16 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Honest GTK MonitorSection equivalent for dim / mono / cut.
 	 */
 	bool ensure_monitor_section ();
+
+	/**
+	 * ACE Limiter on Session master_out (post-fader bus insert).
+	 * Bypass + Ceiling for Monitor strip / --smoke-master-fx.
+	 */
+	bool insert_master_fx ();
+	bool toggle_master_fx_bypass ();
+	bool set_master_fx_bypassed (bool bypassed);
+	bool set_master_fx_ceiling_db (float db);
+	bool smoke_master_fx ();
 	bool set_monitor_dim (bool enable);
 	bool toggle_monitor_dim ();
 	/** Dim attenuation dB (−20..0). For Shift+click Dim / Alt+Shift+D. */
@@ -2078,6 +2092,7 @@ private:
 	void refresh_group_flags ();
 	void refresh_vca_flags ();
 	void refresh_monitor_flags ();
+	void refresh_master_fx_snap ();
 	bool ensure_aux_sends ();
 	void refresh_history_flags ();
 	void refresh_selection_snap ();

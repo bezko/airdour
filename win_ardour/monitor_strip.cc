@@ -24,6 +24,7 @@ MonitorStrip::MonitorStrip ()
 	, _mute_btn ()
 	, _boost_btn ()
 	, _aux_track ()
+	, _lim_btn ()
 	, _available (false)
 	, _aux_ok (false)
 	, _dim (false)
@@ -32,6 +33,8 @@ MonitorStrip::MonitorStrip ()
 	, _mute (false)
 	, _solo_boost_db (0.f)
 	, _aux_return (1.f)
+	, _master_lim_ok (false)
+	, _master_lim_bypassed (false)
 {
 }
 
@@ -99,6 +102,7 @@ MonitorStrip::drag_aux_return_to (float y)
 	}
 	_aux_return = g;
 	return true;
+	_lim_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
 }
 
 MonitorHit
@@ -121,6 +125,8 @@ MonitorStrip::hit_test (float x, float y) const
 	}
 	if (hit_aux_return (x, y)) {
 		return MonitorHit::AuxReturn;
+	if (_master_lim_ok && contains (_lim_btn, x, y)) {
+		return MonitorHit::MasterLim;
 	}
 	return MonitorHit::None;
 }
@@ -173,6 +179,10 @@ MonitorStrip::draw (ID2D1RenderTarget* rt,
 		wchar_t boost_label[16];
 		_snwprintf_s (boost_label, _TRUNCATE, L"Boost +%.0f", _solo_boost_db);
 		draw_btn (_boost_btn, boost_label, _solo_boost_db > 0.5f);
+		if (_master_lim_ok) {
+			/* Lit when limiter is active (not bypassed). */
+			draw_btn (_lim_btn, L"MLim", !_master_lim_bypassed);
+		}
 	} else {
 		rt->FillRectangle (_dim_btn, edge);
 		rt->DrawTextW (L"—", 1, fmt_meta, _dim_btn, body);

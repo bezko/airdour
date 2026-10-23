@@ -24,6 +24,7 @@ enum class MonitorHit {
 	Mute,
 	Boost,
 	AuxReturn
+	MasterLim
 };
 
 class MonitorStrip
@@ -55,6 +56,11 @@ public:
 	bool  drag_aux_return_to (float y);
 	bool  hit_aux_return (float x, float y) const;
 
+	void set_master_lim_ok (bool ok) { _master_lim_ok = ok; }
+	bool master_lim_ok () const { return _master_lim_ok; }
+	void set_master_lim_bypassed (bool on) { _master_lim_bypassed = on; }
+	bool master_lim_bypassed () const { return _master_lim_bypassed; }
+
 	MonitorHit hit_test (float x, float y) const;
 
 	void draw (ID2D1RenderTarget* rt,
@@ -76,6 +82,7 @@ private:
 	D2D1_RECT_F _mute_btn;
 	D2D1_RECT_F _boost_btn;
 	D2D1_RECT_F _aux_track;
+	D2D1_RECT_F _lim_btn;
 	bool        _available;
 	bool        _aux_ok;
 	bool        _dim;
@@ -84,4 +91,6 @@ private:
 	bool        _mute;
 	float       _solo_boost_db;
 	float       _aux_return;
+	bool        _master_lim_ok;
+	bool        _master_lim_bypassed;
 };
