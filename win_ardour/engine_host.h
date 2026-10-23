@@ -241,6 +241,7 @@ struct EngineSnapshot {
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
 	/** Send AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
 	int          track_send_auto_state[kMeters];
+	bool         track_send_muted[kMeters]; /* Send Processor !active() */
 	bool         aux_bus_ok; /* Session Aux audio bus exists */
 	bool         midi_muted;
 	bool         midi_soloed;
@@ -642,6 +643,16 @@ public:
 	bool reset_strip_mixer (int track = 0);
 	/** Dirty gain/pan/send then reset_strip → verify. */
 	bool smoke_strip_mixer_reset ();
+	/** Mute aux send via Processor deactivate (Ctrl+click send). */
+	bool set_track_send_muted (int track, bool muted);
+	bool toggle_track_send_muted (int track);
+
+	/** Send 0 → 0.75 → 0.25 on Audio 1. For --smoke-send. */
+	bool smoke_send ();
+	/**
+	 * Ensure Aux send → mute → unmute. For --smoke-send-mute.
+	 */
+	bool smoke_send_mute ();
 
 	/**
 	 * Track fader AutomationList (GainAutomation). Enable Play, write points,

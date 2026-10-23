@@ -170,6 +170,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_pan = parse_flag (argc, argv, L"--smoke-pan");
 	bool smoke_pan_width = parse_flag (argc, argv, L"--smoke-pan-width");
 	bool smoke_send = parse_flag (argc, argv, L"--smoke-send");
+	bool smoke_send_mute = parse_flag (argc, argv, L"--smoke-send-mute");
 	bool smoke_automation = parse_flag (argc, argv, L"--smoke-automation");
 	bool smoke_edit = parse_flag (argc, argv, L"--smoke-edit");
 	bool smoke_snap = parse_flag (argc, argv, L"--smoke-snap");

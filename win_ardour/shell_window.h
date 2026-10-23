@@ -91,6 +91,7 @@ public:
 	                    bool smoke_pan = false,
 	                    bool smoke_pan_width = false,
 	                    bool smoke_send = false,
+	                    bool smoke_send_mute = false,
 	                    bool smoke_automation = false,
 	                    bool smoke_edit = false,
 	                    bool smoke_snap = false,

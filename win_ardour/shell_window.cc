@@ -253,6 +253,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_pan,
                             bool smoke_pan_width,
                             bool smoke_send,
+                            bool smoke_send_mute,
                             bool smoke_automation,
                             bool smoke_edit,
                             bool smoke_snap,
@@ -1012,11 +1013,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("strip-mixer-reset")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset FAILED (no session)\n");
+	if (ok && smoke_send_mute && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_send_mute ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_send_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_send_mute) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("send-mute") FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
 	if (ok && smoke_automation && engine_session_ok ()) {
+	if (ok && smoke_automation && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_automation ()) {
 			_smoke_failed = true;
 		} else {
@@ -2194,6 +2205,7 @@ ShellWindow::sync_mixer_send_from_engine ()
 	const int na = n_audio_lanes ();
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_send (_engine_snap.track_send[i]);
+		_mixers[i].set_send_muted (_engine_snap.track_send_muted[i]);
 	}
 }
 
@@ -7987,6 +7999,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		if (alt && _engine.is_linked () && _engine.snapshot ().session_ok) {
 			/* Alt+click send → zero every aux send. */
 			_engine.reset_all_sends ();
+		/* Ctrl+click send → mute/unmute (Processor deactivate).
+		 * Alt+click remains send-reset-all on tip #38. */
+		if ((GetKeyState (VK_CONTROL) & 0x8000) != 0
+		    && _engine.is_linked () && _engine_snap.session_ok) {
+			_engine.toggle_track_send_muted (send_i);
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
 			sync_mixer_send_from_engine ();
@@ -9705,6 +9722,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
+		{ L"Ctrl+click Send", L"Mute / unmute Aux send (Sm)" },
 	};
 
 	float y = card.top + 40.f * _dpi_scale;

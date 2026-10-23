@@ -655,6 +655,7 @@ EngineHost::EngineHost ()
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
 		_snap.track_send_auto_state[i] = 0;
+		_snap.track_send_muted[i] = false;
 		_snap.track_gain[i] = _track_gain[i];
 		_snap.track_name[i][0] = L'\0';
 		_snap.track_in_group[i] = false;
@@ -5815,6 +5816,7 @@ EngineHost::refresh_send_flags ()
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
+		_snap.track_send_muted[i] = false;
 	}
 	if (!_impl || !_impl->session) {
 		return;
@@ -5834,6 +5836,7 @@ EngineHost::refresh_send_flags ()
 				continue;
 			}
 			_snap.track_send_ok[i] = true;
+			_snap.track_send_muted[i] = !send->active ();
 			float g = (float)send->gain_control ()->get_value ();
 			_snap.track_send[i] = std::max (0.f, std::min (1.f, g));
 		}
@@ -6028,6 +6031,47 @@ EngineHost::smoke_send_reset_all ()
 	} catch (...) {
 		return false;
 	}
+EngineHost::set_track_send_muted (int track, bool muted)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (!ensure_aux_sends ()) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track] || !_impl->aux_bus) {
+		return false;
+	}
+	try {
+		std::shared_ptr<Send> send =
+			_impl->tracks[track]->internal_send_for (_impl->aux_bus);
+		if (!send) {
+			return false;
+		}
+		if (muted) {
+			send->deactivate ();
+		} else {
+			send->activate ();
+		}
+		refresh_send_flags ();
+		_snap.detail = muted ? L"send muted" : L"send unmuted";
+		return _snap.track_send_muted[track] == muted;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::toggle_track_send_muted (int track)
+{
+	refresh_send_flags ();
+	if (track < 0 || track >= EngineSnapshot::kMeters || !_snap.track_send_ok[track]) {
+		if (!ensure_aux_sends ()) {
+			return false;
+		}
+		refresh_send_flags ();
+	}
+	return set_track_send_muted (track, !_snap.track_send_muted[track]);
 }
 
 bool
@@ -6427,6 +6471,53 @@ EngineHost::smoke_strip_mixer_reset ()
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset exception: %s\n",
 		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_send_mute ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-send-mute failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_aux_sends () || !_snap.track_send_ok[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-mute FAILED (no send)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send (0, 0.5f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-mute FAILED (level)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send_muted (0, true) || !_snap.track_send_muted[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-mute FAILED (mute)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::shared_ptr<Send> send = _impl->tracks[0]->internal_send_for (_impl->aux_bus);
+		if (!send || send->active ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-mute FAILED (!active)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send_muted (0, false) || _snap.track_send_muted[0] || !send->active ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-mute FAILED (unmute)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-mute ok (mute↔unmute)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-send-mute ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-mute exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -30266,6 +30357,7 @@ EngineHost::EngineHost ()
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
 		_snap.track_send_auto_state[i] = 0;
+		_snap.track_send_muted[i] = false;
 		_snap.track_gain[i] = _track_gain[i];
 		_snap.track_name[i][0] = L'\0';
 		_snap.track_in_group[i] = false;
@@ -31249,12 +31341,19 @@ EngineHost::track_send (int track) const
 bool
 EngineHost::reset_all_sends ()
 {
+EngineHost::set_track_send_muted (int track, bool muted)
+{
+	(void)track;
+	(void)muted;
 	return false;
 }
 
 bool
 EngineHost::smoke_send_reset_all ()
 {
+EngineHost::toggle_track_send_muted (int track)
+{
+	(void)track;
 	return false;
 }
 
@@ -31299,6 +31398,12 @@ EngineHost::reset_strip_mixer (int track)
 
 bool
 EngineHost::smoke_strip_mixer_reset ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_send_mute ()
 {
 	return false;
 }
