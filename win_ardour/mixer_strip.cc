@@ -49,6 +49,7 @@ MixerStrip::MixerStrip ()
 	, _has_comment (false)
 	, _phase_inverted (false)
 	, _listen_mode (0)
+	, _route_active (true)
 	, _fx_bypassed (false)
 	, _fx_param_count (1)
 	, _midi_strip (false)
@@ -524,7 +525,7 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 	rt->DrawRectangle (_strip, edge, 1.f);
 	rt->FillRectangle (
 		D2D1::RectF (_strip.left, _strip.top, _strip.left + 3.f * dpi_scale, _strip.bottom),
-		_muted ? body : accent);
+		(!_route_active || _muted) ? body : accent);
 
 	/* Group indicator: top accent bar + "G"; pick shows a second edge wash.
 	 * When RouteGroup shares color, bar uses group RRGGBBAA. */
@@ -593,6 +594,12 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		rt->DrawTextW (L"\x00D8", 1, fmt_meta, badge, brand);
 		fmt_meta->SetTextAlignment (ta_b);
 		fmt_meta->SetParagraphAlignment (pa_b);
+	if (_route_active) {
+		rt->DrawTextW (_label, (UINT32)wcslen (_label), fmt_title, _label_rc, brand);
+	} else {
+		wchar_t off_lab[40];
+		_snwprintf_s (off_lab, _TRUNCATE, L"%s · Off", _label);
+		rt->DrawTextW (off_lab, (UINT32)wcslen (off_lab), fmt_title, _label_rc, body);
 	}
 	fmt_title->SetTextAlignment (ta);
 
@@ -792,7 +799,9 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		} else if (_pan > 0.55f) {
 			pan_txt = L"R";
 		}
-		if (_fx_label[0] != L'\0') {
+		if (!_route_active) {
+			_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  %s  ·  OFF", db_v, pan_txt);
+		} else if (_fx_label[0] != L'\0') {
 			_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  %s  ·  Snd %.0f%%",
 			              db_v, pan_txt, _send * 100.f);
 		} else if (_muted) {

@@ -65,6 +65,9 @@ public:
 	/** 0=Solo (S), 1=PFL (P), 2=AFL (A) — RC listen mode glyph on Solo button. */
 	void set_listen_mode (int mode_0_1_2) { _listen_mode = mode_0_1_2; }
 	int  listen_mode () const { return _listen_mode; }
+	/** Route::active — dim strip when false. */
+	void set_route_active (bool active) { _route_active = active; }
+	bool route_active () const { return _route_active; }
 
 	/** Pan azimuth 0=L … 0.5=C … 1=R (audio strips only). */
 	void  set_pan (float pan_0_1);
@@ -183,6 +186,7 @@ private:
 	bool        _has_comment;
 	bool        _phase_inverted;
 	int         _listen_mode; /* 0=S 1=P 2=A */
+	bool        _route_active;
 	bool        _fx_bypassed;
 	int         _fx_param_count; /* 1..3 */
 	bool        _midi_strip;
