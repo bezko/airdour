@@ -787,6 +787,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("solo-isolate")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (no session)\n");
+	if (ok && smoke_input_monitor && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_input_monitor ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_monitor_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_input_monitor) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-input-monitor FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -800,6 +809,16 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("listen-mode")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-listen-mode FAILED (no session)\n");
+	if (ok && smoke_mon_peer_badge && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_mon_peer_badge ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_monitor_from_engine ();
+			sync_mixer_group_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_mon_peer_badge) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("mon-peer-badge") FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -896,6 +915,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan && engine_session_ok ()) {
+	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
@@ -2023,6 +2043,20 @@ ShellWindow::sync_mixer_arm_from_engine ()
 		_mixers[mi].set_armed (_engine_snap.midi_armed);
 	}
 	_transport.set_record_armed (_engine_snap.session_record_armed);
+}
+
+void
+ShellWindow::sync_mixer_monitor_from_engine ()
+{
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < kMixerStripsMax; ++i) {
+		_mixers[i].set_monitor_choice (0);
+		_mixers[i].set_monitor_peer_count (0);
+	}
+	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
+		_mixers[i].set_monitor_choice (_engine_snap.track_monitor_choice[i]);
+		_mixers[i].set_monitor_peer_count (_engine_snap.track_monitor_peer_count[i]);
+	}
 }
 
 void
@@ -6618,6 +6652,24 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		           && (wparam == 'C' || wparam == 'c')) {
 			/* Alt+Shift+C — cycle RouteGroup color palette. */
 			do_cycle_group_color ();
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'O' || wparam == 'o')) {
+			/* Alt+Shift+O — cycle focused strip monitor Auto→In→Disk. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				int ti = _focus_audio_track;
+				if (ti < 0) {
+					ti = 0;
+				}
+				if (ti < n_audio_lanes ()) {
+					_engine.cycle_track_monitor_choice (ti);
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_mixer_monitor_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+				}
+			}
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'U' || wparam == 'u')) {
 			do_apply_or_clear_group ();
 		} else if ((GetKeyState (VK_MENU) & 0x8000)
@@ -6864,6 +6916,18 @@ ShellWindow::hit_mixer_arm (float x, float y) const
 	const int n = n_mixer_strips ();
 	for (int i = 0; i < n; ++i) {
 		if (_mixers[i].hit_arm (x, y)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+int
+ShellWindow::hit_mixer_mon (float x, float y) const
+{
+	const int na = n_audio_lanes ();
+	for (int i = 0; i < na; ++i) {
+		if (_mixers[i].hit_mon (x, y)) {
 			return i;
 		}
 	}
@@ -7723,6 +7787,18 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 
 	
+	int mon = hit_mixer_mon (x, y);
+	if (mon >= 0) {
+		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
+			_engine.cycle_track_monitor_choice (mon);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_monitor_from_engine ();
+		}
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
 	int mute_i = hit_mixer_mute (x, y);
 	if (mute_i >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
@@ -8822,6 +8898,7 @@ ShellWindow::on_tick ()
 	sync_mixer_phase_from_engine ();
 	sync_mixer_trim_from_engine ();
 	sync_mixer_listen_from_engine ();
+	sync_mixer_monitor_from_engine ();
 	sync_mixer_pan_from_engine ();
 	sync_mixer_send_from_engine ();
 	sync_monitor_from_engine ();
@@ -9551,6 +9628,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·active)" },
 		{ L"Alt+Shift+E", L"Toggle track active (group shares)" },
 		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·select)" },
+		{ L"Mon / Alt+Shift+O", L"Cycle monitor Auto → In → Disk" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },

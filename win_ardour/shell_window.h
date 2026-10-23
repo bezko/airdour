@@ -327,6 +327,7 @@ private:
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
 	void sync_mixer_arm_from_engine ();
+	void sync_mixer_monitor_from_engine ();
 	void sync_mixer_mute_solo_from_engine ();
 	void sync_mixer_comment_from_engine ();
 	void sync_mixer_phase_from_engine ();
@@ -421,6 +422,7 @@ void do_toggle_selection_muted ();
 	int  hit_editor_lane (float x, float y) const;
 	int  hit_mixer_fader (float x, float y) const;
 	int  hit_mixer_arm (float x, float y) const;
+	int  hit_mixer_mon (float x, float y) const;
 	int  hit_mixer_mute (float x, float y) const;
 	int  hit_mixer_solo (float x, float y) const;
 	int  hit_mixer_trim (float x, float y) const;

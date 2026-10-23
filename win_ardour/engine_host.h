@@ -230,6 +230,10 @@ struct EngineSnapshot {
 	int          track_monitor_choice[kMeters];
 	bool         track_stereo[kMeters]; /* ≥2 audio inputs (Equal-Power width capable) */
 	bool         track_active[kMeters]; /* Route::active() — DSP path on */
+	/** MonitorChoice: 0=Auto 1=Input 2=Disk (MonitorCue unused in shell). */
+	int          track_monitor_choice[kMeters];
+	/** Peers sharing same Mon choice via RouteGroup (0 = alone / no share). */
+	int          track_monitor_peer_count[kMeters];
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	/** Pan AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
 	int          track_pan_auto_state[kMeters];
@@ -284,6 +288,7 @@ struct EngineSnapshot {
 	bool         group_shares_monitoring;
 	bool         group_shares_route_active;
 	bool         group_shares_select;
+	bool         group_shares_monitoring;
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
 	bool         mixer_narrow; /* shell UI: compact strip width */
@@ -438,6 +443,21 @@ public:
 	bool arm_all_tracks ();
 	/** Disarm → arm 0+1 via arm_all → verify. For --smoke-arm-all. */
 	bool smoke_arm_all ();
+
+	/**
+	 * Track input monitor choice (MonitorControl): Auto / Input / Disk.
+	 * Uses UseGroup so RouteGroup monitoring share propagates peers.
+	 * Mon button / Alt+Shift+O / --smoke-input-monitor / --smoke-mon-peer-badge.
+	 */
+	bool set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk);
+	bool cycle_track_monitor_choice (int track = 0);
+	/** Auto → Input → Disk → Auto on Audio 1. */
+	bool smoke_input_monitor ();
+	/**
+	 * Group + Input on Audio 1 → peers match; Mon peer badge count ≥1.
+	 * For --smoke-mon-peer-badge.
+	 */
+	bool smoke_mon_peer_badge ();
 
 	/**
 	 * Route mute/solo (audio tracks 0..kMeters-1).
@@ -1348,6 +1368,7 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * indices (≥2). Shares mute + solo + gain + monitoring when active.
 	 * indices (≥2). Shares mute + solo + gain + route-active when active.
 	 * indices (≥2). Shares mute + solo + gain + select when active.
+	 * indices (≥2). Shares mute + solo + gain + monitoring when active.
 	 * Honest scope: one group, no VCA/subgroup.
 	 */
 	bool create_route_group (const int* indices, int n);
@@ -1937,6 +1958,7 @@ private:
 	void refresh_region_flags ();
 	void refresh_freeze_flags ();
 	void refresh_record_flags ();
+	void refresh_monitor_choice_flags ();
 	void refresh_mute_solo_flags ();
 	void refresh_gain_auto_state_flags ();
 	void refresh_solo_isolate_flags ();
