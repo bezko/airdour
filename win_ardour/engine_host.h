@@ -647,8 +647,6 @@ public:
 	bool set_track_send_muted (int track, bool muted);
 	bool toggle_track_send_muted (int track);
 
-	/** Send 0 → 0.75 → 0.25 on Audio 1. For --smoke-send. */
-	bool smoke_send ();
 	/**
 	 * Ensure Aux send → mute → unmute. For --smoke-send-mute.
 	 */

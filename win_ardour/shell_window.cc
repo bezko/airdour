@@ -1013,21 +1013,24 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("strip-mixer-reset")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset FAILED (no session)\n");
-	if (ok && smoke_send_mute && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("send-mute") && engine_session_ok ()) {
 		if (!_engine.smoke_send_mute ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_send_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_send_mute) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("send-mute") FAILED (no session)\n");
+	} else if (has_smoke ("send-mute")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-mute FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
 	if (ok && smoke_automation && engine_session_ok ()) {
-	if (ok && smoke_automation && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_automation ()) {
 			_smoke_failed = true;
 		} else {
@@ -7999,6 +8002,7 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		if (alt && _engine.is_linked () && _engine.snapshot ().session_ok) {
 			/* Alt+click send → zero every aux send. */
 			_engine.reset_all_sends ();
+		}
 		/* Ctrl+click send → mute/unmute (Processor deactivate).
 		 * Alt+click remains send-reset-all on tip #38. */
 		if ((GetKeyState (VK_CONTROL) & 0x8000) != 0

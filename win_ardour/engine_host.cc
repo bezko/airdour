@@ -6031,6 +6031,9 @@ EngineHost::smoke_send_reset_all ()
 	} catch (...) {
 		return false;
 	}
+}
+
+bool
 EngineHost::set_track_send_muted (int track, bool muted)
 {
 	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
