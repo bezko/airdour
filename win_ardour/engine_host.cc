@@ -6053,10 +6053,6 @@ EngineHost::smoke_pan_width ()
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"smoke-pan-width failed — no Session";
-EngineHost::smoke_mixer_reset ()
-{
-	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-mixer-reset failed — no Session";
 		return false;
 	}
 	try {
@@ -6176,6 +6172,80 @@ EngineHost::smoke_mixer_reset ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan-width exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_mixer_reset ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-mixer-reset failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mixer-reset FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_impl->tracks[0]->gain_control ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-mixer-reset FAILED (no gain)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_impl->tracks[0]->pan_azimuth_control ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-mixer-reset FAILED "
+			              "(no pan_azimuth — check panner DLLs)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		set_track_gain (0, 0.35f);
+		if (_snap.track_gain[0] > 0.45f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-mixer-reset FAILED (gain low got=%.3f)\n",
+			              _snap.track_gain[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		set_track_gain (0, 1.0f);
+		if (_snap.track_gain[0] < 0.95f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-mixer-reset FAILED (gain unity got=%.3f)\n",
+			              _snap.track_gain[0]);
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!set_track_pan (0, 0.0f) || _snap.track_pan[0] > 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-mixer-reset FAILED (pan L got=%.3f)\n",
+			              _snap.track_pan[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_pan (0, 0.5f)
+		    || _snap.track_pan[0] < 0.45f || _snap.track_pan[0] > 0.55f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-mixer-reset FAILED (pan C got=%.3f)\n",
+			              _snap.track_pan[0]);
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-mixer-reset ok (Audio1 fader→1.0 pan→0.5)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-mixer-reset ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mixer-reset exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -6318,64 +6388,6 @@ EngineHost::smoke_pan_auto_state ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan-auto-state exception: %s\n", e.what ());
-		if (_impl->tracks.empty () || !_impl->tracks[0]) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-mixer-reset FAILED (no Audio 1)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!_impl->tracks[0]->gain_control ()) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-mixer-reset FAILED (no gain)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!_impl->tracks[0]->pan_azimuth_control ()) {
-			std::fprintf (stderr,
-			              "airdour_win_shell: smoke-mixer-reset FAILED "
-			              "(no pan_azimuth — check panner DLLs)\n");
-			std::fflush (stderr);
-			return false;
-		}
-
-		set_track_gain (0, 0.35f);
-		if (_snap.track_gain[0] > 0.45f) {
-			std::fprintf (stderr,
-			              "airdour_win_shell: smoke-mixer-reset FAILED (gain low got=%.3f)\n",
-			              _snap.track_gain[0]);
-			std::fflush (stderr);
-			return false;
-		}
-		set_track_gain (0, 1.0f);
-		if (_snap.track_gain[0] < 0.95f) {
-			std::fprintf (stderr,
-			              "airdour_win_shell: smoke-mixer-reset FAILED (gain unity got=%.3f)\n",
-			              _snap.track_gain[0]);
-			std::fflush (stderr);
-			return false;
-		}
-
-		if (!set_track_pan (0, 0.0f) || _snap.track_pan[0] > 0.05f) {
-			std::fprintf (stderr,
-			              "airdour_win_shell: smoke-mixer-reset FAILED (pan L got=%.3f)\n",
-			              _snap.track_pan[0]);
-			std::fflush (stderr);
-			return false;
-		}
-		if (!set_track_pan (0, 0.5f)
-		    || _snap.track_pan[0] < 0.45f || _snap.track_pan[0] > 0.55f) {
-			std::fprintf (stderr,
-			              "airdour_win_shell: smoke-mixer-reset FAILED (pan C got=%.3f)\n",
-			              _snap.track_pan[0]);
-			std::fflush (stderr);
-			return false;
-		}
-
-		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-mixer-reset ok (Audio1 fader→1.0 pan→0.5)\n");
-		std::fflush (stderr);
-		_snap.detail = L"smoke-mixer-reset ok";
-		return true;
-	} catch (std::exception& e) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-mixer-reset exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -32393,6 +32405,11 @@ EngineHost::cycle_track_pan_auto_state (int track)
 
 bool
 EngineHost::smoke_pan_auto_state ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_mixer_reset ()
 {
 	return false;

@@ -308,7 +308,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_pan_auto_state,
                             bool smoke_send_auto_state,
                             bool smoke_auto_state_unify,
-                            bool smoke_master_fx)
+                            bool smoke_master_fx,
+                            bool smoke_mixer_reset)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -1042,7 +1043,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("pan-width")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan-width FAILED (no session)\n");
-	if (ok && smoke_mixer_reset && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("mixer-reset") && engine_session_ok ()) {
 		if (!_engine.smoke_mixer_reset ()) {
 			_smoke_failed = true;
 		} else {
@@ -1050,8 +1055,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			sync_mixer_pan_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_mixer_reset) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("mixer-reset") FAILED (no session)\n");
+	} else if (has_smoke ("mixer-reset")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mixer-reset FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1070,7 +1075,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_send && engine_session_ok ()) {
-	if (ok && smoke_send && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_send ()) {
 			_smoke_failed = true;
 		} else {
@@ -1083,7 +1087,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && has_smoke ("strip-has_smoke ("mixer-reset")") && engine_session_ok ()) {
+	if (ok && has_smoke ("strip-mixer-reset") && engine_session_ok ()) {
 		if (!_engine.smoke_strip_mixer_reset ()) {
 			_smoke_failed = true;
 		} else {
@@ -1092,8 +1096,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			sync_mixer_send_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (has_smoke ("strip-has_smoke ("mixer-reset")")) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-strip-has_smoke ("mixer-reset") FAILED (no session)\n");
+	} else if (has_smoke ("strip-mixer-reset")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -6985,6 +6989,8 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		}
 		if (_monitor.hit_aux_return (x, y)) {
 			do_set_aux_return (1.f); /* unity */
+			return 0;
+		}
 		/* Double-click fader → unity; pan → center (before rename hit). */
 		int fi = hit_mixer_fader (x, y);
 		if (fi >= 0 && _engine.is_linked () && _engine_snap.session_ok) {
