@@ -245,6 +245,7 @@ struct EngineSnapshot {
 	int          track_send_auto_state[kMeters];
 	bool         track_send_muted[kMeters]; /* Send Processor !active() */
 	bool         aux_bus_ok; /* Session Aux audio bus exists */
+	float        aux_return; /* Aux bus fader gain coeff 0..1 (unity=1) */
 	bool         midi_muted;
 	bool         midi_soloed;
 	bool         midi_armed; /* MidiTrack rec_enable_control */
@@ -653,6 +654,12 @@ public:
 	 * Ensure Aux send → mute → unmute. For --smoke-send-mute.
 	 */
 	bool smoke_send_mute ();
+
+	/** Aux bus return (wet) gain coeff 0..1. Double-click → unity. */
+	bool  set_aux_return (float gain_0_1);
+	float aux_return () const;
+	/** Ensure Aux → set 0.5 → set 1.0. For --smoke-aux-return. */
+	bool smoke_aux_return ();
 
 	/**
 	 * Track fader AutomationList (GainAutomation). Enable Play, write points,

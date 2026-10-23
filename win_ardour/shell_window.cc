@@ -1046,6 +1046,17 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("strip-mixer-reset")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset FAILED (no session)\n");
+	if (ok && smoke_aux_return && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_aux_return ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_monitor_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_aux_return) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("aux-return") FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1064,6 +1075,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_automation && engine_session_ok ()) {
+	if (ok && smoke_automation && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_automation ()) {
 			_smoke_failed = true;
 		} else {
@@ -4541,6 +4553,21 @@ ShellWindow::sync_monitor_from_engine ()
 	_monitor.set_mono (_engine_snap.monitor_mono);
 	_monitor.set_mute (_engine_snap.monitor_cut);
 	_monitor.set_solo_boost_db (_engine_snap.monitor_solo_boost_db);
+	_monitor.set_aux_ok (_engine_snap.aux_bus_ok);
+	_monitor.set_aux_return (_engine_snap.aux_return);
+}
+
+void
+ShellWindow::do_set_aux_return (float gain_0_1)
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.set_aux_return (gain_0_1);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_monitor_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
@@ -6867,6 +6894,8 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			_engine_snap = _engine.snapshot ();
 			sync_mixer_trim_from_engine ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
+		if (_monitor.hit_aux_return (x, y)) {
+			do_set_aux_return (1.f); /* unity */
 			return 0;
 		}
 		int lab = hit_mixer_label (x, y);
@@ -7673,6 +7702,15 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (mh == MonitorHit::Boost) {
 		do_cycle_monitor_solo_boost ();
+	if (mh == MonitorHit::AuxReturn) {
+		_drag = DragMode::AuxReturn;
+		_drag_index = -1;
+		if (_monitor.drag_aux_return_to (y)) {
+			do_set_aux_return (_monitor.aux_return ());
+		}
+		SetCapture (_hwnd);
+		SetCursor (LoadCursorW (nullptr, IDC_SIZENS));
+		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
 
@@ -8526,6 +8564,13 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 			_engine_snap = _engine.snapshot ();
 			sync_mixer_send_from_engine ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+		return true;
+	}
+
+	if (_drag == DragMode::AuxReturn) {
+		if (_monitor.drag_aux_return_to (y)) {
+			do_set_aux_return (_monitor.aux_return ());
 		}
 		return true;
 	}

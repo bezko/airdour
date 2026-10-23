@@ -718,6 +718,7 @@ EngineHost::EngineHost ()
 		_snap.recent_path[i][0] = L'\0';
 	}
 	_snap.aux_bus_ok = false;
+	_snap.aux_return = 1.f;
 	_snap.midi_muted = false;
 	_snap.midi_armed = false;
 	_snap.midi_soloed = false;
@@ -6063,6 +6064,7 @@ void
 EngineHost::refresh_send_flags ()
 {
 	_snap.aux_bus_ok = false;
+	_snap.aux_return = 1.f;
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
@@ -6075,6 +6077,10 @@ EngineHost::refresh_send_flags ()
 		_snap.aux_bus_ok = (_impl->aux_bus != nullptr);
 		if (!_impl->aux_bus) {
 			return;
+		}
+		if (_impl->aux_bus->gain_control ()) {
+			float rg = (float)_impl->aux_bus->gain_control ()->get_value ();
+			_snap.aux_return = std::max (0.f, std::min (1.f, rg));
 		}
 		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 			if (i >= (int)_impl->tracks.size () || !_impl->tracks[i]) {
@@ -6771,6 +6777,76 @@ EngineHost::smoke_send_mute ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send-mute exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_aux_return (float gain_0_1)
+{
+	gain_0_1 = std::max (0.f, std::min (1.f, gain_0_1));
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	if (!ensure_aux_sends () || !_impl->aux_bus || !_impl->aux_bus->gain_control ()) {
+		return false;
+	}
+	try {
+		_impl->session->set_control (_impl->aux_bus->gain_control (), (double)gain_0_1,
+		                             Controllable::NoGroup);
+		wait_until ([&] () {
+			refresh_send_flags ();
+			return std::fabs (_snap.aux_return - gain_0_1) < 0.02f;
+		}, 300);
+		_snap.detail = L"aux return set";
+		return std::fabs (_snap.aux_return - gain_0_1) < 0.02f;
+	} catch (...) {
+		return false;
+	}
+}
+
+float
+EngineHost::aux_return () const
+{
+	return _snap.aux_return;
+}
+
+bool
+EngineHost::smoke_aux_return ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-aux-return failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_aux_sends () || !_snap.aux_bus_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-aux-return FAILED (no Aux)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_aux_return (0.5f)
+		    || _snap.aux_return < 0.45f || _snap.aux_return > 0.55f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-aux-return FAILED (0.5 got=%.3f)\n",
+			              _snap.aux_return);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_aux_return (1.0f)
+		    || _snap.aux_return < 0.95f || _snap.aux_return > 1.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-aux-return FAILED (1.0 got=%.3f)\n",
+			              _snap.aux_return);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-aux-return ok (0.5→1.0 unity)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-aux-return ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-aux-return exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -30670,6 +30746,7 @@ EngineHost::EngineHost ()
 		_snap.recent_path[i][0] = L'\0';
 	}
 	_snap.aux_bus_ok = false;
+	_snap.aux_return = 1.f;
 	_snap.midi_arp_enabled = false;
 	_snap.midi_arp_mode = 0;
 	_snap.midi_arp_pitch = -1;
@@ -31663,6 +31740,25 @@ EngineHost::smoke_strip_mixer_reset ()
 
 bool
 EngineHost::smoke_send_mute ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_aux_return (float gain_0_1)
+{
+	(void)gain_0_1;
+	return false;
+}
+
+float
+EngineHost::aux_return () const
+{
+	return 1.f;
+}
+
+bool
+EngineHost::smoke_aux_return ()
 {
 	return false;
 }
