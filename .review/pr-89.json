@@ -1,1 +1,0 @@
-﻿{"body":"## Summary\n- `MuteControl::set_mute_points` Main ↔ AllPoints\n- Ctrl+click Mute; `M·All` badge when AllPoints\n- `--smoke-mute-points`: Main → All → Main (Dummy exit 0)\n\n## Test plan\n- [x] `win_ardour\\run-engine-shell.bat --backend Dummy --smoke-mute-points --timeout 25 --no-splash` → EXIT=0","title":"Cycle strip mute points Main/AllPoints"}

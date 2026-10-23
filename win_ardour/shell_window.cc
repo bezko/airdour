@@ -1229,8 +1229,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_tracks && engine_session_ok ()) {
-	if (ok && has_smoke ("click-gain") && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("click-gain") && engine_session_ok ()) {
 		if (!_engine.smoke_click_gain ()) {
 			_smoke_failed = true;
 		} else {
