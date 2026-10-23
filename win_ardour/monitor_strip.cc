@@ -53,7 +53,9 @@ MonitorStrip::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 	_mute_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
 	y = _mute_btn.bottom + gap;
 	_boost_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
-	y = _mute_btn.bottom + gap + 4.f * dpi_scale;
+	y = _boost_btn.bottom + gap;
+	_lim_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
+	y = _lim_btn.bottom + gap + 4.f * dpi_scale;
 	/* Thin vertical Aux return fader; label sits above the track. */
 	float label_h = 16.f * dpi_scale;
 	float track_top = y + label_h;
@@ -102,7 +104,6 @@ MonitorStrip::drag_aux_return_to (float y)
 	}
 	_aux_return = g;
 	return true;
-	_lim_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
 }
 
 MonitorHit
@@ -125,6 +126,7 @@ MonitorStrip::hit_test (float x, float y) const
 	}
 	if (hit_aux_return (x, y)) {
 		return MonitorHit::AuxReturn;
+	}
 	if (_master_lim_ok && contains (_lim_btn, x, y)) {
 		return MonitorHit::MasterLim;
 	}

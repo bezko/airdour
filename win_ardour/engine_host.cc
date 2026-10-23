@@ -15504,10 +15504,6 @@ EngineHost::refresh_monitor_flags ()
 	_snap.monitor_ok = false;
 	_snap.monitor_dim = false;
 	_snap.monitor_dim_db = -12.f;
-	_snap.master_fx_ok = false;
-	_snap.master_fx_bypassed = false;
-	_snap.master_fx_ceiling_db = -0.3f;
-	_snap.master_fx_name.clear ();
 	_snap.monitor_mono = false;
 	_snap.monitor_cut = false;
 	_snap.monitor_solo_boost_db = 0.f;
@@ -31193,6 +31189,7 @@ EngineHost::refresh_snapshot ()
 			refresh_meter_type_flags ();
 			refresh_group_flags ();
 			refresh_monitor_flags ();
+			refresh_master_fx_snap ();
 			refresh_history_flags ();
 			refresh_selection_snap ();
 			refresh_locations_snap ();

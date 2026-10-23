@@ -23,7 +23,7 @@ enum class MonitorHit {
 	Mono,
 	Mute,
 	Boost,
-	AuxReturn
+	AuxReturn,
 	MasterLim
 };
 

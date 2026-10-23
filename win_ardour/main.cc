@@ -157,6 +157,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_midi_cc = parse_flag (argc, argv, L"--smoke-midi-cc");
 	bool smoke_midi_bend = parse_flag (argc, argv, L"--smoke-midi-bend");
 	bool smoke_midi_pressure = parse_flag (argc, argv, L"--smoke-midi-pressure");
+	bool smoke_master_fx = parse_flag (argc, argv, L"--smoke-master-fx");
 	bool smoke_locate_selection = parse_flag (argc, argv, L"--smoke-locate-selection");
 	bool smoke_pan_automation = parse_flag (argc, argv, L"--smoke-pan-automation");
 	bool smoke_auto_lane_unify = parse_flag (argc, argv, L"--smoke-auto-lane-unify");
@@ -266,7 +267,8 @@ wmain (int argc, wchar_t** argv)
 	                         smoke_midi_pressure, smoke_locate_selection,
 	                         smoke_pan_automation, smoke_auto_lane_unify,
 	                         smoke_auto_state, smoke_pan_auto_state,
-	                         smoke_send_auto_state, smoke_auto_state_unify)) {
+	                         smoke_send_auto_state, smoke_auto_state_unify,
+	                         smoke_master_fx)) {
 			const char* be = backend.empty () ? "(prefs/Dummy)" : backend.c_str ();
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", be);
 		} else {

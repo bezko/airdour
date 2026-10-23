@@ -307,7 +307,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_auto_state,
                             bool smoke_pan_auto_state,
                             bool smoke_send_auto_state,
-                            bool smoke_auto_state_unify)
+                            bool smoke_auto_state_unify,
+                            bool smoke_master_fx)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -525,17 +526,16 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-pressure FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi && engine_session_ok ()) {
-	} else if (ok && smoke_master_fx && _engine.snapshot ().session_ok) {
+	} else if (ok && has_smoke ("master-fx") && engine_session_ok ()) {
 		if (!_engine.smoke_master_fx ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_master_fx) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("master-fx") FAILED (no session)\n");
+	} else if (has_smoke ("master-fx")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-master-fx FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
+	} else if (ok && smoke_midi && engine_session_ok ()) {
 		if (_engine.smoke_midi ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi ok\n");
 		} else {
@@ -4673,7 +4673,6 @@ ShellWindow::do_toggle_monitor_cut ()
 
 void
 ShellWindow::do_clear_all_solos ()
-ShellWindow::do_toggle_master_fx ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
@@ -4684,6 +4683,19 @@ ShellWindow::do_toggle_master_fx ()
 		sync_mixer_mute_solo_from_engine ();
 		InvalidateRect (_hwnd, nullptr, FALSE);
 	}
+}
+
+void
+ShellWindow::do_toggle_master_fx ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.toggle_master_fx_bypass ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_monitor_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
@@ -7779,6 +7791,9 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		SetCapture (_hwnd);
 		SetCursor (LoadCursorW (nullptr, IDC_SIZENS));
 		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
 	if (mh == MonitorHit::MasterLim) {
 		do_toggle_master_fx ();
 		return true;

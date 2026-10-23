@@ -145,7 +145,8 @@ public:
 	                    bool smoke_auto_state = false,
 	                    bool smoke_pan_auto_state = false,
 	                    bool smoke_send_auto_state = false,
-	                    bool smoke_auto_state_unify = false);
+	                    bool smoke_auto_state_unify = false,
+	                    bool smoke_master_fx = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -318,6 +319,7 @@ private:
 	void do_toggle_monitor_dim ();
 	void do_toggle_monitor_mono ();
 	void do_toggle_monitor_cut ();
+	void do_toggle_master_fx ();
 	void do_cycle_monitor_solo_boost ();
 	void do_clear_all_solos ();
 	void do_clear_all_mutes ();
