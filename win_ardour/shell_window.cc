@@ -523,25 +523,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && engine_session_ok ()) {
-	} else if (ok && smoke_vca && _engine.snapshot ().session_ok) {
-		if (!_engine.smoke_vca ()) {
-			_smoke_failed = true;
-		}
-		std::fflush (stderr);
-	} else if (smoke_vca) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-vca FAILED (no session)\n");
-		_smoke_failed = true;
-		std::fflush (stderr);
-	} else if (ok && smoke_group_vca && _engine.snapshot ().session_ok) {
-		if (!_engine.smoke_group_vca ()) {
-			_smoke_failed = true;
-		}
-		std::fflush (stderr);
-	} else if (smoke_group_vca) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("group-vca") FAILED (no session)\n");
-		_smoke_failed = true;
-		std::fflush (stderr);
-	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
 		if (_engine.smoke_midi ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi ok\n");
 		} else {
@@ -556,6 +537,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("vca")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-vca FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && has_smoke ("group-vca") && engine_session_ok ()) {
+		if (!_engine.smoke_group_vca ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("group-vca")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-group-vca FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && has_smoke ("vca-status") && engine_session_ok ()) {

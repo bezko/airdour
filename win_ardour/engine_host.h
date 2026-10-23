@@ -292,9 +292,6 @@ struct EngineSnapshot {
 	bool         vca_ok; /* Session VCA master exists */
 	int          vca_slave_count; /* tracks assigned to shell VCA */
 	float        vca_gain; /* VCA gain_control linear */
-	bool         vca_ok; /* Session VCA master exists */
-	int          vca_slave_count; /* tracks assigned to shell VCA */
-	float        vca_gain; /* VCA gain_control linear */
 	bool         group_has_vca_master; /* RouteGroup::has_control_master */
 	bool         monitor_ok; /* Session monitor_out + MonitorProcessor */
 	bool         monitor_dim; /* MonitorProcessor::dim_all */
@@ -1454,20 +1451,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-vca-status (status-line chrome path).
 	 */
 	bool smoke_vca_status ();
-
-	/**
-	 * Session VCA master stub (no mixer chrome). Create "VCA 1", assign
-	 * strip gain, set master gain. Honest scope: engine/smoke only.
-	 */
-	bool ensure_vca_master ();
-	bool assign_track_to_vca (int track, bool on);
-	bool set_vca_gain (float linear_0_1);
-	bool clear_vca_master ();
-	/**
-	 * Create VCA → assign Audio 1 → verify slave → set gain → clear.
-	 * For --smoke-vca.
-	 */
-	bool smoke_vca ();
 
 	/**
 	 * Bind/unbind shell RouteGroup members to the shell VCA via
