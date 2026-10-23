@@ -271,6 +271,7 @@ struct EngineSnapshot {
 	wchar_t      midi_track_name[kTrackNameLen];
 	float        track_gain[kMeters]; /* Route gain_control mirror after reorder */
 	bool         track_in_group[kMeters]; /* member of Session RouteGroup */
+	bool         track_selected[kMeters]; /* CoreSelection selected */
 	int          group_member_count; /* 0 = no shell group */
 	bool         group_active; /* RouteGroup::is_active */
 	bool         group_relative; /* RouteGroup::is_relative — proportional gain */
@@ -282,6 +283,7 @@ struct EngineSnapshot {
 	uint32_t     group_rgba; /* RouteGroup color RRGGBBAA when shares color */
 	bool         group_shares_monitoring;
 	bool         group_shares_route_active;
+	bool         group_shares_select;
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
 	bool         mixer_narrow; /* shell UI: compact strip width */
@@ -1345,6 +1347,7 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * indices (≥2). Shares mute + solo + gain + color when active.
 	 * indices (≥2). Shares mute + solo + gain + monitoring when active.
 	 * indices (≥2). Shares mute + solo + gain + route-active when active.
+	 * indices (≥2). Shares mute + solo + gain + select when active.
 	 * Honest scope: one group, no VCA/subgroup.
 	 */
 	bool create_route_group (const int* indices, int n);
@@ -1365,6 +1368,13 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 */
 	bool set_track_active (int track, bool active);
 	bool toggle_track_active (int track);
+
+	/**
+	 * CoreSelection select (SelectionSet). When group shares select, peers
+	 * follow. Click mixer label / --smoke-group-select.
+	 */
+	bool select_audio_track (int track);
+	bool clear_track_selection ();
 
 	/**
 	 * Group Audio 0+1; mute/solo/gain propagate; clear. For --smoke-group.
@@ -1399,6 +1409,11 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-group-route-active.
 	 */
 	bool smoke_group_route_active ();
+/**
+	 * Group Audio 0+1; select propagates; clear isolates.
+	 * For --smoke-group-select.
+	 */
+	bool smoke_group_select ();
 
 	/**
 	 * Ensure Session monitor bus + MonitorProcessor (add_monitor_section).
@@ -1932,6 +1947,7 @@ private:
 	void refresh_listen_mode_flags ();
 	void refresh_monitor_choice_flags ();
 	void refresh_active_flags ();
+	void refresh_selection_flags ();
 	bool ensure_freeze_session_range (int track);
 	void refresh_pan_flags ();
 	void refresh_pan_auto_state_flags ();

@@ -1391,6 +1391,16 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("group-route-active")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group-route-active FAILED (no session)\n");
+	if (ok && smoke_group_select && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_group_select ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_group_from_engine ();
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_group_select) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("group-select") FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1982,6 +1992,8 @@ ShellWindow::sync_mixer_group_from_engine ()
 			rgba = _engine_snap.group_rgba;
 		}
 		_mixers[i].set_group_rgba (rgba);
+		bool sel = (i < na && i < EngineSnapshot::kMeters && _engine_snap.track_selected[i]);
+		_mixers[i].set_selected (sel);
 	}
 	_transport.set_group_active (_engine_snap.group_member_count >= 2
 	                             && _engine_snap.group_active);
@@ -7647,12 +7659,19 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			_focus_audio_track = lab;
 			refresh_automation_lane ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				_engine.select_audio_track (lab);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_group_from_engine ();
+			}
 			_drag = DragMode::TrackReorderPending;
 			_drag_index = lab;
 			_pan_down_x = x;
 			_pan_down_y = y;
 			_pan_last_x = x;
 			SetCapture (_hwnd);
+			InvalidateRect (_hwnd, nullptr, FALSE);
 			return true;
 		}
 	}
@@ -9527,6 +9546,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+Shift+C", L"Cycle track group color (G bar)" },
 		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·active)" },
 		{ L"Alt+Shift+E", L"Toggle track active (group shares)" },
+		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·select)" },
 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },

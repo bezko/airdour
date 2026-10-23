@@ -107,6 +107,9 @@ public:
 	/** Group color RRGGBBAA when RouteGroup shares color (0 = use accent). */
 	void set_group_rgba (uint32_t rgba) { _group_rgba = rgba; }
 	uint32_t group_rgba () const { return _group_rgba; }
+	/** CoreSelection selected (group select share may light peers). */
+	void set_selected (bool selected) { _selected = selected; }
+	bool selected () const { return _selected; }
 
 	/** True when strip has a non-empty FX label (insert/bypass is live). */
 	bool has_fx () const { return _fx_label[0] != L'\0'; }
@@ -194,4 +197,5 @@ private:
 	bool        _in_group;
 	bool        _group_picked;
 	uint32_t    _group_rgba;
+	bool        _selected;
 };
