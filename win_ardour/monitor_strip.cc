@@ -118,6 +118,7 @@ MonitorStrip::hit_test (float x, float y) const
 	}
 	if (contains (_boost_btn, x, y)) {
 		return MonitorHit::Boost;
+	}
 	if (hit_aux_return (x, y)) {
 		return MonitorHit::AuxReturn;
 	}

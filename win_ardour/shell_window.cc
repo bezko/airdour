@@ -1046,7 +1046,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("strip-mixer-reset")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-strip-mixer-reset FAILED (no session)\n");
-	if (ok && smoke_aux_return && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("aux-return") && engine_session_ok ()) {
 		if (!_engine.smoke_aux_return ()) {
 			_smoke_failed = true;
 		} else {
@@ -1055,8 +1059,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			sync_monitor_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_aux_return) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("aux-return") FAILED (no session)\n");
+	} else if (has_smoke ("aux-return")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-aux-return FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1075,7 +1079,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_automation && engine_session_ok ()) {
-	if (ok && smoke_automation && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_automation ()) {
 			_smoke_failed = true;
 		} else {
@@ -6894,6 +6897,8 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			_engine_snap = _engine.snapshot ();
 			sync_mixer_trim_from_engine ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
+			return 0;
+		}
 		if (_monitor.hit_aux_return (x, y)) {
 			do_set_aux_return (1.f); /* unity */
 			return 0;
@@ -7702,6 +7707,8 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 	if (mh == MonitorHit::Boost) {
 		do_cycle_monitor_solo_boost ();
+		return true;
+	}
 	if (mh == MonitorHit::AuxReturn) {
 		_drag = DragMode::AuxReturn;
 		_drag_index = -1;

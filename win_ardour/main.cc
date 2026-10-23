@@ -244,7 +244,7 @@ wmain (int argc, wchar_t** argv)
 		                         smoke_loop, smoke_midi, smoke_midi_edit,
 		                         smoke_plugin, smoke_perf, session_path, period,
 		                         smoke_vst3, smoke_mute_solo, smoke_meter_point, smoke_pan, smoke_pan_width,
-		                         smoke_send,
+		                         smoke_send, smoke_send_mute,
 		                         smoke_automation, smoke_edit, smoke_snap, smoke_punch,
 		                         smoke_tempo, smoke_click, smoke_tracks,
 		                         smoke_stereo_track,
