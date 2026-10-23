@@ -230,8 +230,6 @@ struct EngineSnapshot {
 	int          track_monitor_choice[kMeters];
 	bool         track_stereo[kMeters]; /* ≥2 audio inputs (Equal-Power width capable) */
 	bool         track_active[kMeters]; /* Route::active() — DSP path on */
-	/** MonitorChoice: 0=Auto 1=Input 2=Disk (MonitorCue unused in shell). */
-	int          track_monitor_choice[kMeters];
 	/** Peers sharing same Mon choice via RouteGroup (0 = alone / no share). */
 	int          track_monitor_peer_count[kMeters];
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
@@ -288,7 +286,6 @@ struct EngineSnapshot {
 	bool         group_shares_monitoring;
 	bool         group_shares_route_active;
 	bool         group_shares_select;
-	bool         group_shares_monitoring;
 	static constexpr int kGroupNameLen = 32;
 	wchar_t      group_name[kGroupNameLen];
 	bool         mixer_narrow; /* shell UI: compact strip width */
@@ -1419,12 +1416,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 */
 	bool smoke_group_monitoring ();
 
-	/**
-	 * Track input monitor choice (MonitorControl): Auto / Input / Disk.
-	 * Uses UseGroup so RouteGroup monitoring share propagates peers.
-	 */
-	bool set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk);
-	bool cycle_track_monitor_choice (int track = 0);
 /**
 	 * Group Audio 0+1; deactivate propagates; clear isolates.
 	 * For --smoke-group-route-active.
@@ -1967,7 +1958,6 @@ private:
 	void refresh_phase_invert_flags ();
 	void refresh_trim_flags ();
 	void refresh_listen_mode_flags ();
-	void refresh_monitor_choice_flags ();
 	void refresh_active_flags ();
 	void refresh_selection_flags ();
 	bool ensure_freeze_session_range (int track);

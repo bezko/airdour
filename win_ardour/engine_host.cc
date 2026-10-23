@@ -3511,20 +3511,6 @@ EngineHost::refresh_record_flags ()
 	}
 }
 
-/** Controllable::RealTime — applied on the process thread. */
-static bool
-wait_until (std::function<bool ()> pred, int timeout_ms = 400)
-{
-	const int step = 20;
-	for (int waited = 0; waited < timeout_ms; waited += step) {
-		if (pred ()) {
-			return true;
-		}
-		Sleep ((DWORD)step);
-	}
-	return pred ();
-}
-
 bool
 EngineHost::set_track_armed (int track, bool armed)
 {
@@ -3984,94 +3970,6 @@ EngineHost::refresh_mute_solo_flags ()
 		}
 	} catch (...) {
 	}
-}
-
-void
-EngineHost::refresh_monitor_choice_flags ()
-{
-	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
-		_snap.track_monitor_choice[i] = 0;
-	}
-	if (!_impl) {
-		return;
-	}
-	try {
-		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
-			if (i < (int)_impl->tracks.size () && _impl->tracks[i]
-			    && _impl->tracks[i]->monitoring_control ()) {
-				MonitorChoice mc =
-					_impl->tracks[i]->monitoring_control ()->monitoring_choice ();
-				if (mc == MonitorInput) {
-					_snap.track_monitor_choice[i] = 1;
-				} else if (mc == MonitorDisk) {
-					_snap.track_monitor_choice[i] = 2;
-				} else {
-					_snap.track_monitor_choice[i] = 0; /* Auto (and Cue→Auto) */
-				}
-			}
-		}
-	} catch (...) {
-	}
-}
-
-bool
-EngineHost::set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk)
-{
-	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
-		return false;
-	}
-	collect_tracks ();
-	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
-	    || !_impl->tracks[track]->monitoring_control ()) {
-		return false;
-	}
-	if (choice_0_auto_1_in_2_disk < 0 || choice_0_auto_1_in_2_disk > 2) {
-		return false;
-	}
-	try {
-		MonitorChoice mc = MonitorAuto;
-		if (choice_0_auto_1_in_2_disk == 1) {
-			mc = MonitorInput;
-		} else if (choice_0_auto_1_in_2_disk == 2) {
-			mc = MonitorDisk;
-		}
-		std::shared_ptr<MonitorControl> ctrl =
-			_impl->tracks[track]->monitoring_control ();
-		_impl->session->set_control (ctrl, (double)mc, Controllable::UseGroup);
-		wait_until ([&] () {
-			refresh_monitor_choice_flags ();
-			return _snap.track_monitor_choice[track] == choice_0_auto_1_in_2_disk;
-		}, 400);
-		refresh_monitor_choice_flags ();
-		const char* name = (mc == MonitorInput) ? "Input"
-		                 : (mc == MonitorDisk) ? "Disk" : "Auto";
-		std::fprintf (stderr,
-		              "airdour_win_shell: Audio %d monitor=%s (got=%d want=%d)\n",
-		              track + 1, name, _snap.track_monitor_choice[track],
-		              choice_0_auto_1_in_2_disk);
-		std::fflush (stderr);
-		_snap.detail = (mc == MonitorInput) ? L"monitor Input"
-		             : (mc == MonitorDisk) ? L"monitor Disk" : L"monitor Auto";
-		return _snap.track_monitor_choice[track] == choice_0_auto_1_in_2_disk;
-	} catch (std::exception& e) {
-		std::fprintf (stderr, "airdour_win_shell: set_track_monitor_choice: %s\n",
-		              e.what ());
-		std::fflush (stderr);
-		return false;
-	} catch (...) {
-		return false;
-	}
-}
-
-bool
-EngineHost::cycle_track_monitor_choice (int track)
-{
-	refresh_monitor_choice_flags ();
-	if (track < 0 || track >= EngineSnapshot::kMeters) {
-		return false;
-	}
-	int next = (_snap.track_monitor_choice[track] + 1) % 3;
-	return set_track_monitor_choice (track, next);
 }
 
 bool
@@ -13550,7 +13448,6 @@ EngineHost::create_route_group (const int* indices, int n)
 		refresh_group_flags ();
 		_snap.detail = L"route group ready";
 		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain/color/mon/active/select\n",
-		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain/mon\n",
 		              rg->name ().c_str (), _snap.group_member_count);
 		std::fflush (stderr);
 		return _snap.group_member_count >= 2;

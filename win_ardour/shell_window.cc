@@ -787,14 +787,18 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("solo-isolate")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (no session)\n");
-	if (ok && smoke_input_monitor && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("input-monitor") && engine_session_ok ()) {
 		if (!_engine.smoke_input_monitor ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_monitor_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_input_monitor) {
+	} else if (has_smoke ("input-monitor")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-input-monitor FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -809,7 +813,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("listen-mode")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-listen-mode FAILED (no session)\n");
-	if (ok && smoke_mon_peer_badge && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("mon-peer-badge") && engine_session_ok ()) {
 		if (!_engine.smoke_mon_peer_badge ()) {
 			_smoke_failed = true;
 		} else {
@@ -817,8 +825,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			sync_mixer_group_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_mon_peer_badge) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("mon-peer-badge") FAILED (no session)\n");
+	} else if (has_smoke ("mon-peer-badge")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-mon-peer-badge FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -915,7 +923,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan && engine_session_ok ()) {
-	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {

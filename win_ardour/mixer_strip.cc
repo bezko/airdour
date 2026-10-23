@@ -167,11 +167,6 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 	_arm_btn = D2D1::RectF (
 		_strip.left + pad, y, _strip.right - pad, y + arm_h);
 	y = _arm_btn.bottom + gap;
-	if (_midi_strip) {
-		_arm_btn = D2D1::RectF (0, 0, 0, 0);
-		_trim_track = D2D1::RectF (0, 0, 0, 0);
-		_pan_track = D2D1::RectF (0, 0, 0, 0);
-		_send_track = D2D1::RectF (0, 0, 0, 0);
 	float mid = (_strip.left + _strip.right) * 0.5f;
 	if (_midi_strip) {
 		_arm_btn = D2D1::RectF (0, 0, 0, 0);
@@ -645,11 +640,8 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 	fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
 	rt->FillRectangle (_arm_btn, _armed ? accent : edge);
-	{
-		const wchar_t* arm_label = _armed ? L"R · armed" : L"R · arm";
 	if (!_midi_strip) {
-		rt->FillRectangle (_arm_btn, _armed ? accent : edge);
-		const wchar_t* arm_label = _armed ? L"R" : L"Arm";
+		const wchar_t* arm_label = _armed ? L"R · armed" : L"R · arm";
 		rt->DrawTextW (arm_label, (UINT32)wcslen (arm_label), fmt_meta, _arm_btn, brand);
 
 		/* Mon — Auto / In / Disk; ·N peer badge when group shares monitoring. */
