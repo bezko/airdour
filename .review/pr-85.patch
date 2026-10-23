@@ -1,0 +1,471 @@
+﻿From f3a3b26c4d842f51f09d4b32f6b1eea1481fe1db Mon Sep 17 00:00:00 2001
+From: bezko <bezkom@gmail.com>
+Date: Tue, 20 Oct 2026 04:20:52 -0400
+Subject: [PATCH] Cycle strip meter type Peak/K14.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Ctrl+click the mixer meter toggles Route MeterPeak↔MeterK14. Pk/K14
+badge under the meter; read_meters honors the active type.
+---
+ win_ardour/engine_host.cc  | 156 ++++++++++++++++++++++++++++++++++++-
+ win_ardour/engine_host.h   |  12 +++
+ win_ardour/main.cc         |   5 +-
+ win_ardour/mixer_strip.cc  |  18 +++++
+ win_ardour/mixer_strip.h   |   4 +
+ win_ardour/shell_window.cc |  51 ++++++++++--
+ win_ardour/shell_window.h  |   1 +
+ 7 files changed, 234 insertions(+), 13 deletions(-)
+
+diff --git a/win_ardour/engine_host.cc b/win_ardour/engine_host.cc
+index 199e78c5406..2024a9e18c5 100644
+--- a/win_ardour/engine_host.cc
++++ b/win_ardour/engine_host.cc
+@@ -185,13 +185,17 @@ db_to_linear (float db)
+ }
+ 
+ float
+-peak_linear_from_meter (std::shared_ptr<PeakMeter> m)
++peak_linear_from_meter (std::shared_ptr<PeakMeter> m, MeterType type = MeterPeak)
+ {
+ 	if (!m) {
+ 		return 0.f;
+ 	}
+-	/* MeterPeak returns dB with falloff. */
+-	float db = m->meter_level (0, MeterPeak);
++	/* MeterPeak / MeterK14 return dB with falloff. */
++	MeterType read = type;
++	if (read != MeterK14) {
++		read = MeterPeak;
++	}
++	float db = m->meter_level (0, read);
+ 	return db_to_linear (db);
+ }
+ 
+@@ -590,6 +594,7 @@ EngineHost::EngineHost ()
+ 		_track_gain[i] = (i == 0) ? 0.85f : (0.85f - 0.12f * (float)i);
+ 		_snap.meter_peak[i] = 0.f;
+ 		_snap.meter_clip[i] = false;
++		_snap.track_meter_type[i] = 0; /* Peak */
+ 		_snap.track_has_regions[i] = false;
+ 		_snap.track_armed[i] = false;
+ 		_snap.track_frozen[i] = false;
+@@ -2849,7 +2854,8 @@ EngineHost::read_meters ()
+ 			if (i < (int)_impl->tracks.size () && _impl->tracks[i]) {
+ 				std::shared_ptr<PeakMeter> pm = _impl->tracks[i]->peak_meter ();
+ 				if (pm) {
+-					peak = peak_linear_from_meter (pm);
++					MeterType mt = _impl->tracks[i]->meter_type ();
++					peak = peak_linear_from_meter (pm, mt);
+ 					clip = clip_from_meter (pm);
+ 				}
+ 			}
+@@ -2884,6 +2890,110 @@ EngineHost::clear_track_meter_clip (int track)
+ 	}
+ }
+ 
++void
++EngineHost::refresh_meter_type_flags ()
++{
++	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
++		_snap.track_meter_type[i] = 0;
++	}
++	if (!_impl || !_impl->session) {
++		return;
++	}
++	try {
++		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
++			if (i >= (int)_impl->tracks.size () || !_impl->tracks[i]) {
++				continue;
++			}
++			MeterType t = _impl->tracks[i]->meter_type ();
++			_snap.track_meter_type[i] = (t == MeterK14) ? 1 : 0;
++		}
++	} catch (...) {
++	}
++}
++
++bool
++EngineHost::set_track_meter_type (int track, int type_0_1)
++{
++	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
++		return false;
++	}
++	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
++		collect_tracks ();
++	}
++	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
++		return false;
++	}
++	try {
++		MeterType t = (type_0_1 == 1) ? MeterK14 : MeterPeak;
++		_impl->tracks[track]->set_meter_type (t);
++		refresh_meter_type_flags ();
++		_snap.detail = (type_0_1 == 1) ? L"meter type K14" : L"meter type Peak";
++		return _snap.track_meter_type[track] == ((type_0_1 == 1) ? 1 : 0);
++	} catch (...) {
++		return false;
++	}
++}
++
++int
++EngineHost::track_meter_type (int track) const
++{
++	if (track < 0 || track >= EngineSnapshot::kMeters) {
++		return 0;
++	}
++	return _snap.track_meter_type[track];
++}
++
++bool
++EngineHost::cycle_track_meter_type (int track)
++{
++	refresh_meter_type_flags ();
++	return set_track_meter_type (track, track_meter_type (track) == 0 ? 1 : 0);
++}
++
++bool
++EngineHost::smoke_meter_type ()
++{
++	if (!_impl || !_impl->session) {
++		_snap.detail = L"smoke-meter-type failed — no Session";
++		return false;
++	}
++	try {
++		collect_tracks ();
++		if (_impl->tracks.empty () || !_impl->tracks[0]) {
++			std::fprintf (stderr, "airdour_win_shell: smoke-meter-type FAILED (no Audio 1)\n");
++			std::fflush (stderr);
++			return false;
++		}
++		if (!set_track_meter_type (0, 0) || _snap.track_meter_type[0] != 0) {
++			std::fprintf (stderr, "airdour_win_shell: smoke-meter-type FAILED (start Peak)\n");
++			std::fflush (stderr);
++			return false;
++		}
++		if (!cycle_track_meter_type (0) || _snap.track_meter_type[0] != 1
++		    || _impl->tracks[0]->meter_type () != MeterK14) {
++			std::fprintf (stderr, "airdour_win_shell: smoke-meter-type FAILED (→K14)\n");
++			std::fflush (stderr);
++			return false;
++		}
++		if (!cycle_track_meter_type (0) || _snap.track_meter_type[0] != 0
++		    || _impl->tracks[0]->meter_type () != MeterPeak) {
++			std::fprintf (stderr, "airdour_win_shell: smoke-meter-type FAILED (→Peak)\n");
++			std::fflush (stderr);
++			return false;
++		}
++		std::fprintf (stderr, "airdour_win_shell: smoke-meter-type ok (Peak↔K14)\n");
++		std::fflush (stderr);
++		_snap.detail = L"smoke-meter-type ok";
++		return true;
++	} catch (std::exception& e) {
++		std::fprintf (stderr, "airdour_win_shell: smoke-meter-type exception: %s\n", e.what ());
++		std::fflush (stderr);
++		return false;
++	} catch (...) {
++		return false;
++	}
++}
++
+ void
+ EngineHost::refresh_region_flags ()
+ {
+@@ -17464,6 +17574,7 @@ EngineHost::refresh_snapshot ()
+ 			refresh_mute_solo_flags ();
+ 			refresh_pan_flags ();
+ 			refresh_send_flags ();
++			refresh_meter_type_flags ();
+ 			refresh_group_flags ();
+ 			refresh_monitor_flags ();
+ 			refresh_history_flags ();
+@@ -17560,6 +17671,7 @@ EngineHost::EngineHost ()
+ 		_track_gain[i] = 0.85f;
+ 		_snap.meter_peak[i] = 0.f;
+ 		_snap.meter_clip[i] = false;
++		_snap.track_meter_type[i] = 0; /* Peak */
+ 		_snap.track_has_regions[i] = false;
+ 		_snap.track_armed[i] = false;
+ 		_snap.track_frozen[i] = false;
+@@ -18536,6 +18648,42 @@ EngineHost::clear_track_meter_clip (int track)
+ 	return false;
+ }
+ 
++void
++EngineHost::refresh_meter_type_flags ()
++{
++	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
++		_snap.track_meter_type[i] = 0;
++	}
++}
++
++bool
++EngineHost::set_track_meter_type (int track, int type_0_1)
++{
++	(void)track;
++	(void)type_0_1;
++	return false;
++}
++
++int
++EngineHost::track_meter_type (int track) const
++{
++	(void)track;
++	return 0;
++}
++
++bool
++EngineHost::cycle_track_meter_type (int track)
++{
++	(void)track;
++	return false;
++}
++
++bool
++EngineHost::smoke_meter_type ()
++{
++	return false;
++}
++
+ bool
+ EngineHost::set_session_record (bool enable)
+ {
+diff --git a/win_ardour/engine_host.h b/win_ardour/engine_host.h
+index 26721a8b0ce..04398d95955 100644
+--- a/win_ardour/engine_host.h
++++ b/win_ardour/engine_host.h
+@@ -169,6 +169,7 @@ struct EngineSnapshot {
+ 	float        gain; /* track 0 stub/session gain */
+ 	float        meter_peak[kMeters]; /* linear 0..1 */
+ 	bool         meter_clip[kMeters]; /* ≥0 dBFS / PeakMeter MeterMaxPeak */
++	int          track_meter_type[kMeters]; /* 0=Peak 1=K14 */
+ 	bool         track_has_regions[kMeters];
+ 	bool         track_armed[kMeters];
+ 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
+@@ -465,6 +466,16 @@ class EngineHost
+ 	/** Clear PeakMeter max-peak / clip latch on Audio track (0..kMeters-1). */
+ 	bool clear_track_meter_clip (int track);
+ 
++	/**
++	 * Route meter ballistics: 0=Peak 1=K14. Ctrl+click meter cycles.
++	 * For --smoke-meter-type.
++	 */
++	bool set_track_meter_type (int track, int type_0_1);
++	int  track_meter_type (int track) const;
++	bool cycle_track_meter_type (int track);
++	/** Peak → K14 → Peak; leave Peak. */
++	bool smoke_meter_type ();
++
+ 	/** Session-level record enable (maybe_enable_record / disable_record). */
+ 	bool set_session_record (bool enable);
+ 	bool toggle_session_record ();
+@@ -1286,6 +1297,7 @@ class EngineHost
+ 	bool ensure_freeze_session_range (int track);
+ 	void refresh_pan_flags ();
+ 	void refresh_send_flags ();
++	void refresh_meter_type_flags ();
+ 	void refresh_group_flags ();
+ 	void refresh_monitor_flags ();
+ 	bool ensure_aux_sends ();
+diff --git a/win_ardour/main.cc b/win_ardour/main.cc
+index 64efdc48ce3..f23f46a880f 100644
+--- a/win_ardour/main.cc
++++ b/win_ardour/main.cc
+@@ -16,6 +16,7 @@
+  *                         [--smoke-midi-bend] [--smoke-midi-pressure]
+  *                         [--smoke-plugin]
+  *                         [--smoke-perf] [--smoke-vst3] [--smoke-mute-solo]
++ *                         [--smoke-meter-type]
+  *                         [--smoke-pan] [--smoke-send] [--smoke-automation]
+  *                         [--smoke-edit] [--smoke-snap] [--smoke-punch]
+  *                         [--smoke-tempo] [--smoke-click] [--smoke-tracks]
+@@ -139,6 +140,7 @@ wmain (int argc, wchar_t** argv)
+ 	bool smoke_plugin = parse_flag (argc, argv, L"--smoke-plugin");
+ 	bool smoke_vst3 = parse_flag (argc, argv, L"--smoke-vst3");
+ 	bool smoke_mute_solo = parse_flag (argc, argv, L"--smoke-mute-solo");
++	bool smoke_meter_type = parse_flag (argc, argv, L"--smoke-meter-type");
+ 	bool smoke_pan = parse_flag (argc, argv, L"--smoke-pan");
+ 	bool smoke_send = parse_flag (argc, argv, L"--smoke-send");
+ 	bool smoke_automation = parse_flag (argc, argv, L"--smoke-automation");
+@@ -210,7 +212,8 @@ wmain (int argc, wchar_t** argv)
+ 		                         smoke_save_load, smoke_export, smoke_undo,
+ 		                         smoke_loop, smoke_midi, smoke_midi_edit,
+ 		                         smoke_plugin, smoke_perf, session_path, period,
+-		                         smoke_vst3, smoke_mute_solo, smoke_pan, smoke_send,
++		                         smoke_vst3, smoke_mute_solo, smoke_meter_type,
++		                         smoke_pan, smoke_send,
+ 		                         smoke_automation, smoke_edit, smoke_snap, smoke_punch,
+ 		                         smoke_tempo, smoke_click, smoke_tracks,
+ 		                         smoke_rename, smoke_group, smoke_monitor,
+diff --git a/win_ardour/mixer_strip.cc b/win_ardour/mixer_strip.cc
+index 5dd3788c065..37576a901ba 100644
+--- a/win_ardour/mixer_strip.cc
++++ b/win_ardour/mixer_strip.cc
+@@ -32,6 +32,7 @@ MixerStrip::MixerStrip ()
+ 	, _fx_param_track ()
+ 	, _fx_param_track2 ()
+ 	, _fx_param_track3 ()
++	, _meter_type (0)
+ 	, _gain (0.85f)
+ 	, _pan (0.5f)
+ 	, _send (0.f)
+@@ -225,6 +226,12 @@ MixerStrip::hit_meter (float x, float y) const
+ 	return _meter.hit (x, y);
+ }
+ 
++void
++MixerStrip::set_meter_type (int type_0_1)
++{
++	_meter_type = (type_0_1 == 1) ? 1 : 0;
++}
++
+ bool
+ MixerStrip::hit_label (float x, float y) const
+ {
+@@ -600,6 +607,17 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
+ 	}
+ 
+ 	_meter.draw (rt, accent, edge, meter_hot, dpi_scale);
++	if (!_midi_strip) {
++		const wchar_t* mt = (_meter_type == 1) ? L"K14" : L"Pk";
++		const D2D1_RECT_F& mb = _meter.bounds ();
++		DWRITE_TEXT_ALIGNMENT ta_mt = fmt_meta->GetTextAlignment ();
++		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
++		rt->DrawTextW (mt, (UINT32)wcslen (mt), fmt_meta,
++		               D2D1::RectF (mb.left - 4.f * dpi_scale, mb.bottom + 1.f * dpi_scale,
++		                            mb.right + 4.f * dpi_scale, mb.bottom + 14.f * dpi_scale),
++		               body);
++		fmt_meta->SetTextAlignment (ta_mt);
++	}
+ 
+ 	wchar_t db[48];
+ 	float db_v = (_gain <= 0.0001f) ? -96.f : (20.f * log10f (_gain));
+diff --git a/win_ardour/mixer_strip.h b/win_ardour/mixer_strip.h
+index 5fc2cd8f6e8..e7f76f34192 100644
+--- a/win_ardour/mixer_strip.h
++++ b/win_ardour/mixer_strip.h
+@@ -92,6 +92,9 @@ class MixerStrip
+ 	bool        meter_clipped () const { return _meter.clipped (); }
+ 	bool        hit_meter (float x, float y) const;
+ 	LevelMeter& meter () { return _meter; }
++	/** 0=Peak 1=K14 — badge near meter. */
++	void set_meter_type (int type_0_1);
++	int  meter_type () const { return _meter_type; }
+ 
+ 	bool hit_fader (float x, float y) const;
+ 	bool hit_label (float x, float y) const;
+@@ -129,6 +132,7 @@ class MixerStrip
+ 	D2D1_RECT_F _fx_param_track2;
+ 	D2D1_RECT_F _fx_param_track3;
+ 	LevelMeter  _meter;
++	int         _meter_type; /* 0=Peak 1=K14 */
+ 	float       _gain;
+ 	float       _pan;
+ 	float       _send;
+diff --git a/win_ardour/shell_window.cc b/win_ardour/shell_window.cc
+index 3fa1f56ccb5..3b13ed73693 100644
+--- a/win_ardour/shell_window.cc
++++ b/win_ardour/shell_window.cc
+@@ -215,6 +215,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
+                             unsigned period_frames,
+                             bool smoke_vst3,
+                             bool smoke_mute_solo,
++                            bool smoke_meter_type,
+                             bool smoke_pan,
+                             bool smoke_send,
+                             bool smoke_automation,
+@@ -625,6 +626,22 @@ ShellWindow::attach_engine (const std::string& backend_name,
+ 		std::fflush (stderr);
+ 	}
+ 
++	if (ok && smoke_meter_type && _engine.snapshot ().session_ok) {
++		if (!_engine.smoke_meter_type ()) {
++			_smoke_failed = true;
++		} else {
++			const int na = n_audio_lanes ();
++			for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
++				_mixers[i].set_meter_type (_engine.snapshot ().track_meter_type[i]);
++			}
++		}
++		std::fflush (stderr);
++	} else if (smoke_meter_type) {
++		std::fprintf (stderr, "airdour_win_shell: smoke-meter-type FAILED (no session)\n");
++		_smoke_failed = true;
++		std::fflush (stderr);
++	}
++
+ 	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
+ 		if (!_engine.smoke_pan ()) {
+ 			_smoke_failed = true;
+@@ -4800,18 +4817,32 @@ ShellWindow::on_mouse_down (LPARAM lparam)
+ 		return true;
+ 	}
+ 
+-	/* Click meter → clear peak-hold clip latch (PeakMeter::reset_max). */
++	/* Ctrl+click meter → Peak↔K14. Plain click (when clipped) → clear clip.
++	 * Shift+click meter point lives on tip #82. */
+ 	int meter_i = hit_mixer_meter (x, y);
+-	if (meter_i >= 0 && _mixers[meter_i].meter_clipped ()) {
+-		_mixers[meter_i].clear_meter_clip ();
+-		if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
+-		    && _engine.snapshot ().session_ok) {
+-			_engine.clear_track_meter_clip (meter_i);
++	if (meter_i >= 0) {
++		if ((GetKeyState (VK_CONTROL) & 0x8000) != 0
++		    && meter_i < EngineSnapshot::kMeters
++		    && _engine.is_linked () && _engine_snap.session_ok
++		    && !_mixers[meter_i].is_midi_strip ()) {
++			_engine.cycle_track_meter_type (meter_i);
+ 			_engine.poll ();
+ 			_engine_snap = _engine.snapshot ();
++			_mixers[meter_i].set_meter_type (_engine_snap.track_meter_type[meter_i]);
++			InvalidateRect (_hwnd, nullptr, FALSE);
++			return true;
++		}
++		if (_mixers[meter_i].meter_clipped ()) {
++			_mixers[meter_i].clear_meter_clip ();
++			if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
++			    && _engine.snapshot ().session_ok) {
++				_engine.clear_track_meter_clip (meter_i);
++				_engine.poll ();
++				_engine_snap = _engine.snapshot ();
++			}
++			InvalidateRect (_hwnd, nullptr, FALSE);
++			return true;
+ 		}
+-		InvalidateRect (_hwnd, nullptr, FALSE);
+-		return true;
+ 	}
+ 
+ 	int fxpi3 = hit_mixer_fx_param3 (x, y);
+@@ -5655,6 +5686,9 @@ ShellWindow::on_tick ()
+ 			peak = stub_meter_peak (i, dt);
+ 		}
+ 		_mixers[i].set_meter_peak (peak, clip);
++		if (i < EngineSnapshot::kMeters) {
++			_mixers[i].set_meter_type (_engine_snap.track_meter_type[i]);
++		}
+ 		_mixers[i].meter_tick (dt);
+ 	}
+ 	{
+@@ -6319,6 +6353,7 @@ ShellWindow::draw_help_overlay ()
+ 		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
+ 		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
+ 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
++		{ L"Ctrl+click meter", L"Cycle meter type Peak↔K14" },
+ 	};
+ 
+ 	float y = card.top + 40.f * _dpi_scale;
+diff --git a/win_ardour/shell_window.h b/win_ardour/shell_window.h
+index 4666254c4e9..1e6f196fa8d 100644
+--- a/win_ardour/shell_window.h
++++ b/win_ardour/shell_window.h
+@@ -82,6 +82,7 @@ class ShellWindow
+ 	                    unsigned period_frames = 0,
+ 	                    bool smoke_vst3 = false,
+ 	                    bool smoke_mute_solo = false,
++	                    bool smoke_meter_type = false,
+ 	                    bool smoke_pan = false,
+ 	                    bool smoke_send = false,
+ 	                    bool smoke_automation = false,

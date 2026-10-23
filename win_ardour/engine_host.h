@@ -262,6 +262,7 @@ struct EngineSnapshot {
 	bool         count_in_enabled; /* Session config count-in before record roll */
 	bool         click_enabled; /* RC Config clicking — audible metronome */
 	int          listen_mode; /* 0=Solo 1=PFL 2=AFL (RC solo-control-is-listen + listen-position) */
+	float        click_gain; /* Config click_gain linear coeff (1.0 = unity) */
 	int          audio_track_count; /* Session audio tracks (1..kMeters) */
 	int          midi_track_count; /* 0 or 1 in this shell */
 	static constexpr int kTrackNameLen = 32;
@@ -994,6 +995,12 @@ public:
 	 */
 	bool set_clicking (bool enable);
 	bool toggle_clicking ();
+	/**
+	 * Metronome level via Config click_gain + Session click Amp.
+	 * Cycle −12/−6/0/+6 dB (0.25/0.5/1/2). Alt+Shift+H / Shift+click Click.
+	 */
+	bool set_click_gain (float linear_0_to_4);
+	bool cycle_click_gain ();
 
 	/** Count audio regions on a track playlist (smoke / diagnostics). */
 	int track_region_count (int track) const;
@@ -1280,6 +1287,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-click. Does not roll transport.
 	 */
 	bool smoke_click ();
+	/** Cycle click gain 0.25→0.5→1→2→0.25. For --smoke-click-gain. */
+	bool smoke_click_gain ();
 
 	/** Create one more Audio track (up to kMeters). Aux send attached. */
 	bool add_audio_track ();

@@ -1,0 +1,497 @@
+﻿From a6d2b03102d324d388e99bcb073229a9366311d4 Mon Sep 17 00:00:00 2001
+From: bezko <bezkom@gmail.com>
+Date: Tue, 20 Oct 2026 05:19:37 -0400
+Subject: [PATCH] Expose aux send pan azimuth (Shift+drag send).
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+InternalSend pannable pan_azimuth; P badge + knob on send track.
+--smoke-send-pan: L→R→C on Audio1→Aux (Dummy exit 0).
+---
+ win_ardour/engine_host.cc  | 136 +++++++++++++++++++++++++++++++++++++
+ win_ardour/engine_host.h   |  11 +++
+ win_ardour/main.cc         |   7 +-
+ win_ardour/mixer_strip.cc  |  47 ++++++++++++-
+ win_ardour/mixer_strip.h   |   9 +++
+ win_ardour/shell_window.cc |  55 +++++++++++++--
+ win_ardour/shell_window.h  |   2 +
+ 7 files changed, 257 insertions(+), 10 deletions(-)
+
+diff --git a/win_ardour/engine_host.cc b/win_ardour/engine_host.cc
+index 199e78c5406..9deca0dbc74 100644
+--- a/win_ardour/engine_host.cc
++++ b/win_ardour/engine_host.cc
+@@ -49,6 +49,8 @@
+ #include "ardour/route.h"
+ #include "ardour/internal_send.h"
+ #include "ardour/send.h"
++#include "ardour/panner_shell.h"
++#include "ardour/pannable.h"
+ #include "ardour/audio_backend.h"
+ #include "ardour/chan_count.h"
+ #include "ardour/location.h"
+@@ -598,6 +600,8 @@ EngineHost::EngineHost ()
+ 		_snap.track_pan[i] = 0.5f;
+ 		_snap.track_send[i] = 0.f;
+ 		_snap.track_send_ok[i] = false;
++		_snap.track_send_pan[i] = 0.5f;
++		_snap.track_send_pan_ok[i] = false;
+ 		_snap.track_gain[i] = _track_gain[i];
+ 		_snap.track_name[i][0] = L'\0';
+ 		_snap.track_in_group[i] = false;
+@@ -3433,6 +3437,8 @@ EngineHost::refresh_send_flags ()
+ 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+ 		_snap.track_send[i] = 0.f;
+ 		_snap.track_send_ok[i] = false;
++		_snap.track_send_pan[i] = 0.5f;
++		_snap.track_send_pan_ok[i] = false;
+ 	}
+ 	if (!_impl || !_impl->session) {
+ 		return;
+@@ -3454,6 +3460,12 @@ EngineHost::refresh_send_flags ()
+ 			_snap.track_send_ok[i] = true;
+ 			float g = (float)send->gain_control ()->get_value ();
+ 			_snap.track_send[i] = std::max (0.f, std::min (1.f, g));
++			if (send->panner_shell () && send->panner_shell ()->pannable ()
++			    && send->panner_shell ()->pannable ()->pan_azimuth_control) {
++				_snap.track_send_pan_ok[i] = true;
++				_snap.track_send_pan[i] = (float)send->panner_shell ()
++					->pannable ()->pan_azimuth_control->get_value ();
++			}
+ 		}
+ 	} catch (...) {
+ 	}
+@@ -3608,6 +3620,107 @@ EngineHost::smoke_send ()
+ 	}
+ }
+ 
++bool
++EngineHost::set_track_send_pan (int track, float pan_0_1)
++{
++	pan_0_1 = std::max (0.f, std::min (1.f, pan_0_1));
++	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
++		return false;
++	}
++	if (!ensure_aux_sends ()) {
++		return false;
++	}
++	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track] || !_impl->aux_bus) {
++		return false;
++	}
++	try {
++		std::shared_ptr<Send> send =
++			_impl->tracks[track]->internal_send_for (_impl->aux_bus);
++		if (!send || !send->panner_shell () || !send->panner_shell ()->pannable ()
++		    || !send->panner_shell ()->pannable ()->pan_azimuth_control) {
++			std::fprintf (stderr, "airdour_win_shell: send pan missing on Audio %d\n",
++			              track + 1);
++			std::fflush (stderr);
++			return false;
++		}
++		std::shared_ptr<AutomationControl> pan =
++			send->panner_shell ()->pannable ()->pan_azimuth_control;
++		_impl->session->set_control (pan, (double)pan_0_1, Controllable::NoGroup);
++		wait_until ([&] () {
++			refresh_send_flags ();
++			return _snap.track_send_pan_ok[track]
++			    && std::fabs (_snap.track_send_pan[track] - pan_0_1) < 0.02f;
++		}, 300);
++		_snap.detail = L"track send pan set";
++		return _snap.track_send_pan_ok[track]
++		    && std::fabs (_snap.track_send_pan[track] - pan_0_1) < 0.02f;
++	} catch (...) {
++		return false;
++	}
++}
++
++float
++EngineHost::track_send_pan (int track) const
++{
++	if (track < 0 || track >= EngineSnapshot::kMeters) {
++		return 0.5f;
++	}
++	return _snap.track_send_pan[track];
++}
++
++bool
++EngineHost::smoke_send_pan ()
++{
++	if (!_impl || !_impl->session) {
++		_snap.detail = L"smoke-send-pan failed — no Session";
++		return false;
++	}
++	try {
++		if (!ensure_aux_sends () || !_snap.aux_bus_ok || !_snap.track_send_ok[0]) {
++			std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (no Aux/send)\n");
++			std::fflush (stderr);
++			return false;
++		}
++		refresh_send_flags ();
++		if (!_snap.track_send_pan_ok[0]) {
++			std::fprintf (stderr,
++			              "airdour_win_shell: smoke-send-pan FAILED "
++			              "(no send pan_azimuth — check panner DLLs)\n");
++			std::fflush (stderr);
++			return false;
++		}
++		if (!set_track_send_pan (0, 0.0f) || _snap.track_send_pan[0] > 0.05f) {
++			std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (L got=%.3f)\n",
++			              _snap.track_send_pan[0]);
++			std::fflush (stderr);
++			return false;
++		}
++		if (!set_track_send_pan (0, 1.0f) || _snap.track_send_pan[0] < 0.95f) {
++			std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (R got=%.3f)\n",
++			              _snap.track_send_pan[0]);
++			std::fflush (stderr);
++			return false;
++		}
++		if (!set_track_send_pan (0, 0.5f)
++		    || _snap.track_send_pan[0] < 0.45f || _snap.track_send_pan[0] > 0.55f) {
++			std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (C got=%.3f)\n",
++			              _snap.track_send_pan[0]);
++			std::fflush (stderr);
++			return false;
++		}
++		std::fprintf (stderr, "airdour_win_shell: smoke-send-pan ok (Audio1 send L→R→C)\n");
++		std::fflush (stderr);
++		_snap.detail = L"smoke-send-pan ok";
++		return true;
++	} catch (std::exception& e) {
++		std::fprintf (stderr, "airdour_win_shell: smoke-send-pan exception: %s\n", e.what ());
++		std::fflush (stderr);
++		return false;
++	} catch (...) {
++		return false;
++	}
++}
++
+ bool
+ EngineHost::ensure_track_gain_automation (int track)
+ {
+@@ -17565,6 +17678,8 @@ EngineHost::EngineHost ()
+ 		_snap.track_frozen[i] = false;
+ 		_snap.track_send[i] = 0.f;
+ 		_snap.track_send_ok[i] = false;
++		_snap.track_send_pan[i] = 0.5f;
++		_snap.track_send_pan_ok[i] = false;
+ 		_snap.track_gain[i] = _track_gain[i];
+ 		_snap.track_name[i][0] = L'\0';
+ 		_snap.track_in_group[i] = false;
+@@ -18265,6 +18380,27 @@ EngineHost::smoke_send ()
+ 	return false;
+ }
+ 
++bool
++EngineHost::set_track_send_pan (int track, float pan_0_1)
++{
++	(void)track;
++	(void)pan_0_1;
++	return false;
++}
++
++float
++EngineHost::track_send_pan (int track) const
++{
++	(void)track;
++	return 0.5f;
++}
++
++bool
++EngineHost::smoke_send_pan ()
++{
++	return false;
++}
++
+ bool
+ EngineHost::ensure_track_gain_automation (int track)
+ {
+diff --git a/win_ardour/engine_host.h b/win_ardour/engine_host.h
+index 26721a8b0ce..36b90e6fd79 100644
+--- a/win_ardour/engine_host.h
++++ b/win_ardour/engine_host.h
+@@ -177,6 +177,8 @@ struct EngineSnapshot {
+ 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
+ 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
+ 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
++	float        track_send_pan[kMeters]; /* send pan azimuth 0=L … 0.5=C … 1=R */
++	bool         track_send_pan_ok[kMeters]; /* send pan_azimuth_control present */
+ 	bool         aux_bus_ok; /* Session Aux audio bus exists */
+ 	bool         midi_muted;
+ 	bool         midi_soloed;
+@@ -374,6 +376,15 @@ class EngineHost
+ 	/** Send 0 → 0.75 → 0.25 on Audio 1. For --smoke-send. */
+ 	bool smoke_send ();
+ 
++	/**
++	 * Aux send pan azimuth 0=L … 0.5=C … 1=R via Send pannable.
++	 * Shift+drag send.
++	 */
++	bool  set_track_send_pan (int track, float pan_0_1);
++	float track_send_pan (int track) const;
++	/** L → R → C on Audio 1 send. For --smoke-send-pan. */
++	bool smoke_send_pan ();
++
+ 	/**
+ 	 * Track fader AutomationList (GainAutomation). Enable Play, write points,
+ 	 * sample curve for Editor automation lane.
+diff --git a/win_ardour/main.cc b/win_ardour/main.cc
+index 64efdc48ce3..4b913b5152d 100644
+--- a/win_ardour/main.cc
++++ b/win_ardour/main.cc
+@@ -16,7 +16,8 @@
+  *                         [--smoke-midi-bend] [--smoke-midi-pressure]
+  *                         [--smoke-plugin]
+  *                         [--smoke-perf] [--smoke-vst3] [--smoke-mute-solo]
+- *                         [--smoke-pan] [--smoke-send] [--smoke-automation]
++ *                         [--smoke-pan] [--smoke-send] [--smoke-send-pan]
++ *                         [--smoke-automation]
+  *                         [--smoke-edit] [--smoke-snap] [--smoke-punch]
+  *                         [--smoke-tempo] [--smoke-click] [--smoke-tracks]
+  *                         [--smoke-rename] [--smoke-group] [--smoke-monitor]
+@@ -141,6 +142,7 @@ wmain (int argc, wchar_t** argv)
+ 	bool smoke_mute_solo = parse_flag (argc, argv, L"--smoke-mute-solo");
+ 	bool smoke_pan = parse_flag (argc, argv, L"--smoke-pan");
+ 	bool smoke_send = parse_flag (argc, argv, L"--smoke-send");
++	bool smoke_send_pan = parse_flag (argc, argv, L"--smoke-send-pan");
+ 	bool smoke_automation = parse_flag (argc, argv, L"--smoke-automation");
+ 	bool smoke_edit = parse_flag (argc, argv, L"--smoke-edit");
+ 	bool smoke_snap = parse_flag (argc, argv, L"--smoke-snap");
+@@ -211,7 +213,8 @@ wmain (int argc, wchar_t** argv)
+ 		                         smoke_loop, smoke_midi, smoke_midi_edit,
+ 		                         smoke_plugin, smoke_perf, session_path, period,
+ 		                         smoke_vst3, smoke_mute_solo, smoke_pan, smoke_send,
+-		                         smoke_automation, smoke_edit, smoke_snap, smoke_punch,
++		                         smoke_send_pan, smoke_automation, smoke_edit, smoke_snap,
++		                         smoke_punch,
+ 		                         smoke_tempo, smoke_click, smoke_tracks,
+ 		                         smoke_rename, smoke_group, smoke_monitor,
+ 		                         smoke_locate, smoke_zoom, smoke_history,
+diff --git a/win_ardour/mixer_strip.cc b/win_ardour/mixer_strip.cc
+index 5dd3788c065..b7c0366e0b2 100644
+--- a/win_ardour/mixer_strip.cc
++++ b/win_ardour/mixer_strip.cc
+@@ -35,6 +35,8 @@ MixerStrip::MixerStrip ()
+ 	, _gain (0.85f)
+ 	, _pan (0.5f)
+ 	, _send (0.f)
++	, _send_pan (0.5f)
++	, _send_pan_ok (false)
+ 	, _fx_param (0.3f)
+ 	, _fx_param2 (0.16f)
+ 	, _fx_param3 (0.5f)
+@@ -123,6 +125,12 @@ MixerStrip::set_send (float send_0_1)
+ 	_send = std::max (0.f, std::min (1.f, send_0_1));
+ }
+ 
++void
++MixerStrip::set_send_pan (float pan_0_1)
++{
++	_send_pan = std::max (0.f, std::min (1.f, pan_0_1));
++}
++
+ void
+ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
+ {
+@@ -320,6 +328,25 @@ MixerStrip::drag_send_to (float x)
+ 	return true;
+ }
+ 
++bool
++MixerStrip::drag_send_pan_to (float x)
++{
++	if (_midi_strip || !_send_pan_ok) {
++		return false;
++	}
++	float w = _send_track.right - _send_track.left;
++	if (w < 1.f) {
++		return false;
++	}
++	float t = (x - _send_track.left) / w;
++	float v = std::max (0.f, std::min (1.f, t));
++	if (v == _send_pan) {
++		return false;
++	}
++	_send_pan = v;
++	return true;
++}
++
+ bool
+ MixerStrip::hit_fx (float x, float y) const
+ {
+@@ -522,7 +549,7 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
+ 			D2D1::Point2F (mid_x, _pan_track.bottom),
+ 			body, 1.f);
+ 
+-		/* Aux send level → Aux bus */
++		/* Aux send level → Aux bus; pan knob when send panner present. */
+ 		rt->FillRectangle (_send_track, edge);
+ 		{
+ 			float sw = _send_track.right - _send_track.left;
+@@ -532,6 +559,24 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
+ 				D2D1::RectF (_send_track.left, _send_track.top, fill_r, _send_track.bottom),
+ 				accent);
+ 			accent->SetOpacity (1.f);
++			if (_send_pan_ok) {
++				float kn_cx = _send_track.left + sw * _send_pan;
++				float kn_w = 6.f * dpi_scale;
++				rt->FillRectangle (
++					D2D1::RectF (kn_cx - kn_w * 0.5f, _send_track.top,
++					             kn_cx + kn_w * 0.5f, _send_track.bottom),
++					body);
++				DWRITE_TEXT_ALIGNMENT ta_p = fmt_meta->GetTextAlignment ();
++				fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_TRAILING);
++				rt->DrawTextW (
++					L"P", 1, fmt_meta,
++					D2D1::RectF (_send_track.right - 12.f * dpi_scale,
++					             _send_track.top - 1.f * dpi_scale,
++					             _send_track.right + 2.f * dpi_scale,
++					             _send_track.bottom + 1.f * dpi_scale),
++					body);
++				fmt_meta->SetTextAlignment (ta_p);
++			}
+ 		}
+ 
+ 		const bool fx_on = _fx_label[0] != L'\0';
+diff --git a/win_ardour/mixer_strip.h b/win_ardour/mixer_strip.h
+index 5fc2cd8f6e8..34e36d16015 100644
+--- a/win_ardour/mixer_strip.h
++++ b/win_ardour/mixer_strip.h
+@@ -59,6 +59,13 @@ class MixerStrip
+ 	bool  hit_send (float x, float y) const;
+ 	bool  drag_send_to (float x);
+ 
++	/** Aux send pan azimuth 0..1 when send panner present. Shift+drag send. */
++	void  set_send_pan (float pan_0_1);
++	float send_pan () const { return _send_pan; }
++	void  set_send_pan_ok (bool ok) { _send_pan_ok = ok; }
++	bool  send_pan_ok () const { return _send_pan_ok; }
++	bool  drag_send_pan_to (float x);
++
+ 	/** MIDI strip: hide rec-arm / FX / pan / send chrome; keep M/S + fader + meter. */
+ 	void set_midi_strip (bool midi) { _midi_strip = midi; }
+ 	bool is_midi_strip () const { return _midi_strip; }
+@@ -132,6 +139,8 @@ class MixerStrip
+ 	float       _gain;
+ 	float       _pan;
+ 	float       _send;
++	float       _send_pan;
++	bool        _send_pan_ok;
+ 	float       _fx_param;
+ 	float       _fx_param2;
+ 	float       _fx_param3;
+diff --git a/win_ardour/shell_window.cc b/win_ardour/shell_window.cc
+index 3fa1f56ccb5..10a36f0e3e6 100644
+--- a/win_ardour/shell_window.cc
++++ b/win_ardour/shell_window.cc
+@@ -217,6 +217,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
+                             bool smoke_mute_solo,
+                             bool smoke_pan,
+                             bool smoke_send,
++                            bool smoke_send_pan,
+                             bool smoke_automation,
+                             bool smoke_edit,
+                             bool smoke_snap,
+@@ -651,6 +652,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
+ 		std::fflush (stderr);
+ 	}
+ 
++	if (ok && smoke_send_pan && _engine.snapshot ().session_ok) {
++		if (!_engine.smoke_send_pan ()) {
++			_smoke_failed = true;
++		} else {
++			sync_mixer_send_from_engine ();
++		}
++		std::fflush (stderr);
++	} else if (smoke_send_pan) {
++		std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (no session)\n");
++		_smoke_failed = true;
++		std::fflush (stderr);
++	}
++
+ 	if (ok && smoke_automation && _engine.snapshot ().session_ok) {
+ 		if (!_engine.smoke_automation ()) {
+ 			_smoke_failed = true;
+@@ -1228,6 +1242,8 @@ ShellWindow::sync_mixer_send_from_engine ()
+ 	const int na = n_audio_lanes ();
+ 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
+ 		_mixers[i].set_send (_engine_snap.track_send[i]);
++		_mixers[i].set_send_pan (_engine_snap.track_send_pan[i]);
++		_mixers[i].set_send_pan_ok (_engine_snap.track_send_pan_ok[i]);
+ 	}
+ }
+ 
+@@ -4786,13 +4802,26 @@ ShellWindow::on_mouse_down (LPARAM lparam)
+ 
+ 	int send_i = hit_mixer_send (x, y);
+ 	if (send_i >= 0) {
+-		_drag = DragMode::Send;
+-		_drag_index = send_i;
+-		if (_mixers[send_i].drag_send_to (x)) {
+-			_engine.set_track_send (send_i, _mixers[send_i].send ());
+-			_engine.poll ();
+-			_engine_snap = _engine.snapshot ();
+-			sync_mixer_send_from_engine ();
++		const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
++		if (shift && _mixers[send_i].send_pan_ok ()) {
++			/* Shift+drag send → aux send pan azimuth. */
++			_drag = DragMode::SendPan;
++			_drag_index = send_i;
++			if (_mixers[send_i].drag_send_pan_to (x)) {
++				_engine.set_track_send_pan (send_i, _mixers[send_i].send_pan ());
++				_engine.poll ();
++				_engine_snap = _engine.snapshot ();
++				sync_mixer_send_from_engine ();
++			}
++		} else {
++			_drag = DragMode::Send;
++			_drag_index = send_i;
++			if (_mixers[send_i].drag_send_to (x)) {
++				_engine.set_track_send (send_i, _mixers[send_i].send ());
++				_engine.poll ();
++				_engine_snap = _engine.snapshot ();
++				sync_mixer_send_from_engine ();
++			}
+ 		}
+ 		SetCapture (_hwnd);
+ 		SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
+@@ -5167,6 +5196,18 @@ ShellWindow::on_mouse_move (LPARAM lparam)
+ 		return true;
+ 	}
+ 
++	if (_drag == DragMode::SendPan && _drag_index >= 0 && _drag_index < kTracks) {
++		if (_mixers[_drag_index].drag_send_pan_to (x)) {
++			_engine.set_track_send_pan (
++				_drag_index, _mixers[_drag_index].send_pan ());
++			_engine.poll ();
++			_engine_snap = _engine.snapshot ();
++			sync_mixer_send_from_engine ();
++			InvalidateRect (_hwnd, nullptr, FALSE);
++		}
++		return true;
++	}
++
+ 	if (_drag == DragMode::AutoWrite) {
+ 		write_automation_at (x, y);
+ 		InvalidateRect (_hwnd, nullptr, FALSE);
+diff --git a/win_ardour/shell_window.h b/win_ardour/shell_window.h
+index 4666254c4e9..39504026e94 100644
+--- a/win_ardour/shell_window.h
++++ b/win_ardour/shell_window.h
+@@ -84,6 +84,7 @@ class ShellWindow
+ 	                    bool smoke_mute_solo = false,
+ 	                    bool smoke_pan = false,
+ 	                    bool smoke_send = false,
++	                    bool smoke_send_pan = false,
+ 	                    bool smoke_automation = false,
+ 	                    bool smoke_edit = false,
+ 	                    bool smoke_snap = false,
+@@ -143,6 +144,7 @@ class ShellWindow
+ 		FxParam3, /* drag Mixer FX param 3 (EQ High) */
+ 		Pan, /* drag Mixer pan azimuth */
+ 		Send, /* drag Mixer aux send level */
++		SendPan, /* Shift+drag Mixer aux send → pan azimuth */
+ 		AutoWrite, /* click/drag Editor automation lane */
+ 		MidiCcWrite, /* click/drag MIDI CC7 automation lane */
+ 		FadeIn, /* drag selection fade-in handle */

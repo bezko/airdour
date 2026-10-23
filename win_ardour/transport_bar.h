@@ -138,6 +138,9 @@ public:
 
 	void set_click_enabled (bool on) { _click_enabled = on; }
 	bool click_enabled () const { return _click_enabled; }
+	/** Linear click gain (1.0 = unity); used for Click button caption. */
+	void set_click_gain (float g) { _click_gain = g; }
+	float click_gain () const { return _click_gain; }
 
 	void set_tempo_bpm (float bpm) { _tempo_bpm = bpm; }
 	float tempo_bpm () const { return _tempo_bpm; }
@@ -275,6 +278,7 @@ private:
 	bool        _freeze_active;
 	bool        _count_in_enabled;
 	bool        _click_enabled;
+	float       _click_gain;
 	bool        _group_active;
 	bool        _group_relative;
 	bool        _spectrum_enabled;

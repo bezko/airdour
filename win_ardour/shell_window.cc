@@ -1230,6 +1230,20 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_tracks && engine_session_ok ()) {
+	if (ok && has_smoke ("click-gain") && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_click_gain ()) {
+			_smoke_failed = true;
+		} else {
+			sync_transport_tempo_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("click-gain")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-click-gain FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_tracks && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_tracks ()) {
 			_smoke_failed = true;
 		} else {
@@ -1848,6 +1862,7 @@ ShellWindow::sync_transport_tempo_from_engine ()
 	_transport.set_tempo_bpm (_engine_snap.tempo_bpm);
 	_transport.set_count_in_enabled (_engine_snap.count_in_enabled);
 	_transport.set_click_enabled (_engine_snap.click_enabled);
+	_transport.set_click_gain (_engine_snap.click_gain);
 }
 
 void
@@ -4032,6 +4047,19 @@ ShellWindow::do_toggle_count_in ()
 		return;
 	}
 	_engine.toggle_count_in ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_transport_tempo_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_cycle_click_gain ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	_engine.cycle_click_gain ();
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_transport_tempo_from_engine ();
@@ -6385,6 +6413,13 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
 		           && !(GetKeyState (VK_MENU) & 0x8000)
 		           && (wparam == 'K' || wparam == 'k')) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && (GetKeyState (VK_SHIFT) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'H' || wparam == 'h')) {
+			/* Alt+Shift+H — cycle metronome click gain. */
+			do_cycle_click_gain ();
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'K' || wparam == 'k')) {
 			do_toggle_click ();
 		} else if (wparam == VK_OEM_MINUS || wparam == VK_SUBTRACT) {
 			do_nudge_tempo (-1.f);
@@ -7273,7 +7308,12 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 	if (th == TransportHit::Click) {
-		do_toggle_click ();
+		if (GetKeyState (VK_SHIFT) & 0x8000) {
+			/* Shift+click Click → cycle metronome level −12/−6/0/+6. */
+			do_cycle_click_gain ();
+		} else {
+			do_toggle_click ();
+		}
 		return true;
 	}
 	if (th == TransportHit::TempoDown) {
@@ -9407,6 +9447,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+M", L"Clear all mutes (audio + MIDI)" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"Alt+Shift+K / Boost", L"Cycle monitor solo boost 0/+3/+6 dB" },
+		{ L"Alt+Shift+H / Shift+click Click", L"Cycle click gain −12/−6/0/+6 dB" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"+A / Shift+click +A", L"Add mono audio · stereo Equal-Power" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },

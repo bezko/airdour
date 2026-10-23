@@ -1,0 +1,577 @@
+﻿From 6426f264be5aeee4e2ec27311ad6e829faa81a37 Mon Sep 17 00:00:00 2001
+From: bezko <bezkom@gmail.com>
+Date: Tue, 20 Oct 2026 05:06:18 -0400
+Subject: [PATCH] Expose strip stereo pan width (Shift+drag pan).
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Equal-Power stereo tracks get pan_width_control (−1..+1); W badge + width band.
+--smoke-pan-width: temp stereo full→0→full (Dummy exit 0).
+---
+ win_ardour/engine_host.cc  | 208 +++++++++++++++++++++++++++++++++++++
+ win_ardour/engine_host.h   |  11 ++
+ win_ardour/main.cc         |   7 +-
+ win_ardour/mixer_strip.cc  |  55 +++++++++-
+ win_ardour/mixer_strip.h   |  12 +++
+ win_ardour/shell_window.cc |  55 ++++++++--
+ win_ardour/shell_window.h  |   2 +
+ 7 files changed, 339 insertions(+), 11 deletions(-)
+
+diff --git a/win_ardour/engine_host.cc b/win_ardour/engine_host.cc
+index 199e78c5406..2a849b17eec 100644
+--- a/win_ardour/engine_host.cc
++++ b/win_ardour/engine_host.cc
+@@ -61,6 +61,7 @@
+ #include "ardour/mute_control.h"
+ #include "ardour/solo_control.h"
+ #include "ardour/gain_control.h"
++#include "ardour/panner_shell.h"
+ #include "ardour/plugin.h"
+ #include "ardour/plugin_insert.h"
+ #include "ardour/plugin_manager.h"
+@@ -596,6 +597,8 @@ EngineHost::EngineHost ()
+ 		_snap.track_muted[i] = false;
+ 		_snap.track_soloed[i] = false;
+ 		_snap.track_pan[i] = 0.5f;
++		_snap.track_pan_width[i] = 1.f;
++		_snap.track_pan_width_ok[i] = false;
+ 		_snap.track_send[i] = 0.f;
+ 		_snap.track_send_ok[i] = false;
+ 		_snap.track_gain[i] = _track_gain[i];
+@@ -3312,6 +3315,8 @@ EngineHost::refresh_pan_flags ()
+ {
+ 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+ 		_snap.track_pan[i] = 0.5f;
++		_snap.track_pan_width[i] = 1.f;
++		_snap.track_pan_width_ok[i] = false;
+ 	}
+ 	if (!_impl) {
+ 		return;
+@@ -3324,6 +3329,13 @@ EngineHost::refresh_pan_flags ()
+ 				if (pan) {
+ 					_snap.track_pan[i] = (float)pan->get_value ();
+ 				}
++				std::shared_ptr<AutomationControl> width =
++					_impl->tracks[i]->pan_width_control ();
++				if (width) {
++					_snap.track_pan_width_ok[i] = true;
++					float w = (float)width->get_value ();
++					_snap.track_pan_width[i] = std::max (-1.f, std::min (1.f, w));
++				}
+ 			}
+ 		}
+ 	} catch (...) {
+@@ -3426,6 +3438,181 @@ EngineHost::smoke_pan ()
+ 	}
+ }
+ 
++bool
++EngineHost::set_track_pan_width (int track, float width_m1_to_1)
++{
++	width_m1_to_1 = std::max (-1.f, std::min (1.f, width_m1_to_1));
++	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
++		return false;
++	}
++	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
++		return false;
++	}
++	try {
++		std::shared_ptr<AutomationControl> width =
++			_impl->tracks[track]->pan_width_control ();
++		if (!width) {
++			std::fprintf (stderr,
++			              "airdour_win_shell: pan width missing on Audio %d "
++			              "(need stereo 2in2out panner)\n",
++			              track + 1);
++			std::fflush (stderr);
++			return false;
++		}
++		_impl->session->set_control (width, (double)width_m1_to_1, Controllable::NoGroup);
++		wait_until ([&] () {
++			refresh_pan_flags ();
++			return _snap.track_pan_width_ok[track]
++			    && std::fabs (_snap.track_pan_width[track] - width_m1_to_1) < 0.05f;
++		}, 300);
++		_snap.detail = L"track pan width set";
++		return _snap.track_pan_width_ok[track]
++		    && std::fabs (_snap.track_pan_width[track] - width_m1_to_1) < 0.05f;
++	} catch (...) {
++		return false;
++	}
++}
++
++float
++EngineHost::track_pan_width (int track) const
++{
++	if (track < 0 || track >= EngineSnapshot::kMeters) {
++		return 1.f;
++	}
++	return _snap.track_pan_width[track];
++}
++
++bool
++EngineHost::smoke_pan_width ()
++{
++	if (!_impl || !_impl->session) {
++		_snap.detail = L"smoke-pan-width failed — no Session";
++		return false;
++	}
++	try {
++		collect_tracks ();
++		refresh_pan_flags ();
++
++		/* Default shell tracks are mono→stereo (1in2out) — no width. Spin up a
++		 * temporary stereo 2in2out track so pan_width_control is live. */
++		bool created_stereo = false;
++		int width_track = -1;
++		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
++			if (_snap.track_pan_width_ok[i]) {
++				width_track = i;
++				break;
++			}
++		}
++		if (width_track < 0) {
++			const int n0 = _snap.audio_track_count;
++			if (n0 >= EngineSnapshot::kMeters) {
++				if (!remove_audio_track (n0 - 1, true)) {
++					std::fprintf (stderr,
++					              "airdour_win_shell: smoke-pan-width FAILED "
++					              "(no room for stereo)\n");
++					std::fflush (stderr);
++					return false;
++				}
++			}
++			AudioTrackList created = _impl->session->new_audio_track (
++				2, 2,
++				std::shared_ptr<RouteGroup> (),
++				1u,
++				"Stereo",
++				PresentationInfo::max_order);
++			if (created.empty () || !created.front ()) {
++				std::fprintf (stderr,
++				              "airdour_win_shell: smoke-pan-width FAILED "
++				              "(stereo create)\n");
++				std::fflush (stderr);
++				return false;
++			}
++			/* Default 2in2 selection prefers Stereo Balance (no width). Force
++			 * Equal Power Stereo so pan_width_control is automatable. */
++			if (created.front ()->panner_shell ()) {
++				created.front ()->panner_shell ()->select_panner_by_uri (
++					"http://ardour.org/plugin/panner_2in2out");
++			}
++			created_stereo = true;
++			collect_tracks ();
++			refresh_pan_flags ();
++			for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
++				if (_snap.track_pan_width_ok[i]) {
++					width_track = i;
++					break;
++				}
++			}
++		}
++		if (width_track < 0 || !_snap.track_pan_width_ok[width_track]) {
++			std::fprintf (stderr,
++			              "airdour_win_shell: smoke-pan-width FAILED "
++			              "(no pan_width — check 2in2out panner DLL)\n");
++			std::fflush (stderr);
++			if (created_stereo) {
++				remove_audio_track (_snap.audio_track_count - 1, true);
++				add_audio_track ();
++			}
++			return false;
++		}
++
++		if (!set_track_pan_width (width_track, 1.0f)
++		    || std::fabs (_snap.track_pan_width[width_track] - 1.f) > 0.05f) {
++			std::fprintf (stderr,
++			              "airdour_win_shell: smoke-pan-width FAILED (full got=%.3f)\n",
++			              _snap.track_pan_width[width_track]);
++			std::fflush (stderr);
++			if (created_stereo) {
++				remove_audio_track (width_track, true);
++				add_audio_track ();
++			}
++			return false;
++		}
++		if (!set_track_pan_width (width_track, 0.0f)
++		    || std::fabs (_snap.track_pan_width[width_track]) > 0.05f) {
++			std::fprintf (stderr,
++			              "airdour_win_shell: smoke-pan-width FAILED (mono got=%.3f)\n",
++			              _snap.track_pan_width[width_track]);
++			std::fflush (stderr);
++			if (created_stereo) {
++				remove_audio_track (width_track, true);
++				add_audio_track ();
++			}
++			return false;
++		}
++		if (!set_track_pan_width (width_track, 1.0f)
++		    || std::fabs (_snap.track_pan_width[width_track] - 1.f) > 0.05f) {
++			std::fprintf (stderr,
++			              "airdour_win_shell: smoke-pan-width FAILED (restore full got=%.3f)\n",
++			              _snap.track_pan_width[width_track]);
++			std::fflush (stderr);
++			if (created_stereo) {
++				remove_audio_track (width_track, true);
++				add_audio_track ();
++			}
++			return false;
++		}
++
++		if (created_stereo) {
++			remove_audio_track (width_track, true);
++			add_audio_track ();
++			collect_tracks ();
++			refresh_pan_flags ();
++		}
++
++		std::fprintf (stderr,
++		              "airdour_win_shell: smoke-pan-width ok (Stereo full→0→full)\n");
++		std::fflush (stderr);
++		_snap.detail = L"smoke-pan-width ok";
++		return true;
++	} catch (std::exception& e) {
++		std::fprintf (stderr, "airdour_win_shell: smoke-pan-width exception: %s\n", e.what ());
++		std::fflush (stderr);
++		return false;
++	} catch (...) {
++		return false;
++	}
++}
++
+ void
+ EngineHost::refresh_send_flags ()
+ {
+@@ -18233,6 +18420,27 @@ EngineHost::smoke_pan ()
+ 	return false;
+ }
+ 
++bool
++EngineHost::set_track_pan_width (int track, float width_m1_to_1)
++{
++	(void)track;
++	(void)width_m1_to_1;
++	return false;
++}
++
++float
++EngineHost::track_pan_width (int track) const
++{
++	(void)track;
++	return 1.f;
++}
++
++bool
++EngineHost::smoke_pan_width ()
++{
++	return false;
++}
++
+ void
+ EngineHost::refresh_send_flags ()
+ {
+diff --git a/win_ardour/engine_host.h b/win_ardour/engine_host.h
+index 26721a8b0ce..07b718d73b9 100644
+--- a/win_ardour/engine_host.h
++++ b/win_ardour/engine_host.h
+@@ -175,6 +175,8 @@ struct EngineSnapshot {
+ 	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
+ 	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
+ 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
++	float        track_pan_width[kMeters]; /* stereo width −1..+1 (1=full) */
++	bool         track_pan_width_ok[kMeters]; /* pan_width_control present */
+ 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
+ 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
+ 	bool         aux_bus_ok; /* Session Aux audio bus exists */
+@@ -367,6 +369,15 @@ class EngineHost
+ 	/** Pan L → C → R on Audio 1. For --smoke-pan. */
+ 	bool smoke_pan ();
+ 
++	/**
++	 * Stereo pan width via Route::pan_width_control (−1..+1; 1=full stereo).
++	 * Shift+drag pan. UI may pass 0..1 iface → mapped as 2v−1.
++	 */
++	bool  set_track_pan_width (int track, float width_m1_to_1);
++	float track_pan_width (int track) const;
++	/** Full → 0 → full. For --smoke-pan-width. */
++	bool smoke_pan_width ();
++
+ 	/** Aux send level 0..1 (gain coeff) via InternalSend → Aux bus. */
+ 	bool  set_track_send (int track, float send_0_1);
+ 	float track_send (int track) const;
+diff --git a/win_ardour/main.cc b/win_ardour/main.cc
+index 64efdc48ce3..0c7bf368341 100644
+--- a/win_ardour/main.cc
++++ b/win_ardour/main.cc
+@@ -16,7 +16,8 @@
+  *                         [--smoke-midi-bend] [--smoke-midi-pressure]
+  *                         [--smoke-plugin]
+  *                         [--smoke-perf] [--smoke-vst3] [--smoke-mute-solo]
+- *                         [--smoke-pan] [--smoke-send] [--smoke-automation]
++ *                         [--smoke-pan] [--smoke-pan-width] [--smoke-send]
++ *                         [--smoke-automation]
+  *                         [--smoke-edit] [--smoke-snap] [--smoke-punch]
+  *                         [--smoke-tempo] [--smoke-click] [--smoke-tracks]
+  *                         [--smoke-rename] [--smoke-group] [--smoke-monitor]
+@@ -140,6 +141,7 @@ wmain (int argc, wchar_t** argv)
+ 	bool smoke_vst3 = parse_flag (argc, argv, L"--smoke-vst3");
+ 	bool smoke_mute_solo = parse_flag (argc, argv, L"--smoke-mute-solo");
+ 	bool smoke_pan = parse_flag (argc, argv, L"--smoke-pan");
++	bool smoke_pan_width = parse_flag (argc, argv, L"--smoke-pan-width");
+ 	bool smoke_send = parse_flag (argc, argv, L"--smoke-send");
+ 	bool smoke_automation = parse_flag (argc, argv, L"--smoke-automation");
+ 	bool smoke_edit = parse_flag (argc, argv, L"--smoke-edit");
+@@ -210,7 +212,8 @@ wmain (int argc, wchar_t** argv)
+ 		                         smoke_save_load, smoke_export, smoke_undo,
+ 		                         smoke_loop, smoke_midi, smoke_midi_edit,
+ 		                         smoke_plugin, smoke_perf, session_path, period,
+-		                         smoke_vst3, smoke_mute_solo, smoke_pan, smoke_send,
++		                         smoke_vst3, smoke_mute_solo, smoke_pan, smoke_pan_width,
++		                         smoke_send,
+ 		                         smoke_automation, smoke_edit, smoke_snap, smoke_punch,
+ 		                         smoke_tempo, smoke_click, smoke_tracks,
+ 		                         smoke_rename, smoke_group, smoke_monitor,
+diff --git a/win_ardour/mixer_strip.cc b/win_ardour/mixer_strip.cc
+index 5dd3788c065..f012f591984 100644
+--- a/win_ardour/mixer_strip.cc
++++ b/win_ardour/mixer_strip.cc
+@@ -34,6 +34,8 @@ MixerStrip::MixerStrip ()
+ 	, _fx_param_track3 ()
+ 	, _gain (0.85f)
+ 	, _pan (0.5f)
++	, _pan_width (1.f)
++	, _pan_width_ok (false)
+ 	, _send (0.f)
+ 	, _fx_param (0.3f)
+ 	, _fx_param2 (0.16f)
+@@ -117,6 +119,12 @@ MixerStrip::set_pan (float pan_0_1)
+ 	_pan = std::max (0.f, std::min (1.f, pan_0_1));
+ }
+ 
++void
++MixerStrip::set_pan_width (float width_m1_to_1)
++{
++	_pan_width = std::max (-1.f, std::min (1.f, width_m1_to_1));
++}
++
+ void
+ MixerStrip::set_send (float send_0_1)
+ {
+@@ -290,6 +298,27 @@ MixerStrip::drag_pan_to (float x)
+ 	return true;
+ }
+ 
++bool
++MixerStrip::drag_pan_width_to (float x)
++{
++	if (_midi_strip || !_pan_width_ok) {
++		return false;
++	}
++	float w = _pan_track.right - _pan_track.left;
++	if (w < 1.f) {
++		return false;
++	}
++	float t = (x - _pan_track.left) / w;
++	float iface = std::max (0.f, std::min (1.f, t));
++	/* ParameterDescriptor::from_interface PanWidth: 2v−1 */
++	float width = 2.f * iface - 1.f;
++	if (width == _pan_width) {
++		return false;
++	}
++	_pan_width = width;
++	return true;
++}
++
+ bool
+ MixerStrip::hit_send (float x, float y) const
+ {
+@@ -505,12 +534,21 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
+ 	}
+ 
+ 	if (!_midi_strip) {
+-		/* Pan azimuth track — L · C · R */
++		/* Pan azimuth track — L · C · R; stereo width band when available. */
+ 		rt->FillRectangle (_pan_track, edge);
+ 		float pw = _pan_track.right - _pan_track.left;
+ 		float kn_cx = _pan_track.left + pw * _pan;
++		if (_pan_width_ok) {
++			float half = std::fabs (_pan_width) * 0.5f * pw;
++			float band_l = std::max (_pan_track.left, kn_cx - half);
++			float band_r = std::min (_pan_track.right, kn_cx + half);
++			accent->SetOpacity (0.35f);
++			rt->FillRectangle (
++				D2D1::RectF (band_l, _pan_track.top, band_r, _pan_track.bottom),
++				accent);
++			accent->SetOpacity (1.f);
++		}
+ 		float kn_w = 8.f * dpi_scale;
+-		float kn_h = _pan_track.bottom - _pan_track.top;
+ 		D2D1_RECT_F kn = D2D1::RectF (
+ 			kn_cx - kn_w * 0.5f, _pan_track.top,
+ 			kn_cx + kn_w * 0.5f, _pan_track.bottom);
+@@ -521,6 +559,19 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
+ 			D2D1::Point2F (mid_x, _pan_track.top),
+ 			D2D1::Point2F (mid_x, _pan_track.bottom),
+ 			body, 1.f);
++		if (_pan_width_ok) {
++			/* Thin W badge — Shift+drag pan adjusts stereo width. */
++			DWRITE_TEXT_ALIGNMENT ta_w = fmt_meta->GetTextAlignment ();
++			fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_TRAILING);
++			rt->DrawTextW (
++				L"W", 1, fmt_meta,
++				D2D1::RectF (_pan_track.right - 14.f * dpi_scale,
++				             _pan_track.top - 1.f * dpi_scale,
++				             _pan_track.right + 2.f * dpi_scale,
++				             _pan_track.bottom + 1.f * dpi_scale),
++				body);
++			fmt_meta->SetTextAlignment (ta_w);
++		}
+ 
+ 		/* Aux send level → Aux bus */
+ 		rt->FillRectangle (_send_track, edge);
+diff --git a/win_ardour/mixer_strip.h b/win_ardour/mixer_strip.h
+index 5fc2cd8f6e8..a78b95013bb 100644
+--- a/win_ardour/mixer_strip.h
++++ b/win_ardour/mixer_strip.h
+@@ -53,6 +53,16 @@ class MixerStrip
+ 	bool  hit_pan (float x, float y) const;
+ 	bool  drag_pan_to (float x);
+ 
++	/**
++	 * Stereo pan width −1..+1 (1=full) when pan_width_control is present.
++	 * Shift+drag pan maps x as 0..1 iface → 2v−1.
++	 */
++	void  set_pan_width (float width_m1_to_1);
++	float pan_width () const { return _pan_width; }
++	void  set_pan_width_ok (bool ok) { _pan_width_ok = ok; }
++	bool  pan_width_ok () const { return _pan_width_ok; }
++	bool  drag_pan_width_to (float x);
++
+ 	/** Aux send level 0..1 (gain coeff) to session Aux bus (audio strips only). */
+ 	void  set_send (float send_0_1);
+ 	float send () const { return _send; }
+@@ -131,6 +141,8 @@ class MixerStrip
+ 	LevelMeter  _meter;
+ 	float       _gain;
+ 	float       _pan;
++	float       _pan_width; /* −1..+1; 1=full stereo */
++	bool        _pan_width_ok;
+ 	float       _send;
+ 	float       _fx_param;
+ 	float       _fx_param2;
+diff --git a/win_ardour/shell_window.cc b/win_ardour/shell_window.cc
+index 3fa1f56ccb5..b3c3d24eae1 100644
+--- a/win_ardour/shell_window.cc
++++ b/win_ardour/shell_window.cc
+@@ -216,6 +216,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
+                             bool smoke_vst3,
+                             bool smoke_mute_solo,
+                             bool smoke_pan,
++                            bool smoke_pan_width,
+                             bool smoke_send,
+                             bool smoke_automation,
+                             bool smoke_edit,
+@@ -638,6 +639,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
+ 		std::fflush (stderr);
+ 	}
+ 
++	if (ok && smoke_pan_width && _engine.snapshot ().session_ok) {
++		if (!_engine.smoke_pan_width ()) {
++			_smoke_failed = true;
++		} else {
++			sync_mixer_pan_from_engine ();
++		}
++		std::fflush (stderr);
++	} else if (smoke_pan_width) {
++		std::fprintf (stderr, "airdour_win_shell: smoke-pan-width FAILED (no session)\n");
++		_smoke_failed = true;
++		std::fflush (stderr);
++	}
++
+ 	if (ok && smoke_send && _engine.snapshot ().session_ok) {
+ 		if (!_engine.smoke_send ()) {
+ 			_smoke_failed = true;
+@@ -1218,6 +1232,8 @@ ShellWindow::sync_mixer_pan_from_engine ()
+ 	const int na = n_audio_lanes ();
+ 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
+ 		_mixers[i].set_pan (_engine_snap.track_pan[i]);
++		_mixers[i].set_pan_width (_engine_snap.track_pan_width[i]);
++		_mixers[i].set_pan_width_ok (_engine_snap.track_pan_width_ok[i]);
+ 	}
+ 	_transport.set_recording (_engine_snap.session_recording);
+ }
+@@ -4770,13 +4786,26 @@ ShellWindow::on_mouse_down (LPARAM lparam)
+ 
+ 	int pan_i = hit_mixer_pan (x, y);
+ 	if (pan_i >= 0) {
+-		_drag = DragMode::Pan;
+-		_drag_index = pan_i;
+-		if (_mixers[pan_i].drag_pan_to (x)) {
+-			_engine.set_track_pan (pan_i, _mixers[pan_i].pan ());
+-			_engine.poll ();
+-			_engine_snap = _engine.snapshot ();
+-			sync_mixer_pan_from_engine ();
++		const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
++		if (shift && _mixers[pan_i].pan_width_ok ()) {
++			/* Shift+drag pan → stereo width (−1..+1 via 0..1 iface). */
++			_drag = DragMode::PanWidth;
++			_drag_index = pan_i;
++			if (_mixers[pan_i].drag_pan_width_to (x)) {
++				_engine.set_track_pan_width (pan_i, _mixers[pan_i].pan_width ());
++				_engine.poll ();
++				_engine_snap = _engine.snapshot ();
++				sync_mixer_pan_from_engine ();
++			}
++		} else {
++			_drag = DragMode::Pan;
++			_drag_index = pan_i;
++			if (_mixers[pan_i].drag_pan_to (x)) {
++				_engine.set_track_pan (pan_i, _mixers[pan_i].pan ());
++				_engine.poll ();
++				_engine_snap = _engine.snapshot ();
++				sync_mixer_pan_from_engine ();
++			}
+ 		}
+ 		SetCapture (_hwnd);
+ 		SetCursor (LoadCursorW (nullptr, IDC_SIZEWE));
+@@ -5156,6 +5185,18 @@ ShellWindow::on_mouse_move (LPARAM lparam)
+ 		return true;
+ 	}
+ 
++	if (_drag == DragMode::PanWidth && _drag_index >= 0 && _drag_index < kTracks) {
++		if (_mixers[_drag_index].drag_pan_width_to (x)) {
++			_engine.set_track_pan_width (
++				_drag_index, _mixers[_drag_index].pan_width ());
++			_engine.poll ();
++			_engine_snap = _engine.snapshot ();
++			sync_mixer_pan_from_engine ();
++			InvalidateRect (_hwnd, nullptr, FALSE);
++		}
++		return true;
++	}
++
+ 	if (_drag == DragMode::Send && _drag_index >= 0 && _drag_index < kTracks) {
+ 		if (_mixers[_drag_index].drag_send_to (x)) {
+ 			_engine.set_track_send (_drag_index, _mixers[_drag_index].send ());
+diff --git a/win_ardour/shell_window.h b/win_ardour/shell_window.h
+index 4666254c4e9..ef1e2502b83 100644
+--- a/win_ardour/shell_window.h
++++ b/win_ardour/shell_window.h
+@@ -83,6 +83,7 @@ class ShellWindow
+ 	                    bool smoke_vst3 = false,
+ 	                    bool smoke_mute_solo = false,
+ 	                    bool smoke_pan = false,
++	                    bool smoke_pan_width = false,
+ 	                    bool smoke_send = false,
+ 	                    bool smoke_automation = false,
+ 	                    bool smoke_edit = false,
+@@ -142,6 +143,7 @@ class ShellWindow
+ 		FxParam2, /* drag Mixer FX param 2 (Comp ratio / EQ mid / Delay fb / Limiter release / Gate hold) */
+ 		FxParam3, /* drag Mixer FX param 3 (EQ High) */
+ 		Pan, /* drag Mixer pan azimuth */
++		PanWidth, /* Shift+drag Mixer pan → stereo width */
+ 		Send, /* drag Mixer aux send level */
+ 		AutoWrite, /* click/drag Editor automation lane */
+ 		MidiCcWrite, /* click/drag MIDI CC7 automation lane */
