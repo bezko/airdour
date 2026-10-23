@@ -259,6 +259,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_tempo,
                             bool smoke_click,
                             bool smoke_tracks,
+                            bool smoke_stereo_track,
                             bool smoke_rename,
                             bool smoke_group,
                             bool smoke_monitor,
@@ -1228,6 +1229,24 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
+	if (ok && smoke_stereo_track && engine_session_ok ()) {
+		if (!_engine.smoke_stereo_track ()) {
+			_smoke_failed = true;
+		} else {
+			sync_track_labels_from_engine ();
+			sync_mixer_gains_from_engine ();
+			sync_mixer_pan_from_engine ();
+			sync_mixer_send_from_engine ();
+			layout_panes ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_stereo_track) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-stereo-track FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && smoke_rename && engine_session_ok ()) {
 	if (ok && smoke_rename && engine_session_ok ()) {
 		if (!_engine.smoke_rename ()) {
 			_smoke_failed = true;
@@ -4023,7 +4042,12 @@ ShellWindow::do_add_audio_track ()
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
 	}
-	_engine.add_audio_track ();
+	/* Shift+click +A → stereo 2in2out Equal-Power (pan width capable). */
+	if (GetKeyState (VK_SHIFT) & 0x8000) {
+		_engine.add_stereo_audio_track ();
+	} else {
+		_engine.add_audio_track ();
+	}
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_track_labels_from_engine ();
@@ -9344,6 +9368,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"Alt+Shift+K / Boost", L"Cycle monitor solo boost 0/+3/+6 dB" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
+		{ L"+A / Shift+click +A", L"Add mono audio · stereo Equal-Power" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
 		{ L"Home / 0", L"Follow transport (reset view)" },
 		{ L"Shift+Home / End", L"Locate to selection start / end" },
@@ -9645,3 +9670,4 @@ ShellWindow::run_message_loop (unsigned timeout_secs)
 	_engine.stop ();
 	return (int)msg.wParam;
 }
+

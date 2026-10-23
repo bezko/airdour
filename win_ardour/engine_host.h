@@ -228,6 +228,7 @@ struct EngineSnapshot {
 	float        track_trim_norm[kMeters]; /* UI 0..1 (0.5 = unity / 0 dB) */
 	/** MonitorChoice: 0=Auto 1=Input 2=Disk (MonitorCue unused in shell). */
 	int          track_monitor_choice[kMeters];
+	bool         track_stereo[kMeters]; /* ≥2 audio inputs (Equal-Power width capable) */
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	/** Pan AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
 	int          track_pan_auto_state[kMeters];
@@ -1271,8 +1272,18 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 
 	/** Create one more Audio track (up to kMeters). Aux send attached. */
 	bool add_audio_track ();
+	/**
+	 * Create stereo Audio track (2in2out Equal-Power) so pan_width_control is live.
+	 * Shift+click +A.
+	 */
+	bool add_stereo_audio_track ();
 	/** Create MIDI track if missing (ensure_midi_track). */
 	bool add_midi_track ();
+	/**
+	 * Add stereo → assert 2in + pan_width → remove; restore mono count.
+	 * For --smoke-stereo-track.
+	 */
+	bool smoke_stereo_track ();
 	/**
 	 * Remove audio track at index. Keeps ≥1 audio.
 	 * If require_empty_or_selected: only when empty or currently selected.
@@ -1974,3 +1985,4 @@ private:
 	Impl* _impl;
 #endif
 };
+

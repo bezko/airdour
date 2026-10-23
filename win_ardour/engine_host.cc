@@ -49,6 +49,8 @@
 #include "ardour/route.h"
 #include "ardour/internal_send.h"
 #include "ardour/send.h"
+#include "ardour/panner_shell.h"
+#include "ardour/pannable.h"
 #include "ardour/audio_backend.h"
 #include "ardour/chan_count.h"
 #include "ardour/location.h"
@@ -635,6 +637,7 @@ EngineHost::EngineHost ()
 		_snap.track_trim[i] = 1.f;
 		_snap.track_trim_norm[i] = 0.5f;
 		_snap.track_monitor_choice[i] = 0;
+		_snap.track_stereo[i] = false;
 		_snap.track_pan[i] = 0.5f;
 		_snap.track_pan_auto_state[i] = 0;
 		_snap.track_send[i] = 0.f;
@@ -2110,6 +2113,10 @@ EngineHost::collect_tracks ()
 				_snap.track_gain[i] = (float)audio[i]->gain_control ()->get_value ();
 				_track_gain[i] = _snap.track_gain[i];
 			}
+			_snap.track_stereo[i] = audio[i]->n_inputs ().n_audio () >= 2;
+		}
+		for (int i = (int)audio.size (); i < EngineSnapshot::kMeters; ++i) {
+			_snap.track_stereo[i] = false;
 		}
 		_snap.audio_track_count = (int)_impl->tracks.size ();
 		/* Prefer existing midi_track if still in Session; else first MidiTrack. */
@@ -12319,6 +12326,66 @@ EngineHost::add_audio_track ()
 }
 
 bool
+EngineHost::add_stereo_audio_track ()
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	collect_tracks ();
+	if ((int)_impl->tracks.size () >= EngineSnapshot::kMeters) {
+		_snap.detail = L"add stereo — at max tracks";
+		return false;
+	}
+	try {
+		AudioTrackList created = _impl->session->new_audio_track (
+			2, 2,
+			std::shared_ptr<RouteGroup> (),
+			1u,
+			"Stereo",
+			PresentationInfo::max_order);
+		if (created.empty () || !created.front ()) {
+			_snap.detail = L"add stereo failed";
+			return false;
+		}
+		/* Default 2in2 prefers Stereo Balance (no width). Force Equal-Power. */
+		if (created.front ()->panner_shell ()) {
+			created.front ()->panner_shell ()->select_panner_by_uri (
+				"http://ardour.org/plugin/panner_2in2out");
+		}
+		size_t idx = _impl->tracks.size ();
+		if (idx < (size_t)EngineSnapshot::kMeters
+		    && created.front ()->gain_control ()) {
+			created.front ()->gain_control ()->set_value (
+				_track_gain[idx < (size_t)EngineSnapshot::kMeters ? idx : 0],
+				Controllable::NoGroup);
+		}
+		collect_tracks ();
+		ensure_aux_sends ();
+		refresh_region_flags ();
+		refresh_mute_solo_flags ();
+		refresh_pan_flags ();
+		refresh_send_flags ();
+		_snap.detail = L"stereo track added";
+		std::fprintf (stderr, "airdour_win_shell: add stereo → count=%d stereo=%d\n",
+		              _snap.audio_track_count,
+		              _snap.audio_track_count > 0
+		                  ? (int)_snap.track_stereo[_snap.audio_track_count - 1]
+		                  : 0);
+		std::fflush (stderr);
+		return _snap.audio_track_count > 0
+		       && _snap.track_stereo[_snap.audio_track_count - 1];
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: add_stereo_audio_track: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"add stereo failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"add stereo failed";
+		return false;
+	}
+}
+
+bool
 EngineHost::add_midi_track ()
 {
 	if (!ensure_midi_track ()) {
@@ -12506,6 +12573,109 @@ EngineHost::smoke_tracks ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-tracks exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_stereo_track ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-stereo-track failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		const int n0 = _snap.audio_track_count;
+		if (n0 < 1) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-stereo-track FAILED (no audio)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		bool removed_for_room = false;
+		if (n0 >= EngineSnapshot::kMeters) {
+			if (!remove_audio_track (n0 - 1, true)
+			    || _snap.audio_track_count != n0 - 1) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-stereo-track FAILED "
+				              "(no room → %d)\n",
+				              _snap.audio_track_count);
+				std::fflush (stderr);
+				return false;
+			}
+			removed_for_room = true;
+		}
+		if (!add_stereo_audio_track ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-stereo-track FAILED (add)\n");
+			std::fflush (stderr);
+			if (removed_for_room) {
+				add_audio_track ();
+			}
+			return false;
+		}
+		const int stereo_idx = _snap.audio_track_count - 1;
+		if (stereo_idx < 0 || !_snap.track_stereo[stereo_idx]) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-stereo-track FAILED "
+			              "(not stereo idx=%d)\n",
+			              stereo_idx);
+			std::fflush (stderr);
+			remove_audio_track (stereo_idx, true);
+			if (removed_for_room) {
+				add_audio_track ();
+			}
+			return false;
+		}
+		/* Equal-Power 2in2out exposes pan_width_control. */
+		if (stereo_idx >= (int)_impl->tracks.size () || !_impl->tracks[stereo_idx]
+		    || !_impl->tracks[stereo_idx]->pan_width_control ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-stereo-track FAILED "
+			              "(no pan_width — Equal-Power panner?)\n");
+			std::fflush (stderr);
+			remove_audio_track (stereo_idx, true);
+			if (removed_for_room) {
+				add_audio_track ();
+			}
+			return false;
+		}
+		if (!remove_audio_track (stereo_idx, true)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-stereo-track FAILED (remove)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (removed_for_room) {
+			if (!add_audio_track () || _snap.audio_track_count != n0) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-stereo-track FAILED "
+				              "(restore mono → %d)\n",
+				              _snap.audio_track_count);
+				std::fflush (stderr);
+				return false;
+			}
+		} else if (_snap.audio_track_count != n0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-stereo-track FAILED "
+			              "(count %d≠%d)\n",
+			              _snap.audio_track_count, n0);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-stereo-track ok "
+		              "(2in Equal-Power → remove → audio=%d)\n",
+		              _snap.audio_track_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-stereo-track ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-stereo-track exception: %s\n",
+		              e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -31065,6 +31235,12 @@ EngineHost::add_audio_track ()
 }
 
 bool
+EngineHost::add_stereo_audio_track ()
+{
+	return false;
+}
+
+bool
 EngineHost::add_midi_track ()
 {
 	return false;
@@ -31092,6 +31268,12 @@ EngineHost::remove_midi_track ()
 
 bool
 EngineHost::smoke_tracks ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_stereo_track ()
 {
 	return false;
 }
@@ -33409,4 +33591,5 @@ EngineHost::fill_track_waveform (int track,
 }
 
 #endif
+
 

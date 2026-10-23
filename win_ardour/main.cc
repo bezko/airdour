@@ -23,6 +23,7 @@
  *                         [--smoke-pan] [--smoke-send] [--smoke-automation]
  *                         [--smoke-edit] [--smoke-snap] [--smoke-punch]
  *                         [--smoke-tempo] [--smoke-click] [--smoke-tracks]
+ *                         [--smoke-stereo-track]
  *                         [--smoke-rename] [--smoke-group] [--smoke-monitor]
  *                         [--smoke-locate] [--smoke-zoom] [--smoke-history]
  *                         [--smoke-prefs] [--smoke-recent] [--smoke-recovery]
@@ -174,6 +175,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_tempo = parse_flag (argc, argv, L"--smoke-tempo");
 	bool smoke_click = parse_flag (argc, argv, L"--smoke-click");
 	bool smoke_tracks = parse_flag (argc, argv, L"--smoke-tracks");
+	bool smoke_stereo_track = parse_flag (argc, argv, L"--smoke-stereo-track");
 	bool smoke_rename = parse_flag (argc, argv, L"--smoke-rename");
 	bool smoke_group = parse_flag (argc, argv, L"--smoke-group");
 	bool smoke_monitor = parse_flag (argc, argv, L"--smoke-monitor");
@@ -240,6 +242,7 @@ wmain (int argc, wchar_t** argv)
 		                         smoke_vst3, smoke_mute_solo, smoke_pan, smoke_send,
 		                         smoke_automation, smoke_edit, smoke_snap, smoke_punch,
 		                         smoke_tempo, smoke_click, smoke_tracks,
+		                         smoke_stereo_track,
 		                         smoke_rename, smoke_group, smoke_monitor,
 		                         smoke_locate, smoke_zoom, smoke_history,
 		                         smoke_prefs, smoke_recent, smoke_recovery,
