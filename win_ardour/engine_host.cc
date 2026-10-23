@@ -4052,7 +4052,6 @@ EngineHost::refresh_monitor_choice_flags ()
 
 bool
 EngineHost::set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk)
-EngineHost::set_track_record_safe (int track, bool safe)
 {
 	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
 		return false;
@@ -4095,6 +4094,17 @@ EngineHost::set_track_record_safe (int track, bool safe)
 		              e.what ());
 		std::fflush (stderr);
 		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_record_safe (int track, bool safe)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
 	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]
 	    || !_impl->tracks[track]->rec_safe_control ()) {
 		return false;
@@ -4157,10 +4167,6 @@ EngineHost::cycle_track_monitor_choice (int track)
 }
 
 bool
-EngineHost::smoke_input_monitor ()
-{
-	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-input-monitor failed — no Session";
 EngineHost::toggle_track_record_safe (int track)
 {
 	if (track < 0 || track >= EngineSnapshot::kMeters) {
@@ -4171,10 +4177,10 @@ EngineHost::toggle_track_record_safe (int track)
 }
 
 bool
-EngineHost::smoke_record_safe ()
+EngineHost::smoke_input_monitor ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-record-safe failed — no Session";
+		_snap.detail = L"smoke-input-monitor failed — no Session";
 		return false;
 	}
 	try {
@@ -4212,6 +4218,61 @@ EngineHost::smoke_record_safe ()
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-input-monitor exception: %s\n",
 		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_record_safe ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-record-safe failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]
+		    || !_impl->tracks[0]->rec_safe_control ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (no Audio1/Rs)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_record_safe (0, false) || _snap.track_record_safe[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_record_safe (0, true) || !_snap.track_record_safe[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (set safe)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (set_track_armed (0, true) || _snap.track_armed[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (arm while safe)\n");
+			std::fflush (stderr);
+			set_track_record_safe (0, false);
+			return false;
+		}
+		if (!set_track_record_safe (0, false) || _snap.track_record_safe[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (clear2)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_armed (0, true) || !_snap.track_armed[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (arm after clear)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		set_track_armed (0, false);
+		std::fprintf (stderr, "airdour_win_shell: smoke-record-safe ok (safe blocks arm)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-record-safe ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-record-safe exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -4275,44 +4336,6 @@ EngineHost::smoke_mon_peer_badge ()
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mon-peer-badge exception: %s\n",
 		              e.what ());
-		    || !_impl->tracks[0]->rec_safe_control ()) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (no Audio1/Rs)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!set_track_record_safe (0, false) || _snap.track_record_safe[0]) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (clear)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!set_track_record_safe (0, true) || !_snap.track_record_safe[0]) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (set safe)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (set_track_armed (0, true) || _snap.track_armed[0]) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (arm while safe)\n");
-			std::fflush (stderr);
-			set_track_record_safe (0, false);
-			return false;
-		}
-		if (!set_track_record_safe (0, false) || _snap.track_record_safe[0]) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (clear2)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!set_track_armed (0, true) || !_snap.track_armed[0]) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-record-safe FAILED (arm after clear)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		set_track_armed (0, false);
-		std::fprintf (stderr, "airdour_win_shell: smoke-record-safe ok (safe blocks arm)\n");
-		std::fflush (stderr);
-		_snap.detail = L"smoke-record-safe ok";
-		return true;
-	} catch (std::exception& e) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-record-safe exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -31438,11 +31461,25 @@ EngineHost::toggle_track_armed (int track)
 
 bool
 EngineHost::disarm_all_tracks ()
+{
+	return false;
+}
+
+bool
 EngineHost::arm_all_tracks ()
+{
+	return false;
+}
+
+bool
 EngineHost::set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk)
 {
 	(void)track;
 	(void)choice_0_auto_1_in_2_disk;
+	return false;
+}
+
+bool
 EngineHost::set_track_record_safe (int track, bool safe)
 {
 	(void)track;
@@ -31452,6 +31489,12 @@ EngineHost::set_track_record_safe (int track, bool safe)
 
 bool
 EngineHost::cycle_track_monitor_choice (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
 EngineHost::toggle_track_record_safe (int track)
 {
 	(void)track;
@@ -31460,6 +31503,11 @@ EngineHost::toggle_track_record_safe (int track)
 
 bool
 EngineHost::smoke_input_monitor ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_record_safe ()
 {
 	return false;
@@ -31467,7 +31515,17 @@ EngineHost::smoke_record_safe ()
 
 bool
 EngineHost::smoke_disarm_all ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_arm_all ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_mon_peer_badge ()
 {
 	return false;

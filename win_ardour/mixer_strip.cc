@@ -663,8 +663,6 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 
 	rt->FillRectangle (_arm_btn, _armed ? accent : edge);
 	if (!_midi_strip) {
-		const wchar_t* arm_label = _armed ? L"R · armed" : L"R · arm";
-		rt->FillRectangle (_arm_btn, _armed ? accent : edge);
 		const wchar_t* arm_label =
 			_record_safe ? L"R · Rs"
 			: (_armed ? L"R · armed" : L"R · arm");
