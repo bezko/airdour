@@ -213,6 +213,7 @@ struct EngineSnapshot {
 	float        meter_peak[kMeters]; /* linear 0..1 */
 	bool         meter_clip[kMeters]; /* ≥0 dBFS / PeakMeter MeterMaxPeak */
 	int          track_meter_point[kMeters]; /* 0=In 1=Pre 2=Post 3=Out (skip Custom) */
+	int          track_meter_type[kMeters]; /* 0=Peak 1=K14 */
 	bool         track_has_regions[kMeters];
 	bool         track_armed[kMeters];
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
@@ -853,6 +854,16 @@ public:
 	bool cycle_track_meter_point (int track);
 	/** Cycle Audio1 through In→Pre→Post→Out→Post; leave Post. */
 	bool smoke_meter_point ();
+
+	/**
+	 * Route meter ballistics: 0=Peak 1=K14. Ctrl+click meter cycles.
+	 * For --smoke-meter-type.
+	 */
+	bool set_track_meter_type (int track, int type_0_1);
+	int  track_meter_type (int track) const;
+	bool cycle_track_meter_type (int track);
+	/** Peak → K14 → Peak; leave Peak. */
+	bool smoke_meter_type ();
 
 	/** Session-level record enable (maybe_enable_record / disable_record). */
 	bool set_session_record (bool enable);
@@ -2022,6 +2033,7 @@ private:
 	void refresh_send_flags ();
 	void refresh_send_auto_state_flags ();
 	void refresh_meter_point_flags ();
+	void refresh_meter_type_flags ();
 	void refresh_group_flags ();
 	void refresh_vca_flags ();
 	void refresh_monitor_flags ();

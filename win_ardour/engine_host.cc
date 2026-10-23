@@ -198,13 +198,17 @@ db_to_linear (float db)
 }
 
 float
-peak_linear_from_meter (std::shared_ptr<PeakMeter> m)
+peak_linear_from_meter (std::shared_ptr<PeakMeter> m, MeterType type = MeterPeak)
 {
 	if (!m) {
 		return 0.f;
 	}
-	/* MeterPeak returns dB with falloff. */
-	float db = m->meter_level (0, MeterPeak);
+	/* MeterPeak / MeterK14 return dB with falloff. */
+	MeterType read = type;
+	if (read != MeterK14) {
+		read = MeterPeak;
+	}
+	float db = m->meter_level (0, read);
 	return db_to_linear (db);
 }
 
@@ -632,6 +636,7 @@ EngineHost::EngineHost ()
 		_snap.meter_peak[i] = 0.f;
 		_snap.meter_clip[i] = false;
 		_snap.track_meter_point[i] = 2; /* PostFader */
+		_snap.track_meter_type[i] = 0; /* Peak */
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
 		_snap.track_frozen[i] = false;
@@ -3187,7 +3192,8 @@ EngineHost::read_meters ()
 			if (i < (int)_impl->tracks.size () && _impl->tracks[i]) {
 				std::shared_ptr<PeakMeter> pm = _impl->tracks[i]->peak_meter ();
 				if (pm) {
-					peak = peak_linear_from_meter (pm);
+					MeterType mt = _impl->tracks[i]->meter_type ();
+					peak = peak_linear_from_meter (pm, mt);
 					clip = clip_from_meter (pm);
 				}
 			}
@@ -3421,6 +3427,110 @@ EngineHost::smoke_meter_point ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-meter-point exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+void
+EngineHost::refresh_meter_type_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_meter_type[i] = 0;
+	}
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	try {
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i >= (int)_impl->tracks.size () || !_impl->tracks[i]) {
+				continue;
+			}
+			MeterType t = _impl->tracks[i]->meter_type ();
+			_snap.track_meter_type[i] = (t == MeterK14) ? 1 : 0;
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::set_track_meter_type (int track, int type_0_1)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		collect_tracks ();
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	try {
+		MeterType t = (type_0_1 == 1) ? MeterK14 : MeterPeak;
+		_impl->tracks[track]->set_meter_type (t);
+		refresh_meter_type_flags ();
+		_snap.detail = (type_0_1 == 1) ? L"meter type K14" : L"meter type Peak";
+		return _snap.track_meter_type[track] == ((type_0_1 == 1) ? 1 : 0);
+	} catch (...) {
+		return false;
+	}
+}
+
+int
+EngineHost::track_meter_type (int track) const
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return 0;
+	}
+	return _snap.track_meter_type[track];
+}
+
+bool
+EngineHost::cycle_track_meter_type (int track)
+{
+	refresh_meter_type_flags ();
+	return set_track_meter_type (track, track_meter_type (track) == 0 ? 1 : 0);
+}
+
+bool
+EngineHost::smoke_meter_type ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-meter-type failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-meter-type FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_meter_type (0, 0) || _snap.track_meter_type[0] != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-meter-type FAILED (start Peak)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_track_meter_type (0) || _snap.track_meter_type[0] != 1
+		    || _impl->tracks[0]->meter_type () != MeterK14) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-meter-type FAILED (→K14)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_track_meter_type (0) || _snap.track_meter_type[0] != 0
+		    || _impl->tracks[0]->meter_type () != MeterPeak) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-meter-type FAILED (→Peak)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-meter-type ok (Peak↔K14)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-meter-type ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-meter-type exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -30388,6 +30498,7 @@ EngineHost::refresh_snapshot ()
 			refresh_send_flags ();
 			refresh_send_auto_state_flags ();
 			refresh_meter_point_flags ();
+			refresh_meter_type_flags ();
 			refresh_group_flags ();
 			refresh_monitor_flags ();
 			refresh_history_flags ();
@@ -30488,6 +30599,7 @@ EngineHost::EngineHost ()
 		_snap.meter_peak[i] = 0.f;
 		_snap.meter_clip[i] = false;
 		_snap.track_meter_point[i] = 2; /* PostFader */
+		_snap.track_meter_type[i] = 0; /* Peak */
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
 		_snap.track_frozen[i] = false;
@@ -32098,6 +32210,10 @@ EngineHost::refresh_meter_point_flags ()
 {
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_meter_point[i] = 2;
+EngineHost::refresh_meter_type_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_meter_type[i] = 0;
 	}
 }
 
@@ -32106,6 +32222,10 @@ EngineHost::set_track_meter_point (int track, int point_0_3)
 {
 	(void)track;
 	(void)point_0_3;
+EngineHost::set_track_meter_type (int track, int type_0_1)
+{
+	(void)track;
+	(void)type_0_1;
 	return false;
 }
 
@@ -32118,6 +32238,14 @@ EngineHost::track_meter_point (int track) const
 
 bool
 EngineHost::cycle_track_meter_point (int track)
+EngineHost::track_meter_type (int track) const
+{
+	(void)track;
+	return 0;
+}
+
+bool
+EngineHost::cycle_track_meter_type (int track)
 {
 	(void)track;
 	return false;
@@ -32137,6 +32265,7 @@ EngineHost::clear_all_meter_clips ()
 
 bool
 EngineHost::smoke_clear_meter_clips ()
+EngineHost::smoke_meter_type ()
 {
 	return false;
 }

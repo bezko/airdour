@@ -822,6 +822,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 
 	if (ok && has_smoke ("meter-point") && engine_session_ok ()) {
 		if (!_engine.smoke_meter_point ()) {
+	if (ok && smoke_meter_type && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_meter_type ()) {
 			_smoke_failed = true;
 		} else {
 			const int na = n_audio_lanes ();
@@ -832,6 +834,12 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("meter-point")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-meter-point FAILED (no session)\n");
+				_mixers[i].set_meter_type (_engine.snapshot ().track_meter_type[i]);
+			}
+		}
+		std::fflush (stderr);
+	} else if (smoke_meter_type) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("meter-type") FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -968,6 +976,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan && engine_session_ok ()) {
+	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
@@ -8077,11 +8086,32 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
 		    && _engine.snapshot ().session_ok) {
 			_engine.clear_track_meter_clip (meter_i);
+	/* Ctrl+click meter → Peak↔K14. Plain click (when clipped) → clear clip.
+	 * Shift+click meter point lives on tip #82. */
+	int meter_i = hit_mixer_meter (x, y);
+	if (meter_i >= 0) {
+		if ((GetKeyState (VK_CONTROL) & 0x8000) != 0
+		    && meter_i < EngineSnapshot::kMeters
+		    && _engine.is_linked () && _engine_snap.session_ok
+		    && !_mixers[meter_i].is_midi_strip ()) {
+			_engine.cycle_track_meter_type (meter_i);
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
+			_mixers[meter_i].set_meter_type (_engine_snap.track_meter_type[meter_i]);
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
 		}
-		InvalidateRect (_hwnd, nullptr, FALSE);
-		return true;
+		if (_mixers[meter_i].meter_clipped ()) {
+			_mixers[meter_i].clear_meter_clip ();
+			if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
+			    && _engine.snapshot ().session_ok) {
+				_engine.clear_track_meter_clip (meter_i);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+			}
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
 	}
 
 	int fxpi3 = hit_mixer_fx_param3 (x, y);
@@ -9001,6 +9031,7 @@ ShellWindow::on_tick ()
 		_mixers[i].set_meter_peak (peak, clip);
 		if (i < EngineSnapshot::kMeters) {
 			_mixers[i].set_meter_point (_engine_snap.track_meter_point[i]);
+			_mixers[i].set_meter_type (_engine_snap.track_meter_type[i]);
 		}
 		_mixers[i].meter_tick (dt);
 	}
@@ -9757,6 +9788,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
 		{ L"Ctrl+click Send", L"Mute / unmute Aux send (Sm)" },
 		{ L"Shift+click meter", L"Cycle meter tap In/Pre/Post/Out" },
+		{ L"Ctrl+click meter", L"Cycle meter type Peak↔K14" },
 	};
 
 	float y = card.top + 40.f * _dpi_scale;
