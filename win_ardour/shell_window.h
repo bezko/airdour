@@ -309,6 +309,7 @@ private:
 	void do_toggle_group_relative ();
 	void do_cycle_group_color ();
 	void do_toggle_focused_track_active ();
+	void do_toggle_vca_assign ();
 	void do_toggle_monitor_dim ();
 	void do_toggle_monitor_mono ();
 	void do_toggle_monitor_cut ();

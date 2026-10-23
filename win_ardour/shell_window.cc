@@ -523,31 +523,30 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && smoke_midi && engine_session_ok ()) {
-	} else if (ok && smoke_vca && _engine.snapshot ().session_ok) {
-		if (!_engine.smoke_vca ()) {
-			_smoke_failed = true;
-		}
-		std::fflush (stderr);
-	} else if (smoke_vca) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-vca FAILED (no session)\n");
-		_smoke_failed = true;
-		std::fflush (stderr);
-	} else if (ok && smoke_vca_status && _engine.snapshot ().session_ok) {
-		if (!_engine.smoke_vca_status ()) {
-			_smoke_failed = true;
-		}
-		std::fflush (stderr);
-	} else if (smoke_vca_status) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("vca-status") FAILED (no session)\n");
-		_smoke_failed = true;
-		std::fflush (stderr);
-	} else if (ok && smoke_midi && _engine.snapshot ().session_ok) {
 		if (_engine.smoke_midi ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi ok\n");
 		} else {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi FAILED\n");
 			_smoke_failed = true;
 		}
+		std::fflush (stderr);
+	} else if (ok && has_smoke ("vca") && engine_session_ok ()) {
+		if (!_engine.smoke_vca ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("vca")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vca FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	} else if (ok && has_smoke ("vca-status") && engine_session_ok ()) {
+		if (!_engine.smoke_vca_status ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("vca-status")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vca-status FAILED (no session)\n");
+		_smoke_failed = true;
 		std::fflush (stderr);
 	} else if (ok && engine_session_ok ()) {
 		/* Always scaffold a MIDI track + empty region so the piano-roll is live. */
@@ -4677,7 +4676,6 @@ ShellWindow::do_apply_or_clear_group ()
 
 void
 ShellWindow::do_toggle_group_relative ()
-ShellWindow::do_toggle_vca_assign ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
@@ -4689,6 +4687,26 @@ ShellWindow::do_toggle_vca_assign ()
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_mixer_group_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_toggle_vca_assign ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.ensure_vca_master ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	const bool on = _engine_snap.vca_slave_count < 1;
+	_engine.assign_track_to_vca (0, on);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
