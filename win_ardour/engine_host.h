@@ -232,6 +232,8 @@ struct EngineSnapshot {
 	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
 	/** Pan AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
 	int          track_pan_auto_state[kMeters];
+	float        track_pan_width[kMeters]; /* stereo width −1..+1 (1=full) */
+	bool         track_pan_width_ok[kMeters]; /* pan_width_control present */
 	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters]; /* InternalSend present on track */
 	/** Send AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
@@ -575,6 +577,15 @@ public:
 	bool smoke_pan ();
 	/** Cycle Off→Play→Write→Touch→Off on Audio 1 pan. For --smoke-pan-auto-state. */
 	bool smoke_pan_auto_state ();
+
+	/**
+	 * Stereo pan width via Route::pan_width_control (−1..+1; 1=full stereo).
+	 * Shift+drag pan. UI may pass 0..1 iface → mapped as 2v−1.
+	 */
+	bool  set_track_pan_width (int track, float width_m1_to_1);
+	float track_pan_width (int track) const;
+	/** Full → 0 → full. For --smoke-pan-width. */
+	bool smoke_pan_width ();
 
 	/** Aux send level 0..1 (gain coeff) via InternalSend → Aux bus. */
 	bool  set_track_send (int track, float send_0_1);

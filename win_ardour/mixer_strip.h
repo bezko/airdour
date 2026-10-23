@@ -72,6 +72,16 @@ public:
 	bool  hit_pan (float x, float y) const;
 	bool  drag_pan_to (float x);
 
+	/**
+	 * Stereo pan width −1..+1 (1=full) when pan_width_control is present.
+	 * Shift+drag pan maps x as 0..1 iface → 2v−1.
+	 */
+	void  set_pan_width (float width_m1_to_1);
+	float pan_width () const { return _pan_width; }
+	void  set_pan_width_ok (bool ok) { _pan_width_ok = ok; }
+	bool  pan_width_ok () const { return _pan_width_ok; }
+	bool  drag_pan_width_to (float x);
+
 	/** Aux send level 0..1 (gain coeff) to session Aux bus (audio strips only). */
 	void  set_send (float send_0_1);
 	float send () const { return _send; }
@@ -159,6 +169,8 @@ private:
 	float       _gain;
 	float       _trim;
 	float       _pan;
+	float       _pan_width; /* −1..+1; 1=full stereo */
+	bool        _pan_width_ok;
 	float       _send;
 	float       _fx_param;
 	float       _fx_param2;

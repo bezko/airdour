@@ -68,6 +68,7 @@
 #include "ardour/solo_safe_control.h"
 #include "ardour/phase_control.h"
 #include "ardour/gain_control.h"
+#include "ardour/panner_shell.h"
 #include "ardour/plugin.h"
 #include "ardour/plugin_insert.h"
 #include "ardour/plugin_manager.h"
@@ -640,6 +641,8 @@ EngineHost::EngineHost ()
 		_snap.track_stereo[i] = false;
 		_snap.track_pan[i] = 0.5f;
 		_snap.track_pan_auto_state[i] = 0;
+		_snap.track_pan_width[i] = 1.f;
+		_snap.track_pan_width_ok[i] = false;
 		_snap.track_send[i] = 0.f;
 		_snap.track_send_ok[i] = false;
 		_snap.track_send_auto_state[i] = 0;
@@ -5131,6 +5134,8 @@ EngineHost::refresh_pan_flags ()
 {
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_pan[i] = 0.5f;
+		_snap.track_pan_width[i] = 1.f;
+		_snap.track_pan_width_ok[i] = false;
 	}
 	if (!_impl) {
 		return;
@@ -5142,6 +5147,13 @@ EngineHost::refresh_pan_flags ()
 					_impl->tracks[i]->pan_azimuth_control ();
 				if (pan) {
 					_snap.track_pan[i] = (float)pan->get_value ();
+				}
+				std::shared_ptr<AutomationControl> width =
+					_impl->tracks[i]->pan_width_control ();
+				if (width) {
+					_snap.track_pan_width_ok[i] = true;
+					float w = (float)width->get_value ();
+					_snap.track_pan_width[i] = std::max (-1.f, std::min (1.f, w));
 				}
 			}
 		}
@@ -5318,6 +5330,181 @@ EngineHost::smoke_pan ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_track_pan_width (int track, float width_m1_to_1)
+{
+	width_m1_to_1 = std::max (-1.f, std::min (1.f, width_m1_to_1));
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	try {
+		std::shared_ptr<AutomationControl> width =
+			_impl->tracks[track]->pan_width_control ();
+		if (!width) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: pan width missing on Audio %d "
+			              "(need stereo 2in2out panner)\n",
+			              track + 1);
+			std::fflush (stderr);
+			return false;
+		}
+		_impl->session->set_control (width, (double)width_m1_to_1, Controllable::NoGroup);
+		wait_until ([&] () {
+			refresh_pan_flags ();
+			return _snap.track_pan_width_ok[track]
+			    && std::fabs (_snap.track_pan_width[track] - width_m1_to_1) < 0.05f;
+		}, 300);
+		_snap.detail = L"track pan width set";
+		return _snap.track_pan_width_ok[track]
+		    && std::fabs (_snap.track_pan_width[track] - width_m1_to_1) < 0.05f;
+	} catch (...) {
+		return false;
+	}
+}
+
+float
+EngineHost::track_pan_width (int track) const
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return 1.f;
+	}
+	return _snap.track_pan_width[track];
+}
+
+bool
+EngineHost::smoke_pan_width ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-pan-width failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		refresh_pan_flags ();
+
+		/* Default shell tracks are mono→stereo (1in2out) — no width. Spin up a
+		 * temporary stereo 2in2out track so pan_width_control is live. */
+		bool created_stereo = false;
+		int width_track = -1;
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (_snap.track_pan_width_ok[i]) {
+				width_track = i;
+				break;
+			}
+		}
+		if (width_track < 0) {
+			const int n0 = _snap.audio_track_count;
+			if (n0 >= EngineSnapshot::kMeters) {
+				if (!remove_audio_track (n0 - 1, true)) {
+					std::fprintf (stderr,
+					              "airdour_win_shell: smoke-pan-width FAILED "
+					              "(no room for stereo)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+			AudioTrackList created = _impl->session->new_audio_track (
+				2, 2,
+				std::shared_ptr<RouteGroup> (),
+				1u,
+				"Stereo",
+				PresentationInfo::max_order);
+			if (created.empty () || !created.front ()) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-pan-width FAILED "
+				              "(stereo create)\n");
+				std::fflush (stderr);
+				return false;
+			}
+			/* Default 2in2 selection prefers Stereo Balance (no width). Force
+			 * Equal Power Stereo so pan_width_control is automatable. */
+			if (created.front ()->panner_shell ()) {
+				created.front ()->panner_shell ()->select_panner_by_uri (
+					"http://ardour.org/plugin/panner_2in2out");
+			}
+			created_stereo = true;
+			collect_tracks ();
+			refresh_pan_flags ();
+			for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+				if (_snap.track_pan_width_ok[i]) {
+					width_track = i;
+					break;
+				}
+			}
+		}
+		if (width_track < 0 || !_snap.track_pan_width_ok[width_track]) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-pan-width FAILED "
+			              "(no pan_width — check 2in2out panner DLL)\n");
+			std::fflush (stderr);
+			if (created_stereo) {
+				remove_audio_track (_snap.audio_track_count - 1, true);
+				add_audio_track ();
+			}
+			return false;
+		}
+
+		if (!set_track_pan_width (width_track, 1.0f)
+		    || std::fabs (_snap.track_pan_width[width_track] - 1.f) > 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-pan-width FAILED (full got=%.3f)\n",
+			              _snap.track_pan_width[width_track]);
+			std::fflush (stderr);
+			if (created_stereo) {
+				remove_audio_track (width_track, true);
+				add_audio_track ();
+			}
+			return false;
+		}
+		if (!set_track_pan_width (width_track, 0.0f)
+		    || std::fabs (_snap.track_pan_width[width_track]) > 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-pan-width FAILED (mono got=%.3f)\n",
+			              _snap.track_pan_width[width_track]);
+			std::fflush (stderr);
+			if (created_stereo) {
+				remove_audio_track (width_track, true);
+				add_audio_track ();
+			}
+			return false;
+		}
+		if (!set_track_pan_width (width_track, 1.0f)
+		    || std::fabs (_snap.track_pan_width[width_track] - 1.f) > 0.05f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-pan-width FAILED (restore full got=%.3f)\n",
+			              _snap.track_pan_width[width_track]);
+			std::fflush (stderr);
+			if (created_stereo) {
+				remove_audio_track (width_track, true);
+				add_audio_track ();
+			}
+			return false;
+		}
+
+		if (created_stereo) {
+			remove_audio_track (width_track, true);
+			add_audio_track ();
+			collect_tracks ();
+			refresh_pan_flags ();
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-pan-width ok (Stereo full→0→full)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-pan-width ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-pan-width exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -30025,6 +30212,27 @@ EngineHost::smoke_pan_reset_all ()
 
 bool
 EngineHost::smoke_pan ()
+{
+	return false;
+}
+
+bool
+EngineHost::set_track_pan_width (int track, float width_m1_to_1)
+{
+	(void)track;
+	(void)width_m1_to_1;
+	return false;
+}
+
+float
+EngineHost::track_pan_width (int track) const
+{
+	(void)track;
+	return 1.f;
+}
+
+bool
+EngineHost::smoke_pan_width ()
 {
 	return false;
 }

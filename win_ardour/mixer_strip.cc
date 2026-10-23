@@ -35,6 +35,8 @@ MixerStrip::MixerStrip ()
 	, _gain (0.85f)
 	, _trim (0.5f)
 	, _pan (0.5f)
+	, _pan_width (1.f)
+	, _pan_width_ok (false)
 	, _send (0.f)
 	, _fx_param (0.3f)
 	, _fx_param2 (0.16f)
@@ -129,6 +131,12 @@ void
 MixerStrip::set_pan (float pan_0_1)
 {
 	_pan = std::max (0.f, std::min (1.f, pan_0_1));
+}
+
+void
+MixerStrip::set_pan_width (float width_m1_to_1)
+{
+	_pan_width = std::max (-1.f, std::min (1.f, width_m1_to_1));
 }
 
 void
@@ -336,6 +344,27 @@ MixerStrip::drag_pan_to (float x)
 		return false;
 	}
 	_pan = v;
+	return true;
+}
+
+bool
+MixerStrip::drag_pan_width_to (float x)
+{
+	if (_midi_strip || !_pan_width_ok) {
+		return false;
+	}
+	float w = _pan_track.right - _pan_track.left;
+	if (w < 1.f) {
+		return false;
+	}
+	float t = (x - _pan_track.left) / w;
+	float iface = std::max (0.f, std::min (1.f, t));
+	/* ParameterDescriptor::from_interface PanWidth: 2v−1 */
+	float width = 2.f * iface - 1.f;
+	if (width == _pan_width) {
+		return false;
+	}
+	_pan_width = width;
 	return true;
 }
 
@@ -633,12 +662,21 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		}
 
 		if (!_narrow) {
-			/* Pan azimuth track — L · C · R */
+			/* Pan azimuth track — L · C · R; stereo width band when available. */
 		rt->FillRectangle (_pan_track, edge);
 		float pw = _pan_track.right - _pan_track.left;
 		float kn_cx = _pan_track.left + pw * _pan;
+		if (_pan_width_ok) {
+			float half = std::fabs (_pan_width) * 0.5f * pw;
+			float band_l = std::max (_pan_track.left, kn_cx - half);
+			float band_r = std::min (_pan_track.right, kn_cx + half);
+			accent->SetOpacity (0.35f);
+			rt->FillRectangle (
+				D2D1::RectF (band_l, _pan_track.top, band_r, _pan_track.bottom),
+				accent);
+			accent->SetOpacity (1.f);
+		}
 		float kn_w = 8.f * dpi_scale;
-		float kn_h = _pan_track.bottom - _pan_track.top;
 		D2D1_RECT_F kn = D2D1::RectF (
 			kn_cx - kn_w * 0.5f, _pan_track.top,
 			kn_cx + kn_w * 0.5f, _pan_track.bottom);
@@ -649,6 +687,19 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 			D2D1::Point2F (mid_x, _pan_track.top),
 			D2D1::Point2F (mid_x, _pan_track.bottom),
 			body, 1.f);
+		if (_pan_width_ok) {
+			/* Thin W badge — Shift+drag pan adjusts stereo width. */
+			DWRITE_TEXT_ALIGNMENT ta_w = fmt_meta->GetTextAlignment ();
+			fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_TRAILING);
+			rt->DrawTextW (
+				L"W", 1, fmt_meta,
+				D2D1::RectF (_pan_track.right - 14.f * dpi_scale,
+				             _pan_track.top - 1.f * dpi_scale,
+				             _pan_track.right + 2.f * dpi_scale,
+				             _pan_track.bottom + 1.f * dpi_scale),
+				body);
+			fmt_meta->SetTextAlignment (ta_w);
+		}
 
 		/* Aux send level → Aux bus */
 		rt->FillRectangle (_send_track, edge);

@@ -89,6 +89,7 @@ public:
 	                    bool smoke_vst3 = false,
 	                    bool smoke_mute_solo = false,
 	                    bool smoke_pan = false,
+	                    bool smoke_pan_width = false,
 	                    bool smoke_send = false,
 	                    bool smoke_automation = false,
 	                    bool smoke_edit = false,
@@ -157,6 +158,7 @@ private:
 		FxParam3, /* drag Mixer FX param 3 (EQ High) */
 		Trim, /* drag Mixer preamp trim */
 		Pan, /* drag Mixer pan azimuth */
+		PanWidth, /* Shift+drag Mixer pan → stereo width */
 		Send, /* drag Mixer aux send level */
 		AutoWrite, /* click/drag Editor automation lane */
 		MidiCcWrite, /* click/drag MIDI CC7 automation lane */
