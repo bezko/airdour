@@ -929,7 +929,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		}
 		std::fflush (stderr);
 	} else if (has_smoke ("strip-trim")) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-strip-trim FAILED (no session)\n")
+		std::fprintf (stderr, "airdour_win_shell: smoke-strip-trim FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
