@@ -279,6 +279,9 @@ MixerStrip::set_meter_point (int point_0_3)
 		point_0_3 = 3;
 	}
 	_meter_point = point_0_3;
+}
+
+void
 MixerStrip::set_meter_type (int type_0_1)
 {
 	_meter_type = (type_0_1 == 1) ? 1 : 0;
@@ -870,12 +873,12 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		               body);
 		fmt_meta->SetTextAlignment (ta_mp);
 		const wchar_t* mt = (_meter_type == 1) ? L"K14" : L"Pk";
-		const D2D1_RECT_F& mb = _meter.bounds ();
+		const D2D1_RECT_F& mb2 = _meter.bounds ();
 		DWRITE_TEXT_ALIGNMENT ta_mt = fmt_meta->GetTextAlignment ();
 		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
 		rt->DrawTextW (mt, (UINT32)wcslen (mt), fmt_meta,
-		               D2D1::RectF (mb.left - 4.f * dpi_scale, mb.bottom + 1.f * dpi_scale,
-		                            mb.right + 4.f * dpi_scale, mb.bottom + 14.f * dpi_scale),
+		               D2D1::RectF (mb2.left - 4.f * dpi_scale, mb2.bottom + 1.f * dpi_scale,
+		                            mb2.right + 4.f * dpi_scale, mb2.bottom + 14.f * dpi_scale),
 		               body);
 		fmt_meta->SetTextAlignment (ta_mt);
 	}

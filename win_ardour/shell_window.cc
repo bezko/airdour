@@ -822,8 +822,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 
 	if (ok && has_smoke ("meter-point") && engine_session_ok ()) {
 		if (!_engine.smoke_meter_point ()) {
-	if (ok && smoke_meter_type && _engine.snapshot ().session_ok) {
-		if (!_engine.smoke_meter_type ()) {
 			_smoke_failed = true;
 		} else {
 			const int na = n_audio_lanes ();
@@ -834,12 +832,22 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("meter-point")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-meter-point FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("meter-type") && engine_session_ok ()) {
+		if (!_engine.smoke_meter_type ()) {
+			_smoke_failed = true;
+		} else {
+			const int na = n_audio_lanes ();
+			for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 				_mixers[i].set_meter_type (_engine.snapshot ().track_meter_type[i]);
 			}
 		}
 		std::fflush (stderr);
-	} else if (smoke_meter_type) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("meter-type") FAILED (no session)\n");
+	} else if (has_smoke ("meter-type")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-meter-type FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -976,7 +984,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan && engine_session_ok ()) {
-	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
@@ -8054,10 +8061,21 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
-	/* Shift+click meter → cycle Input/Pre/Post/Output tap.
+	/* Ctrl+click meter → Peak↔K14. Shift+click meter → cycle meter point.
 	 * Alt+click → clear every strip's clip latch.
 	 * Plain click (when clipped) → clear peak-hold clip latch. */
 	int meter_i = hit_mixer_meter (x, y);
+	if (meter_i >= 0 && (GetKeyState (VK_CONTROL) & 0x8000) != 0
+	    && meter_i < EngineSnapshot::kMeters
+	    && _engine.is_linked () && _engine_snap.session_ok
+	    && !_mixers[meter_i].is_midi_strip ()) {
+		_engine.cycle_track_meter_type (meter_i);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_mixers[meter_i].set_meter_type (_engine_snap.track_meter_type[meter_i]);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
 	if (meter_i >= 0 && (GetKeyState (VK_SHIFT) & 0x8000) != 0
 	    && meter_i < EngineSnapshot::kMeters
 	    && _engine.is_linked () && _engine_snap.session_ok
@@ -8086,32 +8104,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
 		    && _engine.snapshot ().session_ok) {
 			_engine.clear_track_meter_clip (meter_i);
-	/* Ctrl+click meter → Peak↔K14. Plain click (when clipped) → clear clip.
-	 * Shift+click meter point lives on tip #82. */
-	int meter_i = hit_mixer_meter (x, y);
-	if (meter_i >= 0) {
-		if ((GetKeyState (VK_CONTROL) & 0x8000) != 0
-		    && meter_i < EngineSnapshot::kMeters
-		    && _engine.is_linked () && _engine_snap.session_ok
-		    && !_mixers[meter_i].is_midi_strip ()) {
-			_engine.cycle_track_meter_type (meter_i);
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
-			_mixers[meter_i].set_meter_type (_engine_snap.track_meter_type[meter_i]);
-			InvalidateRect (_hwnd, nullptr, FALSE);
-			return true;
 		}
-		if (_mixers[meter_i].meter_clipped ()) {
-			_mixers[meter_i].clear_meter_clip ();
-			if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
-			    && _engine.snapshot ().session_ok) {
-				_engine.clear_track_meter_clip (meter_i);
-				_engine.poll ();
-				_engine_snap = _engine.snapshot ();
-			}
-			InvalidateRect (_hwnd, nullptr, FALSE);
-			return true;
-		}
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
 	}
 
 	int fxpi3 = hit_mixer_fx_param3 (x, y);

@@ -203,12 +203,15 @@ peak_linear_from_meter (std::shared_ptr<PeakMeter> m, MeterType type = MeterPeak
 	if (!m) {
 		return 0.f;
 	}
-	/* MeterPeak / MeterK14 return dB with falloff. */
+	/* MeterPeak / MeterK14 return dB with falloff; K14 0 dB = -14 dBFS. */
 	MeterType read = type;
 	if (read != MeterK14) {
 		read = MeterPeak;
 	}
 	float db = m->meter_level (0, read);
+	if (read == MeterK14) {
+		db += 14.f;
+	}
 	return db_to_linear (db);
 }
 
