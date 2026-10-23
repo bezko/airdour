@@ -13264,21 +13264,17 @@ EngineHost::create_route_group (const int* indices, int n)
 			}
 			_impl->session->add_route_group (rg);
 		}
-		/* Honest scope: mute + solo + gain + color + monitoring. */
-		/* Honest scope: mute + solo + gain + route-active. */
+		/* Honest scope: mute + solo + gain + color + monitoring + route-active. */
 		rg->set_active (true, nullptr);
 		rg->set_mute (true);
 		rg->set_solo (true);
 		rg->set_gain (true);
 		rg->set_recenable (true);
 		rg->set_select (false);
-		rg->set_route_active (false);
 		rg->set_color (true);
 		rg->set_rgba (0xC45C26FF); /* terracotta default */
 		rg->set_monitoring (true);
 		rg->set_route_active (true);
-		rg->set_color (false);
-		rg->set_monitoring (false);
 		rg->set_sursend_enable (false);
 
 		rg->clear ();
@@ -13302,8 +13298,7 @@ EngineHost::create_route_group (const int* indices, int n)
 		_impl->shell_group = rg;
 		refresh_group_flags ();
 		_snap.detail = L"route group ready";
-		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain/color/mon\n",
-		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain/active\n",
+		std::fprintf (stderr, "airdour_win_shell: RouteGroup \"%s\" members=%d mute/solo/gain/color/mon/active\n",
 		              rg->name ().c_str (), _snap.group_member_count);
 		std::fflush (stderr);
 		return _snap.group_member_count >= 2;

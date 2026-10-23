@@ -1376,7 +1376,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("group-monitoring")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group-monitoring FAILED (no session)\n");
-	if (ok && has_smoke ("group-route-active") && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("group-route-active") && engine_session_ok ()) {
 		if (!_engine.smoke_group_route_active ()) {
 			_smoke_failed = true;
 		} else {
@@ -4597,7 +4601,6 @@ ShellWindow::do_apply_or_clear_group ()
 
 void
 ShellWindow::do_toggle_group_relative ()
-ShellWindow::do_toggle_focused_track_active ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
@@ -4609,6 +4612,23 @@ ShellWindow::do_toggle_focused_track_active ()
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_mixer_group_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_toggle_focused_track_active ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	int track = _focus_audio_track;
+	if (track < 0 || track >= n_audio_lanes ()) {
+		track = 0;
+	}
+	_engine.toggle_track_active (track);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_mute_solo_from_engine ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
@@ -4625,14 +4645,6 @@ ShellWindow::do_cycle_group_color ()
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_mixer_group_from_engine ();
-	int track = _focus_audio_track;
-	if (track < 0 || track >= n_audio_lanes ()) {
-		track = 0;
-	}
-	_engine.toggle_track_active (track);
-	_engine.poll ();
-	_engine_snap = _engine.snapshot ();
-	sync_mixer_mute_solo_from_engine ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
@@ -7597,6 +7609,7 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		if (lab < n_audio_lanes ()) {
 			if ((GetKeyState (VK_MENU) & 0x8000)
 			    && (GetKeyState (VK_SHIFT) & 0x8000)
+			    && !(GetKeyState (VK_CONTROL) & 0x8000)
 			    && _engine.is_linked () && _engine_snap.session_ok) {
 				/* Alt+Shift+click label → toggle Route comment. */
 				_focus_audio_track = lab;
@@ -7608,6 +7621,15 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				return true;
 			}
 			if ((GetKeyState (VK_MENU) & 0x8000)
+			    && (GetKeyState (VK_SHIFT) & 0x8000)
+			    && (GetKeyState (VK_CONTROL) & 0x8000)
+			    && _engine.is_linked () && _engine_snap.session_ok) {
+				/* Ctrl+Alt+Shift+click label — toggle Route::active (group shares). */
+				_focus_audio_track = lab;
+				do_toggle_focused_track_active ();
+				return true;
+			}
+			if ((GetKeyState (VK_MENU) & 0x8000)
 			    && _engine.is_linked () && _engine_snap.session_ok) {
 				/* Alt+click label → toggle polarity invert. */
 				_focus_audio_track = lab;
@@ -7616,10 +7638,6 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_phase_from_engine ();
 				InvalidateRect (_hwnd, nullptr, FALSE);
-			    && !(GetKeyState (VK_CONTROL) & 0x8000)) {
-				/* Alt+Shift+click label — toggle Route::active (group shares). */
-				_focus_audio_track = lab;
-				do_toggle_focused_track_active ();
 				return true;
 			}
 			if (GetKeyState (VK_SHIFT) & 0x8000) {

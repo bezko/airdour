@@ -562,7 +562,6 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 
 	DWRITE_TEXT_ALIGNMENT ta = fmt_title->GetTextAlignment ();
 	fmt_title->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-	rt->DrawTextW (_label, (UINT32)wcslen (_label), fmt_title, _label_rc, brand);
 	if (_has_comment && !_midi_strip) {
 		/* Cm badge — Route::comment non-empty. */
 		D2D1_RECT_F badge = D2D1::RectF (
@@ -594,6 +593,7 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		rt->DrawTextW (L"\x00D8", 1, fmt_meta, badge, brand);
 		fmt_meta->SetTextAlignment (ta_b);
 		fmt_meta->SetParagraphAlignment (pa_b);
+	}
 	if (_route_active) {
 		rt->DrawTextW (_label, (UINT32)wcslen (_label), fmt_title, _label_rc, brand);
 	} else {
