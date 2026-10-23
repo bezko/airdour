@@ -212,6 +212,7 @@ struct EngineSnapshot {
 	float        gain; /* track 0 stub/session gain */
 	float        meter_peak[kMeters]; /* linear 0..1 */
 	bool         meter_clip[kMeters]; /* ≥0 dBFS / PeakMeter MeterMaxPeak */
+	int          track_meter_point[kMeters]; /* 0=In 1=Pre 2=Post 3=Out (skip Custom) */
 	bool         track_has_regions[kMeters];
 	bool         track_armed[kMeters];
 	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
@@ -842,6 +843,16 @@ public:
 	bool clear_all_meter_clips ();
 	/** Mark snap clips then clear_all; verify none remain. */
 	bool smoke_clear_meter_clips ();
+
+	/**
+	 * Route meter tap: 0=Input 1=PreFader 2=PostFader 3=Output (skip Custom).
+	 * Shift+click meter cycles. For --smoke-meter-point.
+	 */
+	bool set_track_meter_point (int track, int point_0_3);
+	int  track_meter_point (int track) const;
+	bool cycle_track_meter_point (int track);
+	/** Cycle Audio1 through In→Pre→Post→Out→Post; leave Post. */
+	bool smoke_meter_point ();
 
 	/** Session-level record enable (maybe_enable_record / disable_record). */
 	bool set_session_record (bool enable);
@@ -2010,6 +2021,7 @@ private:
 	void refresh_pan_auto_state_flags ();
 	void refresh_send_flags ();
 	void refresh_send_auto_state_flags ();
+	void refresh_meter_point_flags ();
 	void refresh_group_flags ();
 	void refresh_vca_flags ();
 	void refresh_monitor_flags ();

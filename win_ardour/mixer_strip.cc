@@ -33,6 +33,7 @@ MixerStrip::MixerStrip ()
 	, _fx_param_track ()
 	, _fx_param_track2 ()
 	, _fx_param_track3 ()
+	, _meter_point (2)
 	, _gain (0.85f)
 	, _trim (0.5f)
 	, _pan (0.5f)
@@ -265,6 +266,18 @@ bool
 MixerStrip::hit_meter (float x, float y) const
 {
 	return _meter.hit (x, y);
+}
+
+void
+MixerStrip::set_meter_point (int point_0_3)
+{
+	if (point_0_3 < 0) {
+		point_0_3 = 0;
+	}
+	if (point_0_3 > 3) {
+		point_0_3 = 3;
+	}
+	_meter_point = point_0_3;
 }
 
 bool
@@ -836,6 +849,23 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 	}
 
 	_meter.draw (rt, accent, edge, meter_hot, dpi_scale);
+	if (!_midi_strip) {
+		const wchar_t* mp = L"Pst";
+		switch (_meter_point) {
+		case 0: mp = L"In"; break;
+		case 1: mp = L"Pre"; break;
+		case 3: mp = L"Out"; break;
+		default: mp = L"Pst"; break;
+		}
+		const D2D1_RECT_F& mb = _meter.bounds ();
+		DWRITE_TEXT_ALIGNMENT ta_mp = fmt_meta->GetTextAlignment ();
+		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
+		rt->DrawTextW (mp, (UINT32)wcslen (mp), fmt_meta,
+		               D2D1::RectF (mb.left - 2.f * dpi_scale, mb.top - 14.f * dpi_scale,
+		                            mb.right + 2.f * dpi_scale, mb.top - 1.f * dpi_scale),
+		               body);
+		fmt_meta->SetTextAlignment (ta_mp);
+	}
 
 	wchar_t db[48];
 	float db_v = (_gain <= 0.0001f) ? -96.f : (20.f * log10f (_gain));

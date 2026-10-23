@@ -631,6 +631,7 @@ EngineHost::EngineHost ()
 		_track_gain[i] = (i == 0) ? 0.85f : (0.85f - 0.12f * (float)i);
 		_snap.meter_peak[i] = 0.f;
 		_snap.meter_clip[i] = false;
+		_snap.track_meter_point[i] = 2; /* PostFader */
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
 		_snap.track_frozen[i] = false;
@@ -3241,6 +3242,76 @@ EngineHost::clear_all_meter_clips ()
 		std::fflush (stderr);
 		_snap.detail = L"all meter clips cleared";
 		return true;
+namespace {
+
+int
+meter_point_to_snap (MeterPoint p)
+{
+	switch (p) {
+	case MeterInput:     return 0;
+	case MeterPreFader:  return 1;
+	case MeterOutput:    return 3;
+	case MeterPostFader:
+	default:             return 2;
+	}
+}
+
+MeterPoint
+snap_to_meter_point (int point_0_3)
+{
+	switch (point_0_3) {
+	case 0:  return MeterInput;
+	case 1:  return MeterPreFader;
+	case 3:  return MeterOutput;
+	default: return MeterPostFader;
+	}
+}
+
+} // namespace
+
+void
+EngineHost::refresh_meter_point_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_meter_point[i] = 2;
+	}
+	if (!_impl || !_impl->session) {
+		return;
+	}
+	try {
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			if (i >= (int)_impl->tracks.size () || !_impl->tracks[i]) {
+				continue;
+			}
+			_snap.track_meter_point[i] = meter_point_to_snap (_impl->tracks[i]->meter_point ());
+		}
+	} catch (...) {
+	}
+}
+
+bool
+EngineHost::set_track_meter_point (int track, int point_0_3)
+{
+	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
+		return false;
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		collect_tracks ();
+	}
+	if (track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		return false;
+	}
+	if (point_0_3 < 0) {
+		point_0_3 = 0;
+	}
+	if (point_0_3 > 3) {
+		point_0_3 = 3;
+	}
+	try {
+		_impl->tracks[track]->set_meter_point (snap_to_meter_point (point_0_3));
+		refresh_meter_point_flags ();
+		_snap.detail = L"meter point set";
+		return _snap.track_meter_point[track] == point_0_3;
 	} catch (...) {
 		return false;
 	}
@@ -3251,6 +3322,28 @@ EngineHost::smoke_clear_meter_clips ()
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"smoke-clear-meter-clips failed — no Session";
+int
+EngineHost::track_meter_point (int track) const
+{
+	if (track < 0 || track >= EngineSnapshot::kMeters) {
+		return 2;
+	}
+	return _snap.track_meter_point[track];
+}
+
+bool
+EngineHost::cycle_track_meter_point (int track)
+{
+	refresh_meter_point_flags ();
+	int cur = track_meter_point (track);
+	return set_track_meter_point (track, (cur + 1) % 4);
+}
+
+bool
+EngineHost::smoke_meter_point ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-meter-point failed — no Session";
 		return false;
 	}
 	try {
@@ -3274,6 +3367,23 @@ EngineHost::smoke_clear_meter_clips ()
 				std::fprintf (stderr,
 				              "airdour_win_shell: smoke-clear-meter-clips FAILED (clip still on %d)\n",
 				              i);
+			std::fprintf (stderr, "airdour_win_shell: smoke-meter-point FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_meter_point_flags ();
+		/* Default PostFader (2); force known start. */
+		if (!set_track_meter_point (0, 2) || _snap.track_meter_point[0] != 2) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-meter-point FAILED (start Post)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const int expect[] = { 3, 0, 1, 2 }; /* Out → In → Pre → Post */
+		for (int i = 0; i < 4; ++i) {
+			if (!cycle_track_meter_point (0) || _snap.track_meter_point[0] != expect[i]) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-meter-point FAILED (step %d got=%d expect=%d)\n",
+				              i, _snap.track_meter_point[0], expect[i]);
 				std::fflush (stderr);
 				return false;
 			}
@@ -3284,6 +3394,12 @@ EngineHost::smoke_clear_meter_clips ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-clear-meter-clips exception: %s\n", e.what ());
+		std::fprintf (stderr, "airdour_win_shell: smoke-meter-point ok (In/Pre/Post/Out cycle → Post)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-meter-point ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-meter-point exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -12840,6 +12956,7 @@ EngineHost::add_audio_track ()
 		refresh_mute_solo_flags ();
 		refresh_pan_flags ();
 		refresh_send_flags ();
+		refresh_meter_point_flags ();
 		_snap.detail = L"audio track added";
 		std::fprintf (stderr, "airdour_win_shell: add audio → count=%d\n",
 		              _snap.audio_track_count);
@@ -13353,6 +13470,7 @@ EngineHost::move_audio_track (int index, int delta)
 		refresh_mute_solo_flags ();
 		refresh_pan_flags ();
 		refresh_send_flags ();
+		refresh_meter_point_flags ();
 		refresh_selection_snap ();
 		_snap.detail = L"tracks reordered";
 		std::fprintf (stderr, "airdour_win_shell: move audio[%d] %+d → [%d]\n",
@@ -30248,6 +30366,7 @@ EngineHost::refresh_snapshot ()
 			refresh_pan_auto_state_flags ();
 			refresh_send_flags ();
 			refresh_send_auto_state_flags ();
+			refresh_meter_point_flags ();
 			refresh_group_flags ();
 			refresh_monitor_flags ();
 			refresh_history_flags ();
@@ -30347,6 +30466,7 @@ EngineHost::EngineHost ()
 		_track_gain[i] = 0.85f;
 		_snap.meter_peak[i] = 0.f;
 		_snap.meter_clip[i] = false;
+		_snap.track_meter_point[i] = 2; /* PostFader */
 		_snap.track_has_regions[i] = false;
 		_snap.track_armed[i] = false;
 		_snap.track_frozen[i] = false;
@@ -31949,6 +32069,42 @@ bool
 EngineHost::clear_track_meter_clip (int track)
 {
 	(void)track;
+	return false;
+}
+
+void
+EngineHost::refresh_meter_point_flags ()
+{
+	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+		_snap.track_meter_point[i] = 2;
+	}
+}
+
+bool
+EngineHost::set_track_meter_point (int track, int point_0_3)
+{
+	(void)track;
+	(void)point_0_3;
+	return false;
+}
+
+int
+EngineHost::track_meter_point (int track) const
+{
+	(void)track;
+	return 2;
+}
+
+bool
+EngineHost::cycle_track_meter_point (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::smoke_meter_point ()
+{
 	return false;
 }
 

@@ -167,6 +167,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_plugin = parse_flag (argc, argv, L"--smoke-plugin");
 	bool smoke_vst3 = parse_flag (argc, argv, L"--smoke-vst3");
 	bool smoke_mute_solo = parse_flag (argc, argv, L"--smoke-mute-solo");
+	bool smoke_meter_point = parse_flag (argc, argv, L"--smoke-meter-point");
 	bool smoke_pan = parse_flag (argc, argv, L"--smoke-pan");
 	bool smoke_pan_width = parse_flag (argc, argv, L"--smoke-pan-width");
 	bool smoke_send = parse_flag (argc, argv, L"--smoke-send");
