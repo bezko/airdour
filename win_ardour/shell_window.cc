@@ -816,7 +816,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("solo-isolate")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-solo-isolate FAILED (no session)\n");
-	if (ok && smoke_meter_point && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("meter-point") && engine_session_ok ()) {
 		if (!_engine.smoke_meter_point ()) {
 			_smoke_failed = true;
 		} else {
@@ -826,8 +830,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			}
 		}
 		std::fflush (stderr);
-	} else if (smoke_meter_point) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-has_smoke ("meter-point") FAILED (no session)\n");
+	} else if (has_smoke ("meter-point")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-meter-point FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -964,7 +968,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_pan && engine_session_ok ()) {
-	if (ok && smoke_pan && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
@@ -8042,46 +8045,43 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
-	/* Click meter → clear peak-hold clip latch (PeakMeter::reset_max).
-	 * Alt+click → clear every strip's clip latch. */
-	int meter_i = hit_mixer_meter (x, y);
-	if (meter_i >= 0) {
-		const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
-		if (alt) {
-			for (int i = 0; i < kMixerStripsMax; ++i) {
-				_mixers[i].clear_meter_clip ();
-			}
-			if (_engine.is_linked () && _engine.snapshot ().session_ok) {
-				_engine.clear_all_meter_clips ();
-				_engine.poll ();
-				_engine_snap = _engine.snapshot ();
-			}
 	/* Shift+click meter → cycle Input/Pre/Post/Output tap.
+	 * Alt+click → clear every strip's clip latch.
 	 * Plain click (when clipped) → clear peak-hold clip latch. */
 	int meter_i = hit_mixer_meter (x, y);
-	if (meter_i >= 0) {
-		if ((GetKeyState (VK_SHIFT) & 0x8000) != 0
-		    && meter_i < EngineSnapshot::kMeters
-		    && _engine.is_linked () && _engine_snap.session_ok
-		    && !_mixers[meter_i].is_midi_strip ()) {
-			_engine.cycle_track_meter_point (meter_i);
+	if (meter_i >= 0 && (GetKeyState (VK_SHIFT) & 0x8000) != 0
+	    && meter_i < EngineSnapshot::kMeters
+	    && _engine.is_linked () && _engine_snap.session_ok
+	    && !_mixers[meter_i].is_midi_strip ()) {
+		_engine.cycle_track_meter_point (meter_i);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_mixers[meter_i].set_meter_point (_engine_snap.track_meter_point[meter_i]);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+	if (meter_i >= 0 && (GetKeyState (VK_MENU) & 0x8000) != 0) {
+		for (int i = 0; i < kMixerStripsMax; ++i) {
+			_mixers[i].clear_meter_clip ();
+		}
+		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
+			_engine.clear_all_meter_clips ();
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
-			_mixers[meter_i].set_meter_point (_engine_snap.track_meter_point[meter_i]);
-			InvalidateRect (_hwnd, nullptr, FALSE);
-			return true;
 		}
-		if (_mixers[meter_i].meter_clipped ()) {
-			_mixers[meter_i].clear_meter_clip ();
-			if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
-			    && _engine.snapshot ().session_ok) {
-				_engine.clear_track_meter_clip (meter_i);
-				_engine.poll ();
-				_engine_snap = _engine.snapshot ();
-			}
-			InvalidateRect (_hwnd, nullptr, FALSE);
-			return true;
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+	if (meter_i >= 0 && _mixers[meter_i].meter_clipped ()) {
+		_mixers[meter_i].clear_meter_clip ();
+		if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
+		    && _engine.snapshot ().session_ok) {
+			_engine.clear_track_meter_clip (meter_i);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
 		}
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
 	}
 
 	int fxpi3 = hit_mixer_fx_param3 (x, y);

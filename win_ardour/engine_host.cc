@@ -3242,6 +3242,11 @@ EngineHost::clear_all_meter_clips ()
 		std::fflush (stderr);
 		_snap.detail = L"all meter clips cleared";
 		return true;
+	} catch (...) {
+		return false;
+	}
+}
+
 namespace {
 
 int
@@ -3317,11 +3322,6 @@ EngineHost::set_track_meter_point (int track, int point_0_3)
 	}
 }
 
-bool
-EngineHost::smoke_clear_meter_clips ()
-{
-	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-clear-meter-clips failed — no Session";
 int
 EngineHost::track_meter_point (int track) const
 {
@@ -3340,10 +3340,10 @@ EngineHost::cycle_track_meter_point (int track)
 }
 
 bool
-EngineHost::smoke_meter_point ()
+EngineHost::smoke_clear_meter_clips ()
 {
 	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-meter-point failed — no Session";
+		_snap.detail = L"smoke-clear-meter-clips failed — no Session";
 		return false;
 	}
 	try {
@@ -3367,6 +3367,33 @@ EngineHost::smoke_meter_point ()
 				std::fprintf (stderr,
 				              "airdour_win_shell: smoke-clear-meter-clips FAILED (clip still on %d)\n",
 				              i);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-meter-clips ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-clear-meter-clips ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-clear-meter-clips exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_meter_point ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-meter-point failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-meter-point FAILED (no Audio 1)\n");
 			std::fflush (stderr);
 			return false;
@@ -3388,12 +3415,6 @@ EngineHost::smoke_meter_point ()
 				return false;
 			}
 		}
-		std::fprintf (stderr, "airdour_win_shell: smoke-clear-meter-clips ok\n");
-		std::fflush (stderr);
-		_snap.detail = L"smoke-clear-meter-clips ok";
-		return true;
-	} catch (std::exception& e) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-clear-meter-clips exception: %s\n", e.what ());
 		std::fprintf (stderr, "airdour_win_shell: smoke-meter-point ok (In/Pre/Post/Out cycle → Post)\n");
 		std::fflush (stderr);
 		_snap.detail = L"smoke-meter-point ok";
