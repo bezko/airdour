@@ -706,6 +706,12 @@ public:
 	bool smoke_send_pan ();
 
 	/**
+	 * Audio 1 aux send → 0.75 → reset 0 (double-click send).
+	 * For --smoke-send-reset.
+	 */
+	bool smoke_send_reset ();
+
+	/**
 	 * Track fader AutomationList (GainAutomation). Enable Play, write points,
 	 * sample curve for Editor automation lane.
 	 */

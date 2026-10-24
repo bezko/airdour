@@ -1119,6 +1119,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 
 	if (ok && has_smoke ("send-pan") && engine_session_ok ()) {
 		if (!_engine.smoke_send_pan ()) {
+	if (ok && smoke_send_reset && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_send_reset ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_send_from_engine ();
@@ -1126,6 +1128,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("send-pan")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (no session)\n");
+	} else if (smoke_send_reset) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-reset FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1144,6 +1148,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_automation && engine_session_ok ()) {
+	if (ok && smoke_automation && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_automation ()) {
 			_smoke_failed = true;
 		} else {
@@ -7016,6 +7021,14 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
 			sync_mixer_pan_from_engine ();
+		/* Double-click aux send → 0 (before rename hit). */
+		int si = hit_mixer_send (x, y);
+		if (si >= 0 && _engine.is_linked () && _engine_snap.session_ok) {
+			_mixers[si].set_send (0.f);
+			_engine.set_track_send (si, 0.f);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_send_from_engine ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
 			return 0;
 		}
@@ -9966,6 +9979,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F2", L"Rename focused track" },
 		{ L"Dbl-click FX param", L"Reset FX knob to insert default" },
 		{ L"Dbl-click fader/pan", L"Reset fader → unity · pan → center" },
+		{ L"Dbl-click send", L"Reset aux send → 0 (off)" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"Alt+Shift+click Arm", L"Arm all audio tracks" },
 		{ L"U", L"Apply / clear track group" },

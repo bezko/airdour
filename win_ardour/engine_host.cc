@@ -7302,6 +7302,45 @@ EngineHost::smoke_send_pan ()
 }
 
 bool
+EngineHost::smoke_send_reset ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-send-reset failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_aux_sends () || !_snap.aux_bus_ok || !_snap.track_send_ok[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-reset FAILED (no Aux/send)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send (0, 0.75f)
+		    || _snap.track_send[0] < 0.70f || _snap.track_send[0] > 0.80f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-reset FAILED (0.75 got=%.3f)\n",
+			              _snap.track_send[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send (0, 0.0f) || _snap.track_send[0] > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-reset FAILED (reset 0 got=%.3f)\n",
+			              _snap.track_send[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-reset ok (Audio1 Aux →0)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-send-reset ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-reset exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::ensure_track_gain_automation (int track)
 {
 	if (!_impl || !_impl->session || track < 0 || track >= EngineSnapshot::kMeters) {
@@ -32547,6 +32586,12 @@ EngineHost::track_send_pan (int track) const
 
 bool
 EngineHost::smoke_send_pan ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_send_reset ()
 {
 	return false;
 }
