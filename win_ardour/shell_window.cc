@@ -309,7 +309,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_send_auto_state,
                             bool smoke_auto_state_unify,
                             bool smoke_master_fx,
-                            bool smoke_mixer_reset)
+                            bool smoke_mixer_reset,
+                            bool smoke_send_reset)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -1119,8 +1120,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 
 	if (ok && has_smoke ("send-pan") && engine_session_ok ()) {
 		if (!_engine.smoke_send_pan ()) {
-	if (ok && smoke_send_reset && _engine.snapshot ().session_ok) {
-		if (!_engine.smoke_send_reset ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_send_from_engine ();
@@ -1128,7 +1127,18 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("send-pan")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (no session)\n");
-	} else if (smoke_send_reset) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("send-reset") && engine_session_ok ()) {
+		if (!_engine.smoke_send_reset ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_send_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("send-reset")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send-reset FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -1148,7 +1158,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_automation && engine_session_ok ()) {
-	if (ok && smoke_automation && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_automation ()) {
 			_smoke_failed = true;
 		} else {
@@ -7021,6 +7030,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
 			sync_mixer_pan_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return 0;
+		}
 		/* Double-click aux send → 0 (before rename hit). */
 		int si = hit_mixer_send (x, y);
 		if (si >= 0 && _engine.is_linked () && _engine_snap.session_ok) {
