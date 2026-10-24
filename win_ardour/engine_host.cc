@@ -14450,11 +14450,6 @@ EngineHost::create_route_group (const int* indices, int n)
 		rg->set_rgba (0xC45C26FF); /* terracotta default */
 		rg->set_monitoring (true);
 		rg->set_route_active (true);
-		rg->set_recenable (false);
-		rg->set_select (false);
-		rg->set_route_active (false);
-		rg->set_color (false);
-		rg->set_monitoring (true);
 		rg->set_sursend_enable (false);
 
 		rg->clear ();
