@@ -26,4 +26,3 @@ class no_state : public std::exception {
   public:
 	virtual const char *what() const throw() { return "no state for XML"; }
 };
-
