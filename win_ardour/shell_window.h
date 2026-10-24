@@ -148,7 +148,8 @@ public:
 	                    bool smoke_auto_state_unify = false,
 	                    bool smoke_master_fx = false,
 	                    bool smoke_mixer_reset = false,
-	                    bool smoke_send_reset = false);
+	                    bool smoke_send_reset = false,
+	                    bool smoke_track_color = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }

@@ -605,13 +605,10 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 
 	rt->FillRectangle (_strip, pane);
 	rt->DrawRectangle (_strip, edge, 1.f);
-	rt->FillRectangle (
-		D2D1::RectF (_strip.left, _strip.top, _strip.left + 3.f * dpi_scale, _strip.bottom),
-		(!_route_active || _muted) ? body : accent);
 	{
-		ID2D1SolidColorBrush* bar = _muted ? body : accent;
+		ID2D1SolidColorBrush* bar = (!_route_active || _muted) ? body : accent;
 		ID2D1SolidColorBrush* owned = nullptr;
-		if (!_muted && _color_rgba != 0) {
+		if (_route_active && !_muted && _color_rgba != 0) {
 			float r = (float)((_color_rgba >> 24) & 0xff) / 255.f;
 			float g = (float)((_color_rgba >> 16) & 0xff) / 255.f;
 			float b = (float)((_color_rgba >> 8) & 0xff) / 255.f;

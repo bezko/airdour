@@ -310,7 +310,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_auto_state_unify,
                             bool smoke_master_fx,
                             bool smoke_mixer_reset,
-                            bool smoke_send_reset)
+                            bool smoke_send_reset,
+                            bool smoke_track_color)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -587,14 +588,18 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("pan-reset-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan-reset-all FAILED (no session)\n");
-	if (ok && smoke_track_color && _engine.snapshot ().session_ok) {
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("track-color") && engine_session_ok ()) {
 		if (!_engine.smoke_track_color ()) {
 			_smoke_failed = true;
 		} else {
 			sync_track_labels_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_track_color) {
+	} else if (has_smoke ("track-color")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-track-color FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -681,7 +686,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_plugin && engine_session_ok ()) {
-	if (ok && smoke_plugin && _engine.snapshot ().session_ok) {
 		if (_engine.smoke_plugin_insert ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-plugin ok\n");
 		} else {
