@@ -27,6 +27,9 @@ public:
 	MixerStrip ();
 
 	void set_label (const wchar_t* label);
+	/** PresentationInfo RGBA (RRGGBBAA); 0 = use accent for left bar. */
+	void set_color (uint32_t rgba_rrggbbaa);
+	uint32_t color () const { return _color_rgba; }
 	/** Optional processor name shown under the track label (e.g. ACE Reverb). */
 	void set_fx_label (const wchar_t* label);
 	void set_fx_bypassed (bool bypassed);
@@ -187,6 +190,7 @@ public:
 private:
 	wchar_t     _label[32];
 	wchar_t     _fx_label[40];
+	uint32_t    _color_rgba;
 	D2D1_RECT_F _strip;
 	D2D1_RECT_F _label_rc;
 	D2D1_RECT_F _track;

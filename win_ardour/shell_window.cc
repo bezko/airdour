@@ -587,6 +587,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("pan-reset-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan-reset-all FAILED (no session)\n");
+	if (ok && smoke_track_color && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_track_color ()) {
+			_smoke_failed = true;
+		} else {
+			sync_track_labels_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_track_color) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-color FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -672,6 +681,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_plugin && engine_session_ok ()) {
+	if (ok && smoke_plugin && _engine.snapshot ().session_ok) {
 		if (_engine.smoke_plugin_insert ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-plugin ok\n");
 		} else {
@@ -2155,6 +2165,7 @@ ShellWindow::sync_track_labels_from_engine ()
 		}
 		wcsncpy_s (_lanes[i].label, lab, _TRUNCATE);
 		_mixers[i].set_label (lab);
+		_mixers[i].set_color (i < EngineSnapshot::kMeters ? _engine_snap.track_color[i] : 0);
 		_mixers[i].set_midi_strip (false);
 	}
 	const int mi = midi_mixer_index ();
@@ -2164,6 +2175,7 @@ ShellWindow::sync_track_labels_from_engine ()
 		} else {
 			_mixers[mi].set_label (L"MIDI 1");
 		}
+		_mixers[mi].set_color (0);
 		_mixers[mi].set_midi_strip (true);
 	}
 	refresh_automation_lane ();
@@ -6728,7 +6740,28 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				st *= 12;
 			}
 			do_transpose_midi_notes (st);
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'C' || wparam == 'c')) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'C' || wparam == 'c')) {
+			/* Alt+C — cycle PresentationInfo color on focused audio track. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				int idx = _focus_audio_track;
+				if (_engine_snap.has_selection && _engine_snap.selection_track >= 0) {
+					idx = _engine_snap.selection_track;
+				}
+				if (idx < 0 || idx >= n_audio_lanes ()) {
+					idx = 0;
+				}
+				if (_engine.cycle_track_color (idx)) {
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_track_labels_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+				}
+			}
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'C' || wparam == 'c')) {
 			do_toggle_count_in ();
 		} else if (wparam == 'K' || wparam == 'k') {
 			if ((GetKeyState (VK_CONTROL) & 0x8000)
@@ -9980,6 +10013,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"Alt+Shift+K / Boost", L"Cycle monitor solo boost 0/+3/+6 dB" },
 		{ L"Alt+Shift+H / Shift+click Click", L"Cycle click gain −12/−6/0/+6 dB" },
+		{ L"Alt+C", L"Cycle focused track color" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"+A / Shift+click +A", L"Add mono audio · stereo Equal-Power" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
