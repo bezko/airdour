@@ -32377,18 +32377,34 @@ bool
 EngineHost::set_midi_armed (bool armed)
 {
 	(void)armed;
+	return false;
+}
+
+bool
 EngineHost::set_track_solo_isolated (int track, bool isolated)
 {
 	(void)track;
 	(void)isolated;
+	return false;
+}
+
+bool
 EngineHost::set_track_solo_safe (int track, bool safe)
 {
 	(void)track;
 	(void)safe;
+	return false;
+}
+
+bool
 EngineHost::set_track_comment (int track, const char* utf8)
 {
 	(void)track;
 	(void)utf8;
+	return false;
+}
+
+bool
 EngineHost::set_listen_mode (int mode_0_solo_1_pfl_2_afl)
 {
 	(void)mode_0_solo_1_pfl_2_afl;
@@ -32398,11 +32414,31 @@ EngineHost::set_listen_mode (int mode_0_solo_1_pfl_2_afl)
 bool
 EngineHost::toggle_midi_armed ()
 {
+	return false;
+}
+
+bool
 EngineHost::toggle_track_solo_isolated (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
 EngineHost::toggle_track_solo_safe (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
 EngineHost::clear_track_comment (int track)
 {
 	(void)track;
+	return false;
+}
+
+bool
 EngineHost::cycle_listen_mode ()
 {
 	return false;
@@ -32410,8 +32446,23 @@ EngineHost::cycle_listen_mode ()
 
 bool
 EngineHost::smoke_midi_arm ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_solo_isolate ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_solo_safe ()
+{
+	return false;
+}
+
+bool
 EngineHost::toggle_track_comment (int track)
 {
 	(void)track;
@@ -32420,6 +32471,11 @@ EngineHost::toggle_track_comment (int track)
 
 bool
 EngineHost::smoke_track_comment ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_listen_mode ()
 {
 	return false;
@@ -32427,8 +32483,20 @@ EngineHost::smoke_listen_mode ()
 
 void
 EngineHost::refresh_solo_isolate_flags ()
+{
+}
+
+void
 EngineHost::refresh_solo_safe_flags ()
+{
+}
+
+void
 EngineHost::refresh_track_comment_flags ()
+{
+}
+
+void
 EngineHost::refresh_listen_mode_flags ()
 {
 }
@@ -32441,9 +32509,30 @@ EngineHost::smoke_mute_solo ()
 
 bool
 EngineHost::mute_all_tracks ()
+{
+	return false;
+}
+
+bool
 EngineHost::clear_all_solos ()
+{
+	return false;
+}
+
+bool
 EngineHost::clear_all_mutes ()
+{
+	return false;
+}
+
+bool
 EngineHost::exclusive_solo_track (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
 EngineHost::set_track_phase_invert (int track, bool invert)
 {
 	(void)track;
@@ -32460,6 +32549,11 @@ EngineHost::toggle_track_phase_invert (int track)
 
 bool
 EngineHost::exclusive_solo_midi ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_phase_invert ()
 {
 	return false;
@@ -32467,8 +32561,23 @@ EngineHost::smoke_phase_invert ()
 
 bool
 EngineHost::smoke_mute_all ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_clear_solos ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_clear_mutes ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_exclusive_solo ()
 {
 	return false;
@@ -32653,6 +32762,10 @@ EngineHost::track_send (int track) const
 bool
 EngineHost::reset_all_sends ()
 {
+	return false;
+}
+
+bool
 EngineHost::set_track_send_muted (int track, bool muted)
 {
 	(void)track;
@@ -32663,6 +32776,10 @@ EngineHost::set_track_send_muted (int track, bool muted)
 bool
 EngineHost::smoke_send_reset_all ()
 {
+	return false;
+}
+
+bool
 EngineHost::toggle_track_send_muted (int track)
 {
 	(void)track;
@@ -33312,6 +33429,10 @@ EngineHost::refresh_meter_point_flags ()
 {
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_meter_point[i] = 2;
+	}
+}
+
+void
 EngineHost::refresh_meter_type_flags ()
 {
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
@@ -33324,6 +33445,10 @@ EngineHost::set_track_meter_point (int track, int point_0_3)
 {
 	(void)track;
 	(void)point_0_3;
+	return false;
+}
+
+bool
 EngineHost::set_track_meter_type (int track, int type_0_1)
 {
 	(void)track;
@@ -33340,6 +33465,12 @@ EngineHost::track_meter_point (int track) const
 
 bool
 EngineHost::cycle_track_meter_point (int track)
+{
+	(void)track;
+	return false;
+}
+
+int
 EngineHost::track_meter_type (int track) const
 {
 	(void)track;
@@ -33367,6 +33498,11 @@ EngineHost::clear_all_meter_clips ()
 
 bool
 EngineHost::smoke_clear_meter_clips ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_meter_type ()
 {
 	return false;
@@ -34087,6 +34223,12 @@ EngineHost::cycle_route_group_color ()
 }
 
 bool
+EngineHost::smoke_group ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_group_monitoring ()
 {
 	return false;
@@ -34095,14 +34237,6 @@ EngineHost::smoke_group_monitoring ()
 bool
 EngineHost::smoke_group_relative ()
 {
-	return false;
-}
-
-bool
-EngineHost::set_track_monitor_choice (int track, int choice_0_auto_1_in_2_disk)
-{
-	(void)track;
-	(void)choice_0_auto_1_in_2_disk;
 	return false;
 }
 
@@ -34116,18 +34250,6 @@ bool
 EngineHost::smoke_group_color ()
 {
 	return false;
-}
-
-bool
-EngineHost::cycle_track_monitor_choice (int track)
-{
-	(void)track;
-	return false;
-}
-
-void
-EngineHost::refresh_monitor_choice_flags ()
-{
 }
 
 void
@@ -34220,44 +34342,6 @@ EngineHost::smoke_vca ()
 
 bool
 EngineHost::smoke_vca_status ()
-{
-	return false;
-}
-
-void
-EngineHost::refresh_vca_flags ()
-{
-}
-
-bool
-EngineHost::ensure_vca_master ()
-{
-	return false;
-}
-
-bool
-EngineHost::assign_track_to_vca (int track, bool on)
-{
-	(void)track;
-	(void)on;
-	return false;
-}
-
-bool
-EngineHost::set_vca_gain (float linear_0_1)
-{
-	(void)linear_0_1;
-	return false;
-}
-
-bool
-EngineHost::clear_vca_master ()
-{
-	return false;
-}
-
-bool
-EngineHost::smoke_vca ()
 {
 	return false;
 }
@@ -34365,6 +34449,11 @@ EngineHost::toggle_mixer_narrow ()
 
 bool
 EngineHost::smoke_narrow_mixer ()
+{
+	return false;
+}
+
+bool
 EngineHost::set_monitor_solo_boost_db (float db)
 {
 	(void)db;
@@ -35297,6 +35386,11 @@ EngineHost::set_all_fx_bypassed (bool bypassed)
 
 bool
 EngineHost::smoke_fx_bypass_all ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_fx_activate_all ()
 {
 	return false;
