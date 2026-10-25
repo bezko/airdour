@@ -726,8 +726,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_eq && engine_session_ok ()) {
-
 	if (ok && smoke_comp_sc_hotkey && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_comp_sc_hotkey ()) {
 			_smoke_failed = true;
