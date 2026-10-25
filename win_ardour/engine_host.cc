@@ -679,6 +679,7 @@ EngineHost::EngineHost ()
 		_snap.track_send_pan_ok[i] = false;
 		_snap.track_gain[i] = _track_gain[i];
 		_snap.track_name[i][0] = L'\0';
+		_snap.track_color[i] = 0;
 		_snap.track_in_group[i] = false;
 		_snap.track_selected[i] = false;
 	}
@@ -2130,6 +2131,7 @@ EngineHost::collect_tracks ()
 	_snap.midi_track_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
 		_snap.track_name[i][0] = L'\0';
+		_snap.track_color[i] = 0;
 		_snap.track_gain[i] = _track_gain[i];
 	}
 	_snap.midi_track_name[0] = L'\0';
@@ -2164,6 +2166,7 @@ EngineHost::collect_tracks ()
 			_impl->tracks.push_back (audio[i]);
 			copy_name_to_snap (_snap.track_name[i], EngineSnapshot::kTrackNameLen,
 			                   audio[i]->name ());
+			_snap.track_color[i] = audio[i]->presentation_info ().color ();
 			if (audio[i]->gain_control ()) {
 				_snap.track_gain[i] = (float)audio[i]->gain_control ()->get_value ();
 				_track_gain[i] = _snap.track_gain[i];
@@ -7294,6 +7297,45 @@ EngineHost::smoke_send_pan ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send-pan exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_send_reset ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-send-reset failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_aux_sends () || !_snap.aux_bus_ok || !_snap.track_send_ok[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-reset FAILED (no Aux/send)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send (0, 0.75f)
+		    || _snap.track_send[0] < 0.70f || _snap.track_send[0] > 0.80f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-reset FAILED (0.75 got=%.3f)\n",
+			              _snap.track_send[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_send (0, 0.0f) || _snap.track_send[0] > 0.05f) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-send-reset FAILED (reset 0 got=%.3f)\n",
+			              _snap.track_send[0]);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-reset ok (Audio1 Aux →0)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-send-reset ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-reset exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -14146,6 +14188,114 @@ EngineHost::move_audio_track (int index, int delta)
 }
 
 bool
+EngineHost::set_track_color (int track, uint32_t rgba)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	collect_tracks ();
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"track color — bad index";
+		return false;
+	}
+	try {
+		_impl->tracks[track]->presentation_info ().set_color (rgba);
+		_snap.track_color[track] = _impl->tracks[track]->presentation_info ().color ();
+		std::fprintf (stderr, "airdour_win_shell: track[%d] color=0x%08X\n",
+		              track, (unsigned)_snap.track_color[track]);
+		std::fflush (stderr);
+		_snap.detail = L"track color set";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: set_track_color: %s\n", e.what ());
+		std::fflush (stderr);
+		_snap.detail = L"track color failed";
+		return false;
+	} catch (...) {
+		_snap.detail = L"track color failed";
+		return false;
+	}
+}
+
+bool
+EngineHost::cycle_track_color (int track)
+{
+	/* Fixed shell palette (RRGGBBAA) — modern D2D accents, not purple-default. */
+	static const uint32_t kPalette[] = {
+		0xC45C26FF, /* terracotta */
+		0x2F6F4EFF, /* forest */
+		0x1F5C8AFF, /* steel blue */
+		0xB8860BFF, /* dark goldenrod */
+		0x6B4F3AFF, /* umber */
+		0x3D7A6AFF, /* teal */
+		0x8B3A3AFF, /* brick */
+		0x4A5568FF, /* slate */
+	};
+	static const int kN = (int)(sizeof (kPalette) / sizeof (kPalette[0]));
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	collect_tracks ();
+	if (track < 0 || track >= (int)_impl->tracks.size () || !_impl->tracks[track]) {
+		_snap.detail = L"cycle color — bad index";
+		return false;
+	}
+	uint32_t cur = _impl->tracks[track]->presentation_info ().color ();
+	int next = 0;
+	for (int i = 0; i < kN; ++i) {
+		if (kPalette[i] == cur) {
+			next = (i + 1) % kN;
+			break;
+		}
+	}
+	return set_track_color (track, kPalette[next]);
+}
+
+bool
+EngineHost::smoke_track_color ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-track-color failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-track-color FAILED (no Audio 1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const uint32_t before = _snap.track_color[0];
+		const uint32_t first = 0xC45C26FF;
+		if (!set_track_color (0, first) || _snap.track_color[0] != first) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-track-color FAILED (set)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!cycle_track_color (0) || _snap.track_color[0] == first) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-track-color FAILED (cycle)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_track_color (0, before)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-track-color FAILED (restore)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-color ok\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-track-color ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-color exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::smoke_rename ()
 {
 	if (!_impl || !_impl->session) {
@@ -14300,11 +14450,6 @@ EngineHost::create_route_group (const int* indices, int n)
 		rg->set_rgba (0xC45C26FF); /* terracotta default */
 		rg->set_monitoring (true);
 		rg->set_route_active (true);
-		rg->set_recenable (false);
-		rg->set_select (false);
-		rg->set_route_active (false);
-		rg->set_color (false);
-		rg->set_monitoring (true);
 		rg->set_sursend_enable (false);
 
 		rg->clear ();
@@ -31383,6 +31528,7 @@ EngineHost::EngineHost ()
 		_snap.track_send_pan_ok[i] = false;
 		_snap.track_gain[i] = _track_gain[i];
 		_snap.track_name[i][0] = L'\0';
+		_snap.track_color[i] = 0;
 		_snap.track_in_group[i] = false;
 		_snap.track_selected[i] = false;
 	}
@@ -32547,6 +32693,12 @@ EngineHost::track_send_pan (int track) const
 
 bool
 EngineHost::smoke_send_pan ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_send_reset ()
 {
 	return false;
 }
@@ -33775,6 +33927,27 @@ bool
 EngineHost::set_midi_track_name (const std::string& name)
 {
 	(void)name;
+	return false;
+}
+
+bool
+EngineHost::set_track_color (int track, uint32_t rgba)
+{
+	(void)track;
+	(void)rgba;
+	return false;
+}
+
+bool
+EngineHost::cycle_track_color (int track)
+{
+	(void)track;
+	return false;
+}
+
+bool
+EngineHost::smoke_track_color ()
+{
 	return false;
 }
 

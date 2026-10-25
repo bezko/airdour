@@ -309,7 +309,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_send_auto_state,
                             bool smoke_auto_state_unify,
                             bool smoke_master_fx,
-                            bool smoke_mixer_reset)
+                            bool smoke_mixer_reset,
+                            bool smoke_send_reset,
+                            bool smoke_track_color)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -586,6 +588,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("pan-reset-all")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan-reset-all FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("track-color") && engine_session_ok ()) {
+		if (!_engine.smoke_track_color ()) {
+			_smoke_failed = true;
+		} else {
+			sync_track_labels_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("track-color")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-color FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -1126,6 +1141,19 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	} else if (has_smoke ("send-pan")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send-pan FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("send-reset") && engine_session_ok ()) {
+		if (!_engine.smoke_send_reset ()) {
+			_smoke_failed = true;
+		} else {
+			sync_mixer_send_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (has_smoke ("send-reset")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-send-reset FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
@@ -2141,6 +2169,7 @@ ShellWindow::sync_track_labels_from_engine ()
 		}
 		wcsncpy_s (_lanes[i].label, lab, _TRUNCATE);
 		_mixers[i].set_label (lab);
+		_mixers[i].set_color (i < EngineSnapshot::kMeters ? _engine_snap.track_color[i] : 0);
 		_mixers[i].set_midi_strip (false);
 	}
 	const int mi = midi_mixer_index ();
@@ -2150,6 +2179,7 @@ ShellWindow::sync_track_labels_from_engine ()
 		} else {
 			_mixers[mi].set_label (L"MIDI 1");
 		}
+		_mixers[mi].set_color (0);
 		_mixers[mi].set_midi_strip (true);
 	}
 	refresh_automation_lane ();
@@ -6714,7 +6744,28 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				st *= 12;
 			}
 			do_transpose_midi_notes (st);
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'C' || wparam == 'c')) {
+		} else if ((GetKeyState (VK_MENU) & 0x8000)
+		           && !(GetKeyState (VK_CONTROL) & 0x8000)
+		           && (wparam == 'C' || wparam == 'c')) {
+			/* Alt+C — cycle PresentationInfo color on focused audio track. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				int idx = _focus_audio_track;
+				if (_engine_snap.has_selection && _engine_snap.selection_track >= 0) {
+					idx = _engine_snap.selection_track;
+				}
+				if (idx < 0 || idx >= n_audio_lanes ()) {
+					idx = 0;
+				}
+				if (_engine.cycle_track_color (idx)) {
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_track_labels_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+				}
+			}
+		} else if (!(GetKeyState (VK_CONTROL) & 0x8000)
+		           && !(GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'C' || wparam == 'c')) {
 			do_toggle_count_in ();
 		} else if (wparam == 'K' || wparam == 'k') {
 			if ((GetKeyState (VK_CONTROL) & 0x8000)
@@ -7016,6 +7067,17 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
 			sync_mixer_pan_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return 0;
+		}
+		/* Double-click aux send → 0 (before rename hit). */
+		int si = hit_mixer_send (x, y);
+		if (si >= 0 && _engine.is_linked () && _engine_snap.session_ok) {
+			_mixers[si].set_send (0.f);
+			_engine.set_track_send (si, 0.f);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_send_from_engine ();
 			InvalidateRect (_hwnd, nullptr, FALSE);
 			return 0;
 		}
@@ -9955,6 +10017,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"Alt+Shift+K / Boost", L"Cycle monitor solo boost 0/+3/+6 dB" },
 		{ L"Alt+Shift+H / Shift+click Click", L"Cycle click gain −12/−6/0/+6 dB" },
+		{ L"Alt+C", L"Cycle focused track color" },
 		{ L"− / +", L"Tempo −1 / +1 BPM" },
 		{ L"+A / Shift+click +A", L"Add mono audio · stereo Equal-Power" },
 		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
@@ -9966,6 +10029,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"F2", L"Rename focused track" },
 		{ L"Dbl-click FX param", L"Reset FX knob to insert default" },
 		{ L"Dbl-click fader/pan", L"Reset fader → unity · pan → center" },
+		{ L"Dbl-click send", L"Reset aux send → 0 (off)" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
 		{ L"Alt+Shift+click Arm", L"Arm all audio tracks" },
 		{ L"U", L"Apply / clear track group" },

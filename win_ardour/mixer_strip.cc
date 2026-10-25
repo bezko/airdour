@@ -20,7 +20,8 @@ contains (const D2D1_RECT_F& r, float x, float y)
 } // namespace
 
 MixerStrip::MixerStrip ()
-	: _strip ()
+	: _color_rgba (0)
+	, _strip ()
 	, _label_rc ()
 	, _track ()
 	, _arm_btn ()
@@ -79,6 +80,12 @@ MixerStrip::set_label (const wchar_t* label)
 	if (label) {
 		wcsncpy_s (_label, label, _TRUNCATE);
 	}
+}
+
+void
+MixerStrip::set_color (uint32_t rgba_rrggbbaa)
+{
+	_color_rgba = rgba_rrggbbaa;
 }
 
 void
@@ -598,9 +605,26 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 
 	rt->FillRectangle (_strip, pane);
 	rt->DrawRectangle (_strip, edge, 1.f);
-	rt->FillRectangle (
-		D2D1::RectF (_strip.left, _strip.top, _strip.left + 3.f * dpi_scale, _strip.bottom),
-		(!_route_active || _muted) ? body : accent);
+	{
+		ID2D1SolidColorBrush* bar = (!_route_active || _muted) ? body : accent;
+		ID2D1SolidColorBrush* owned = nullptr;
+		if (_route_active && !_muted && _color_rgba != 0) {
+			float r = (float)((_color_rgba >> 24) & 0xff) / 255.f;
+			float g = (float)((_color_rgba >> 16) & 0xff) / 255.f;
+			float b = (float)((_color_rgba >> 8) & 0xff) / 255.f;
+			float a = (float)(_color_rgba & 0xff) / 255.f;
+			if (SUCCEEDED (rt->CreateSolidColorBrush (D2D1::ColorF (r, g, b, a), &owned))
+			    && owned) {
+				bar = owned;
+			}
+		}
+		rt->FillRectangle (
+			D2D1::RectF (_strip.left, _strip.top, _strip.left + 3.f * dpi_scale, _strip.bottom),
+			bar);
+		if (owned) {
+			owned->Release ();
+		}
+	}
 
 	/* Group indicator: top accent bar + "G"; pick shows a second edge wash.
 	 * When RouteGroup shares color, bar uses group RRGGBBAA. */
