@@ -24498,6 +24498,69 @@ EngineHost::smoke_comp ()
 	}
 }
 
+
+bool
+EngineHost::toggle_track_comp_sidechain (int track, int src_track)
+{
+	if (!_impl || !_impl->session) {
+		return false;
+	}
+	refresh_track_comp_snap ();
+	bool on = !_snap.track_comp_sidechain;
+	return set_track_comp_sidechain (track, src_track, on);
+}
+
+bool
+EngineHost::smoke_comp_sc_hotkey ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-comp-sc-hotkey failed — no Session";
+		return false;
+	}
+	try {
+		collect_tracks ();
+		if (_impl->tracks.size () < 2 || !_impl->tracks[0] || !_impl->tracks[1]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-comp-sc-hotkey FAILED (need Audio 1+2)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!insert_track_comp (1) || !_snap.track_comp_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-comp-sc-hotkey FAILED (insert)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_comp_sidechain) {
+			set_track_comp_sidechain (1, 0, false);
+		}
+		if (!toggle_track_comp_sidechain (1, 0) || !_snap.track_comp_sidechain) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-comp-sc-hotkey FAILED (SC on)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.track_comp_sidechain_src != 0) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-comp-sc-hotkey FAILED (src=%d)\n",
+			              _snap.track_comp_sidechain_src);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!toggle_track_comp_sidechain (1, 0) || _snap.track_comp_sidechain) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-comp-sc-hotkey FAILED (SC off)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-comp-sc-hotkey ok (Audio1→Audio2 toggle)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-comp-sc-hotkey ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-comp-sc-hotkey exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 void
 EngineHost::refresh_track_eq_snap ()
 {
@@ -35339,6 +35402,20 @@ EngineHost::smoke_fx_param_reset ()
 
 bool
 EngineHost::smoke_comp ()
+{
+	return false;
+}
+
+bool
+EngineHost::toggle_track_comp_sidechain (int track, int src_track)
+{
+	(void)track;
+	(void)src_track;
+	return false;
+}
+
+bool
+EngineHost::smoke_comp_sc_hotkey ()
 {
 	return false;
 }

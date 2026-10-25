@@ -281,6 +281,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_consolidate,
                             bool smoke_freeze,
                             bool smoke_comp,
+                            bool smoke_comp_sc_hotkey,
                             bool smoke_eq,
                             bool smoke_delay,
                             bool smoke_limiter,
@@ -726,6 +727,24 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 
 	if (ok && smoke_eq && engine_session_ok ()) {
+
+	if (ok && smoke_comp_sc_hotkey && _engine.snapshot ().session_ok) {
+		if (!_engine.smoke_comp_sc_hotkey ()) {
+			_smoke_failed = true;
+		} else {
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_fx_from_engine ();
+		}
+		std::fflush (stderr);
+	} else if (smoke_comp_sc_hotkey) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-comp-sc-hotkey FAILED (no session)\n");
+		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+
+	if (ok && smoke_eq && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_eq ()) {
 			_smoke_failed = true;
 		} else {
@@ -4975,6 +4994,23 @@ ShellWindow::do_nudge_tempo (float delta)
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+
+void
+ShellWindow::do_toggle_comp_sidechain ()
+{
+	if (!_engine.is_linked () || !_engine_snap.session_ok) {
+		return;
+	}
+	if (!_engine.toggle_track_comp_sidechain (1, 0)) {
+		MessageBoxW (_hwnd, L"Could not toggle Comp sidechain (need ACE Comp on Audio 2).",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_fx_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
 void
 ShellWindow::do_add_marker_at_playhead ()
 {
@@ -6732,6 +6768,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Q' || wparam == 'q')) {
 			/* Q = quantize selected (or all) MIDI notes to snap grid. */
 			do_quantize_midi_notes ();
+		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
+		           && (GetKeyState (VK_MENU) & 0x8000)
+		           && (wparam == 'H' || wparam == 'h')) {
+			/* Ctrl+Alt+H = toggle Comp SC Audio1→Audio2. */
+			do_toggle_comp_sidechain ();
 		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'H' || wparam == 'h')) {
 			/* H = humanize; Shift+H = 2× strength. */
 			do_humanize_midi_notes ((GetKeyState (VK_SHIFT) & 0x8000) ? 2.f : 1.f);
@@ -10014,6 +10055,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Tab / Shift+Tab", L"Cycle region selection" },
 		{ L"Ctrl+Alt+±", L"Zoom around playhead" },
 		{ L"Alt+M", L"Clear all mutes (audio + MIDI)" },
+		{ L"Ctrl+Alt+H", L"Toggle Comp sidechain (Audio 1→2)" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"Alt+Shift+K / Boost", L"Cycle monitor solo boost 0/+3/+6 dB" },
 		{ L"Alt+Shift+H / Shift+click Click", L"Cycle click gain −12/−6/0/+6 dB" },

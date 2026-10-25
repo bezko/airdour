@@ -119,6 +119,7 @@ public:
 	                    bool smoke_consolidate = false,
 	                    bool smoke_freeze = false,
 	                    bool smoke_comp = false,
+	                    bool smoke_comp_sc_hotkey = false,
 	                    bool smoke_eq = false,
 	                    bool smoke_delay = false,
 	                    bool smoke_limiter = false,
@@ -336,6 +337,7 @@ private:
 	void sync_mixer_group_from_engine ();
 	void draw_editor_grid ();
 	void draw_punch_overlay ();
+	void do_toggle_comp_sidechain ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
 	void sync_mixer_arm_from_engine ();

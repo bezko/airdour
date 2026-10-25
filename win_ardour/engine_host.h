@@ -1673,6 +1673,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Falls back to SC off if pin/connect fails.
 	 */
 	bool set_track_comp_sidechain (int track, int src_track, bool enable);
+	/** Toggle Comp SC Audio 1 → Audio 2 (Ctrl+Alt+H). */
+	bool toggle_track_comp_sidechain (int track = 1, int src_track = 0);
 
 	/**
 	 * Insert ACE EQ (bundled LV2, DSP-only) on an audio track pre-fader.
@@ -1735,6 +1737,11 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-comp.
 	 */
 	bool smoke_comp ();
+	/**
+	 * Insert Comp → SC on → assert → SC off → assert.
+	 * For --smoke-comp-sc-hotkey.
+	 */
+	bool smoke_comp_sc_hotkey ();
 
 	/**
 	 * Insert ACE EQ on Audio 3; set Gain L / Gain 2 / Gain H.
