@@ -1949,6 +1949,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		return true;
 	});
 	run_smoke_check (ok, "vst3-prefs-click", [this]() { return smoke_vst3_prefs_click (); });
+	run_smoke_check (ok, "vst3-mixer-unload", [this]() { return smoke_vst3_mixer_unload (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
 	run_smoke_check (ok, "solo-all", [this]() { return _engine.smoke_solo_all (); });
@@ -2734,6 +2735,7 @@ void
 ShellWindow::sync_mixer_fx_from_engine ()
 {
 	for (int i = 0; i < kTracks; ++i) {
+		_mixers[i].set_fx_can_unload (false);
 		if (i == 0 && _engine_snap.track_fx_ok && !_engine_snap.track_fx_name.empty ()) {
 			_mixers[i].set_fx_label (_engine_snap.track_fx_name.c_str ());
 			_mixers[i].set_fx_bypassed (_engine_snap.track_fx_bypassed);
@@ -2743,6 +2745,7 @@ ShellWindow::sync_mixer_fx_from_engine ()
 			/* Prefer live VST3 insert on Audio 2 over ACE Comp when both present. */
 			_mixers[i].set_fx_label (_engine_snap.vst3_name);
 			_mixers[i].set_fx_bypassed (_engine_snap.vst3_bypassed);
+			_mixers[i].set_fx_can_unload (true);
 			const int n = (_engine_snap.vst3_param_count > 0)
 			                  ? (std::min) (_engine_snap.vst3_param_count,
 			                               EngineSnapshot::kMaxVst3Params)
@@ -8528,6 +8531,20 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
+	/* VST3 × unload on Audio 2 FX row (before bypass toggle). */
+	for (int ui = 0; ui < kTracks; ++ui) {
+		if (_mixers[ui].hit_fx_unload (x, y)) {
+			if (_engine.is_linked () && _engine.snapshot ().session_ok) {
+				(void)_engine.unload_vst3 ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_fx_from_engine ();
+			}
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
+	}
+
 	int fxi = hit_mixer_fx (x, y);
 	if (fxi >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
@@ -10047,6 +10064,79 @@ ShellWindow::smoke_vst3_prefs_click ()
 	              "airdour_win_shell: smoke-vst3-prefs-click ok "
 	              "(catalog=%d row0 hit→insert path)\n",
 	              catalog_n);
+	return true;
+}
+
+bool
+ShellWindow::smoke_vst3_mixer_unload ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst3-mixer-unload FAILED (no session)\n");
+		return false;
+	}
+	layout_panes ();
+	sync_mixer_fx_from_engine ();
+
+	if (!_engine_snap.vst3_ok) {
+		/* Empty / scan-only: × must not hit; unload is still a safe no-op. */
+		if (_mixers[1].fx_can_unload () || _mixers[1].hit_fx_unload (
+		        0.5f * (_mixers[1].bounds ().left + _mixers[1].bounds ().right),
+		        0.5f * (_mixers[1].bounds ().top + _mixers[1].bounds ().bottom))) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-mixer-unload FAILED "
+			              "(unload chrome without VST3)\n");
+			return false;
+		}
+		if (!_engine.unload_vst3 ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-mixer-unload FAILED "
+			              "(idle unload)\n");
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-unload ok "
+		              "(scan-only; no ×; idle unload; set VST3_PATH to insert)\n");
+		return true;
+	}
+
+	/* Live VST3: × hit → unload → !vst3_ok. */
+	sync_mixer_fx_from_engine ();
+	layout_panes ();
+	if (!_mixers[1].fx_can_unload () || !_mixers[1].has_fx ()) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-unload FAILED "
+		              "(no unload chrome while vst3_ok)\n");
+		return false;
+	}
+	/* Center of unload chip = right edge of FX row. */
+	const D2D1_RECT_F& b = _mixers[1].bounds ();
+	float fx_top = b.top + 80.f * _dpi_scale; /* approximate; use hit scan */
+	bool hit = false;
+	for (float y = b.top; y < b.bottom; y += 2.f * _dpi_scale) {
+		for (float x = b.right - 20.f * _dpi_scale; x < b.right; x += 2.f * _dpi_scale) {
+			if (_mixers[1].hit_fx_unload (x, y)) {
+				hit = true;
+				(void)_engine.unload_vst3 ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_fx_from_engine ();
+				goto after_hit;
+			}
+		}
+	}
+after_hit:
+	if (!hit) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-unload FAILED (× not hittable)\n");
+		return false;
+	}
+	(void)fx_top;
+	if (_engine_snap.vst3_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-unload FAILED (still loaded)\n");
+		return false;
+	}
+	std::fprintf (stderr, "airdour_win_shell: smoke-vst3-mixer-unload ok (× → unload)\n");
 	return true;
 }
 
