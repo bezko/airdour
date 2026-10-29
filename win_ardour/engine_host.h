@@ -1842,6 +1842,13 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool quantize_midi_notes ();
 
 	/**
+	 * Legato selected MIDI notes (or all if none selected): each note's end
+	 * abuts the next note's start (time order). Last note length unchanged.
+	 * Rebuilds the MIDI region (Windows-safe).
+	 */
+	bool legato_midi_notes ();
+
+	/**
 	 * Transpose selected MIDI notes (or all if none selected) by semitones.
 	 * Pitch clamped to 0..127. Rebuilds the MIDI region (Windows-safe).
 	 */
@@ -1954,6 +1961,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-midi-quantize.
 	 */
 	bool smoke_midi_quantize ();
+	/** Two short notes with a gap → legato → first end abuts second. --smoke-midi-legato */
+	bool smoke_midi_legato ();
 
 	/**
 	 * Add notes, transpose +1 then −12, verify pitches. For --smoke-midi-transpose.

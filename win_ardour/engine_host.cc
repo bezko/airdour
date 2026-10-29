@@ -27985,6 +27985,132 @@ EngineHost::quantize_midi_notes ()
 }
 
 bool
+EngineHost::legato_midi_notes ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"legato: no Session";
+		return false;
+	}
+	if (!ensure_midi_region (32.f) || !_impl->midi_region) {
+		_snap.detail = L"legato: no MIDI region";
+		return false;
+	}
+	try {
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count < 2) {
+			_snap.detail = L"legato: need ≥2 notes";
+			return false;
+		}
+
+		bool have_sel = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				have_sel = true;
+				break;
+			}
+		}
+
+		struct Kept {
+			uint8_t pitch;
+			uint8_t velocity;
+			float   start_sec;
+			float   length_sec;
+			bool    touch;
+		};
+		std::vector<Kept> keep;
+		keep.reserve ((size_t)_snap.midi_note_count);
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			Kept k;
+			k.pitch = n.pitch;
+			k.velocity = n.velocity;
+			k.start_sec = n.start_sec;
+			k.length_sec = n.length_sec;
+			k.touch = !have_sel || n.selected;
+			keep.push_back (k);
+		}
+
+		std::sort (keep.begin (), keep.end (),
+		           [] (const Kept& a, const Kept& b) {
+			           if (a.start_sec != b.start_sec) {
+				           return a.start_sec < b.start_sec;
+			           }
+			           return a.pitch < b.pitch;
+		           });
+
+		/* Among notes that participate, abut each to the next participant. */
+		std::vector<size_t> chain;
+		chain.reserve (keep.size ());
+		for (size_t i = 0; i < keep.size (); ++i) {
+			if (keep[i].touch) {
+				chain.push_back (i);
+			}
+		}
+		if (chain.size () < 2) {
+			_snap.detail = L"legato: need ≥2 selected notes";
+			return false;
+		}
+
+		constexpr float kMinLen = 0.05f;
+		int moved = 0;
+		for (size_t c = 0; c + 1 < chain.size (); ++c) {
+			Kept& cur = keep[chain[c]];
+			const Kept& nxt = keep[chain[c + 1]];
+			float len = nxt.start_sec - cur.start_sec;
+			if (len < kMinLen) {
+				len = kMinLen;
+			}
+			if (std::fabs (len - cur.length_sec) > 1e-4f) {
+				++moved;
+			}
+			cur.length_sec = len;
+		}
+
+		std::shared_ptr<Playlist> playlist = _impl->midi_track
+		                                        ? _impl->midi_track->playlist ()
+		                                        : std::shared_ptr<Playlist> ();
+		if (!playlist) {
+			_snap.detail = L"legato: no playlist";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("legato midi");
+		playlist->clear_changes ();
+		playlist->clear_owned_changes ();
+		playlist->remove_region (_impl->midi_region);
+		playlist->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		_impl->midi_region.reset ();
+		_impl->selected_midi_note_id = -1;
+		if (!ensure_midi_region (32.f)) {
+			_snap.detail = L"legato: region rebuild failed";
+			return false;
+		}
+		int added = 0;
+		for (size_t i = 0; i < keep.size (); ++i) {
+			if (add_midi_note (keep[i].pitch, keep[i].start_sec,
+			                   keep[i].length_sec, keep[i].velocity)) {
+				++added;
+			}
+		}
+		_impl->selected_midi_note_id = -1;
+		refresh_midi_notes_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: legato ok (notes=%d moved=%d added=%d)\n",
+		              _snap.midi_note_count, moved, added);
+		std::fflush (stderr);
+		_snap.detail = L"MIDI legato";
+		return added > 0;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: legato exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::smoke_midi_quantize ()
 {
 	if (!_impl || !_impl->session || !_impl->engine) {
@@ -28097,7 +28223,89 @@ EngineHost::smoke_midi_quantize ()
 	}
 }
 
-
+bool
+EngineHost::smoke_midi_legato ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-legato failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-legato FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for legato smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-legato FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+		if (!add_midi_note (60, 0.0f, 0.25f, 100)
+		    || !add_midi_note (64, 1.0f, 0.25f, 100)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-legato FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		if (!legato_midi_notes ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-legato FAILED (legato)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		float len60 = -1.f;
+		float len64 = -1.f;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			if (n.pitch == 60) {
+				len60 = n.length_sec;
+			}
+			if (n.pitch == 64) {
+				len64 = n.length_sec;
+			}
+		}
+		if (len60 < 0.f || len64 < 0.f
+		    || std::fabs (len60 - 1.0f) > 0.06f
+		    || std::fabs (len64 - 0.25f) > 0.06f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-legato FAILED "
+			              "(len60=%.3f want≈1.0 len64=%.3f want≈0.25)\n",
+			              len60, len64);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-legato ok (len60=%.3f len64=%.3f)\n",
+		              len60, len64);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-legato ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-legato exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
 
 bool
 EngineHost::transpose_midi_notes (int semitones)
@@ -36046,7 +36254,19 @@ EngineHost::quantize_midi_notes ()
 }
 
 bool
+EngineHost::legato_midi_notes ()
+{
+	return false;
+}
+
+bool
 EngineHost::smoke_midi_quantize ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_legato ()
 {
 	return false;
 }
