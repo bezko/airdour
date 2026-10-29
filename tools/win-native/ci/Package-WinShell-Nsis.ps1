@@ -31,9 +31,20 @@ if (-not [System.IO.Path]::IsPathRooted($OutDir)) {
 $OutDir = [System.IO.Path]::GetFullPath($OutDir)
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
-function Convert-ToNsisPath([string]$Path) {
-    $full = [System.IO.Path]::GetFullPath($Path)
-    return ($full -replace '\\', '/').TrimEnd('/')
+function Convert-ToNsisPath([string]$Path, [string]$FromDir) {
+    # makensis uses the .nsi directory as cwd. Relative forward-slash paths
+    # avoid the Windows compile-time /FileExists miss on absolute "D:/..." paths.
+    $fromFull = [System.IO.Path]::GetFullPath($FromDir)
+    if (-not $fromFull.EndsWith([IO.Path]::DirectorySeparatorChar)) {
+        $fromFull += [IO.Path]::DirectorySeparatorChar
+    }
+    $toFull = [System.IO.Path]::GetFullPath($Path)
+    $rel = [System.Uri]::UnescapeDataString(
+        ([System.Uri]$fromFull).MakeRelativeUri([System.Uri]$toFull).ToString()
+    )
+    $rel = ($rel -replace '\\', '/').TrimEnd('/')
+    if (-not $rel) { return "." }
+    return $rel
 }
 
 function Convert-ToViVersion([string]$DisplayVersion) {
@@ -129,14 +140,24 @@ if (-not (Test-Path $copying)) { throw "Missing $copying" }
 $outExe = Join-Path $OutDir ($outBase + ".exe")
 if (Test-Path $outExe) { Remove-Item -Force $outExe }
 
+$nsiDir = Split-Path $nsi -Parent
+$sourceRel = Convert-ToNsisPath $StageDir $nsiDir
+$outRel = Convert-ToNsisPath $outExe $nsiDir
+$licenseRel = Convert-ToNsisPath $copying $nsiDir
+Write-Host "Stage files:"
+Get-ChildItem -File -Recurse $StageDir | ForEach-Object { Write-Host ("  " + $_.FullName) }
+Write-Host "NSIS SOURCE_DIR=$sourceRel"
+Write-Host "NSIS OUT_FILE=$outRel"
+Write-Host "NSIS LICENSE_FILE=$licenseRel"
+
 $nsisArgs = @(
     "/V3",
     "/DVERSION=$appVer",
     "/DPRODUCT_VERSION=$viVer",
-    "/DSOURCE_DIR=$(Convert-ToNsisPath $StageDir)",
-    "/DOUT_FILE=$(Convert-ToNsisPath $outExe)",
-    "/DLICENSE_FILE=$(Convert-ToNsisPath $copying)",
-    (Convert-ToNsisPath $nsi)
+    "/DSOURCE_DIR=$sourceRel",
+    "/DOUT_FILE=$outRel",
+    "/DLICENSE_FILE=$licenseRel",
+    $nsi
 )
 
 Write-Host "Compiling installer from stage: $StageDir"

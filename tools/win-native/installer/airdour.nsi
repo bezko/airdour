@@ -40,6 +40,9 @@ Unicode true
   !define LICENSE_FILE "..\..\..\COPYING"
 !endif
 
+; Paths are relative to this script (makensis cds here). Absolute D:/ paths make
+; compile-time /FileExists miss the payload on the Windows NSIS that ships on
+; GitHub-hosted runners.
 !if /FileExists "${SOURCE_DIR}/airdour_win_shell.exe"
 !else
   !error "SOURCE_DIR is missing airdour_win_shell.exe (${SOURCE_DIR})"
