@@ -32,8 +32,8 @@ $OutDir = [System.IO.Path]::GetFullPath($OutDir)
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 function Convert-ToNsisPath([string]$Path, [string]$FromDir) {
-    # makensis uses the .nsi directory as cwd. Relative forward-slash paths
-    # avoid the Windows compile-time /FileExists miss on absolute "D:/..." paths.
+    # Relative backslashes from the .nsi directory. Forward slashes make
+    # compile-time /FileExists fail on the NSIS build shipped with GitHub runners.
     $fromFull = [System.IO.Path]::GetFullPath($FromDir)
     if (-not $fromFull.EndsWith([IO.Path]::DirectorySeparatorChar)) {
         $fromFull += [IO.Path]::DirectorySeparatorChar
@@ -42,7 +42,7 @@ function Convert-ToNsisPath([string]$Path, [string]$FromDir) {
     $rel = [System.Uri]::UnescapeDataString(
         ([System.Uri]$fromFull).MakeRelativeUri([System.Uri]$toFull).ToString()
     )
-    $rel = ($rel -replace '\\', '/').TrimEnd('/')
+    $rel = $rel.Replace('/', '\').TrimEnd('\')
     if (-not $rel) { return "." }
     return $rel
 }
@@ -150,21 +150,27 @@ Write-Host "NSIS SOURCE_DIR=$sourceRel"
 Write-Host "NSIS OUT_FILE=$outRel"
 Write-Host "NSIS LICENSE_FILE=$licenseRel"
 
-$nsisArgs = @(
-    "/V3",
-    "/DVERSION=$appVer",
-    "/DPRODUCT_VERSION=$viVer",
-    "/DSOURCE_DIR=$sourceRel",
-    "/DOUT_FILE=$outRel",
-    "/DLICENSE_FILE=$licenseRel",
-    $nsi
-)
+# Defines live in a sibling .nsh so backslashes are not command-line escapes.
+$pathsNsh = Join-Path $nsiDir "airdour-paths.nsh"
+@(
+    "!define VERSION `"$appVer`""
+    "!define PRODUCT_VERSION `"$viVer`""
+    "!define SOURCE_DIR `"$sourceRel`""
+    "!define OUT_FILE `"$outRel`""
+    "!define LICENSE_FILE `"$licenseRel`""
+) | Set-Content -Path $pathsNsh -Encoding ascii
 
 Write-Host "Compiling installer from stage: $StageDir"
 Write-Host "  Output: $outExe"
-& $makensis @nsisArgs
-if ($LASTEXITCODE -ne 0) {
-    throw "makensis failed (exit $LASTEXITCODE)"
+Push-Location $nsiDir
+try {
+    & $makensis @("/V3", "airdour.nsi")
+    if ($LASTEXITCODE -ne 0) {
+        throw "makensis failed (exit $LASTEXITCODE)"
+    }
+} finally {
+    Pop-Location
+    Remove-Item -Force $pathsNsh -ErrorAction SilentlyContinue
 }
 if (-not (Test-Path $outExe)) {
     throw "Installer not produced: $outExe"

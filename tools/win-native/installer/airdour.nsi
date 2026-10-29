@@ -24,6 +24,13 @@ Unicode true
 !include "FileFunc.nsh"
 !include "MUI2.nsh"
 
+; Package-WinShell-Nsis.ps1 writes this next to the script. Backslashes, not
+; /D defines: the NSIS on GitHub-hosted runners misses /FileExists hits that
+; contain forward slashes.
+!if /FileExists "airdour-paths.nsh"
+  !include "airdour-paths.nsh"
+!endif
+
 !ifndef VERSION
   !define VERSION "0.1.0"
 !endif
@@ -31,19 +38,16 @@ Unicode true
   !define PRODUCT_VERSION "0.1.0.0"
 !endif
 !ifndef SOURCE_DIR
-  !define SOURCE_DIR "..\..\dist\shell-stage"
+  !define SOURCE_DIR "..\..\..\dist\shell-stage"
 !endif
 !ifndef OUT_FILE
-  !define OUT_FILE "..\..\dist\airdour-setup.exe"
+  !define OUT_FILE "..\..\..\dist\airdour-setup.exe"
 !endif
 !ifndef LICENSE_FILE
   !define LICENSE_FILE "..\..\..\COPYING"
 !endif
 
-; Paths are relative to this script (makensis cds here). Absolute D:/ paths make
-; compile-time /FileExists miss the payload on the Windows NSIS that ships on
-; GitHub-hosted runners.
-!if /FileExists "${SOURCE_DIR}/airdour_win_shell.exe"
+!if /FileExists "${SOURCE_DIR}\airdour_win_shell.exe"
 !else
   !error "SOURCE_DIR is missing airdour_win_shell.exe (${SOURCE_DIR})"
 !endif
@@ -119,7 +123,7 @@ Section "Airdour" SecMain
   SectionIn RO
   SetOutPath "$INSTDIR"
   SetOverwrite on
-  File /r "${SOURCE_DIR}/*.*"
+  File /r "${SOURCE_DIR}\*.*"
   ; COPYING has no extension; keep the GPL text in the install folder
   ; even if the wildcard above skipped it.
   File "/oname=COPYING" "${LICENSE_FILE}"
