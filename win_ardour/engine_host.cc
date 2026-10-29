@@ -15,6 +15,7 @@
 #include <functional>
 #include <limits>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -513,7 +514,8 @@ public:
 	int             selected_track;
 	std::weak_ptr<Region> selected_region;
 	float           midi_activity;
-	Evoral::event_id_t selected_midi_note_id;
+	Evoral::event_id_t selected_midi_note_id; /* primary / last clicked */
+	std::set<Evoral::event_id_t> selected_midi_note_ids;
 	bool            midi_out_connected;
 	std::string     midi_out_port;
 	bool            midi_synth_ok;
@@ -610,6 +612,55 @@ public:
 		, track_gate_hold_ms (50.f)
 		, plugins_scanned (false)
 	{
+	}
+
+	void clear_midi_note_sel ()
+	{
+		selected_midi_note_ids.clear ();
+		selected_midi_note_id = -1;
+	}
+
+	void set_midi_note_sel (Evoral::event_id_t id)
+	{
+		selected_midi_note_ids.clear ();
+		if (id >= 0) {
+			selected_midi_note_ids.insert (id);
+		}
+		selected_midi_note_id = id;
+	}
+
+	void toggle_midi_note_sel (Evoral::event_id_t id)
+	{
+		if (id < 0) {
+			return;
+		}
+		/* Seed from primary when first additive click after a legacy single. */
+		if (selected_midi_note_ids.empty () && selected_midi_note_id >= 0) {
+			selected_midi_note_ids.insert (selected_midi_note_id);
+		}
+		std::set<Evoral::event_id_t>::iterator it = selected_midi_note_ids.find (id);
+		if (it != selected_midi_note_ids.end ()) {
+			selected_midi_note_ids.erase (it);
+			if (selected_midi_note_id == id) {
+				selected_midi_note_id = selected_midi_note_ids.empty ()
+				                            ? -1
+				                            : *selected_midi_note_ids.rbegin ();
+			}
+		} else {
+			selected_midi_note_ids.insert (id);
+			selected_midi_note_id = id;
+		}
+	}
+
+	bool midi_note_sel_has (Evoral::event_id_t id) const
+	{
+		if (id < 0) {
+			return false;
+		}
+		if (!selected_midi_note_ids.empty ()) {
+			return selected_midi_note_ids.count (id) > 0;
+		}
+		return selected_midi_note_id >= 0 && selected_midi_note_id == id;
 	}
 };
 
@@ -2018,7 +2069,7 @@ EngineHost::destroy_session ()
 	_impl->midi_track.reset ();
 	_impl->midi_region.reset ();
 	_impl->midi_activity = 0.f;
-	_impl->selected_midi_note_id = -1;
+	_impl->clear_midi_note_sel ();
 	_impl->midi_out_connected = false;
 	_impl->midi_out_port.clear ();
 	_impl->midi_synth_ok = false;
@@ -13831,7 +13882,7 @@ EngineHost::remove_midi_track ()
 		_impl->midi_synth_ok = false;
 		_impl->midi_synth_to_master = false;
 		_impl->midi_synth_name.clear ();
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		_impl->session->remove_route (r);
 		collect_tracks ();
 		refresh_midi_snap ();
@@ -23410,8 +23461,7 @@ EngineHost::refresh_midi_notes_snap ()
 			_snap.midi_notes[n].pitch = note->note ();
 			_snap.midi_notes[n].velocity = note->velocity ();
 			_snap.midi_notes[n].selected =
-			    (_impl->selected_midi_note_id >= 0
-			     && note->id () == _impl->selected_midi_note_id);
+			    _impl->midi_note_sel_has (note->id ());
 			++n;
 		}
 		_snap.midi_note_count = n;
@@ -27596,7 +27646,7 @@ EngineHost::add_midi_note (uint8_t pitch, float start_sec, float length_sec, uin
 			refresh_midi_notes_snap ();
 			return false;
 		}
-		_impl->selected_midi_note_id = inserted->id ();
+		_impl->set_midi_note_sel (inserted->id ());
 		_impl->midi_activity = 1.f;
 		refresh_midi_notes_snap ();
 		_snap.detail = L"MIDI note added";
@@ -27611,7 +27661,8 @@ EngineHost::add_midi_note (uint8_t pitch, float start_sec, float length_sec, uin
 }
 
 bool
-EngineHost::select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop)
+EngineHost::select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop,
+                                 bool additive)
 {
 	(void)pitch_slop;
 	refresh_midi_notes_snap ();
@@ -27638,11 +27689,17 @@ EngineHost::select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop
 		}
 	}
 	if (best < 0) {
-		_impl->selected_midi_note_id = -1;
-		refresh_midi_notes_snap ();
+		if (!additive) {
+			_impl->clear_midi_note_sel ();
+			refresh_midi_notes_snap ();
+		}
 		return false;
 	}
-	_impl->selected_midi_note_id = _snap.midi_notes[best].id;
+	if (additive) {
+		_impl->toggle_midi_note_sel (_snap.midi_notes[best].id);
+	} else {
+		_impl->set_midi_note_sel (_snap.midi_notes[best].id);
+	}
 	refresh_midi_notes_snap ();
 	/* Click preview through the track synth (auto note-off via poll). */
 	audition_midi_note (_snap.midi_notes[best].pitch, _snap.midi_notes[best].velocity);
@@ -27653,7 +27710,7 @@ void
 EngineHost::clear_midi_note_selection ()
 {
 	if (_impl) {
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 	}
 	refresh_midi_notes_snap ();
 }
@@ -27661,14 +27718,23 @@ EngineHost::clear_midi_note_selection ()
 bool
 EngineHost::delete_selected_midi_note ()
 {
-	if (!_impl || !_impl->session || !_impl->midi_region
-	    || _impl->selected_midi_note_id < 0) {
+	if (!_impl || !_impl->session || !_impl->midi_region) {
 		return false;
 	}
 	try {
 		/* Diff-command remove can WriterLock-deadlock against SMF readers on
 		 * this Windows path. Rebuild the region from remaining notes instead. */
 		refresh_midi_notes_snap ();
+		bool have_sel = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				have_sel = true;
+				break;
+			}
+		}
+		if (!have_sel) {
+			return false;
+		}
 		struct Kept {
 			uint8_t pitch;
 			uint8_t velocity;
@@ -27677,10 +27743,9 @@ EngineHost::delete_selected_midi_note ()
 		};
 		std::vector<Kept> keep;
 		keep.reserve ((size_t)_snap.midi_note_count);
-		const int32_t doomed = _impl->selected_midi_note_id;
 		for (int i = 0; i < _snap.midi_note_count; ++i) {
 			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
-			if (n.id == doomed) {
+			if (n.selected) {
 				continue;
 			}
 			Kept k;
@@ -27705,7 +27770,7 @@ EngineHost::delete_selected_midi_note ()
 		_impl->session->commit_reversible_command ();
 
 		_impl->midi_region.reset ();
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		if (!ensure_midi_region (32.f)) {
 			_snap.detail = L"MIDI note delete: region rebuild failed";
 			return false;
@@ -27717,7 +27782,7 @@ EngineHost::delete_selected_midi_note ()
 				std::fflush (stderr);
 			}
 		}
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		refresh_midi_notes_snap ();
 		_snap.detail = L"MIDI note deleted";
 		std::fprintf (stderr, "airdour_win_shell: delete note via rebuild (kept=%zu)\n",
@@ -27824,7 +27889,7 @@ EngineHost::smoke_midi_edit ()
 		if (!select_midi_note_at (0.75f, 64)) {
 			/* Fallback: select first snap note. */
 			if (_snap.midi_note_count > 0) {
-				_impl->selected_midi_note_id = _snap.midi_notes[0].id;
+				_impl->set_midi_note_sel (_snap.midi_notes[0].id);
 				refresh_midi_notes_snap ();
 			}
 		}
@@ -27949,7 +28014,7 @@ EngineHost::quantize_midi_notes ()
 		_impl->session->commit_reversible_command ();
 
 		_impl->midi_region.reset ();
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		if (!ensure_midi_region (32.f)) {
 			_snap.detail = L"quantize: region rebuild failed";
 			return false;
@@ -27967,7 +28032,7 @@ EngineHost::quantize_midi_notes ()
 				std::fflush (stderr);
 			}
 		}
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		refresh_midi_notes_snap ();
 		std::fprintf (stderr,
 		              "airdour_win_shell: quantize ok (notes=%d moved=%d added=%d dens=%d)\n",
@@ -28018,7 +28083,7 @@ EngineHost::smoke_midi_quantize ()
 				playlist->rdiff_and_add_command (_impl->session);
 				_impl->session->commit_reversible_command ();
 				_impl->midi_region.reset ();
-				_impl->selected_midi_note_id = -1;
+				_impl->clear_midi_note_sel ();
 				if (!ensure_midi_region (16.f)) {
 					std::fprintf (stderr, "airdour_win_shell: smoke-midi-quantize FAILED (clear)\n");
 					std::fflush (stderr);
@@ -28179,7 +28244,7 @@ EngineHost::transpose_midi_notes (int semitones)
 		_impl->session->commit_reversible_command ();
 
 		_impl->midi_region.reset ();
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		if (!ensure_midi_region (32.f)) {
 			_snap.detail = L"transpose: region rebuild failed";
 			return false;
@@ -28197,7 +28262,7 @@ EngineHost::transpose_midi_notes (int semitones)
 				std::fflush (stderr);
 			}
 		}
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		refresh_midi_notes_snap ();
 		std::fprintf (stderr,
 		              "airdour_win_shell: transpose ok (notes=%d moved=%d added=%d st=%+d)\n",
@@ -28247,7 +28312,7 @@ EngineHost::smoke_midi_transpose ()
 				playlist->rdiff_and_add_command (_impl->session);
 				_impl->session->commit_reversible_command ();
 				_impl->midi_region.reset ();
-				_impl->selected_midi_note_id = -1;
+				_impl->clear_midi_note_sel ();
 				if (!ensure_midi_region (16.f)) {
 					std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (clear)\n");
 					std::fflush (stderr);
@@ -28409,7 +28474,7 @@ EngineHost::nudge_midi_velocity (int delta)
 		_impl->session->commit_reversible_command ();
 
 		_impl->midi_region.reset ();
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		if (!ensure_midi_region (32.f)) {
 			_snap.detail = L"velocity: region rebuild failed";
 			return false;
@@ -28426,7 +28491,7 @@ EngineHost::nudge_midi_velocity (int delta)
 			}
 		}
 		/* Prefer re-select first note that was in the edited set. */
-		_impl->selected_midi_note_id = first_id;
+		_impl->set_midi_note_sel (first_id);
 		refresh_midi_notes_snap ();
 		std::fprintf (stderr,
 		              "airdour_win_shell: velocity ok (notes=%d moved=%d added=%d d=%+d)\n",
@@ -28508,7 +28573,7 @@ EngineHost::set_midi_velocity (int velocity)
 		_impl->session->commit_reversible_command ();
 
 		_impl->midi_region.reset ();
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		if (!ensure_midi_region (32.f)) {
 			return false;
 		}
@@ -28521,7 +28586,7 @@ EngineHost::set_midi_velocity (int velocity)
 				}
 			}
 		}
-		_impl->selected_midi_note_id = first_id;
+		_impl->set_midi_note_sel (first_id);
 		refresh_midi_notes_snap ();
 		_snap.detail = L"MIDI velocity set";
 		return true;
@@ -28563,7 +28628,7 @@ EngineHost::smoke_midi_velocity ()
 				playlist->rdiff_and_add_command (_impl->session);
 				_impl->session->commit_reversible_command ();
 				_impl->midi_region.reset ();
-				_impl->selected_midi_note_id = -1;
+				_impl->clear_midi_note_sel ();
 				if (!ensure_midi_region (16.f)) {
 					std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity FAILED (clear)\n");
 					std::fflush (stderr);
@@ -28579,7 +28644,7 @@ EngineHost::smoke_midi_velocity ()
 		}
 		/* Select the note we just added. */
 		if (_snap.midi_note_count > 0) {
-			_impl->selected_midi_note_id = _snap.midi_notes[0].id;
+			_impl->set_midi_note_sel (_snap.midi_notes[0].id);
 			refresh_midi_notes_snap ();
 		}
 
@@ -28732,7 +28797,7 @@ EngineHost::nudge_midi_length (float delta_sec)
 		_impl->session->commit_reversible_command ();
 
 		_impl->midi_region.reset ();
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		if (!ensure_midi_region (32.f)) {
 			_snap.detail = L"length: region rebuild failed";
 			return false;
@@ -28748,7 +28813,7 @@ EngineHost::nudge_midi_length (float delta_sec)
 				}
 			}
 		}
-		_impl->selected_midi_note_id = first_id;
+		_impl->set_midi_note_sel (first_id);
 		refresh_midi_notes_snap ();
 		std::fprintf (stderr,
 		              "airdour_win_shell: length ok (notes=%d moved=%d added=%d d=%+.3f)\n",
@@ -28849,7 +28914,7 @@ EngineHost::set_midi_note_start (float start_sec)
 		_impl->session->commit_reversible_command ();
 
 		_impl->midi_region.reset ();
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		if (!ensure_midi_region (32.f)) {
 			return false;
 		}
@@ -28862,7 +28927,7 @@ EngineHost::set_midi_note_start (float start_sec)
 				}
 			}
 		}
-		_impl->selected_midi_note_id = first_id;
+		_impl->set_midi_note_sel (first_id);
 		refresh_midi_notes_snap ();
 		_snap.detail = L"MIDI note start trimmed";
 		return true;
@@ -28947,7 +29012,7 @@ EngineHost::set_midi_note_end (float end_sec)
 		_impl->session->commit_reversible_command ();
 
 		_impl->midi_region.reset ();
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		if (!ensure_midi_region (32.f)) {
 			return false;
 		}
@@ -28960,7 +29025,7 @@ EngineHost::set_midi_note_end (float end_sec)
 				}
 			}
 		}
-		_impl->selected_midi_note_id = first_id;
+		_impl->set_midi_note_sel (first_id);
 		refresh_midi_notes_snap ();
 		_snap.detail = L"MIDI note end trimmed";
 		return true;
@@ -29002,7 +29067,7 @@ EngineHost::smoke_midi_length ()
 				playlist->rdiff_and_add_command (_impl->session);
 				_impl->session->commit_reversible_command ();
 				_impl->midi_region.reset ();
-				_impl->selected_midi_note_id = -1;
+				_impl->clear_midi_note_sel ();
 				if (!ensure_midi_region (16.f)) {
 					std::fprintf (stderr, "airdour_win_shell: smoke-midi-length FAILED (clear)\n");
 					std::fflush (stderr);
@@ -29021,7 +29086,7 @@ EngineHost::smoke_midi_length ()
 			return false;
 		}
 		if (_snap.midi_note_count > 0) {
-			_impl->selected_midi_note_id = _snap.midi_notes[0].id;
+			_impl->set_midi_note_sel (_snap.midi_notes[0].id);
 			refresh_midi_notes_snap ();
 		}
 
@@ -29087,6 +29152,161 @@ EngineHost::smoke_midi_length ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-length exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_multi_select ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-multi-select failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi-select FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi-select FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for multi-select smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->clear_midi_note_sel ();
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi-select FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+
+		if (!add_midi_note (60, 0.0f, 0.4f, 100)
+		    || !add_midi_note (64, 0.5f, 0.4f, 100)
+		    || _snap.midi_note_count < 2) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi-select FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!select_midi_note_at (0.2f, 60, 0.f, false)) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi-select FAILED (select1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		int sel1 = 0;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				++sel1;
+			}
+		}
+		if (sel1 != 1) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi-select FAILED (sel1=%d)\n",
+			              sel1);
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!select_midi_note_at (0.7f, 64, 0.f, true /* Shift+click */)) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi-select FAILED (select2)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		int sel2 = 0;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				++sel2;
+			}
+		}
+		if (sel2 != 2) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi-select FAILED (sel2=%d)\n",
+			              sel2);
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!transpose_midi_notes (1)) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi-select FAILED (transpose)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		bool have60 = false;
+		bool have64 = false;
+		bool have61 = false;
+		bool have65 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 60) {
+				have60 = true;
+			}
+			if (_snap.midi_notes[i].pitch == 64) {
+				have64 = true;
+			}
+			if (_snap.midi_notes[i].pitch == 61) {
+				have61 = true;
+			}
+			if (_snap.midi_notes[i].pitch == 65) {
+				have65 = true;
+			}
+		}
+		if (have60 || have64 || !have61 || !have65) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-multi-select FAILED (pitches after transpose)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				set_snap_enabled (snap_was);
+				std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi-select FAILED (clear)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+
+		set_snap_enabled (snap_was);
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-multi-select ok (notes=%d)\n",
+		              _snap.midi_note_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-multi-select ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi-select exception: %s\n",
+		              e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -29203,7 +29423,7 @@ EngineHost::cut_selected_midi_notes ()
 		_impl->session->commit_reversible_command ();
 
 		_impl->midi_region.reset ();
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		if (!ensure_midi_region (32.f)) {
 			return false;
 		}
@@ -29211,7 +29431,7 @@ EngineHost::cut_selected_midi_notes ()
 			add_midi_note (keep[i].pitch, keep[i].start_sec,
 			               keep[i].length_sec, keep[i].velocity);
 		}
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		refresh_midi_notes_snap ();
 		std::fprintf (stderr, "airdour_win_shell: MIDI cut (removed=%d kept=%zu clip=%zu)\n",
 		              removed, keep.size (), _midi_clipboard.size ());
@@ -29267,7 +29487,7 @@ EngineHost::paste_midi_notes (float at_sec)
 				}
 			}
 		}
-		_impl->selected_midi_note_id = first_id;
+		_impl->set_midi_note_sel (first_id);
 		refresh_midi_notes_snap ();
 		std::fprintf (stderr,
 		              "airdour_win_shell: MIDI paste (added=%d at=%.3f clip=%zu)\n",
@@ -29370,7 +29590,7 @@ EngineHost::smoke_midi_duplicate ()
 				playlist->rdiff_and_add_command (_impl->session);
 				_impl->session->commit_reversible_command ();
 				_impl->midi_region.reset ();
-				_impl->selected_midi_note_id = -1;
+				_impl->clear_midi_note_sel ();
 			}
 			if (!ensure_midi_region (16.f)) {
 				std::fprintf (stderr, "airdour_win_shell: smoke-midi-duplicate FAILED (re-region)\n");
@@ -29388,7 +29608,7 @@ EngineHost::smoke_midi_duplicate ()
 		if (_snap.midi_note_count != 1 || !_snap.midi_notes[0].selected) {
 			/* Select the only note. */
 			if (_snap.midi_note_count >= 1) {
-				_impl->selected_midi_note_id = _snap.midi_notes[0].id;
+				_impl->set_midi_note_sel (_snap.midi_notes[0].id);
 				refresh_midi_notes_snap ();
 			}
 		}
@@ -29473,7 +29693,7 @@ EngineHost::smoke_midi_clipboard ()
 				playlist->rdiff_and_add_command (_impl->session);
 				_impl->session->commit_reversible_command ();
 				_impl->midi_region.reset ();
-				_impl->selected_midi_note_id = -1;
+				_impl->clear_midi_note_sel ();
 				if (!ensure_midi_region (16.f)) {
 					std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (clear)\n");
 					std::fflush (stderr);
@@ -29491,7 +29711,7 @@ EngineHost::smoke_midi_clipboard ()
 			std::fflush (stderr);
 			return false;
 		}
-		_impl->selected_midi_note_id = _snap.midi_notes[0].id;
+		_impl->set_midi_note_sel (_snap.midi_notes[0].id);
 		refresh_midi_notes_snap ();
 
 		if (!copy_selected_midi_notes () || !has_midi_clipboard ()) {
@@ -29521,7 +29741,7 @@ EngineHost::smoke_midi_clipboard ()
 			    && _snap.midi_notes[i].start_sec >= 0.95f
 			    && _snap.midi_notes[i].start_sec <= 1.05f) {
 				got_paste = true;
-				_impl->selected_midi_note_id = _snap.midi_notes[i].id;
+				_impl->set_midi_note_sel (_snap.midi_notes[i].id);
 			}
 		}
 		if (!got_paste) {
@@ -29702,7 +29922,7 @@ EngineHost::humanize_midi_notes (float strength, uint32_t seed)
 		_impl->session->commit_reversible_command ();
 
 		_impl->midi_region.reset ();
-		_impl->selected_midi_note_id = -1;
+		_impl->clear_midi_note_sel ();
 		if (!ensure_midi_region (32.f)) {
 			_snap.detail = L"humanize: region rebuild failed";
 			return false;
@@ -29718,7 +29938,7 @@ EngineHost::humanize_midi_notes (float strength, uint32_t seed)
 				}
 			}
 		}
-		_impl->selected_midi_note_id = first_id;
+		_impl->set_midi_note_sel (first_id);
 		refresh_midi_notes_snap ();
 		std::fprintf (stderr,
 		              "airdour_win_shell: humanize ok (notes=%d moved=%d added=%d str=%.2f seed=%u)\n",
@@ -29768,7 +29988,7 @@ EngineHost::smoke_midi_humanize ()
 				playlist->rdiff_and_add_command (_impl->session);
 				_impl->session->commit_reversible_command ();
 				_impl->midi_region.reset ();
-				_impl->selected_midi_note_id = -1;
+				_impl->clear_midi_note_sel ();
 				if (!ensure_midi_region (16.f)) {
 					std::fprintf (stderr, "airdour_win_shell: smoke-midi-humanize FAILED (clear)\n");
 					std::fflush (stderr);
@@ -30191,7 +30411,7 @@ EngineHost::smoke_midi_step ()
 				playlist->rdiff_and_add_command (_impl->session);
 				_impl->session->commit_reversible_command ();
 				_impl->midi_region.reset ();
-				_impl->selected_midi_note_id = -1;
+				_impl->clear_midi_note_sel ();
 				if (!ensure_midi_region (16.f)) {
 					std::fprintf (stderr, "airdour_win_shell: smoke-midi-step FAILED (clear)\n");
 					std::fflush (stderr);
@@ -30350,7 +30570,7 @@ EngineHost::smoke_midi_chord ()
 				playlist->rdiff_and_add_command (_impl->session);
 				_impl->session->commit_reversible_command ();
 				_impl->midi_region.reset ();
-				_impl->selected_midi_note_id = -1;
+				_impl->clear_midi_note_sel ();
 				if (!ensure_midi_region (16.f)) {
 					std::fprintf (stderr, "airdour_win_shell: smoke-midi-chord FAILED (clear)\n");
 					std::fflush (stderr);
@@ -31122,7 +31342,7 @@ EngineHost::smoke_midi_arp ()
 				playlist->rdiff_and_add_command (_impl->session);
 				_impl->session->commit_reversible_command ();
 				_impl->midi_region.reset ();
-				_impl->selected_midi_note_id = -1;
+				_impl->clear_midi_note_sel ();
 				if (!ensure_midi_region (16.f)) {
 					std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (clear)\n");
 					std::fflush (stderr);
@@ -31267,7 +31487,7 @@ EngineHost::smoke_midi_scale ()
 				playlist->rdiff_and_add_command (_impl->session);
 				_impl->session->commit_reversible_command ();
 				_impl->midi_region.reset ();
-				_impl->selected_midi_note_id = -1;
+				_impl->clear_midi_note_sel ();
 				if (!ensure_midi_region (16.f)) {
 					std::fprintf (stderr, "airdour_win_shell: smoke-midi-scale FAILED (clear)\n");
 					std::fflush (stderr);
@@ -35991,11 +36211,13 @@ EngineHost::add_midi_note (uint8_t pitch, float start_sec, float length_sec, uin
 }
 
 bool
-EngineHost::select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop)
+EngineHost::select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop,
+                                 bool additive)
 {
 	(void)time_sec;
 	(void)pitch;
 	(void)pitch_slop;
+	(void)additive;
 	return false;
 }
 
@@ -36115,6 +36337,12 @@ EngineHost::snap_unit_sec () const
 
 bool
 EngineHost::smoke_midi_length ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_multi_select ()
 {
 	return false;
 }

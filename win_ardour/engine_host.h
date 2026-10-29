@@ -1829,8 +1829,10 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool add_midi_note (uint8_t pitch, float start_sec, float length_sec,
 	                    uint8_t velocity = 100);
 
-	/** Hit-test piano-roll; selects note under (time,pitch) if any. */
-	bool select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop = 0.f);
+	/** Hit-test piano-roll; selects note under (time,pitch) if any.
+	 *  When additive (Shift+click), toggles membership; else replaces. */
+	bool select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop = 0.f,
+	                          bool additive = false);
 	void clear_midi_note_selection ();
 	bool delete_selected_midi_note ();
 
@@ -1969,6 +1971,12 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Add fixed-length note, trim end, nudge length, verify. For --smoke-midi-length.
 	 */
 	bool smoke_midi_length ();
+
+	/**
+	 * Add two notes, select then Shift+select, verify both .selected, transpose,
+	 * clear. For --smoke-midi-multi-select.
+	 */
+	bool smoke_midi_multi_select ();
 
 	/**
 	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.

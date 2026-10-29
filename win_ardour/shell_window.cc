@@ -1918,6 +1918,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "midi-panic", [this]() { return _engine.smoke_midi_panic (); });
 	run_smoke_check (ok, "stop-midi-panic", [this]() { return _engine.smoke_stop_midi_panic (); });
 	run_smoke_check (ok, "midi-audition", [this]() { return _engine.smoke_midi_audition (); });
+	run_smoke_check (ok, "midi-multi-select", [this]() { return _engine.smoke_midi_multi_select (); });
 	run_smoke_check (ok, "midi-program", [this]() { return _engine.smoke_midi_program (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
@@ -7966,13 +7967,14 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		float time_sec = midi_time_at_x (x);
 		if (hit_midi_velocity_lane (x, y)) {
 			/* Velocity lane: select note under x if any, then drag velocity. */
+			const bool additive = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
 			bool hit_note = false;
 			for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
 				const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
 				float t0 = n.start_sec;
 				float t1 = n.start_sec + n.length_sec;
 				if (time_sec >= t0 - 0.02f && time_sec <= t1 + 0.02f) {
-					_engine.select_midi_note_at (time_sec, n.pitch);
+					_engine.select_midi_note_at (time_sec, n.pitch, 0.f, additive);
 					hit_note = true;
 					break;
 				}
@@ -8025,7 +8027,9 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			}
 			if (best_i >= 0 && best_edge >= 0) {
 				const EngineMidiNoteSnap& n = _engine_snap.midi_notes[best_i];
-				_engine.select_midi_note_at (n.start_sec + n.length_sec * 0.5f, n.pitch);
+				/* Trim always promotes the edged note as primary (no toggle). */
+				_engine.select_midi_note_at (n.start_sec + n.length_sec * 0.5f, n.pitch,
+				                            0.f, false);
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				_drag = (best_edge == 0) ? DragMode::MidiTrimStart : DragMode::MidiTrimEnd;
@@ -8041,11 +8045,14 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				return true;
 			}
 		}
-		if (_engine.select_midi_note_at (time_sec, pitch)) {
-			_engine.poll ();
-			_engine_snap = _engine.snapshot ();
-			InvalidateRect (_hwnd, nullptr, FALSE);
-			return true;
+		{
+			const bool additive = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
+			if (_engine.select_midi_note_at (time_sec, pitch, 0.f, additive)) {
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return true;
+			}
 		}
 		if (_engine_snap.midi_step_enabled) {
 			/* Step mode: empty cell places pitch at playhead and advances. */
@@ -9992,6 +9999,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Z", L"Freeze / unfreeze focused audio track" },
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"Q / Qnt", L"Quantize MIDI notes to snap grid" },
+		{ L"Shift+click note", L"Toggle MIDI note multi-select" },
 		{ L". / ,  Shift", L"MIDI transpose ±1 · ±12 (T+/T−)" },
 		{ L"↑ / ↓  Shift", L"MIDI velocity ±1 · ±8 (V+/V−)" },
 		{ L"Alt+←/→  Shift", L"MIDI note length ± (L+/L−; snap unit)" },
