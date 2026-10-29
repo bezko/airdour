@@ -1961,6 +1961,13 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool smoke_midi_transpose ();
 
 	/**
+	 * TempoMap-accurate MIDI BeatTime: set BPM 100, place a note on beat 1,
+	 * verify snap seconds ≈ 0.6 and quantize stays on the grid. Restores 120.
+	 * For --smoke-midi-tempo-map.
+	 */
+	bool smoke_midi_tempo_map ();
+
+	/**
 	 * Add note, nudge velocity −20, set 64, verify. For --smoke-midi-velocity.
 	 */
 	bool smoke_midi_velocity ();
@@ -2132,6 +2139,9 @@ private:
 	bool compute_export_range (int64_t* start_sample, int64_t* end_sample) const;
 	bool configure_backend_midi ();
 	void refresh_midi_notes_snap ();
+	/** Session TempoMap beat↔sec for MIDI notes/CC (falls back to 120 BPM). */
+	double midi_beats_from_sec (float time_sec) const;
+	float midi_sec_from_beats (double beats) const;
 	void rebuild_arp_pitches ();
 	int  arp_pitch_at_step (int step) const;
 	bool midi_immediate_note (uint8_t status, uint8_t pitch, uint8_t velocity);
