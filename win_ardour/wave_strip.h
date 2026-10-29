@@ -40,6 +40,12 @@ public:
 	static constexpr float  kDefaultSpanSec = 8.f;
 	/** Screen fraction where playhead sits while following transport. */
 	static constexpr float  kFollowFrac = 0.28f;
+	/* Selection marquee wash/edge opacities (smoke-selection-marquee-tint). */
+	static constexpr float kSelWashOp      = 0.40f; /* was 0.28 */
+	static constexpr float kSelEdgeOp      = 0.95f; /* was 0.85 */
+	static constexpr float kSelMutedWashOp = 0.18f; /* was 0.14 */
+	static constexpr float kSelMutedEdgeOp = 0.55f; /* was 0.45 */
+	static constexpr float kSelFadeWashOp  = 0.55f; /* was 0.45 */
 
 	WaveStrip ();
 

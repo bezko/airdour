@@ -29,7 +29,7 @@ constexpr D2D1_COLOR_F kPaneEdge   = { 0.140f, 0.190f, 0.220f, 1.f };
 constexpr D2D1_COLOR_F kPeak       = { 0.200f, 0.940f, 0.820f, 1.f };
 constexpr D2D1_COLOR_F kRms        = { 0.100f, 0.380f, 0.360f, 0.88f };
 constexpr D2D1_COLOR_F kPlayhead   = { 0.990f, 0.820f, 0.280f, 1.f };
-constexpr D2D1_COLOR_F kSelection  = { 0.280f, 0.760f, 0.900f, 1.f };
+constexpr D2D1_COLOR_F kSelection  = { 0.220f, 0.820f, 0.960f, 1.f }; /* brighter cyan marquee */
 constexpr D2D1_COLOR_F kLoop       = { 0.940f, 0.640f, 0.200f, 1.f };
 constexpr D2D1_COLOR_F kPunch      = { 0.920f, 0.340f, 0.280f, 1.f };
 constexpr D2D1_COLOR_F kMarker     = { 0.820f, 0.880f, 0.420f, 1.f };
@@ -1770,6 +1770,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection ok (span=%.2fs)\n", span);
 		layout_panes ();
 		return true;
+	});
+	run_smoke_check (ok, "selection-marquee-tint", [this]() {
+		return smoke_selection_marquee_tint ();
 	});
 	run_smoke_check (ok, "zoom-session", [this]() {
 		if (!_engine.smoke_zoom_session ()) return false;
@@ -4797,6 +4800,40 @@ ShellWindow::do_scroll_mixer (float delta_px)
 	_mixer_scroll_x += delta_px;
 	layout_panes ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+bool
+ShellWindow::smoke_selection_marquee_tint ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-selection-marquee-tint FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	/* Floors: wash > prior 0.28, edge > wash, muted still below active. */
+	if (!(WaveStrip::kSelWashOp > 0.35f
+	      && WaveStrip::kSelEdgeOp > WaveStrip::kSelWashOp
+	      && WaveStrip::kSelEdgeOp > 0.90f
+	      && WaveStrip::kSelMutedWashOp < WaveStrip::kSelWashOp
+	      && WaveStrip::kSelMutedEdgeOp < WaveStrip::kSelEdgeOp
+	      && WaveStrip::kSelFadeWashOp > 0.50f
+	      && kSelection.r < kSelection.g && kSelection.b > 0.90f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-selection-marquee-tint FAILED "
+		              "(wash=%.2f edge=%.2f muted=%.2f/%.2f fade=%.2f)\n",
+		              WaveStrip::kSelWashOp, WaveStrip::kSelEdgeOp,
+		              WaveStrip::kSelMutedWashOp, WaveStrip::kSelMutedEdgeOp,
+		              WaveStrip::kSelFadeWashOp);
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-selection-marquee-tint ok "
+	              "(wash=%.2f edge=%.2f cyan)\n",
+	              WaveStrip::kSelWashOp, WaveStrip::kSelEdgeOp);
+	std::fflush (stderr);
+	return true;
 }
 
 bool

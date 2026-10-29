@@ -394,13 +394,13 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 		n1 = std::max (0.f, std::min (1.f, n1));
 		if (n1 > n0) {
 			/* Muted selection: cooler / dimmer wash so mute is visible. */
-			selection_brush->SetOpacity (_sel_muted ? 0.14f : 0.28f);
+			selection_brush->SetOpacity (_sel_muted ? kSelMutedWashOp : kSelWashOp);
 			rt->FillRectangle (
 				D2D1::RectF (bounds.left + n0 * w, bounds.top,
 				             bounds.left + n1 * w, bounds.bottom),
 				selection_brush);
-			selection_brush->SetOpacity (_sel_muted ? 0.45f : 0.85f);
-			float edge = std::max (1.f, 1.5f * dpi_scale);
+			selection_brush->SetOpacity (_sel_muted ? kSelMutedEdgeOp : kSelEdgeOp);
+			float edge = std::max (1.f, 2.f * dpi_scale);
 			rt->FillRectangle (
 				D2D1::RectF (bounds.left + n0 * w, bounds.top,
 				             bounds.left + n0 * w + edge, bounds.bottom),
@@ -414,7 +414,7 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 			float region_len = std::max (0.001f, _sel_end_sec - _sel_start_sec);
 			float fi = std::min (_sel_fade_in_sec, region_len * 0.49f);
 			float fo = std::min (_sel_fade_out_sec, region_len * 0.49f);
-			selection_brush->SetOpacity (0.45f);
+			selection_brush->SetOpacity (kSelFadeWashOp);
 			if (fi > 0.001f) {
 				float nf = (_sel_start_sec + fi - _view_start_sec) / span;
 				nf = std::max (0.f, std::min (1.f, nf));

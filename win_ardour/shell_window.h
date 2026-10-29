@@ -337,6 +337,8 @@ private:
 	void sync_mixer_group_from_engine ();
 	void draw_editor_grid ();
 	void draw_punch_overlay ();
+	/** Assert stronger region marquee wash opacities. For --smoke-selection-marquee-tint. */
+	bool smoke_selection_marquee_tint ();
 	void do_toggle_comp_sidechain ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
