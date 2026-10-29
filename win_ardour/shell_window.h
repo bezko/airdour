@@ -347,6 +347,10 @@ private:
 	bool smoke_midi_step_piano_highlight ();
 	bool smoke_meter_clip_led ();
 	bool smoke_midi_playhead_draw ();
+	/** Bottom Y of editor content (lanes + MIDI + CC) for overlays/grid. */
+	float editor_content_bottom () const;
+	/** Punch wash + grid lines reach MIDI/CC; layout bottoms non-empty. */
+	bool smoke_midi_punch_grid ();
 	void do_toggle_group_relative ();
 	void do_cycle_group_color ();
 	void do_toggle_focused_track_active ();
