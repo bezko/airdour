@@ -1938,6 +1938,16 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		sync_prefs_from_engine ();
 		return true;
 	});
+	run_smoke_check (ok, "vst3-insert-index", [this]() {
+		if (!_engine.smoke_vst3_insert_index ()) {
+			return false;
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_fx_from_engine ();
+		sync_prefs_from_engine ();
+		return true;
+	});
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
 	run_smoke_check (ok, "solo-all", [this]() { return _engine.smoke_solo_all (); });

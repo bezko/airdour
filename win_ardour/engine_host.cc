@@ -27736,6 +27736,183 @@ EngineHost::smoke_vst3_catalog ()
 }
 
 bool
+EngineHost::insert_vst3_by_index (int index)
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"VST3 insert failed — no Session";
+		return false;
+	}
+	try {
+		if (_snap.vst3_scan_count <= 0) {
+			if (!rescan_vst3 ()) {
+				return false;
+			}
+		}
+		if (index < 0 || index >= _snap.vst3_scan_count) {
+			_snap.detail = L"VST3 index out of range";
+			return false;
+		}
+
+		PluginInfoPtr info;
+		int at = 0;
+		const PluginInfoList& plugs = PluginManager::instance ().vst3_plugin_info ();
+		for (PluginInfoList::const_iterator i = plugs.begin (); i != plugs.end (); ++i) {
+			if (!*i) {
+				continue;
+			}
+			if (at == index) {
+				info = *i;
+				break;
+			}
+			++at;
+		}
+		if (!info) {
+			_snap.detail = L"VST3 index missing";
+			return false;
+		}
+		if (info->is_instrument ()) {
+			_snap.detail = L"VST3 index is instrument (need audio FX)";
+			std::fprintf (stderr,
+			              "airdour_win_shell: insert_vst3_by_index(%d) skipped instrument %s\n",
+			              index, info->name.c_str ());
+			std::fflush (stderr);
+			return false;
+		}
+		if (info->n_inputs.n_audio () < 1 || info->n_outputs.n_audio () < 1) {
+			_snap.detail = L"VST3 index has no audio IO";
+			return false;
+		}
+
+		/* Replace any live shell VST3 on Audio 2. */
+		(void)unload_vst3 ();
+
+		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
+			collect_tracks ();
+		}
+		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
+			_snap.detail = L"VST3 insert — no Audio 2";
+			return false;
+		}
+
+		std::shared_ptr<AudioTrack> track = _impl->tracks[1];
+		PluginPtr plugin = info->load (*_impl->session);
+		if (!plugin) {
+			_snap.detail = L"VST3 load failed";
+			std::fprintf (stderr, "airdour_win_shell: insert_vst3_by_index load failed: %s\n",
+			              info->name.c_str ());
+			std::fflush (stderr);
+			return false;
+		}
+		std::shared_ptr<PluginInsert> pi (
+		    new PluginInsert (*_impl->session, *track, plugin));
+		pi->set_strict_io (true);
+		if (track->add_processor (pi, PreFader) != 0) {
+			_snap.detail = L"VST3 add_processor failed";
+			return false;
+		}
+		pi->activate ();
+		_impl->vst3_fx = pi;
+		refresh_vst3_params_snap ();
+		if (!_snap.vst3_ok) {
+			_snap.detail = L"VST3 insert snap failed";
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: insert_vst3_by_index(%d) ok fx=%s params=%d\n",
+		              index, info->name.c_str (), _snap.vst3_param_count);
+		std::fflush (stderr);
+		_snap.detail = L"VST3 inserted by index";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: insert_vst3_by_index: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_vst3_insert_index ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-vst3-insert-index failed — no Session";
+		return false;
+	}
+	try {
+		if (!rescan_vst3 ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-insert-index FAILED (rescan)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_snap.vst3_scan_count <= 0) {
+			/* Out-of-range insert must fail honestly; empty scan still PASS. */
+			if (insert_vst3_by_index (0)) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-vst3-insert-index FAILED "
+				              "(empty insert unexpectedly ok)\n");
+				std::fflush (stderr);
+				return false;
+			}
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-insert-index ok "
+			              "(scan-only; index 0 rejected; set VST3_PATH to insert)\n");
+			std::fflush (stderr);
+			_snap.detail = L"smoke-vst3-insert-index scan-only";
+			return true;
+		}
+
+		/* Prefer first audio FX in the list (skip instruments). */
+		int pick = -1;
+		int at = 0;
+		const PluginInfoList& plugs = PluginManager::instance ().vst3_plugin_info ();
+		for (PluginInfoList::const_iterator i = plugs.begin (); i != plugs.end (); ++i, ++at) {
+			if (!*i || (*i)->is_instrument ()) {
+				continue;
+			}
+			if ((*i)->n_inputs.n_audio () < 1 || (*i)->n_outputs.n_audio () < 1) {
+				continue;
+			}
+			pick = at;
+			break;
+		}
+		if (pick < 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-insert-index ok "
+			              "(scan=%d but no audio FX; instruments-only)\n",
+			              _snap.vst3_scan_count);
+			std::fflush (stderr);
+			_snap.detail = L"smoke-vst3-insert-index no audio FX";
+			return true;
+		}
+		if (!insert_vst3_by_index (pick) || !_snap.vst3_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-insert-index FAILED (insert %d)\n",
+			              pick);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!unload_vst3 () || _snap.vst3_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-insert-index FAILED (unload)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-insert-index ok (index=%d insert→unload)\n",
+		              pick);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-vst3-insert-index ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst3-insert-index exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::smoke_vst3_lifecycle ()
 {
 	if (!_impl || !_impl->session) {
@@ -36487,6 +36664,19 @@ EngineHost::refresh_vst3_catalog_snap ()
 
 bool
 EngineHost::smoke_vst3_catalog ()
+{
+	return false;
+}
+
+bool
+EngineHost::insert_vst3_by_index (int index)
+{
+	(void)index;
+	return false;
+}
+
+bool
+EngineHost::smoke_vst3_insert_index ()
 {
 	return false;
 }

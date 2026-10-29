@@ -1880,6 +1880,19 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool smoke_vst3_catalog ();
 
 	/**
+	 * Unload any shell VST3, then load PluginManager VST3 list[index]
+	 * onto Audio 2 (DSP-only). index is into the scanned list (same order
+	 * as vst3_catalog_*). Returns false when out of range / load fails.
+	 */
+	bool insert_vst3_by_index (int index);
+
+	/**
+	 * Rescan → insert index 0 when plugins exist → unload.
+	 * Scan-only with VST3=0 still returns true. For --smoke-vst3-insert-index.
+	 */
+	bool smoke_vst3_insert_index ();
+
+	/**
 	 * Sample WASAPI shared timing + working set while transport rolls briefly.
 	 * Prints a one-line PERF summary to stderr. For --smoke-perf.
 	 */
