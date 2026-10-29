@@ -329,12 +329,17 @@ private:
 	bool smoke_vst3_status_unload ();
 	bool smoke_vst3_status_bypass ();
 	bool smoke_vst3_status_param_reset ();
+	bool smoke_vst3_status_param12_reset ();
 	bool hit_status_vst3_unload (float x, float y) const;
 	bool hit_status_vst3_bypass (float x, float y) const;
 	bool hit_status_vst3_param_reset (float x, float y) const;
+	bool hit_status_vst3_param_reset1 (float x, float y) const;
+	bool hit_status_vst3_param_reset2 (float x, float y) const;
 	bool status_vst3_unload_center (float* out_x, float* out_y) const;
 	bool status_vst3_bypass_center (float* out_x, float* out_y) const;
 	bool status_vst3_param_reset_center (float* out_x, float* out_y) const;
+	bool status_vst3_param_reset1_center (float* out_x, float* out_y) const;
+	bool status_vst3_param_reset2_center (float* out_x, float* out_y) const;
 	void do_cycle_vst3_insert (int dir);
 	void do_toggle_group_relative ();
 	void do_cycle_group_color ();
@@ -527,6 +532,8 @@ void do_toggle_selection_muted ();
 	D2D1_RECT_F _status_bar;
 	D2D1_RECT_F _status_vst3_bypass_btn; /* BYP chip when vst3_ok */
 	D2D1_RECT_F _status_vst3_param_reset_btn; /* RST chip when vst3_ok */
+	D2D1_RECT_F _status_vst3_param_reset1_btn; /* 1 = param1 reset */
+	D2D1_RECT_F _status_vst3_param_reset2_btn; /* 2 = param2 reset */
 	D2D1_RECT_F _status_vst3_unload_btn; /* × chip when vst3_ok */
 
 	ID2D1Factory*             _d2d_factory;
