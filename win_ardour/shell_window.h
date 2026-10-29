@@ -320,6 +320,7 @@ private:
 	bool smoke_mixer_scroll_layout ();
 	bool smoke_vst3_mixer_unload ();
 	bool smoke_vst3_mixer_bypass ();
+	bool smoke_vst3_mixer_param12_reset ();
 	bool smoke_vst3_catalog_highlight ();
 	bool smoke_vst3_prefs_bypass ();
 	bool smoke_vst3_prefs_param_reset ();

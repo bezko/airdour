@@ -149,6 +149,10 @@ public:
 	bool hit_fx_unload (float x, float y) const;
 	/** B chip left of × when set_fx_can_unload(true) — VST3 Audio 2 bypass. */
 	bool hit_fx_bypass (float x, float y) const;
+	/** "1" chip — reset VST3 param1 (between B and ×). */
+	bool hit_fx_param_reset1 (float x, float y) const;
+	/** "2" chip — reset VST3 param2 (between B and ×). */
+	bool hit_fx_param_reset2 (float x, float y) const;
 	void set_fx_can_unload (bool on) { _fx_can_unload = on; }
 	bool fx_can_unload () const { return _fx_can_unload; }
 	bool hit_fx_param (float x, float y) const;
@@ -209,6 +213,8 @@ private:
 	D2D1_RECT_F _send_track;
 	D2D1_RECT_F _fx_btn;
 	D2D1_RECT_F _fx_bypass_btn;
+	D2D1_RECT_F _fx_param_reset1_btn;
+	D2D1_RECT_F _fx_param_reset2_btn;
 	D2D1_RECT_F _fx_unload_btn;
 	D2D1_RECT_F _fx_param_track;
 	D2D1_RECT_F _fx_param_track2;
