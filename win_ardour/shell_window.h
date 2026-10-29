@@ -347,6 +347,8 @@ private:
 	bool smoke_punch_loop_tint ();
 	/** Assert soft hatch when loop range idle. For --smoke-loop-inactive-hatch. */
 	bool smoke_loop_inactive_hatch ();
+	/** Assert soft hatch when punch disarmed. For --smoke-punch-inactive-hatch. */
+	bool smoke_punch_inactive_hatch ();
 	void do_toggle_comp_sidechain ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();

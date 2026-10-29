@@ -42,7 +42,9 @@ constexpr float kLoopLaneTintIdle  = 0.10f; /* range on, play off */
 constexpr float kLoopInactiveHatchOp = 0.30f; /* soft hatch when idle */
 constexpr float kLoopInactiveHatchPx = 6.f;   /* stripe pitch @ dpi=1 */
 constexpr float kPunchLaneTintOn   = 0.34f; /* was 0.22 */
-constexpr float kPunchLaneTintOff  = 0.16f; /* was 0.10 */
+constexpr float kPunchLaneTintOff  = 0.12f; /* was 0.16 — idle + hatch */
+constexpr float kPunchInactiveHatchOp = 0.32f; /* soft hatch when disarmed */
+constexpr float kPunchInactiveHatchPx = 6.f;
 constexpr D2D1_COLOR_F kMarker     = { 0.820f, 0.880f, 0.420f, 1.f };
 constexpr D2D1_COLOR_F kMidi       = { 0.320f, 0.780f, 0.920f, 1.f }; /* cyan, not purple */
 constexpr D2D1_COLOR_F kMeterHot   = { 0.96f, 0.38f, 0.24f, 1.f };
@@ -1741,6 +1743,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	});
 	run_smoke_check (ok, "loop-inactive-hatch", [this]() {
 		return smoke_loop_inactive_hatch ();
+	});
+	run_smoke_check (ok, "punch-inactive-hatch", [this]() {
+		return smoke_punch_inactive_hatch ();
 	});
 	run_smoke_check (ok, "playhead-nudge", [this]() { return _engine.smoke_playhead_nudge (); });
 	run_smoke_check (ok, "zoom-punch", [this]() {
@@ -9838,6 +9843,61 @@ ShellWindow::smoke_loop_inactive_hatch ()
 	return true;
 }
 
+bool
+ShellWindow::smoke_punch_inactive_hatch ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-inactive-hatch FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!(kPunchLaneTintOff < kPunchLaneTintOn
+	      && kPunchLaneTintOff < 0.15f
+	      && kPunchInactiveHatchOp > 0.24f
+	      && kPunchInactiveHatchPx >= 4.f
+	      && kPunchInactiveHatchPx <= 10.f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-inactive-hatch FAILED "
+		              "(off=%.2f on=%.2f hatch=%.2f/%.1fpx)\n",
+		              kPunchLaneTintOff, kPunchLaneTintOn,
+		              kPunchInactiveHatchOp, kPunchInactiveHatchPx);
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_punch_range (1.0f, 3.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-inactive-hatch FAILED (range)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (!_engine_snap.punch_range_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-inactive-hatch FAILED (no punch)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (_engine_snap.punch_enabled) {
+		(void)_engine.set_punch_enabled (false);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	if (_engine_snap.punch_enabled) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-inactive-hatch FAILED (still armed)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-punch-inactive-hatch ok "
+	              "(off=%.2f hatch=%.2f @%.0fpx)\n",
+	              kPunchLaneTintOff, kPunchInactiveHatchOp, kPunchInactiveHatchPx);
+	std::fflush (stderr);
+	return true;
+}
+
 void
 ShellWindow::draw_loop_overlay ()
 {
@@ -9895,7 +9955,8 @@ ShellWindow::draw_punch_overlay ()
 	if (n1 <= n0) {
 		return;
 	}
-	float op = _engine_snap.punch_enabled ? kPunchLaneTintOn : kPunchLaneTintOff;
+	const bool armed = _engine_snap.punch_enabled;
+	float op = armed ? kPunchLaneTintOn : kPunchLaneTintOff;
 	_brush_punch->SetOpacity (op);
 	for (int i = 0; i < kTracks; ++i) {
 		const D2D1_RECT_F& lb = _lanes[i].bounds;
@@ -9905,9 +9966,19 @@ ShellWindow::draw_punch_overlay ()
 		}
 		float bot = (i == 0 && _auto_lane_bounds.bottom > lb.bottom)
 		            ? _auto_lane_bounds.bottom : lb.bottom;
-		_rt->FillRectangle (
-			D2D1::RectF (lb.left + n0 * w, lb.top, lb.left + n1 * w, bot),
-			_brush_punch);
+		float x0 = lb.left + n0 * w;
+		float x1 = lb.left + n1 * w;
+		_rt->FillRectangle (D2D1::RectF (x0, lb.top, x1, bot), _brush_punch);
+		if (!armed) {
+			/* Soft vertical hatch — range present but punch disarmed. */
+			_brush_punch->SetOpacity (kPunchInactiveHatchOp);
+			float step = std::max (3.f, kPunchInactiveHatchPx * _dpi_scale);
+			float stripe = std::max (1.f, 1.2f * _dpi_scale);
+			for (float x = x0; x < x1 - stripe; x += step) {
+				_rt->FillRectangle (D2D1::RectF (x, lb.top, x + stripe, bot), _brush_punch);
+			}
+			_brush_punch->SetOpacity (kPunchLaneTintOff);
+		}
 	}
 	_brush_punch->SetOpacity (1.f);
 }
