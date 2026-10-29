@@ -1914,6 +1914,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		refresh_midi_cc_lane ();
 		return true;
 	});
+	run_smoke_check (ok, "midi-cc-clear", [this]() { return smoke_midi_cc_clear (); });
 	run_smoke_check (ok, "midi-duplicate", [this]() { return _engine.smoke_midi_duplicate (); });
 	run_smoke_check (ok, "midi-panic", [this]() { return _engine.smoke_midi_panic (); });
 	run_smoke_check (ok, "stop-midi-panic", [this]() { return _engine.smoke_stop_midi_panic (); });
@@ -5087,11 +5088,44 @@ ShellWindow::do_undo_to_index (int index)
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+bool
+ShellWindow::do_clear_active_midi_cc_lane ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		return false;
+	}
+	bool ok = false;
+	if (_midi_cc_number == -1) {
+		ok = _engine.clear_midi_bend_automation ();
+	} else if (_midi_cc_number == -2) {
+		ok = _engine.clear_midi_pressure_automation ();
+	} else if (_midi_cc_number == -3) {
+		ok = _engine.clear_midi_note_pressure_automation ();
+	} else if (_midi_cc_number >= 0) {
+		ok = _engine.clear_midi_cc_automation (_midi_cc_number);
+	}
+	if (ok) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		refresh_midi_cc_lane ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+	return ok;
+}
+
 void
 ShellWindow::do_delete_selection ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
+	}
+	/* Del over the CC lane clears that lane's automation first. */
+	POINT pt;
+	if (GetCursorPos (&pt) && ScreenToClient (_hwnd, &pt)
+	    && _midi_cc_lane.hit (_midi_cc_lane_bounds, (float)pt.x, (float)pt.y)) {
+		if (do_clear_active_midi_cc_lane ()) {
+			return;
+		}
 	}
 	/* Prefer MIDI note selection when present. */
 	if (_engine_snap.midi_selected_note_id >= 0) {
@@ -5111,6 +5145,57 @@ ShellWindow::do_delete_selection ()
 	_engine_snap = _engine.snapshot ();
 	apply_region_selection_to_lanes ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+bool
+ShellWindow::smoke_midi_cc_clear ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (no session)\n");
+		return false;
+	}
+	if (!_engine.ensure_midi_track () || !_engine.ensure_midi_region (16.f)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (region)\n");
+		return false;
+	}
+	_midi_cc_number = 7;
+	if (!_engine.clear_midi_cc_automation (7)
+	    || !_engine.write_midi_cc_automation (0.0f, 0.25f, 7)
+	    || !_engine.write_midi_cc_automation (1.5f, 0.80f, 7)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (write)\n");
+		return false;
+	}
+	float xn[8], yn[8];
+	int n = _engine.fill_midi_cc_automation_points (0.f, 8.f, xn, yn, 8, 7);
+	if (n < 2) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (pts=%d)\n", n);
+		return false;
+	}
+	if (!do_clear_active_midi_cc_lane ()) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (clear)\n");
+		return false;
+	}
+	n = _engine.fill_midi_cc_automation_points (0.f, 8.f, xn, yn, 8, 7);
+	if (n != 0) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (after=%d)\n", n);
+		return false;
+	}
+	/* Also clear bend via the same shell path. */
+	_midi_cc_number = -1;
+	if (!_engine.write_midi_bend_automation (0.5f, 0.75f)
+	    || !do_clear_active_midi_cc_lane ()) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (bend)\n");
+		return false;
+	}
+	n = _engine.fill_midi_bend_automation_points (0.f, 8.f, xn, yn, 8);
+	if (n != 0) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (bend after=%d)\n", n);
+		return false;
+	}
+	_midi_cc_number = 7;
+	refresh_midi_cc_lane ();
+	std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear ok (CC7+bend cleared)\n");
+	return true;
 }
 
 void
@@ -8584,6 +8669,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	if (_midi_cc_lane.hit (_midi_cc_lane_bounds, x, y)
 	    && _engine.is_linked () && _engine_snap.session_ok) {
+		/* Alt+click clears the active CC/bend/pressure/PolyAT lane. */
+		if ((GetKeyState (VK_MENU) & 0x8000) != 0) {
+			do_clear_active_midi_cc_lane ();
+			return true;
+		}
 		_drag = DragMode::MidiCcWrite;
 		_drag_index = 0;
 		_midi_cc_last_write_sec = -1.f;
@@ -8591,6 +8681,8 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			_engine.ensure_midi_bend_automation ();
 		} else if (_midi_cc_number == -2) {
 			_engine.ensure_midi_pressure_automation ();
+		} else if (_midi_cc_number == -3) {
+			_engine.ensure_midi_note_pressure_automation ();
 		} else {
 			_engine.ensure_midi_cc_automation (_midi_cc_number);
 		}
