@@ -1838,6 +1838,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	                                bool additive = false);
 	/** Select every note in the MIDI region (primary = last id). */
 	bool select_all_midi_notes ();
+	/** Flip selection: unselected notes become selected and vice versa. */
+	bool invert_midi_note_selection ();
 	void clear_midi_note_selection ();
 	bool delete_selected_midi_note ();
 
@@ -1994,6 +1996,12 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-midi-select-all.
 	 */
 	bool smoke_midi_select_all ();
+
+	/**
+	 * Add three notes, select one, invert → two; invert again → one.
+	 * For --smoke-midi-invert-select.
+	 */
+	bool smoke_midi_invert_select ();
 
 	/**
 	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.

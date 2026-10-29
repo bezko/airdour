@@ -27781,6 +27781,32 @@ EngineHost::select_all_midi_notes ()
 	return _snap.midi_note_count > 0;
 }
 
+bool
+EngineHost::invert_midi_note_selection ()
+{
+	refresh_midi_notes_snap ();
+	if (!_impl) {
+		return false;
+	}
+	std::set<Evoral::event_id_t> next;
+	Evoral::event_id_t last = -1;
+	for (int i = 0; i < _snap.midi_note_count; ++i) {
+		const Evoral::event_id_t id = _snap.midi_notes[i].id;
+		if (!_impl->midi_note_sel_has (id)) {
+			next.insert (id);
+			last = id;
+		}
+	}
+	_impl->selected_midi_note_ids.swap (next);
+	_impl->selected_midi_note_id = last;
+	refresh_midi_notes_snap ();
+	std::fprintf (stderr, "airdour_win_shell: invert_midi_note_selection sel=%d/%d\n",
+	              (int)_impl->selected_midi_note_ids.size (), _snap.midi_note_count);
+	std::fflush (stderr);
+	_snap.detail = L"MIDI invert select";
+	return true;
+}
+
 void
 EngineHost::clear_midi_note_selection ()
 {
@@ -29643,6 +29669,155 @@ EngineHost::smoke_midi_select_all ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-all exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_invert_select ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-invert-select failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-invert-select FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-invert-select FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for invert-select smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->clear_midi_note_sel ();
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-invert-select FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+
+		if (!add_midi_note (60, 0.0f, 0.4f, 100)
+		    || !add_midi_note (64, 0.5f, 0.4f, 100)
+		    || !add_midi_note (67, 1.0f, 0.4f, 100)
+		    || _snap.midi_note_count < 3) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-invert-select FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!select_midi_note_at (0.5f, 64)) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-invert-select FAILED (pick)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		{
+			int sel = 0;
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				if (_snap.midi_notes[i].selected) {
+					++sel;
+				}
+			}
+			if (sel != 1) {
+				set_snap_enabled (snap_was);
+				std::fprintf (stderr, "airdour_win_shell: smoke-midi-invert-select FAILED (pre sel=%d)\n",
+				              sel);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+
+		if (!invert_midi_note_selection ()) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-invert-select FAILED (invert1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		{
+			int sel = 0;
+			bool mid_sel = false;
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				if (_snap.midi_notes[i].selected) {
+					++sel;
+					if (_snap.midi_notes[i].pitch == 64) {
+						mid_sel = true;
+					}
+				}
+			}
+			if (sel != 2 || mid_sel) {
+				set_snap_enabled (snap_was);
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-midi-invert-select FAILED "
+				              "(after1 sel=%d mid=%d)\n",
+				              sel, mid_sel ? 1 : 0);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+
+		if (!invert_midi_note_selection ()) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-invert-select FAILED (invert2)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		{
+			int sel = 0;
+			bool mid_sel = false;
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				if (_snap.midi_notes[i].selected) {
+					++sel;
+					if (_snap.midi_notes[i].pitch == 64) {
+						mid_sel = true;
+					}
+				}
+			}
+			if (sel != 1 || !mid_sel) {
+				set_snap_enabled (snap_was);
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-midi-invert-select FAILED "
+				              "(after2 sel=%d mid=%d)\n",
+				              sel, mid_sel ? 1 : 0);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+
+		set_snap_enabled (snap_was);
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-invert-select ok (notes=%d)\n",
+		              _snap.midi_note_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-invert-select ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-invert-select exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -36576,6 +36751,12 @@ EngineHost::select_all_midi_notes ()
 	return false;
 }
 
+bool
+EngineHost::invert_midi_note_selection ()
+{
+	return false;
+}
+
 void
 EngineHost::clear_midi_note_selection ()
 {
@@ -36710,6 +36891,12 @@ EngineHost::smoke_midi_marquee ()
 
 bool
 EngineHost::smoke_midi_select_all ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_invert_select ()
 {
 	return false;
 }
