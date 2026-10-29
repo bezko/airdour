@@ -1925,6 +1925,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "midi-marquee", [this]() { return _engine.smoke_midi_marquee (); });
 	run_smoke_check (ok, "midi-select-all", [this]() { return _engine.smoke_midi_select_all (); });
 	run_smoke_check (ok, "midi-invert-select", [this]() { return _engine.smoke_midi_invert_select (); });
+	run_smoke_check (ok, "midi-select-same-pitch", [this]() { return _engine.smoke_midi_select_same_pitch (); });
 	run_smoke_check (ok, "midi-force-velocity", [this]() { return _engine.smoke_midi_force_velocity (); });
 	run_smoke_check (ok, "midi-program", [this]() { return _engine.smoke_midi_program (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
@@ -6209,6 +6210,19 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			}
 			return 0;
 		}
+		if ((GetKeyState (VK_CONTROL) & 0x8000)
+		    && (GetKeyState (VK_MENU) & 0x8000)
+		    && (GetKeyState (VK_SHIFT) & 0x8000)
+		    && (wparam == 'P' || wparam == 'p')) {
+			/* Ctrl+Alt+Shift+P = select all notes matching primary pitch. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				_engine.select_midi_notes_same_pitch ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			}
+			return 0;
+		}
 		if (wparam == VK_ESCAPE) {
 			if (_engine_snap.has_selection) {
 				/* Esc = clear region selection (quit via second Esc). */
@@ -10124,6 +10138,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Shift+drag empty", L"MIDI marquee box-select (Ctrl=add)" },
 		{ L"Ctrl+Shift+A", L"Select all MIDI notes" },
 		{ L"Ctrl+Shift+I", L"Invert MIDI note selection" },
+		{ L"Ctrl+Alt+Shift+P", L"Select MIDI notes of same pitch" },
 		{ L". / ,  Shift", L"MIDI transpose ±1 · ±12 (T+/T−)" },
 		{ L"↑ / ↓  Shift", L"MIDI velocity ±1 · ±8 (V+/V−)" },
 		{ L"Ctrl+Alt+V / Alt+V+", L"Force MIDI velocity 100 (Alt+V− → 64)" },
