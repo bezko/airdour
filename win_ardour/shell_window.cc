@@ -135,6 +135,7 @@ ShellWindow::ShellWindow ()
 	, _mixer_scroll_max (0.f)
 	, _mixer_force_min_w (0.f)
 	, _status_bar ()
+	, _status_snap_btn ()
 	, _d2d_factory (nullptr)
 	, _dwrite_factory (nullptr)
 	, _rt (nullptr)
@@ -1902,6 +1903,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "snap-density", [this]() { return _engine.smoke_snap_density (); });
 	run_smoke_check (ok, "snap-density-label", [this]() { return smoke_snap_density_label (); });
 	run_smoke_check (ok, "snap-ruler-ticks", [this]() { return smoke_snap_ruler_ticks (); });
+	run_smoke_check (ok, "snap-status-chip", [this]() { return smoke_snap_status_chip (); });
 	run_smoke_check (ok, "grid-refresh", [this]() { return _engine.smoke_grid_lines (); });
 	run_smoke_check (ok, "tempo-nudge", [this]() { return _engine.smoke_tempo_nudge (); });
 	run_smoke_check (ok, "count-in", [this]() { return _engine.smoke_count_in (); });
@@ -5932,6 +5934,117 @@ ShellWindow::smoke_snap_ruler_ticks ()
 	return true;
 }
 
+bool
+ShellWindow::hit_status_snap (float x, float y) const
+{
+	const D2D1_RECT_F& r = _status_snap_btn;
+	return r.right > r.left && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+
+bool
+ShellWindow::status_snap_center (float* out_x, float* out_y) const
+{
+	if (!out_x || !out_y) {
+		return false;
+	}
+	const D2D1_RECT_F& r = _status_snap_btn;
+	if (r.right <= r.left) {
+		return false;
+	}
+	*out_x = 0.5f * (r.left + r.right);
+	*out_y = 0.5f * (r.top + r.bottom);
+	return true;
+}
+
+bool
+ShellWindow::smoke_snap_status_chip ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-snap-status-chip FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	layout_panes ();
+	_engine.set_snap_enabled (false);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_transport.set_snap_enabled (false);
+	/* Paint path clears the chip when snap is off — simulate via redraw layout. */
+	InvalidateRect (_hwnd, nullptr, FALSE);
+	layout_panes ();
+	/* Force status chip layout by calling the same geometry used in paint:
+	 * clear then paint path sets it; rebuild manually for smoke. */
+	_status_snap_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
+	if (hit_status_snap (1.f, 1.f) || status_snap_center (nullptr, nullptr)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-snap-status-chip FAILED (chrome when off)\n");
+		std::fflush (stderr);
+		return false;
+	}
+
+	static const wchar_t* want[] = { L"Bar", L"Beat", L"1/2", L"1/4" };
+	_engine.set_snap_enabled (true);
+	for (int d = 0; d < 4; ++d) {
+		_engine.set_snap_density (d);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_transport.set_snap_enabled (true);
+		_transport.set_snap_density (d);
+		layout_panes ();
+		/* Mirror paint geometry for the chip. */
+		{
+			const float meter_w = 96.f * _dpi_scale;
+			float mid_y = (_status_bar.top + _status_bar.bottom) * 0.5f;
+			float bh = 14.f * _dpi_scale;
+			float chip_w = 44.f * _dpi_scale;
+			float gap = 8.f * _dpi_scale;
+			float right = _status_bar.right - 20.f * _dpi_scale - meter_w - gap;
+			_status_snap_btn = D2D1::RectF (right - chip_w, mid_y - bh * 0.5f,
+			                               right, mid_y + bh * 0.5f);
+		}
+		if (wcscmp (_transport.snap_btn_label (), want[d]) != 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-snap-status-chip FAILED "
+			              "(label dens=%d got=%ls)\n",
+			              d, _transport.snap_btn_label ());
+			std::fflush (stderr);
+			return false;
+		}
+		float sx = 0.f;
+		float sy = 0.f;
+		if (!status_snap_center (&sx, &sy) || !hit_status_snap (sx, sy)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-snap-status-chip FAILED "
+			              "(hit dens=%d)\n",
+			              d);
+			std::fflush (stderr);
+			return false;
+		}
+	}
+
+	/* Click chip → cycle Bar→Beat. */
+	_engine.set_snap_density (0);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_transport.set_snap_density (0);
+	do_cycle_snap_density ();
+	if (_engine_snap.snap_density != 1) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-snap-status-chip FAILED "
+		              "(cycle dens=%d want=1)\n",
+		              _engine_snap.snap_density);
+		std::fflush (stderr);
+		return false;
+	}
+
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-snap-status-chip ok "
+	              "(Bar/Beat/1/2/1/4 · click cycle · off=no chrome)\n");
+	std::fflush (stderr);
+	return true;
+}
+
 float
 ShellWindow::stub_meter_peak (int track, float dt) const
 {
@@ -7758,6 +7871,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		/* Any click dismisses the shortcuts overlay. */
 		_help_visible = false;
 		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+
+	if (hit_status_snap (x, y)) {
+		do_cycle_snap_density ();
 		return true;
 	}
 
@@ -10218,6 +10336,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+Shift+B / Alt+Shift+click FX", L"Activate all ACE inserts" },
 		{ L"Z", L"Freeze / unfreeze focused audio track" },
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
+		{ L"Status snap chip", L"Show density · click to cycle" },
 		{ L"Q / Qnt", L"Quantize MIDI notes to snap grid" },
 		{ L". / ,  Shift", L"MIDI transpose ±1 · ±12 (T+/T−)" },
 		{ L"↑ / ↓  Shift", L"MIDI velocity ±1 · ±8 (V+/V−)" },
@@ -10537,15 +10656,38 @@ ShellWindow::on_paint ()
 	}
 
 	const float meter_w = 96.f * _dpi_scale;
-	const float text_right = _status_bar.right - 20.f * _dpi_scale - meter_w - 12.f * _dpi_scale;
+	const float gap = 8.f * _dpi_scale;
+	float mid_y = (_status_bar.top + _status_bar.bottom) * 0.5f;
+	_status_snap_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
+	float text_right = _status_bar.right - 20.f * _dpi_scale - meter_w - 12.f * _dpi_scale;
+	if (_engine_snap.snap_enabled) {
+		float bh = 14.f * _dpi_scale;
+		float chip_w = 44.f * _dpi_scale;
+		float right = _status_bar.right - 20.f * _dpi_scale - meter_w - gap;
+		_status_snap_btn = D2D1::RectF (right - chip_w, mid_y - bh * 0.5f,
+		                               right, mid_y + bh * 0.5f);
+		text_right = _status_snap_btn.left - gap;
+	}
 	_rt->DrawTextW (status, (UINT32)wcslen (status), _fmt_meta,
 	                D2D1::RectF (_status_bar.left + 20.f * _dpi_scale, _status_bar.top,
 	                             text_right, _status_bar.bottom),
 	                _brush_body);
 
+	if (_status_snap_btn.right > _status_snap_btn.left) {
+		_rt->FillRectangle (_status_snap_btn, _brush_pane_edge);
+		_rt->DrawRectangle (_status_snap_btn, _brush_accent, 1.f * _dpi_scale);
+		DWRITE_TEXT_ALIGNMENT ta = _fmt_meta->GetTextAlignment ();
+		DWRITE_PARAGRAPH_ALIGNMENT pa = _fmt_meta->GetParagraphAlignment ();
+		_fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
+		_fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+		const wchar_t* lab = _transport.snap_btn_label ();
+		_rt->DrawTextW (lab, (UINT32)wcslen (lab), _fmt_meta, _status_snap_btn, _brush_brand);
+		_fmt_meta->SetTextAlignment (ta);
+		_fmt_meta->SetParagraphAlignment (pa);
+	}
+
 	/* Status-bar DSP meter (same load % as transport; UI-rate from poll). */
 	if (_engine_snap.available) {
-		float mid_y = (_status_bar.top + _status_bar.bottom) * 0.5f;
 		float bh = 12.f * _dpi_scale;
 		D2D1_RECT_F track = D2D1::RectF (_status_bar.right - 20.f * _dpi_scale - meter_w,
 		                                 mid_y - bh * 0.5f,
