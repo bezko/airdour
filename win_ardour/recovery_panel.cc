@@ -78,65 +78,52 @@ RecoveryPanel::hit_test (float x, float y) const
 }
 
 void
-RecoveryPanel::draw (ID2D1RenderTarget* rt,
-                     ID2D1SolidColorBrush* brand,
-                     ID2D1SolidColorBrush* body,
-                     ID2D1SolidColorBrush* accent,
-                     ID2D1SolidColorBrush* pane,
-                     ID2D1SolidColorBrush* edge,
-                     IDWriteTextFormat* fmt_title,
-                     IDWriteTextFormat* fmt_meta,
-                     float dpi_scale) const
+RecoveryPanel::draw (UiDraw& ui) const
 {
-	if (!rt || !_visible) {
+	if (!ui.ready () || !_visible) {
 		return;
 	}
 
-	pane->SetOpacity (0.82f);
-	D2D1_SIZE_F sz = rt->GetSize ();
-	rt->FillRectangle (D2D1::RectF (0, 0, sz.width, sz.height), pane);
-	pane->SetOpacity (1.f);
+	const float s = ui.dpi_scale ();
+	const D2D1_SIZE_F sz = ui.rt ()->GetSize ();
+	ui.modal_scrim (D2D1::RectF (0.f, 0.f, sz.width, sz.height), 0.66f);
 
-	rt->FillRectangle (_card, pane);
-	rt->DrawRectangle (_card, accent, 1.5f * dpi_scale);
+	const float radius = ui::theme ().metrics.radius_lg;
+	ui.shadow (_card, radius + 2.f);
+	ui.fill_round (_card, radius, ui::ColorToken::Card);
+	ui.stroke_round (_card, radius, ui::ColorToken::BorderStrong, 1.f);
 
-	DWRITE_TEXT_ALIGNMENT ta = fmt_title->GetTextAlignment ();
-	fmt_title->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
-	rt->DrawTextW (L"Airdour — recover session?", 26, fmt_title,
-	               D2D1::RectF (_card.left + 16.f * dpi_scale, _card.top + 12.f * dpi_scale,
-	                            _card.right - 16.f * dpi_scale, _card.top + 40.f * dpi_scale),
-	               brand);
-	fmt_title->SetTextAlignment (ta);
+	/* Attention tab + title. */
+	const float inset = 18.f * s;
+	ui.fill_round (D2D1::RectF (_card.left + inset, _card.top + 13.f * s,
+	                             _card.left + inset + 3.f * s, _card.top + 33.f * s),
+	                1.5f, ui::ColorToken::Solo);
+	ui.text_vcenter (L"Recover session?", ui::TextRole::Title,
+	                 ui::ColorToken::TextPrimary,
+	                 D2D1::RectF (_card.left + inset + 12.f * s, _card.top,
+	                              _card.right - inset, _card.top + 42.f * s));
+	ui.divider (D2D1::RectF (_card.left + inset, _card.top + 44.f * s,
+	                          _card.right - inset, _card.top + 44.f * s + std::max (1.f, s)));
 
-	wchar_t line[160];
-	_snwprintf_s (line, _TRUNCATE, L"Autosave is newer than the last clean open.");
-	rt->DrawTextW (line, (UINT32)wcslen (line), fmt_meta,
-	               D2D1::RectF (_card.left + 16.f * dpi_scale, _card.top + 48.f * dpi_scale,
-	                            _card.right - 16.f * dpi_scale, _card.top + 70.f * dpi_scale),
-	               body);
-
-	_snwprintf_s (line, _TRUNCATE, L"%s", _label);
-	rt->DrawTextW (line, (UINT32)wcslen (line), fmt_meta,
-	               D2D1::RectF (_card.left + 16.f * dpi_scale, _card.top + 74.f * dpi_scale,
-	                            _card.right - 16.f * dpi_scale, _card.top + 94.f * dpi_scale),
-	               brand);
+	const float x0 = _card.left + inset;
+	const float x1 = _card.right - inset;
+	ui.text_vcenter (L"Autosave is newer than the last clean open.",
+	                 ui::TextRole::Caption, ui::ColorToken::TextSecondary,
+	                 D2D1::RectF (x0, _card.top + 52.f * s, x1, _card.top + 74.f * s));
+	ui.text_vcenter (_label, ui::TextRole::Body, ui::ColorToken::TextPrimary,
+	                 D2D1::RectF (x0, _card.top + 76.f * s, x1, _card.top + 98.f * s));
 	if (_path[0]) {
-		rt->DrawTextW (_path, (UINT32)wcslen (_path), fmt_meta,
-		               D2D1::RectF (_card.left + 16.f * dpi_scale, _card.top + 94.f * dpi_scale,
-		                            _card.right - 16.f * dpi_scale, _restore_btn.top - 8.f * dpi_scale),
-		               body);
+		ui.text_vcenter (_path, ui::TextRole::Caption, ui::ColorToken::TextMuted,
+		                 D2D1::RectF (x0, _card.top + 98.f * s,
+		                              x1, _restore_btn.top - 6.f * s));
 	}
 
-	auto draw_btn = [&] (const D2D1_RECT_F& r, const wchar_t* text, bool primary) {
-		rt->FillRectangle (r, primary ? accent : edge);
-		DWRITE_TEXT_ALIGNMENT t = fmt_meta->GetTextAlignment ();
-		DWRITE_PARAGRAPH_ALIGNMENT p = fmt_meta->GetParagraphAlignment ();
-		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-		fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-		rt->DrawTextW (text, (UINT32)wcslen (text), fmt_meta, r, brand);
-		fmt_meta->SetTextAlignment (t);
-		fmt_meta->SetParagraphAlignment (p);
-	};
-	draw_btn (_restore_btn, L"Restore", true);
-	draw_btn (_discard_btn, L"Discard", false);
+	UiDraw::ButtonStyle restore_st;
+	restore_st.label = L"Restore";
+	restore_st.latched = true;
+	ui.button (_restore_btn, restore_st);
+
+	UiDraw::ButtonStyle discard_st;
+	discard_st.label = L"Discard";
+	ui.button (_discard_btn, discard_st);
 }

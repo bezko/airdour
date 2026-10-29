@@ -16,6 +16,8 @@
 #include <windows.h>
 #include <d2d1.h>
 
+#include "ui_draw.h"
+
 class LevelMeter
 {
 public:
@@ -41,11 +43,7 @@ public:
 	bool hit_clip_led (float x, float y) const;
 	void set_clip_led_height (float h_px);
 
-	void draw (ID2D1RenderTarget* rt,
-	           ID2D1SolidColorBrush* fill,
-	           ID2D1SolidColorBrush* edge,
-	           ID2D1SolidColorBrush* hot,
-	           float dpi_scale) const;
+	void draw (UiDraw& ui) const;
 
 	const D2D1_RECT_F& bounds () const { return _bounds; }
 

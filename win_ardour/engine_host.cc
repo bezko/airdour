@@ -92,6 +92,7 @@
 #include "ardour/stretch.h"
 #include "ardour/timefx_request.h"
 #include "ardour/types.h"
+#include "ardour/utils.h"
 #include "pbd/progress.h"
 #include "evoral/Note.h"
 #include "evoral/Parameter.h"
@@ -100,6 +101,7 @@
 #include "pbd/error.h"
 #include "pbd/event_loop.h"
 #include "pbd/failed_constructor.h"
+#include "pbd/file_utils.h"
 #include "pbd/memento_command.h"
 #include "pbd/mutex.h"
 #include "pbd/property_list.h"
@@ -107,7 +109,9 @@
 #include "pbd/stateful_diff_command.h"
 
 #include <glib.h>
+#include <glib/gstdio.h>
 #include <glibmm/fileutils.h>
+#include <sndfile.h>
 #include <glibmm/miscutils.h>
 #include "pbd/xml++.h"
 #include "temporal/beats.h"
@@ -273,6 +277,74 @@ utf8_path_to_wide (const std::string& s)
 	std::wstring out ((size_t)n, L'\0');
 	MultiByteToWideChar (CP_UTF8, 0, s.c_str (), (int)s.size (), &out[0], n);
 	return out;
+}
+
+bool
+dir_exists (const std::string& path)
+{
+	DWORD attrs = GetFileAttributesW (utf8_path_to_wide (path).c_str ());
+	return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+/* Snapshot stem of the first `<name>.ardour` state file, or empty. */
+std::string
+find_session_snapshot (const std::string& session_dir)
+{
+	std::string pattern = path_join (session_dir, "*.ardour");
+	WIN32_FIND_DATAW fd;
+	HANDLE h = FindFirstFileW (utf8_path_to_wide (pattern).c_str (), &fd);
+	if (h == INVALID_HANDLE_VALUE) {
+		return std::string ();
+	}
+	std::string found;
+	do {
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+			continue;
+		}
+		found = wide_to_utf8 (fd.cFileName);
+		break;
+	} while (FindNextFileW (h, &fd));
+	FindClose (h);
+	size_t dot = found.find_last_of ('.');
+	return (dot == std::string::npos) ? found : found.substr (0, dot);
+}
+
+bool
+session_snapshot_exists (const std::string& session_dir, const std::string& snapshot)
+{
+	if (session_dir.empty () || snapshot.empty ()) {
+		return false;
+	}
+	std::string file = path_join (session_dir, snapshot + ".ardour");
+	DWORD attrs = GetFileAttributesW (utf8_path_to_wide (file).c_str ());
+	return attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+/* True if the WAV contains at least one non-silent sample. */
+bool
+wav_has_signal (const std::string& path, float threshold = 0.001f)
+{
+	SF_INFO info = {};
+	std::wstring wpath = utf8_path_to_wide (path);
+	SNDFILE* f = wpath.empty () ? nullptr
+	                            : sf_wchar_open (wpath.c_str (), SFM_READ, &info);
+	if (!f) {
+		return false;
+	}
+	std::vector<float> buf ((size_t)std::max (info.channels, 1) * 4096);
+	bool found = false;
+	sf_count_t n;
+	while (!found && (n = sf_readf_float (f, buf.data (), 4096)) > 0) {
+		const size_t total = (size_t)n * (size_t)info.channels;
+		for (size_t i = 0; i < total; ++i) {
+			if (std::fabs (buf[i]) > threshold) {
+				found = true;
+				break;
+			}
+		}
+	}
+	sf_close (f);
+	return found;
 }
 
 /** Minimal mono 16-bit PCM WAV (no libsndfile) for import smoke. */
@@ -700,6 +772,28 @@ EngineHost::refresh_prefs_snap ()
 	_snap.pref_period_frames = _pref_period_frames;
 	_snap.pref_snap_default = _pref_snap_default;
 	_snap.pref_click_default = _pref_click_default;
+	_snap.pref_in_device = utf8_to_wide (_pref_input_device.empty () ? "Default" : _pref_input_device);
+	_snap.pref_out_device = utf8_to_wide (_pref_output_device.empty () ? "Default" : _pref_output_device);
+
+	if (_impl && _impl->engine) {
+		if (std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ()) {
+			const bool sep = be->use_separate_input_and_output_devices ();
+			_snap.separate_io_devices = sep;
+			const std::string in = sep ? be->input_device_name () : std::string ();
+			const std::string out = sep ? be->output_device_name () : be->device_name ();
+			_snap.audio_in_name = utf8_to_wide (in.empty () ? "Default" : in);
+			_snap.audio_out_name = utf8_to_wide (out.empty () ? "Default" : out);
+			_snap.systemic_in_frames = be->systemic_input_latency ();
+			_snap.systemic_out_frames = be->systemic_output_latency ();
+			/* Capture expected (not "None") but no physical inputs → explain. */
+			_snap.capture_disabled_reason.clear ();
+			if (sep && in != "None" && _impl->engine->running ()
+			    && _impl->engine->n_physical_inputs ().n_audio () == 0) {
+				_snap.capture_disabled_reason =
+					L"capture unavailable — device in use or microphone access denied";
+			}
+		}
+	}
 
 	std::string hint;
 	const char* env = std::getenv ("VST3_PATH");
@@ -746,14 +840,24 @@ EngineHost::load_shell_prefs ()
 			if (node->get_property ("click-default", click)) {
 				_pref_click_default = (click != 0);
 			}
+			std::string dev;
+			if (node->get_property ("input-device", dev)) {
+				_pref_input_device = dev;
+			}
+			if (node->get_property ("output-device", dev)) {
+				_pref_output_device = dev;
+			}
 		}
 		/* Keep RC Config clicking aligned with the shell preference. */
 		Config->set_clicking (_pref_click_default);
 		refresh_prefs_snap ();
 		std::fprintf (stderr,
-		              "airdour_win_shell: prefs loaded (backend=%s period=%u snap=%d click=%d)\n",
+		              "airdour_win_shell: prefs loaded (backend=%s period=%u snap=%d click=%d "
+		              "in=%s out=%s)\n",
 		              _pref_backend.c_str (), (unsigned)_pref_period_frames,
-		              _pref_snap_default ? 1 : 0, _pref_click_default ? 1 : 0);
+		              _pref_snap_default ? 1 : 0, _pref_click_default ? 1 : 0,
+		              _pref_input_device.empty () ? "(default)" : _pref_input_device.c_str (),
+		              _pref_output_device.empty () ? "(default)" : _pref_output_device.c_str ());
 		std::fflush (stderr);
 	} catch (...) {
 		refresh_prefs_snap ();
@@ -780,13 +884,18 @@ EngineHost::save_shell_prefs ()
 		node.set_property ("period", _pref_period_frames);
 		node.set_property ("snap-default", _pref_snap_default ? 1 : 0);
 		node.set_property ("click-default", _pref_click_default ? 1 : 0);
+		node.set_property ("input-device", _pref_input_device);
+		node.set_property ("output-device", _pref_output_device);
 		Config->add_instant_xml (node);
 		refresh_prefs_snap ();
 		_snap.detail = L"preferences saved (RC + instant.xml)";
 		std::fprintf (stderr,
-		              "airdour_win_shell: prefs saved (backend=%s period=%u snap=%d click=%d)\n",
+		              "airdour_win_shell: prefs saved (backend=%s period=%u snap=%d click=%d "
+		              "in=%s out=%s)\n",
 		              _pref_backend.c_str (), (unsigned)_pref_period_frames,
-		              _pref_snap_default ? 1 : 0, _pref_click_default ? 1 : 0);
+		              _pref_snap_default ? 1 : 0, _pref_click_default ? 1 : 0,
+		              _pref_input_device.empty () ? "(default)" : _pref_input_device.c_str (),
+		              _pref_output_device.empty () ? "(default)" : _pref_output_device.c_str ());
 		std::fflush (stderr);
 		return true;
 	} catch (std::exception& e) {
@@ -856,10 +965,14 @@ EngineHost::smoke_prefs ()
 		const uint32_t period0 = _pref_period_frames;
 		const bool snap0 = _pref_snap_default;
 		const bool click0 = _pref_click_default;
+		const std::string in0 = _pref_input_device;
+		const std::string out0 = _pref_output_device;
 
 		set_pref_backend ("WASAPI");
 		set_pref_period_frames (512);
 		set_pref_snap_default (true);
+		set_pref_input_device ("smoke-in");
+		set_pref_output_device ("smoke-out");
 		if (!set_pref_click_default (false)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-prefs FAILED (click off)\n");
 			std::fflush (stderr);
@@ -876,6 +989,8 @@ EngineHost::smoke_prefs ()
 		_pref_period_frames = 0;
 		_pref_snap_default = false;
 		_pref_click_default = true;
+		_pref_input_device.clear ();
+		_pref_output_device.clear ();
 		load_shell_prefs ();
 
 		if (_pref_backend != "WASAPI" || _pref_period_frames != 512 || !_pref_snap_default
@@ -888,23 +1003,447 @@ EngineHost::smoke_prefs ()
 			std::fflush (stderr);
 			return false;
 		}
+		if (_pref_input_device != "smoke-in" || _pref_output_device != "smoke-out") {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-prefs FAILED (devices in=%s out=%s)\n",
+			              _pref_input_device.c_str (), _pref_output_device.c_str ());
+			std::fflush (stderr);
+			return false;
+		}
 
 		set_pref_backend (be0);
 		set_pref_period_frames (period0);
 		set_pref_snap_default (snap0);
 		set_pref_click_default (click0);
+		set_pref_input_device (in0);
+		set_pref_output_device (out0);
 		if (!save_shell_prefs ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-prefs FAILED (restore save)\n");
 			std::fflush (stderr);
 			return false;
 		}
 
-		std::fprintf (stderr, "airdour_win_shell: smoke-prefs ok (WASAPI/512/snap/click round-trip)\n");
+		std::fprintf (stderr, "airdour_win_shell: smoke-prefs ok (WASAPI/512/snap/click/device round-trip)\n");
 		std::fflush (stderr);
 		_snap.detail = L"smoke-prefs ok";
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-prefs exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::backend_uses_separate_devices () const
+{
+	if (!_impl || !_impl->engine) {
+		return false;
+	}
+	std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
+	return be && be->use_separate_input_and_output_devices ();
+}
+
+std::vector<std::string>
+EngineHost::input_devices () const
+{
+	std::vector<std::string> names;
+	if (!_impl || !_impl->engine) {
+		return names;
+	}
+	std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
+	if (!be) {
+		return names;
+	}
+	std::vector<AudioBackend::DeviceStatus> ds = be->use_separate_input_and_output_devices ()
+		? be->enumerate_input_devices () : be->enumerate_devices ();
+	for (size_t i = 0; i < ds.size (); ++i) {
+		names.push_back (ds[i].name);
+	}
+	return names;
+}
+
+std::vector<std::string>
+EngineHost::output_devices () const
+{
+	std::vector<std::string> names;
+	if (!_impl || !_impl->engine) {
+		return names;
+	}
+	std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
+	if (!be) {
+		return names;
+	}
+	std::vector<AudioBackend::DeviceStatus> ds = be->use_separate_input_and_output_devices ()
+		? be->enumerate_output_devices () : be->enumerate_devices ();
+	for (size_t i = 0; i < ds.size (); ++i) {
+		names.push_back (ds[i].name);
+	}
+	return names;
+}
+
+std::string
+EngineHost::current_input_device () const
+{
+	if (!_impl || !_impl->engine) {
+		return std::string ();
+	}
+	std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
+	if (!be) {
+		return std::string ();
+	}
+	if (!be->use_separate_input_and_output_devices ()) {
+		return be->device_name ();
+	}
+	return be->input_device_name ();
+}
+
+std::string
+EngineHost::current_output_device () const
+{
+	if (!_impl || !_impl->engine) {
+		return std::string ();
+	}
+	std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
+	if (!be) {
+		return std::string ();
+	}
+	if (!be->use_separate_input_and_output_devices ()) {
+		return be->device_name ();
+	}
+	return be->output_device_name ();
+}
+
+bool
+EngineHost::set_audio_devices (const std::string& in, const std::string& out)
+{
+	if (!_impl || !_impl->engine) {
+		_snap.detail = L"audio devices: engine not created";
+		return false;
+	}
+	std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
+	if (!be) {
+		_snap.detail = L"audio devices: no backend";
+		return false;
+	}
+	if (in.empty () && out.empty ()) {
+		return true;
+	}
+
+	const bool sep = be->use_separate_input_and_output_devices ();
+	const bool was_running = _impl->engine->running ();
+
+	if (_impl->session) {
+		try {
+			if (_impl->session->transport_rolling ()) {
+				_impl->session->request_stop (false, false, TRS_UI);
+			}
+		} catch (...) {
+		}
+	}
+	_impl->transport_playing = false;
+
+	if (was_running && _impl->engine->stop () != 0) {
+		_snap.detail = L"audio devices: engine stop failed";
+		std::fprintf (stderr, "airdour_win_shell: audio devices: engine stop failed\n");
+		std::fflush (stderr);
+		return false;
+	}
+
+	bool applied = true;	if (sep) {
+		if (!in.empty () && be->set_input_device_name (in) != 0) {
+			applied = false;
+		}
+		if (!out.empty () && be->set_output_device_name (out) != 0) {
+			applied = false;
+		}
+	} else {
+		const std::string name = out.empty () ? in : out;
+		if (be->set_device_name (name) != 0) {
+			applied = false;
+		}
+	}
+
+	if (!applied) {
+		std::fprintf (stderr, "airdour_win_shell: audio devices: set failed (in=%s out=%s)\n",
+		              in.c_str (), out.c_str ());
+		std::fflush (stderr);
+		if (was_running) {
+			_impl->engine->start ();
+		}
+		_snap.detail = L"audio devices: backend rejected the name";
+		return false;
+	}
+
+	if (was_running && _impl->engine->start () != 0) {
+		_started = false;
+		_snap.running = false;
+		_snap.detail = L"audio devices: restart failed (" + utf8_to_wide (out) + L")";
+		std::fprintf (stderr, "airdour_win_shell: audio devices: restart failed\n");
+		std::fflush (stderr);
+		return false;
+	}
+
+	_started = was_running;
+	refresh_prefs_snap ();
+	refresh_snapshot ();
+	std::fprintf (stderr, "airdour_win_shell: audio devices set (wasapi?=%d in=%s out=%s)\n",
+	              sep ? 1 : 0,
+	              current_input_device ().empty () ? "(default)" : current_input_device ().c_str (),
+	              current_output_device ().empty () ? "(default)" : current_output_device ().c_str ());
+	std::fflush (stderr);
+	return true;
+}
+
+void
+EngineHost::set_pref_input_device (const std::string& name)
+{
+	_pref_input_device = name;
+	refresh_prefs_snap ();
+}
+
+void
+EngineHost::set_pref_output_device (const std::string& name)
+{
+	_pref_output_device = name;
+	refresh_prefs_snap ();
+}
+
+bool
+EngineHost::cycle_audio_device (bool output, int delta)
+{
+	std::vector<std::string> names = output ? output_devices () : input_devices ();
+	if (names.empty ()) {
+		_snap.detail = L"audio devices: none enumerated";
+		return false;
+	}
+	std::string cur = output ? current_output_device () : current_input_device ();
+	if (cur.empty ()) {
+		cur = "Default";
+	}
+	/* Match the persisted name first so cycling continues from the UI value. */
+	const std::string pref = output ? _pref_output_device : _pref_input_device;
+	if (!pref.empty ()) {
+		cur = pref;
+	}
+	int idx = -1;
+	for (size_t i = 0; i < names.size (); ++i) {
+		if (names[i] == cur) {
+			idx = (int)i;
+			break;
+		}
+	}
+	if (idx < 0) {
+		idx = 0;
+	} else {
+		const int n = (int)names.size ();
+		idx = ((idx + delta) % n + n) % n;
+	}
+
+	if (output) {
+		set_pref_output_device (names[(size_t)idx]);
+	} else {
+		set_pref_input_device (names[(size_t)idx]);
+	}
+	return restart_audio ();
+}
+
+bool
+EngineHost::restart_audio ()
+{
+	if (!_impl || !_impl->engine) {
+		_snap.detail = L"restart audio: engine not created";
+		return false;
+	}
+	if (!_started) {
+		refresh_prefs_snap ();
+		_snap.detail = L"device prefs apply at next start";
+		return true;
+	}
+	const std::string want = resolve_backend_name (
+		_pref_backend.empty () ? "Dummy" : _pref_backend);
+	if (!want.empty () && _stricmp (want.c_str (), _impl->engine->current_backend_name ().c_str ()) != 0) {
+		_snap.detail = L"backend change applies on relaunch — restarting current backend";
+	}
+	if (!set_audio_devices (_pref_input_device, _pref_output_device)) {
+		return false;
+	}
+	_snap.detail = L"audio restarted";
+	return true;
+}
+
+bool
+EngineHost::smoke_device ()
+{
+	if (!_impl || !_impl->engine || !_started) {
+		_snap.detail = L"smoke-device failed — engine not running";
+		return false;
+	}
+	auto fail = [] (const char* why) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-device FAILED (%s)\n", why);
+		std::fflush (stderr);
+		return false;
+	};
+
+	try {
+		std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
+		if (!be) {
+			return fail ("no backend");
+		}
+		const std::string backend = _impl->engine->current_backend_name ();
+		const bool sep = be->use_separate_input_and_output_devices ();
+		std::vector<std::string> outs = output_devices ();
+		std::vector<std::string> ins = input_devices ();
+		if (outs.empty ()) {
+			return fail ("empty output device list");
+		}
+		if (sep && ins.empty ()) {
+			return fail ("empty input device list");
+		}
+
+		const std::string out0 = wide_to_utf8 (_snap.audio_out_name);
+		const std::string in0 = wide_to_utf8 (_snap.audio_in_name);
+		auto pick = [] (const std::vector<std::string>& list, const std::string& cur,
+		                bool skip_none) {
+			for (size_t i = 0; i < list.size (); ++i) {
+				if (list[i] == cur || (skip_none && list[i] == "None")) {
+					continue;
+				}
+				return list[i];
+			}
+			return cur.empty () ? list.front () : cur;
+		};
+		const std::string out_t = pick (outs, out0, true);
+		const std::string in_t = sep ? pick (ins, in0, true) : out_t;
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-device %s: %zu out / %zu in, %s → out=%s in=%s\n",
+		              backend.c_str (), outs.size (), ins.size (),
+		              sep ? "separate" : "unified", out_t.c_str (), in_t.c_str ());
+		std::fflush (stderr);
+
+		if (!set_audio_devices (in_t, out_t)) {
+			return fail ("apply failed");
+		}
+		refresh_snapshot ();
+		std::string rb_out = wide_to_utf8 (_snap.audio_out_name);
+		std::string rb_in = wide_to_utf8 (_snap.audio_in_name);
+		if (rb_out != out_t || (sep && rb_in != in_t)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-device FAILED (readback out=%s in=%s)\n",
+			              rb_out.c_str (), rb_in.c_str ());
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_impl->engine->running ()) {
+			return fail ("engine not running after restart");
+		}
+
+		if (!set_audio_devices (in0, out0)) {
+			return fail ("restore failed");
+		}
+		refresh_snapshot ();
+		rb_out = wide_to_utf8 (_snap.audio_out_name);
+		rb_in = wide_to_utf8 (_snap.audio_in_name);
+		if (rb_out != out0 || (sep && rb_in != in0)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-device FAILED (restore out=%s in=%s)\n",
+			              rb_out.c_str (), rb_in.c_str ());
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* Exercise the prefs-panel arrow path (cycle_audio_device). */
+		if (outs.size () > 1) {
+			const std::string pref_out0 = _pref_output_device;
+			const std::string before = current_output_device ();
+			if (!cycle_audio_device (true, +1)) {
+				return fail ("cycle failed");
+			}
+			refresh_snapshot ();
+			const std::string cycled = current_output_device ();
+			if (cycled == before) {
+				return fail ("cycle did not change the output device");
+			}
+			set_pref_output_device (pref_out0);
+			if (!set_audio_devices (in0, out0)) {
+				return fail ("restore after cycle failed");
+			}
+			refresh_snapshot ();
+			if (current_output_device () != out0) {
+				return fail ("restore after cycle readback mismatch");
+			}
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-device ok (%s round-trip + restore)\n",
+		              backend.c_str ());
+		std::fflush (stderr);
+		_snap.detail = L"smoke-device ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-device exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_latency ()
+{
+	if (!_impl || !_impl->engine || !_started) {
+		_snap.detail = L"smoke-latency failed — engine not running";
+		return false;
+	}
+	try {
+		std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
+		if (!be) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-latency FAILED (no backend)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const std::string backend = _impl->engine->current_backend_name ();
+		const bool wasapi = _stricmp (backend.c_str (), "WASAPI") == 0;
+		const uint32_t in = be->systemic_input_latency ();
+		const uint32_t out = be->systemic_output_latency ();
+		if (wasapi) {
+			if (!be->can_measure_systemic_latency ()) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-latency FAILED (backend cannot measure)\n");
+				std::fflush (stderr);
+				return false;
+			}
+			if (in == 0 && out == 0) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-latency FAILED (WASAPI systemic in=0 out=0)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		} else if (in != 0 || out != 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-latency FAILED (%s systemic in=%u out=%u, expected 0)\n",
+			              backend.c_str (), (unsigned)in, (unsigned)out);
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_prefs_snap ();
+		if (_snap.systemic_in_frames != in || _snap.systemic_out_frames != out) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-latency FAILED (snapshot mismatch)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-latency ok (%s systemic in=%u out=%u frames @ %u Hz, period %u)\n",
+		              backend.c_str (), (unsigned)in, (unsigned)out,
+		              (unsigned)_snap.sample_rate, (unsigned)_snap.period_frames);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-latency ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-latency exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -1558,8 +2097,37 @@ EngineHost::ensure_session ()
 		char uniq[96];
 		std::snprintf (uniq, sizeof (uniq), "airdour_win_shell_%u_%lu",
 		               (unsigned)GetCurrentProcessId (), (unsigned long)GetTickCount ());
+		return create_session_at (path_join (win_temp_dir (), uniq), "win_shell");
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: session exception: %s\n", e.what ());
+		std::fflush (stderr);
+		destroy_session ();
+		_snap.detail = L"Session exception — stub meters";
+		return false;
+	} catch (...) {
+		std::fprintf (stderr, "airdour_win_shell: session unknown failure\n");
+		std::fflush (stderr);
+		destroy_session ();
+		_snap.detail = L"Session unknown failure — stub meters";
+		return false;
+	}
+}
+
+bool
+EngineHost::create_session_at (const std::string& dir, const std::string& snapshot)
+{
+	if (!_impl || !_impl->engine) {
+		return false;
+	}
+
+	auto step = [] (const char* msg) {
+		std::fprintf (stderr, "airdour_win_shell: session: %s\n", msg);
+		std::fflush (stderr);
+	};
+
+	try {
 		/* Path must NOT exist yet — Session::pre_engine_init sets _is_new from that. */
-		_impl->session_dir = path_join (win_temp_dir (), uniq);
+		_impl->session_dir = dir;
 
 		BusProfile profile;
 		profile.master_out_channels = 2;
@@ -1569,7 +2137,7 @@ EngineHost::ensure_session ()
 
 		step ("Session ctor (new/unnamed)…");
 		/* unnamed=true matches unit-test / headless new-session path. */
-		_impl->session = new Session (*_impl->engine, _impl->session_dir, "win_shell",
+		_impl->session = new Session (*_impl->engine, _impl->session_dir, snapshot,
 		                              &profile, std::string (), true);
 		step ("Session ctor done");
 		/* Session ctor already called engine->set_session(this). */
@@ -2035,7 +2603,13 @@ EngineHost::open_session (const std::string& session_dir, const std::string& sna
 		destroy_session ();
 
 		_impl->session_dir = session_dir;
-		std::string snap = snapshot_name.empty () ? "win_shell" : snapshot_name;
+		std::string snap = snapshot_name;
+		if (snap.empty ()) {
+			snap = find_session_snapshot (session_dir);
+		}
+		if (snap.empty ()) {
+			snap = "win_shell";
+		}
 
 		step (("Session ctor load " + session_dir).c_str ());
 		/* Path exists → load_state. unnamed=false so it is a normal reopen. */
@@ -2118,17 +2692,309 @@ EngineHost::reload_session ()
 		return false;
 	}
 	std::string path = _impl->session_dir;
-	std::string snap = "win_shell";
-	if (_impl->session) {
+	std::string snap = find_session_snapshot (path);
+	if (snap.empty () && _impl->session) {
 		snap = _impl->session->snap_name ();
-		if (snap.empty ()) {
-			snap = "win_shell";
-		}
+	}
+	if (snap.empty ()) {
+		snap = "win_shell";
 	}
 	if (!save_session ()) {
 		return false;
 	}
 	return open_session (path, snap);
+}
+
+bool
+EngineHost::new_session (const std::string& parent_dir, const std::string& name)
+{
+	if (!_impl || !_impl->engine || !_started) {
+		_snap.detail = L"new session failed — engine not running";
+		return false;
+	}
+	if (parent_dir.empty () || name.empty ()) {
+		_snap.detail = L"new session failed — empty name or folder";
+		return false;
+	}
+
+	const std::string legal = legalize_for_path (legalize_for_universal_path (name));
+	if (legal.empty ()) {
+		_snap.detail = L"new session failed — invalid name";
+		return false;
+	}
+	const std::string dir = path_join (parent_dir, legal);
+
+	/* Session ctor treats an existing folder as a load; require a fresh one. */
+	if (dir_exists (dir)) {
+		_snap.detail = L"new session failed — folder already exists";
+		std::fprintf (stderr, "airdour_win_shell: new session: folder exists: %s\n", dir.c_str ());
+		std::fflush (stderr);
+		return false;
+	}
+	if (g_mkdir_with_parents (parent_dir.c_str (), 0755) != 0 && !dir_exists (parent_dir)) {
+		_snap.detail = L"new session failed — cannot create folder";
+		std::fprintf (stderr, "airdour_win_shell: new session: mkdir failed: %s\n", parent_dir.c_str ());
+		std::fflush (stderr);
+		return false;
+	}
+
+	try {
+		if (_impl->session) {
+			_impl->session->request_stop (false, false, TRS_UI);
+		}
+	} catch (...) {
+	}
+
+	destroy_session ();
+
+	if (!create_session_at (dir, legal)) {
+		return false;
+	}
+	if (!save_session ()) {
+		return false;
+	}
+
+	remember_recent_session (dir, legal, true);
+	update_session_path_snap ();
+	mark_recovery_clean_open ();
+	_snap.detail = L"new session created";
+	std::fprintf (stderr, "airdour_win_shell: new session %s (tracks=%u)\n",
+	              dir.c_str (), (unsigned)_impl->tracks.size ());
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+EngineHost::save_session_as (const std::string& parent_dir, const std::string& name)
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"save as failed — no Session";
+		return false;
+	}
+	if (parent_dir.empty () || name.empty ()) {
+		_snap.detail = L"save as failed — empty name or folder";
+		return false;
+	}
+
+	const std::string legal = legalize_for_path (legalize_for_universal_path (name));
+	if (legal.empty ()) {
+		_snap.detail = L"save as failed — invalid name";
+		return false;
+	}
+	const std::string dir = path_join (parent_dir, legal);
+
+	if (dir_exists (dir)) {
+		_snap.detail = L"save as failed — folder already exists";
+		std::fprintf (stderr, "airdour_win_shell: save as: folder exists: %s\n", dir.c_str ());
+		std::fflush (stderr);
+		return false;
+	}
+	if (g_mkdir_with_parents (parent_dir.c_str (), 0755) != 0 && !dir_exists (parent_dir)) {
+		_snap.detail = L"save as failed — cannot create folder";
+		return false;
+	}
+
+	try {
+		_impl->session->request_stop (false, false, TRS_UI);
+	} catch (...) {
+	}
+
+	const std::string prev_dir = _impl->session_dir;
+	try {
+		Session::SaveAs saveas;
+		saveas.new_parent_folder = parent_dir;
+		saveas.new_name = legal;
+		saveas.switch_to = true;
+		saveas.include_media = true;
+		saveas.copy_media = true;
+		saveas.copy_external = false;
+
+		const int rc = _impl->session->save_as (saveas);
+		if (rc != 0) {
+			_impl->session_dir = prev_dir;
+			update_session_path_snap ();
+			_snap.detail = L"save as failed";
+			std::fprintf (stderr, "airdour_win_shell: save as failed: %s\n",
+			              saveas.failure_message.c_str ());
+			std::fflush (stderr);
+			return false;
+		}
+
+		_impl->session_dir = saveas.final_session_folder_name.empty ()
+		                     ? dir : saveas.final_session_folder_name;
+		update_session_path_snap ();
+		collect_tracks ();
+		refresh_region_flags ();
+		refresh_track_fx_snap ();
+		refresh_track_comp_snap ();
+		refresh_track_eq_snap ();
+		refresh_track_delay_snap ();
+		refresh_track_limiter_snap ();
+		refresh_track_gate_snap ();
+		refresh_master_fx_snap ();
+		_snap.session_ok = true;
+		_snap.session_saved = true;
+		remember_recent_session (_impl->session_dir, legal, true);
+		mark_recovery_clean_open ();
+		_snap.detail = L"session saved as copy";
+		std::fprintf (stderr, "airdour_win_shell: saved as %s (copied media)\n",
+		              _impl->session_dir.c_str ());
+		std::fflush (stderr);
+		return true;
+	} catch (std::exception& e) {
+		_snap.detail = L"save as exception";
+		std::fprintf (stderr, "airdour_win_shell: save as exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		_snap.detail = L"save as unknown failure";
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_new_session ()
+{
+	try {
+		const std::string parent = path_join (win_temp_dir (), "airdour_m1");
+		const std::string name = string_compose ("smoke_new_%1_%2",
+		                                         (unsigned)GetCurrentProcessId (),
+		                                         (unsigned long)GetTickCount ());
+		const std::string legal = legalize_for_path (legalize_for_universal_path (name));
+		const std::string dir = path_join (parent, legal);
+
+		if (!new_session (parent, name)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-new-session FAILED (create)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_snap.session_ok || _snap.audio_track_count < 6
+		    || _impl->session_dir != dir
+		    || !session_snapshot_exists (dir, legal)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-new-session FAILED "
+			              "(ok=%d tracks=%d dir=%s snapshot=%d)\n",
+			              _snap.session_ok ? 1 : 0, _snap.audio_track_count,
+			              _impl->session_dir.c_str (),
+			              session_snapshot_exists (dir, legal) ? 1 : 0);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-new-session ok (%s)\n", dir.c_str ());
+		std::fflush (stderr);
+		_snap.detail = L"smoke-new-session ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-new-session exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_save_as ()
+{
+	try {
+		const std::string parent = path_join (win_temp_dir (), "airdour_m1");
+		const unsigned long tick = (unsigned long)GetTickCount ();
+		const std::string src = string_compose ("smoke_save_as_src_%1_%2",
+		                                        (unsigned)GetCurrentProcessId (), tick);
+		const std::string dst = string_compose ("smoke_save_as_dst_%1_%2",
+		                                        (unsigned)GetCurrentProcessId (), tick);
+		const std::string src_legal = legalize_for_path (legalize_for_universal_path (src));
+		const std::string dst_legal = legalize_for_path (legalize_for_universal_path (dst));
+		const std::string src_dir = path_join (parent, src_legal);
+		const std::string dst_dir = path_join (parent, dst_legal);
+
+		if (!new_session (parent, src) || !import_test_tone (0, 330.f, 1.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-save-as FAILED (source setup)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!save_session_as (parent, dst)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-save-as FAILED (save as)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (_impl->session_dir != dst_dir
+		    || !session_snapshot_exists (dst_dir, dst_legal)
+		    || !_snap.session_ok
+		    || !_snap.track_has_regions[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-save-as FAILED "
+			              "(dir=%s snapshot=%d ok=%d region0=%d)\n",
+			              _impl->session_dir.c_str (),
+			              session_snapshot_exists (dst_dir, dst_legal) ? 1 : 0,
+			              _snap.session_ok ? 1 : 0,
+			              _snap.track_has_regions[0] ? 1 : 0);
+			std::fflush (stderr);
+			return false;
+		}
+		/* Playback after switching: the export must contain audio, not silence. */
+		std::string exported;
+		if (!smoke_export_wav (&exported) || !wav_has_signal (exported)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-save-as FAILED (silent after switch: %s)\n",
+			              exported.c_str ());
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-save-as ok (%s → %s)\n",
+		              src_dir.c_str (), dst_dir.c_str ());
+		std::fflush (stderr);
+		_snap.detail = L"smoke-save-as ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-save-as exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_open_session ()
+{
+	try {
+		const std::string parent = path_join (win_temp_dir (), "airdour_m1");
+		const std::string name = string_compose ("smoke_open_%1_%2",
+		                                         (unsigned)GetCurrentProcessId (),
+		                                         (unsigned long)GetTickCount ());
+		const std::string legal = legalize_for_path (legalize_for_universal_path (name));
+		const std::string dir = path_join (parent, legal);
+
+		if (!new_session (parent, name) || !import_test_tone (0, 440.f, 1.f) || !save_session ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-open-session FAILED (setup)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		destroy_session ();
+		if (!open_session (dir)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-open-session FAILED (open)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_snap.session_ok || _snap.audio_track_count < 6 || !_snap.track_has_regions[0]) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-open-session FAILED "
+			              "(ok=%d tracks=%d region0=%d)\n",
+			              _snap.session_ok ? 1 : 0, _snap.audio_track_count,
+			              _snap.track_has_regions[0] ? 1 : 0);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr, "airdour_win_shell: smoke-open-session ok (%s, tracks=%d)\n",
+		              dir.c_str (), _snap.audio_track_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-open-session ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-open-session exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 bool
@@ -9631,6 +10497,42 @@ EngineHost::toggle_session_record ()
 	return set_session_record (!_snap.session_record_armed);
 }
 
+/* Copy an external file into the session's interchange/audiofiles folder.
+ * Session::save_as repaths within-session sources using the
+ * interchange/<name>/audiofiles layout; media left elsewhere (e.g. the
+ * session root) would be repathed to a path that was never copied.
+ * Returns the in-session path, or the input path if it cannot be copied. */
+std::string
+media_path_in_session (Session& session, const std::string& path)
+{
+	const std::string sound_dir = session.session_directory ().sound_path ();
+	if (_stricmp (Glib::path_get_dirname (path).c_str (), sound_dir.c_str ()) == 0) {
+		return path;
+	}
+	if (g_mkdir_with_parents (sound_dir.c_str (), 0755) != 0 && !dir_exists (sound_dir)) {
+		return path;
+	}
+
+	std::string base = Glib::path_get_basename (path);
+	std::string stem = base;
+	std::string ext;
+	const size_t dot = base.find_last_of ('.');
+	if (dot != std::string::npos && dot > 0) {
+		stem = base.substr (0, dot);
+		ext = base.substr (dot);
+	}
+	std::string dest = path_join (sound_dir, base);
+	for (int n = 1; Glib::file_test (dest, Glib::FILE_TEST_EXISTS); ++n) {
+		dest = path_join (sound_dir, string_compose ("%1-%2%3", stem, n, ext));
+	}
+	if (!PBD::copy_file (path, dest)) {
+		std::fprintf (stderr, "airdour_win_shell: media copy failed: %s\n", path.c_str ());
+		std::fflush (stderr);
+		return path;
+	}
+	return dest;
+}
+
 bool
 EngineHost::import_audio_file (int track, const std::string& path)
 {
@@ -9643,10 +10545,11 @@ EngineHost::import_audio_file (int track, const std::string& path)
 	}
 
 	try {
+		const std::string media_path = media_path_in_session (*_impl->session, path);
 		std::shared_ptr<Source> src = SourceFactory::createExternal (
 			DataType::AUDIO,
 			*_impl->session,
-			path,
+			media_path,
 			0,
 			Source::Flag (Source::Removable | Source::RemovableIfEmpty),
 			true,
@@ -9671,6 +10574,15 @@ EngineHost::import_audio_file (int track, const std::string& path)
 		if (!region || !pl) {
 			_snap.detail = L"import failed — region create";
 			return false;
+		}
+		/* RegionFactory leaves the placeholder "toBeRenamed"; use the file stem. */
+		std::string rname = Glib::path_get_basename (path);
+		const size_t dot = rname.find_last_of ('.');
+		if (dot != std::string::npos && dot > 0) {
+			rname = rname.substr (0, dot);
+		}
+		if (!rname.empty ()) {
+			region->set_name (rname);
 		}
 		/* Wrap in Session history so Ctrl+Z / --smoke-undo can reverse import. */
 		_impl->session->begin_reversible_command ("import audio");
@@ -9720,15 +10632,20 @@ EngineHost::import_test_tone (int track, float freq_hz, float seconds)
 	}
 	const int n = (int)std::llround ((double)sr * (double)seconds);
 	std::string wav = path_join (
-		_impl->session_dir,
-		string_compose ("import_tone_%1.wav", track + 1));
+		win_temp_dir (),
+		string_compose ("airdour_tone_%1_%2.wav", track + 1, (unsigned)GetTickCount ()));
 	if (!write_pcm16_wav (wav, (int)sr, n, freq_hz, 0.28f)) {
 		_snap.detail = L"test WAV write failed";
 		return false;
 	}
 	std::fprintf (stderr, "airdour_win_shell: wrote test WAV %s\n", wav.c_str ());
 	std::fflush (stderr);
-	return import_audio_file (track, wav);
+	if (!import_audio_file (track, wav)) {
+		return false;
+	}
+	/* The import copied the tone into the session; drop the temp original. */
+	g_unlink (wav.c_str ());
+	return true;
 }
 
 void
@@ -22099,8 +23016,35 @@ EngineHost::smoke_zoom ()
 			std::fflush (stderr);
 			return false;
 		}
-		/* Select the tone region so shell can fit-selection. */
-		if (!select_region_at (0, s1 + 0.1f) || !_snap.has_selection) {
+		/* Select the tone region so shell can fit-selection. Use track 0's
+		 * own extent — the session/MIDI extent may begin before the region
+		 * once edit smokes have moved it. */
+		float t0s = s1, t0e = e1;
+		if (_impl->tracks[0] && _impl->tracks[0]->playlist ()) {
+			std::shared_ptr<RegionList> regions =
+				_impl->tracks[0]->playlist ()->region_list ();
+			if (regions && !regions->empty ()) {
+				samplecnt_t sr = _impl->session->sample_rate ();
+				if (sr > 0) {
+					t0s = 1e9f;
+					t0e = -1e9f;
+					for (RegionList::const_iterator it = regions->begin (); it != regions->end (); ++it) {
+						if (!*it) {
+							continue;
+						}
+						float rs = (float)(*it)->position ().samples () / (float)sr;
+						float re = (float)(*it)->end_position ().samples () / (float)sr;
+						t0s = std::min (t0s, rs);
+						t0e = std::max (t0e, re);
+					}
+				}
+			}
+		}
+		if (t0e <= t0s) {
+			t0s = s1;
+			t0e = e1;
+		}
+		if (!select_region_at (0, t0s + 0.1f) || !_snap.has_selection) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-zoom FAILED (select region)\n");
 			std::fflush (stderr);
 			return false;
@@ -32900,6 +33844,16 @@ EngineHost::refresh_prefs_snap ()
 	_snap.pref_period_frames = _pref_period_frames;
 	_snap.pref_snap_default = _pref_snap_default;
 	_snap.pref_click_default = _pref_click_default;
+	_snap.pref_in_device = _pref_input_device.empty ()
+		? L"Default" : std::wstring (_pref_input_device.begin (), _pref_input_device.end ());
+	_snap.pref_out_device = _pref_output_device.empty ()
+		? L"Default" : std::wstring (_pref_output_device.begin (), _pref_output_device.end ());
+	_snap.audio_in_name = _snap.pref_in_device;
+	_snap.audio_out_name = _snap.pref_out_device;
+	_snap.separate_io_devices = false;
+	_snap.systemic_in_frames = 0;
+	_snap.systemic_out_frames = 0;
+	_snap.capture_disabled_reason.clear ();
 }
 
 void
@@ -32949,6 +33903,84 @@ EngineHost::set_pref_click_default (bool on)
 
 bool
 EngineHost::smoke_prefs ()
+{
+	return false;
+}
+
+bool
+EngineHost::backend_uses_separate_devices () const
+{
+	return false;
+}
+
+std::vector<std::string>
+EngineHost::input_devices () const
+{
+	return std::vector<std::string> ();
+}
+
+std::vector<std::string>
+EngineHost::output_devices () const
+{
+	return std::vector<std::string> ();
+}
+
+std::string
+EngineHost::current_input_device () const
+{
+	return _pref_input_device;
+}
+
+std::string
+EngineHost::current_output_device () const
+{
+	return _pref_output_device;
+}
+
+bool
+EngineHost::set_audio_devices (const std::string& in, const std::string& out)
+{
+	(void)in;
+	(void)out;
+	return false;
+}
+
+bool
+EngineHost::cycle_audio_device (bool output, int delta)
+{
+	(void)output;
+	(void)delta;
+	return false;
+}
+
+bool
+EngineHost::restart_audio ()
+{
+	return false;
+}
+
+void
+EngineHost::set_pref_input_device (const std::string& name)
+{
+	_pref_input_device = name;
+	refresh_prefs_snap ();
+}
+
+void
+EngineHost::set_pref_output_device (const std::string& name)
+{
+	_pref_output_device = name;
+	refresh_prefs_snap ();
+}
+
+bool
+EngineHost::smoke_device ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_latency ()
 {
 	return false;
 }
@@ -34541,6 +35573,40 @@ EngineHost::open_session (const std::string& session_dir, const std::string& sna
 
 bool
 EngineHost::reload_session ()
+{
+	return false;
+}
+
+bool
+EngineHost::new_session (const std::string& parent_dir, const std::string& name)
+{
+	(void)parent_dir;
+	(void)name;
+	return false;
+}
+
+bool
+EngineHost::save_session_as (const std::string& parent_dir, const std::string& name)
+{
+	(void)parent_dir;
+	(void)name;
+	return false;
+}
+
+bool
+EngineHost::smoke_new_session ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_save_as ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_open_session ()
 {
 	return false;
 }

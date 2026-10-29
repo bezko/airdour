@@ -1,9 +1,8 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Direct2D transport: Play / Stop / Rec / Loop / Punch / Mark / Split / Fade /
- * Stretch / Pitch± / Reverse / Norm / Sil / Cons / Frz / Snap / Count / Click / Tempo± / Shuttle / Import / Save / Open / Export.
- * Clock shows MM:SS + BBT + timecode + BPM.
+ * Direct2D transport: grouped primary transport, edit/MIDI rows, a responsive
+ * clock + shuttle strip, file actions and a popup overflow menu.
  */
 
 #pragma once
@@ -15,12 +14,18 @@
 #define NOMINMAX
 #endif
 
+#include <cstddef>
+#include <vector>
+
 #include <windows.h>
 #include <d2d1.h>
 #include <dwrite.h>
 
+#include "ui_draw.h"
+
 enum class TransportHit {
 	None,
+	Overflow,
 	Play,
 	Stop,
 	Rec,
@@ -86,7 +91,8 @@ class TransportBar
 public:
 	TransportBar ();
 
-	void layout (const D2D1_RECT_F& bounds, float dpi_scale);
+	void layout (const D2D1_RECT_F& bounds, float dpi_scale,
+	             float viewport_bottom = 0.f);
 
 	void set_playing (bool playing) { _playing = playing; }
 	bool playing () const { return _playing; }
@@ -194,80 +200,102 @@ public:
 
 	TransportHit hit_test (float x, float y) const;
 
-	void draw (ID2D1RenderTarget* rt,
-	           ID2D1SolidColorBrush* brand,
-	           ID2D1SolidColorBrush* body,
-	           ID2D1SolidColorBrush* accent,
-	           ID2D1SolidColorBrush* pane,
-	           ID2D1SolidColorBrush* edge,
-	           IDWriteTextFormat* fmt,
-	           float playhead_sec,
-	           float dpi_scale) const;
+	/** Pointer feedback (hover highlight, pressed look, tooltip text). */
+	bool update_hover (float x, float y);
+	bool clear_hover ();
+	void set_pressed (TransportHit hit) { _pressed = hit; }
+	void clear_pressed () { _pressed = TransportHit::None; }
+	TransportHit hovered_hit () const { return _hover; }
+	bool hover_tooltip (wchar_t* buf, size_t n) const;
+
+	/** Popup overflow menu state (owned by the bar, driven by the shell). */
+	bool overflow_open () const { return _overflow_open; }
+	void set_overflow_open (bool on);
+	bool menu_contains (float x, float y) const;
+
+	void draw (UiDraw& ui, float playhead_sec) const;
+	/** Popup layer; call after the rest of the window so the menu sits on top. */
+	void draw_overlay (UiDraw& ui) const;
 
 	const D2D1_RECT_F& bounds () const { return _bounds; }
 	const D2D1_RECT_F& shuttle_btn () const { return _shuttle_btn; }
 	const D2D1_RECT_F& open_btn () const { return _open_btn; }
+	const D2D1_RECT_F& overflow_btn () const { return _overflow_btn; }
+
+	/** Number of action rows laid out (2 when the compact edit/MIDI rows fit). */
+	int rows () const { return _rows.empty () ? 1 : 2; }
+	size_t file_button_count () const { return _files.size (); }
+	bool file_button_rect (size_t index, D2D1_RECT_F* out) const;
 
 private:
+	enum class Group {
+		Edit,
+		Midi,
+		Track,
+		View,
+		File,
+		App
+	};
+
+	struct HitSlot {
+		TransportHit hit;
+		D2D1_RECT_F  rect;
+	};
+
+	struct MenuRow {
+		bool         heading;
+		const wchar_t* text;
+		TransportHit hit;
+		D2D1_RECT_F  rect;
+	};
+
+	struct MenuGroup {
+		Group                    group;
+		const wchar_t*           title;
+		std::vector<TransportHit> items;
+	};
+
+	void clear_layout ();
+	void add_hit (TransportHit hit, const D2D1_RECT_F& r);
+	void build_menu (std::vector<MenuGroup>& groups, float viewport_bottom);
+
+	const wchar_t* glyph_for (TransportHit hit) const;
+	bool is_latched (TransportHit hit) const;
+	ui::ColorToken latch_color (TransportHit hit) const;
+	void label_for (TransportHit hit, wchar_t* buf, size_t n) const;
+	void row_label_for (TransportHit hit, wchar_t* buf, size_t n) const;
+
+	void draw_primary (UiDraw& ui, TransportHit hit,
+	                   const D2D1_RECT_F& r) const;
+	void draw_row (UiDraw& ui, TransportHit hit,
+	               const D2D1_RECT_F& r) const;
+	void draw_file (UiDraw& ui, TransportHit hit,
+	                const D2D1_RECT_F& r) const;
+	void draw_clock (UiDraw& ui, float playhead_sec) const;
+	void draw_menu (UiDraw& ui) const;
+
 	D2D1_RECT_F _bounds;
-	D2D1_RECT_F _play_btn;
-	D2D1_RECT_F _stop_btn;
-	D2D1_RECT_F _rec_btn;
-	D2D1_RECT_F _import_btn;
-	D2D1_RECT_F _save_btn;
-	D2D1_RECT_F _open_btn;
-	D2D1_RECT_F _export_btn;
-	D2D1_RECT_F _loop_btn;
-	D2D1_RECT_F _punch_btn;
-	D2D1_RECT_F _mark_btn;
-	D2D1_RECT_F _split_btn;
-	D2D1_RECT_F _fade_btn;
-	D2D1_RECT_F _stretch_btn;
-	D2D1_RECT_F _pitch_up_btn;
-	D2D1_RECT_F _pitch_dn_btn;
-	D2D1_RECT_F _reverse_btn;
-	D2D1_RECT_F _normalize_btn;
-	D2D1_RECT_F _strip_silence_btn;
-	D2D1_RECT_F _consolidate_btn;
-	D2D1_RECT_F _freeze_btn;
-	D2D1_RECT_F _snap_btn;
-	D2D1_RECT_F _quantize_btn;
-	D2D1_RECT_F _midi_trans_up_btn;
-	D2D1_RECT_F _midi_trans_dn_btn;
-	D2D1_RECT_F _midi_vel_up_btn;
-	D2D1_RECT_F _midi_vel_dn_btn;
-	D2D1_RECT_F _midi_len_up_btn;
-	D2D1_RECT_F _midi_len_dn_btn;
-	D2D1_RECT_F _midi_humanize_btn;
-	D2D1_RECT_F _midi_step_btn;
-	D2D1_RECT_F _midi_chord_btn;
-	D2D1_RECT_F _midi_arp_btn;
-	D2D1_RECT_F _midi_scale_btn;
-	D2D1_RECT_F _midi_panic_btn;
-	D2D1_RECT_F _midi_pgm_up_btn;
-	D2D1_RECT_F _midi_pgm_dn_btn;
-	D2D1_RECT_F _midi_bank_up_btn;
-	D2D1_RECT_F _midi_bank_dn_btn;
-	D2D1_RECT_F _count_btn;
-	D2D1_RECT_F _click_btn;
+	D2D1_RECT_F _clock_bounds;
+	D2D1_RECT_F _dsp_bounds;
+	D2D1_RECT_F _shuttle_btn;
 	D2D1_RECT_F _tempo_dn_btn;
 	D2D1_RECT_F _tempo_up_btn;
-	D2D1_RECT_F _add_audio_btn;
-	D2D1_RECT_F _add_midi_btn;
-	D2D1_RECT_F _remove_track_btn;
-	D2D1_RECT_F _track_up_btn;
-	D2D1_RECT_F _track_dn_btn;
-	D2D1_RECT_F _group_btn;
-	D2D1_RECT_F _shuttle_btn;
-	D2D1_RECT_F _fit_session_btn;
-	D2D1_RECT_F _fit_selection_btn;
-	D2D1_RECT_F _fit_regions_btn;
-	D2D1_RECT_F _help_btn;
-	D2D1_RECT_F _prefs_btn;
-	D2D1_RECT_F _about_btn;
-	D2D1_RECT_F _spectrum_btn;
-	D2D1_RECT_F _phase_btn;
-	D2D1_RECT_F _loudness_btn;
+	D2D1_RECT_F _open_btn;
+	D2D1_RECT_F _overflow_btn;
+	D2D1_RECT_F _menu_bounds;
+	bool        _overflow_open;
+	float       _dpi_scale;
+	TransportHit _hover;
+	TransportHit _pressed;
+	float        _hover_x;
+	float        _hover_y;
+
+	std::vector<HitSlot> _primary;
+	std::vector<HitSlot> _rows;
+	std::vector<HitSlot> _files;
+	std::vector<HitSlot> _hit_rects;
+	std::vector<MenuRow> _menu_rows;
+
 	bool        _playing;
 	bool        _recording;
 	bool        _record_armed;

@@ -181,16 +181,7 @@ public:
 	bool hit_solo (float x, float y) const;
 	bool drag_to (float y);
 
-	void draw (ID2D1RenderTarget* rt,
-	           ID2D1SolidColorBrush* brand,
-	           ID2D1SolidColorBrush* body,
-	           ID2D1SolidColorBrush* accent,
-	           ID2D1SolidColorBrush* pane,
-	           ID2D1SolidColorBrush* edge,
-	           ID2D1SolidColorBrush* meter_hot,
-	           IDWriteTextFormat* fmt_title,
-	           IDWriteTextFormat* fmt_meta,
-	           float dpi_scale) const;
+	void draw (UiDraw& ui) const;
 
 	const D2D1_RECT_F& bounds () const { return _strip; }
 
