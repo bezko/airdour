@@ -27759,6 +27759,28 @@ EngineHost::select_midi_notes_in_rect (float t0, float t1, uint8_t pitch_lo, uin
 	return hit > 0;
 }
 
+bool
+EngineHost::select_all_midi_notes ()
+{
+	refresh_midi_notes_snap ();
+	if (!_impl) {
+		return false;
+	}
+	_impl->clear_midi_note_sel ();
+	Evoral::event_id_t last = -1;
+	for (int i = 0; i < _snap.midi_note_count; ++i) {
+		_impl->selected_midi_note_ids.insert (_snap.midi_notes[i].id);
+		last = _snap.midi_notes[i].id;
+	}
+	_impl->selected_midi_note_id = last;
+	refresh_midi_notes_snap ();
+	std::fprintf (stderr, "airdour_win_shell: select_all_midi_notes count=%d\n",
+	              _snap.midi_note_count);
+	std::fflush (stderr);
+	_snap.detail = L"MIDI select all";
+	return _snap.midi_note_count > 0;
+}
+
 void
 EngineHost::clear_midi_note_selection ()
 {
@@ -29489,6 +29511,138 @@ EngineHost::smoke_midi_marquee ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-marquee exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_select_all ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-select-all failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-all FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-all FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for select-all smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->clear_midi_note_sel ();
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-all FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+
+		if (!add_midi_note (60, 0.0f, 0.4f, 100)
+		    || !add_midi_note (64, 0.5f, 0.4f, 100)
+		    || !add_midi_note (67, 1.0f, 0.4f, 100)
+		    || _snap.midi_note_count < 3) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-all FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!select_all_midi_notes ()) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-all FAILED (select)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		int sel = 0;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				++sel;
+			}
+		}
+		if (sel != _snap.midi_note_count || sel < 3) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-all FAILED (sel=%d/%d)\n",
+			              sel, _snap.midi_note_count);
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!transpose_midi_notes (1)) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-all FAILED (transpose)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		bool ok61 = false;
+		bool ok65 = false;
+		bool ok68 = false;
+		bool bad = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			uint8_t p = _snap.midi_notes[i].pitch;
+			if (p == 61) {
+				ok61 = true;
+			} else if (p == 65) {
+				ok65 = true;
+			} else if (p == 68) {
+				ok68 = true;
+			} else if (p == 60 || p == 64 || p == 67) {
+				bad = true;
+			}
+		}
+		if (bad || !ok61 || !ok65 || !ok68) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-all FAILED (pitches)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				set_snap_enabled (snap_was);
+				std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-all FAILED (clear)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+
+		set_snap_enabled (snap_was);
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-all ok (notes=%d)\n",
+		              _snap.midi_note_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-select-all ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-all exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -36416,6 +36570,12 @@ EngineHost::select_midi_notes_in_rect (float t0, float t1, uint8_t pitch_lo, uin
 	return false;
 }
 
+bool
+EngineHost::select_all_midi_notes ()
+{
+	return false;
+}
+
 void
 EngineHost::clear_midi_note_selection ()
 {
@@ -36544,6 +36704,12 @@ EngineHost::smoke_midi_multi_select ()
 
 bool
 EngineHost::smoke_midi_marquee ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_select_all ()
 {
 	return false;
 }

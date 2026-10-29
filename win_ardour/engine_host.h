@@ -1836,6 +1836,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	/** Select notes overlapping time×pitch box (inclusive pitches). */
 	bool select_midi_notes_in_rect (float t0, float t1, uint8_t pitch_lo, uint8_t pitch_hi,
 	                                bool additive = false);
+	/** Select every note in the MIDI region (primary = last id). */
+	bool select_all_midi_notes ();
 	void clear_midi_note_selection ();
 	bool delete_selected_midi_note ();
 
@@ -1986,6 +1988,12 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-midi-marquee.
 	 */
 	bool smoke_midi_marquee ();
+
+	/**
+	 * Add three notes, select_all, transpose, verify all moved.
+	 * For --smoke-midi-select-all.
+	 */
+	bool smoke_midi_select_all ();
 
 	/**
 	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.
