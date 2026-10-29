@@ -316,6 +316,8 @@ private:
 	void do_apply_or_clear_group ();
 	void do_scroll_mixer (float delta_px);
 	bool smoke_mixer_scroll_layout ();
+	/** Import → select → set sync mid → assert D2D x maps inside strip. */
+	bool smoke_region_sync_draw ();
 	void do_toggle_group_relative ();
 	void do_cycle_group_color ();
 	void do_toggle_focused_track_active ();
