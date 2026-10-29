@@ -49,6 +49,7 @@ struct EngineMidiNoteSnap {
 	float   length_sec;
 	uint8_t pitch;
 	uint8_t velocity;
+	uint8_t channel; /* 0..15 */
 	bool    selected;
 };
 
@@ -1827,7 +1828,7 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Returns false if track/region/model unavailable or overlap policy rejects.
 	 */
 	bool add_midi_note (uint8_t pitch, float start_sec, float length_sec,
-	                    uint8_t velocity = 100);
+	                    uint8_t velocity = 100, uint8_t channel = 0);
 
 	/** Hit-test piano-roll; selects note under (time,pitch) if any.
 	 *  When additive (Shift+click), toggles membership; else replaces. */
@@ -1848,6 +1849,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool select_midi_notes_same_pitch_class ();
 	/** Select every note matching primary length_sec (±1 ms). */
 	bool select_midi_notes_same_length ();
+	/** Select every note matching primary MIDI channel (0..15). */
+	bool select_midi_notes_same_channel ();
 	void clear_midi_note_selection ();
 	bool delete_selected_midi_note ();
 
@@ -2039,6 +2042,12 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-midi-select-same-length.
 	 */
 	bool smoke_midi_select_same_length ();
+
+	/**
+	 * Add ch0×2 + ch1, select a ch0 note → both ch0; ch1 untouched.
+	 * For --smoke-midi-select-same-channel.
+	 */
+	bool smoke_midi_select_same_channel ();
 
 	/**
 	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.

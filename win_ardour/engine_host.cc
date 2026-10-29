@@ -958,6 +958,7 @@ EngineHost::EngineHost ()
 		_snap.midi_notes[i].length_sec = 0.f;
 		_snap.midi_notes[i].pitch = 0;
 		_snap.midi_notes[i].velocity = 0;
+		_snap.midi_notes[i].channel = 0;
 		_snap.midi_notes[i].selected = false;
 	}
 	_snap.midi_selected_note_id = -1;
@@ -23426,6 +23427,7 @@ EngineHost::refresh_midi_notes_snap ()
 		_snap.midi_notes[i].length_sec = 0.f;
 		_snap.midi_notes[i].pitch = 0;
 		_snap.midi_notes[i].velocity = 0;
+		_snap.midi_notes[i].channel = 0;
 		_snap.midi_notes[i].selected = false;
 	}
 	if (!_impl || !_impl->midi_region || !_impl->engine) {
@@ -23460,6 +23462,7 @@ EngineHost::refresh_midi_notes_snap ()
 			_snap.midi_notes[n].length_sec = len;
 			_snap.midi_notes[n].pitch = note->note ();
 			_snap.midi_notes[n].velocity = note->velocity ();
+			_snap.midi_notes[n].channel = (uint8_t)(note->channel () & 0x0f);
 			_snap.midi_notes[n].selected =
 			    _impl->midi_note_sel_has (note->id ());
 			++n;
@@ -27583,7 +27586,8 @@ EngineHost::ensure_midi_region (float length_sec)
 }
 
 bool
-EngineHost::add_midi_note (uint8_t pitch, float start_sec, float length_sec, uint8_t velocity)
+EngineHost::add_midi_note (uint8_t pitch, float start_sec, float length_sec, uint8_t velocity,
+                           uint8_t channel)
 {
 	if (!ensure_midi_region () || !_impl || !_impl->session || !_impl->midi_region) {
 		return false;
@@ -27597,6 +27601,7 @@ EngineHost::add_midi_note (uint8_t pitch, float start_sec, float length_sec, uin
 	if (velocity > 127) {
 		velocity = 127;
 	}
+	channel = (uint8_t)(channel & 0x0f);
 	if (length_sec < 0.05f) {
 		length_sec = 0.25f;
 	}
@@ -27623,7 +27628,7 @@ EngineHost::add_midi_note (uint8_t pitch, float start_sec, float length_sec, uin
 
 		std::shared_ptr<Evoral::Note<Temporal::Beats> > note (
 		    new Evoral::Note<Temporal::Beats> (
-		        0 /*channel*/,
+		        channel,
 		        start_beats,
 		        length_beats,
 		        pitch,
@@ -27993,6 +27998,53 @@ EngineHost::select_midi_notes_same_length ()
 	              len, hit);
 	std::fflush (stderr);
 	_snap.detail = L"MIDI select same length";
+	return hit > 0;
+}
+
+bool
+EngineHost::select_midi_notes_same_channel ()
+{
+	refresh_midi_notes_snap ();
+	if (!_impl) {
+		return false;
+	}
+	int ch = -1;
+	if (_impl->selected_midi_note_id >= 0) {
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].id == _impl->selected_midi_note_id) {
+				ch = (int)_snap.midi_notes[i].channel;
+				break;
+			}
+		}
+	}
+	if (ch < 0) {
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				ch = (int)_snap.midi_notes[i].channel;
+				break;
+			}
+		}
+	}
+	if (ch < 0) {
+		_snap.detail = L"MIDI same channel: none selected";
+		return false;
+	}
+	_impl->clear_midi_note_sel ();
+	Evoral::event_id_t last = -1;
+	int hit = 0;
+	for (int i = 0; i < _snap.midi_note_count; ++i) {
+		if ((int)_snap.midi_notes[i].channel == ch) {
+			_impl->selected_midi_note_ids.insert (_snap.midi_notes[i].id);
+			last = _snap.midi_notes[i].id;
+			++hit;
+		}
+	}
+	_impl->selected_midi_note_id = last;
+	refresh_midi_notes_snap ();
+	std::fprintf (stderr, "airdour_win_shell: select_midi_notes_same_channel ch=%d hit=%d\n",
+	              ch, hit);
+	std::fflush (stderr);
+	_snap.detail = L"MIDI select same channel";
 	return hit > 0;
 }
 
@@ -30576,6 +30628,113 @@ EngineHost::smoke_midi_select_same_length ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-same-length exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_select_same_channel ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-select-same-channel failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-same-channel FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-same-channel FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for same-channel smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->clear_midi_note_sel ();
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-same-channel FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+
+		if (!add_midi_note (60, 0.0f, 0.4f, 100, 0)
+		    || !add_midi_note (64, 0.5f, 0.4f, 100, 0)
+		    || !add_midi_note (67, 1.0f, 0.4f, 100, 1)
+		    || _snap.midi_note_count < 3) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-same-channel FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		bool picked = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].channel == 0) {
+				_impl->set_midi_note_sel (_snap.midi_notes[i].id);
+				refresh_midi_notes_snap ();
+				picked = true;
+				break;
+			}
+		}
+		if (!picked || !select_midi_notes_same_channel ()) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-same-channel FAILED (select)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		int sel0 = 0;
+		int sel1 = 0;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (!_snap.midi_notes[i].selected) {
+				continue;
+			}
+			if (_snap.midi_notes[i].channel == 0) {
+				++sel0;
+			} else if (_snap.midi_notes[i].channel == 1) {
+				++sel1;
+			}
+		}
+		if (sel0 != 2 || sel1 != 0) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-select-same-channel FAILED "
+			              "(sel0=%d sel1=%d)\n",
+			              sel0, sel1);
+			std::fflush (stderr);
+			return false;
+		}
+
+		set_snap_enabled (snap_was);
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-same-channel ok (ch0×2)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-select-same-channel ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-same-channel exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -33294,6 +33453,7 @@ EngineHost::EngineHost ()
 		_snap.midi_notes[i].length_sec = 0.f;
 		_snap.midi_notes[i].pitch = 0;
 		_snap.midi_notes[i].velocity = 0;
+		_snap.midi_notes[i].channel = 0;
 		_snap.midi_notes[i].selected = false;
 	}
 	_snap.midi_selected_note_id = -1;
@@ -37471,12 +37631,14 @@ EngineHost::ensure_midi_region (float length_sec)
 }
 
 bool
-EngineHost::add_midi_note (uint8_t pitch, float start_sec, float length_sec, uint8_t velocity)
+EngineHost::add_midi_note (uint8_t pitch, float start_sec, float length_sec, uint8_t velocity,
+                           uint8_t channel)
 {
 	(void)pitch;
 	(void)start_sec;
 	(void)length_sec;
 	(void)velocity;
+	(void)channel;
 	return false;
 }
 
@@ -37535,6 +37697,12 @@ EngineHost::select_midi_notes_same_pitch_class ()
 
 bool
 EngineHost::select_midi_notes_same_length ()
+{
+	return false;
+}
+
+bool
+EngineHost::select_midi_notes_same_channel ()
 {
 	return false;
 }
@@ -37709,6 +37877,12 @@ EngineHost::smoke_midi_select_pitch_class ()
 
 bool
 EngineHost::smoke_midi_select_same_length ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_select_same_channel ()
 {
 	return false;
 }
