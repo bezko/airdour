@@ -1710,6 +1710,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "marker-navigate", [this]() { return _engine.smoke_marker_navigate (); });
 	run_smoke_check (ok, "marker-rename", [this]() { return _engine.smoke_marker_rename (); });
 	run_smoke_check (ok, "marker-lock", [this]() { return _engine.smoke_marker_lock (); });
+	run_smoke_check (ok, "midi-marker-overlay", [this]() { return smoke_midi_marker_overlay (); });
 	run_smoke_check (ok, "cd-marker", [this]() { return _engine.smoke_cd_marker (); });
 	run_smoke_check (ok, "range-marker", [this]() { return _engine.smoke_range_marker (); });
 	run_smoke_check (ok, "region-sync", [this]() { return _engine.smoke_region_sync (); });
@@ -9613,8 +9614,115 @@ ShellWindow::draw_editor_pane ()
 	draw_automation_lane ();
 	draw_midi_lane ();
 	draw_midi_cc_lane ();
+	draw_midi_marker_overlay ();
 	draw_punch_overlay ();
 	draw_editor_grid ();
+}
+
+void
+ShellWindow::draw_midi_marker_overlay ()
+{
+	if (!_brush_marker || _engine_snap.marker_count <= 0) {
+		return;
+	}
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float left = _lanes[0].bounds.left;
+	float right = _lanes[0].bounds.right;
+	float w = right - left;
+	if (w < 4.f) {
+		return;
+	}
+	_brush_marker->SetOpacity (0.50f);
+	for (int m = 0; m < _engine_snap.marker_count; ++m) {
+		float n = (_engine_snap.markers[m].sec - view0) / span;
+		if (n < 0.f || n > 1.f) {
+			continue;
+		}
+		float px = left + n * w;
+		if (_midi_lane.bottom > _midi_lane.top + 2.f) {
+			_rt->DrawLine (D2D1::Point2F (px, _midi_lane.top),
+			               D2D1::Point2F (px, _midi_lane.bottom),
+			               _brush_marker, 1.f * _dpi_scale);
+		}
+		if (_midi_cc_lane_bounds.bottom > _midi_cc_lane_bounds.top + 2.f) {
+			_rt->DrawLine (D2D1::Point2F (px, _midi_cc_lane_bounds.top),
+			               D2D1::Point2F (px, _midi_cc_lane_bounds.bottom),
+			               _brush_marker, 1.f * _dpi_scale);
+		}
+	}
+	_brush_marker->SetOpacity (1.f);
+}
+
+bool
+ShellWindow::smoke_midi_marker_overlay ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-marker-overlay FAILED (no session)\n");
+		return false;
+	}
+	layout_panes ();
+	if (_midi_lane.bottom <= _midi_lane.top + 8.f
+	    || _midi_cc_lane_bounds.bottom <= _midi_cc_lane_bounds.top + 4.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-marker-overlay FAILED (layout)\n");
+		return false;
+	}
+	if (!_engine.add_marker_at (1.25f, "M-MIDI")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-marker-overlay FAILED (add)\n");
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (_engine_snap.marker_count < 1) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-marker-overlay FAILED (count)\n");
+		return false;
+	}
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float left = _lanes[0].bounds.left;
+	float w = _lanes[0].bounds.right - left;
+	bool found = false;
+	float px = 0.f;
+	for (int m = 0; m < _engine_snap.marker_count; ++m) {
+		if (std::fabs (_engine_snap.markers[m].sec - 1.25f) > 0.08f) {
+			continue;
+		}
+		float n = (_engine_snap.markers[m].sec - view0) / span;
+		px = left + n * w;
+		found = (n >= 0.f && n <= 1.f && px >= left - 1.f && px <= left + w + 1.f);
+		break;
+	}
+	if (!found) {
+		/* Fit so marker is on-screen then recheck. */
+		_lanes[0].strip.fit_range (0.f, 4.f, 0.05f);
+		for (int i = 1; i < kTracks; ++i) {
+			_lanes[i].strip.sync_view_from (_lanes[0].strip);
+		}
+		layout_panes ();
+		view0 = _lanes[0].strip.view_start_sec ();
+		span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+		left = _lanes[0].bounds.left;
+		w = _lanes[0].bounds.right - left;
+		for (int m = 0; m < _engine_snap.marker_count; ++m) {
+			if (std::fabs (_engine_snap.markers[m].sec - 1.25f) > 0.08f) {
+				continue;
+			}
+			float n = (_engine_snap.markers[m].sec - view0) / span;
+			px = left + n * w;
+			found = (n >= 0.f && n <= 1.f);
+			break;
+		}
+	}
+	if (!found) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-marker-overlay FAILED (x map)\n");
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-midi-marker-overlay ok "
+	              "(marker@1.25s px=%.1f across midi+cc)\n",
+	              px);
+	return true;
 }
 
 void
