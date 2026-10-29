@@ -125,6 +125,10 @@ ShellWindow::ShellWindow ()
 	, _midi_vel_drag (100)
 	, _midi_trim_start_sec (0.f)
 	, _midi_trim_end_sec (0.f)
+	, _midi_move_origin_sec (0.f)
+	, _midi_move_origin_pitch (60)
+	, _midi_move_preview_sec (0.f)
+	, _midi_move_preview_pitch (60)
 	, _step_piano_held_count (0)
 	, _transport_playing (false)
 	, _playhead_sec (0.f)
@@ -1955,6 +1959,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "midi-cc-clear", [this]() { return smoke_midi_cc_clear (); });
 	run_smoke_check (ok, "midi-duplicate", [this]() { return _engine.smoke_midi_duplicate (); });
 	run_smoke_check (ok, "midi-tempo-map", [this]() { return _engine.smoke_midi_tempo_map (); });
+	run_smoke_check (ok, "midi-move", [this]() { return _engine.smoke_midi_move (); });
 	run_smoke_check (ok, "midi-panic", [this]() { return _engine.smoke_midi_panic (); });
 	run_smoke_check (ok, "stop-midi-panic", [this]() { return _engine.smoke_stop_midi_panic (); });
 	run_smoke_check (ok, "midi-audition", [this]() { return _engine.smoke_midi_audition (); });
@@ -9445,6 +9450,28 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		if (_engine.select_midi_note_at (time_sec, pitch)) {
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
+			/* Body drag relocates selected note in time + pitch. */
+			float origin_sec = time_sec;
+			int origin_pitch = (int)pitch;
+			for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
+				const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
+				if (n.selected) {
+					origin_sec = n.start_sec;
+					origin_pitch = (int)n.pitch;
+					break;
+				}
+			}
+			_drag = DragMode::MidiMove;
+			_drag_index = -1;
+			_midi_move_origin_sec = origin_sec;
+			_midi_move_origin_pitch = origin_pitch;
+			_midi_move_preview_sec = origin_sec;
+			_midi_move_preview_pitch = origin_pitch;
+			_pan_down_x = x;
+			_pan_down_y = y;
+			_pan_last_x = x;
+			SetCapture (_hwnd);
+			SetCursor (LoadCursorW (nullptr, IDC_SIZEALL));
 			InvalidateRect (_hwnd, nullptr, FALSE);
 			return true;
 		}
@@ -10460,6 +10487,32 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
+	if (_drag == DragMode::MidiMove) {
+		_pan_last_x = x;
+		float t = midi_time_at_x (x);
+		float grab_t = midi_time_at_x (_pan_down_x);
+		float new_start = _midi_move_origin_sec + (t - grab_t);
+		if (new_start < 0.f) {
+			new_start = 0.f;
+		}
+		if (_engine_snap.snap_enabled) {
+			new_start = _engine.snap_time (new_start);
+			if (new_start < 0.f) {
+				new_start = 0.f;
+			}
+		}
+		int new_pitch = (int)midi_pitch_at_y (y);
+		if (new_pitch < 0) {
+			new_pitch = 0;
+		}
+		if (new_pitch > 127) {
+			new_pitch = 127;
+		}
+		_midi_move_preview_sec = new_start;
+		_midi_move_preview_pitch = new_pitch;
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
 
 	if (_drag == DragMode::RulerScrub && _engine.is_linked () && _engine_snap.session_ok) {
 		_pan_last_x = x;
@@ -10535,6 +10588,16 @@ ShellWindow::on_mouse_up ()
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
 		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+	if (_drag == DragMode::MidiMove && _engine.is_linked () && _engine_snap.session_ok) {
+		const float dt = _midi_move_preview_sec - _midi_move_origin_sec;
+		const int dp = _midi_move_preview_pitch - _midi_move_origin_pitch;
+		if (std::fabs (dt) > 1.0e-4f || dp != 0) {
+			_engine.move_selected_midi_notes (dt, dp);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
 	}
 	if (_drag == DragMode::WavePending && _drag_index >= 0 && _drag_index < kTracks) {
 		int lane = _drag_index;

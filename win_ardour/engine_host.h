@@ -2077,6 +2077,19 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool smoke_midi_tempo_map ();
 
 	/**
+	 * Move selected MIDI notes by Δtime (sec) and Δpitch (semitones).
+	 * When no selection, moves all notes. Snap applies to new starts when
+	 * Snap is on. Pitch clamped 0..127; starts floored at 0. Rebuilds region.
+	 */
+	bool move_selected_midi_notes (float delta_sec, int delta_semitones);
+
+	/**
+	 * Add note @0.5s pitch 60 → select → move +0.5s/+2 → verify start≈1.0
+	 * pitch 62. For --smoke-midi-move.
+	 */
+	bool smoke_midi_move ();
+
+	/**
 	 * Add note, nudge velocity −20, set 64, verify. For --smoke-midi-velocity.
 	 */
 	bool smoke_midi_velocity ();
