@@ -239,6 +239,8 @@ private:
 	void toggle_about ();
 	void sync_prefs_from_engine ();
 	void apply_prefs_hit (PrefsHit hit);
+	void apply_prefs_vst3_catalog_click (int index);
+	bool smoke_vst3_prefs_click ();
 	void transport_play ();
 	void transport_stop ();
 	void transport_toggle ();

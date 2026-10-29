@@ -44,6 +44,7 @@ PrefsPanel::PrefsPanel ()
 	_vst3_catalog_count = 0;
 	for (int i = 0; i < kMaxCatalog; ++i) {
 		_vst3_catalog[i][0] = L'\0';
+		_vst3_catalog_row[i] = D2D1::RectF ();
 	}
 	_status[0] = L'\0';
 }
@@ -76,8 +77,16 @@ PrefsPanel::layout (float view_w, float view_h, float dpi_scale)
 
 	_click_btn = D2D1::RectF (x, y, x + half, y + btn_h);
 	_snap_btn = D2D1::RectF (x + half + gap, y, x + half + gap + half, y + btn_h);
-	/* Leave room for path hint + up to kMaxCatalog name lines. */
-	y = _click_btn.bottom + (52.f + 15.f * (float)kMaxCatalog) * dpi_scale;
+	/* Path hint + catalog rows sit between click/snap and Rescan. */
+	float cat_y = _click_btn.bottom + 44.f * dpi_scale;
+	float row_h = 15.f * dpi_scale;
+	float cat_left = _card.left + 16.f * dpi_scale;
+	float cat_right = _card.right - 16.f * dpi_scale;
+	for (int i = 0; i < kMaxCatalog; ++i) {
+		_vst3_catalog_row[i] = D2D1::RectF (cat_left, cat_y, cat_right, cat_y + row_h);
+		cat_y += row_h;
+	}
+	y = cat_y + 8.f * dpi_scale;
 
 	_vst3_rescan_btn = D2D1::RectF (x, y, x + 140.f * dpi_scale, y + btn_h);
 
@@ -186,6 +195,7 @@ PrefsPanel::hit_test (float x, float y) const
 	if (contains (_snap_btn, x, y)) {
 		return PrefsHit::SnapToggle;
 	}
+	/* Catalog rows are handled via hit_vst3_catalog_index before PrefsHit. */
 	if (contains (_vst3_rescan_btn, x, y)) {
 		return PrefsHit::Vst3Rescan;
 	}
@@ -196,6 +206,32 @@ PrefsPanel::hit_test (float x, float y) const
 		return PrefsHit::None; /* eat clicks on card */
 	}
 	return PrefsHit::Close; /* click outside → close */
+}
+
+int
+PrefsPanel::hit_vst3_catalog_index (float x, float y) const
+{
+	if (!_visible || _vst3_catalog_count <= 0) {
+		return -1;
+	}
+	for (int i = 0; i < _vst3_catalog_count; ++i) {
+		if (contains (_vst3_catalog_row[i], x, y)) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+bool
+PrefsPanel::catalog_row_center (int index, float* out_x, float* out_y) const
+{
+	if (index < 0 || index >= kMaxCatalog || !out_x || !out_y) {
+		return false;
+	}
+	const D2D1_RECT_F& r = _vst3_catalog_row[index];
+	*out_x = 0.5f * (r.left + r.right);
+	*out_y = 0.5f * (r.top + r.bottom);
+	return true;
 }
 
 void
@@ -288,20 +324,12 @@ PrefsPanel::draw (ID2D1RenderTarget* rt,
 	               D2D1::RectF (_card.left + 16.f * dpi_scale, _click_btn.bottom + 26.f * dpi_scale,
 	                            _card.right - 16.f * dpi_scale, _click_btn.bottom + 42.f * dpi_scale),
 	               brand);
-	float cat_y = _click_btn.bottom + 44.f * dpi_scale;
 	if (_vst3_catalog_count <= 0) {
-		rt->DrawTextW (L"(none scanned)", 14, fmt_meta,
-		               D2D1::RectF (_card.left + 16.f * dpi_scale, cat_y,
-		                            _card.right - 16.f * dpi_scale, cat_y + 16.f * dpi_scale),
-		               body);
+		rt->DrawTextW (L"(none scanned)", 14, fmt_meta, _vst3_catalog_row[0], body);
 	} else {
 		for (int i = 0; i < _vst3_catalog_count; ++i) {
 			_snwprintf_s (line, _TRUNCATE, L"· %s", _vst3_catalog[i]);
-			rt->DrawTextW (line, (UINT32)wcslen (line), fmt_meta,
-			               D2D1::RectF (_card.left + 16.f * dpi_scale, cat_y,
-			                            _card.right - 16.f * dpi_scale, cat_y + 15.f * dpi_scale),
-			               brand);
-			cat_y += 15.f * dpi_scale;
+			rt->DrawTextW (line, (UINT32)wcslen (line), fmt_meta, _vst3_catalog_row[i], brand);
 		}
 	}
 	draw_btn (_vst3_rescan_btn, L"Rescan VST3", false);
