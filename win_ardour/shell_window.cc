@@ -1951,6 +1951,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	});
 	run_smoke_check (ok, "vst3-prefs-click", [this]() { return smoke_vst3_prefs_click (); });
 	run_smoke_check (ok, "vst3-mixer-unload", [this]() { return smoke_vst3_mixer_unload (); });
+	run_smoke_check (ok, "vst3-mixer-bypass", [this]() { return smoke_vst3_mixer_bypass (); });
 	run_smoke_check (ok, "vst3-catalog-highlight", [this]() { return smoke_vst3_catalog_highlight (); });
 	run_smoke_check (ok, "vst3-cycle-insert", [this]() { return _engine.smoke_vst3_cycle_insert (); });
 	run_smoke_check (ok, "vst3-prefs-bypass", [this]() { return smoke_vst3_prefs_bypass (); });
@@ -8573,8 +8574,18 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
-	/* VST3 × unload on Audio 2 FX row (before bypass toggle). */
+	/* VST3 B / × on Audio 2 FX row (before label bypass toggle). */
 	for (int ui = 0; ui < kTracks; ++ui) {
+		if (_mixers[ui].hit_fx_bypass (x, y)) {
+			if (_engine.is_linked () && _engine.snapshot ().session_ok) {
+				(void)_engine.toggle_vst3_bypass ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_fx_from_engine ();
+			}
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
 		if (_mixers[ui].hit_fx_unload (x, y)) {
 			if (_engine.is_linked () && _engine.snapshot ().session_ok) {
 				(void)_engine.unload_vst3 ();
@@ -10186,6 +10197,87 @@ after_hit:
 		return false;
 	}
 	std::fprintf (stderr, "airdour_win_shell: smoke-vst3-mixer-unload ok (× → unload)\n");
+	return true;
+}
+
+bool
+ShellWindow::smoke_vst3_mixer_bypass ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst3-mixer-bypass FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	layout_panes ();
+	sync_mixer_fx_from_engine ();
+
+	if (!_engine_snap.vst3_ok) {
+		/* Empty / scan-only: B chip must not hit; toggle idle is ok. */
+		const D2D1_RECT_F& b = _mixers[1].bounds ();
+		bool chrome = false;
+		for (float y = b.top; y < b.bottom && !chrome; y += 2.f * _dpi_scale) {
+			for (float x = b.right - 40.f * _dpi_scale; x < b.right; x += 2.f * _dpi_scale) {
+				if (_mixers[1].hit_fx_bypass (x, y)) {
+					chrome = true;
+					break;
+				}
+			}
+		}
+		if (chrome) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-mixer-bypass FAILED "
+			              "(B chrome without VST3)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		(void)_engine.toggle_vst3_bypass ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-bypass ok "
+		              "(scan-only; no B; idle toggle; set VST3_PATH to insert)\n");
+		std::fflush (stderr);
+		return true;
+	}
+
+	sync_mixer_fx_from_engine ();
+	layout_panes ();
+	if (!_mixers[1].fx_can_unload () || !_mixers[1].has_fx ()) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-bypass FAILED "
+		              "(no B chrome while vst3_ok)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	const bool was = _engine_snap.vst3_bypassed;
+	const D2D1_RECT_F& b = _mixers[1].bounds ();
+	bool hit = false;
+	for (float y = b.top; y < b.bottom; y += 2.f * _dpi_scale) {
+		for (float x = b.right - 40.f * _dpi_scale; x < b.right; x += 2.f * _dpi_scale) {
+			if (_mixers[1].hit_fx_bypass (x, y)) {
+				hit = true;
+				(void)_engine.toggle_vst3_bypass ();
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_fx_from_engine ();
+				goto after_bypass_hit;
+			}
+		}
+	}
+after_bypass_hit:
+	if (!hit) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-bypass FAILED (B not hittable)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (_engine_snap.vst3_bypassed == was) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-bypass FAILED (state)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	(void)_engine.toggle_vst3_bypass ();
+	std::fprintf (stderr, "airdour_win_shell: smoke-vst3-mixer-bypass ok (B → toggle)\n");
+	std::fflush (stderr);
 	return true;
 }
 
