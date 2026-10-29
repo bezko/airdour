@@ -1709,6 +1709,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	}
 	run_smoke_check (ok, "marker-navigate", [this]() { return _engine.smoke_marker_navigate (); });
 	run_smoke_check (ok, "marker-rename", [this]() { return _engine.smoke_marker_rename (); });
+	run_smoke_check (ok, "marker-name-ellipsis", [this]() { return smoke_marker_name_ellipsis (); });
 	run_smoke_check (ok, "marker-lock", [this]() { return _engine.smoke_marker_lock (); });
 	run_smoke_check (ok, "cd-marker", [this]() { return _engine.smoke_cd_marker (); });
 	run_smoke_check (ok, "range-marker", [this]() { return _engine.smoke_range_marker (); });
@@ -5007,6 +5008,105 @@ ShellWindow::do_toggle_comp_sidechain ()
 	_engine_snap = _engine.snapshot ();
 	sync_mixer_fx_from_engine ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::format_marker_ruler_label (const wchar_t* name, wchar_t* out, size_t out_len,
+                                        int max_chars)
+{
+	if (!out || out_len == 0) {
+		return;
+	}
+	out[0] = L'\0';
+	if (!name || !name[0] || max_chars < 2 || out_len < 2) {
+		return;
+	}
+	const size_t n = wcslen (name);
+	const size_t cap = out_len - 1;
+	if ((int)n <= max_chars) {
+		wcsncpy_s (out, out_len, name, _TRUNCATE);
+		return;
+	}
+	/* Keep max_chars-1 glyphs + ellipsis (… U+2026). */
+	const int keep = max_chars - 1;
+	if ((size_t)keep + 1 > cap) {
+		wcsncpy_s (out, out_len, name, _TRUNCATE);
+		return;
+	}
+	for (int i = 0; i < keep; ++i) {
+		out[i] = name[i];
+	}
+	out[keep] = L'\x2026';
+	out[keep + 1] = L'\0';
+}
+
+bool
+ShellWindow::smoke_marker_name_ellipsis ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-marker-name-ellipsis FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	wchar_t short_lab[32];
+	wchar_t long_lab[32];
+	format_marker_ruler_label (L"Intro", short_lab, 32, 8);
+	format_marker_ruler_label (L"VeryLongMarkerNameXYZ", long_lab, 32, 8);
+	if (wcscmp (short_lab, L"Intro") != 0) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-marker-name-ellipsis FAILED (short=%ls)\n",
+		              short_lab);
+		std::fflush (stderr);
+		return false;
+	}
+	if (wcslen (long_lab) != 8 || long_lab[7] != L'\x2026'
+	    || wcsncmp (long_lab, L"VeryLon", 7) != 0) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-marker-name-ellipsis FAILED (long=%ls)\n",
+		              long_lab);
+		std::fflush (stderr);
+		return false;
+	}
+
+	if (!_engine.add_marker_at (1.0f, "Short")
+	    || !_engine.add_marker_at (2.0f, "VeryLongMarkerNameXYZ")) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-marker-name-ellipsis FAILED (add)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	bool short_ok = false;
+	bool long_ok = false;
+	for (int i = 0; i < _engine_snap.marker_count; ++i) {
+		wchar_t lab[32];
+		format_marker_ruler_label (_engine_snap.markers[i].name, lab, 32, 8);
+		if (std::fabs (_engine_snap.markers[i].sec - 1.0f) < 0.05f
+		    && wcscmp (lab, L"Short") == 0) {
+			short_ok = true;
+		}
+		if (std::fabs (_engine_snap.markers[i].sec - 2.0f) < 0.05f
+		    && wcslen (lab) == 8 && lab[7] == L'\x2026') {
+			long_ok = true;
+		}
+	}
+	(void)_engine.remove_marker_near (1.0f, 0.35f);
+	(void)_engine.remove_marker_near (2.0f, 0.35f);
+	if (!short_ok || !long_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-marker-name-ellipsis FAILED "
+		              "(snap short=%d long=%d)\n",
+		              short_ok ? 1 : 0, long_ok ? 1 : 0);
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-marker-name-ellipsis ok "
+	              "(Short · VeryLon…)\n");
+	std::fflush (stderr);
+	return true;
 }
 
 void
@@ -9423,7 +9523,9 @@ ShellWindow::draw_editor_ruler ()
 			_brush_marker);
 		const wchar_t* name = _engine_snap.markers[i].name;
 		if (name[0]) {
-			_rt->DrawTextW (name, (UINT32)wcslen (name), _fmt_meta,
+			wchar_t label[32];
+			format_marker_ruler_label (name, label, 32, 8);
+			_rt->DrawTextW (label, (UINT32)wcslen (label), _fmt_meta,
 			                D2D1::RectF (px + 2.f * _dpi_scale, rr.top,
 			                             px + 48.f * _dpi_scale, rr.bottom),
 			                _brush_marker);
