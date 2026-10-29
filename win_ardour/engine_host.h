@@ -1844,6 +1844,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool select_midi_notes_same_pitch ();
 	/** Select every note matching primary selected velocity (no-op if none selected). */
 	bool select_midi_notes_same_velocity ();
+	/** Select every note matching primary pitch class (pitch%12; all octaves). */
+	bool select_midi_notes_same_pitch_class ();
 	void clear_midi_note_selection ();
 	bool delete_selected_midi_note ();
 
@@ -2023,6 +2025,12 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-midi-select-same-velocity.
 	 */
 	bool smoke_midi_select_same_velocity ();
+
+	/**
+	 * Add C4+C5+D4, select C4, pitch-class → both C's; D untouched.
+	 * For --smoke-midi-select-pitch-class.
+	 */
+	bool smoke_midi_select_pitch_class ();
 
 	/**
 	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.
