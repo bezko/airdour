@@ -1958,6 +1958,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "stop-midi-panic", [this]() { return _engine.smoke_stop_midi_panic (); });
 	run_smoke_check (ok, "midi-audition", [this]() { return _engine.smoke_midi_audition (); });
 	run_smoke_check (ok, "midi-legato", [this]() { return _engine.smoke_midi_legato (); });
+	run_smoke_check (ok, "midi-step-piano-highlight", [this]() {
+		return smoke_midi_step_piano_highlight ();
+	});
 	run_smoke_check (ok, "midi-program", [this]() { return _engine.smoke_midi_program (); });
 	run_smoke_check (ok, "vst3-params", [this]() { return _engine.smoke_vst3_params (); });
 	run_smoke_check (ok, "vst3-mixer-param-reset", [this]() {
@@ -6229,6 +6232,68 @@ ShellWindow::do_humanize_midi_notes (float strength)
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+bool
+ShellWindow::smoke_midi_step_piano_highlight ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-step-piano-highlight FAILED (no session)\n");
+		return false;
+	}
+	if (!_engine_snap.midi_step_enabled) {
+		_engine.toggle_midi_step_enabled ();
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	if (!_engine_snap.midi_step_enabled) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-step-piano-highlight FAILED (step off)\n");
+		return false;
+	}
+	clear_step_piano_held ();
+	const uint8_t pitch = 60; /* C4 — in piano range */
+	do_step_piano_key_down (pitch);
+	if (!_step_piano_held[pitch] || _step_piano_held_count < 1) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-step-piano-highlight FAILED (held)\n");
+		clear_step_piano_held ();
+		return false;
+	}
+	layout_panes ();
+	const D2D1_RECT_F piano = midi_piano_rect ();
+	float h = piano.bottom - piano.top;
+	if (h < 20.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-step-piano-highlight FAILED (piano)\n");
+		clear_step_piano_held ();
+		return false;
+	}
+	int row = (int)(kMidiPitchHi - pitch);
+	float row_h = h / (float)kMidiPitchRows;
+	float y0 = piano.top + (float)row * row_h;
+	float y1 = y0 + row_h;
+	if (y0 < piano.top - 1.f || y1 > piano.bottom + 1.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-step-piano-highlight FAILED "
+		              "(row y=[%.1f..%.1f])\n",
+		              y0, y1);
+		clear_step_piano_held ();
+		return false;
+	}
+	do_step_piano_key_up (pitch);
+	if (_step_piano_held[pitch] || _step_piano_held_count != 0) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-step-piano-highlight FAILED (clear)\n");
+		clear_step_piano_held ();
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-midi-step-piano-highlight ok "
+	              "(pitch=%u row y=[%.1f..%.1f])\n",
+	              (unsigned)pitch, y0, y1);
+	return true;
+}
+
 void
 ShellWindow::do_toggle_midi_step ()
 {
@@ -6394,6 +6459,7 @@ ShellWindow::do_step_piano_key_down (uint8_t pitch)
 	sync_arp_held_from_step_keys ();
 	/* Place without advancing; advance on last key-up (multi-key chord). */
 	do_step_input_pitch (pitch, false);
+	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
@@ -11467,6 +11533,7 @@ ShellWindow::draw_midi_lane ()
 	const int keys = kMidiPitchRows;
 	float h = piano.bottom - piano.top;
 	float row_h = h / (float)keys;
+	const bool step_on = _engine_snap.midi_step_enabled;
 	for (int k = 0; k < keys; ++k) {
 		float y0 = piano.top + (float)k * row_h;
 		uint8_t pitch = (uint8_t)(kMidiPitchHi - k);
@@ -11475,6 +11542,14 @@ ShellWindow::draw_midi_lane ()
 		_brush_body->SetOpacity (black ? 0.18f : 0.08f);
 		_rt->FillRectangle (D2D1::RectF (piano.left, y0, piano.right, y0 + row_h - 0.5f), _brush_body);
 		_brush_body->SetOpacity (1.f);
+		/* Step-record held computer-key → accent wash on that pitch row. */
+		if (step_on && pitch < 128 && _step_piano_held[pitch] && _brush_accent) {
+			_brush_accent->SetOpacity (0.32f);
+			_rt->FillRectangle (
+				D2D1::RectF (piano.left, y0, piano.right, y0 + row_h - 0.5f),
+				_brush_accent);
+			_brush_accent->SetOpacity (1.f);
+		}
 	}
 
 	/* Session MIDI notes — height scales with velocity (bottom-aligned in row). */
