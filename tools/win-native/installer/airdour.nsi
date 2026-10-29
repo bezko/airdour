@@ -15,8 +15,9 @@
 ;   Uninstall.exe /S _?=C:\Airdour
 
 Unicode true
-; 64-bit installer stub for the 64-bit shell (avoids WOW64 file redirection).
-Target amd64-unicode
+; x86-unicode stub (the default). It installs the 64-bit shell per-user.
+; GitHub-hosted runners ship NSIS without the amd64 stub, so Target amd64-unicode
+; fails there. Per-user files go to %LOCALAPPDATA%, which is not WOW64-redirected.
 !include "LogicLib.nsh"
 !include "x64.nsh"
 !include "WinVer.nsh"
@@ -59,7 +60,6 @@ InstallDirRegKey HKCU "${APP_KEY}" "InstallDir"
 RequestExecutionLevel user
 ShowInstDetails show
 ShowUnInstDetails show
-SetCompressor lzma
 ManifestDPIAware true
 ManifestSupportedOS Win10
 
