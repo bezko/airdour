@@ -189,6 +189,7 @@ struct EngineSnapshot {
 	int          midi_note_count = 0;
 	EngineMidiNoteSnap midi_notes[kMaxMidiNotes] = {};
 	int32_t      midi_selected_note_id = -1; /* Evoral id, or -1 */
+	int          midi_audition_pitch = -1; /* −1 = silent; live note-on pitch for D2D ghost */
 	std::wstring midi_option; /* e.g. WinMME / Dummy loopback */
 	std::wstring midi_synth_name; /* e.g. ACE Reasonable Synth */
 	std::wstring midi_out_name; /* connected playback port display name */
