@@ -318,6 +318,7 @@ private:
 	void do_apply_or_clear_group ();
 	void do_scroll_mixer (float delta_px);
 	bool smoke_mixer_scroll_layout ();
+	bool smoke_midi_outside_ranges_wash ();
 	void do_toggle_group_relative ();
 	void do_cycle_group_color ();
 	void do_toggle_focused_track_active ();

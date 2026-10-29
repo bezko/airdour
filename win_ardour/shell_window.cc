@@ -35,6 +35,10 @@ constexpr D2D1_COLOR_F kPunch      = { 0.920f, 0.340f, 0.280f, 1.f };
 constexpr D2D1_COLOR_F kMarker     = { 0.820f, 0.880f, 0.420f, 1.f };
 constexpr D2D1_COLOR_F kMidi       = { 0.320f, 0.780f, 0.920f, 1.f }; /* cyan, not purple */
 constexpr D2D1_COLOR_F kMeterHot   = { 0.96f, 0.38f, 0.24f, 1.f };
+/* Piano-roll outside-ranges cue: dim unselected notes inside loop∪punch. */
+constexpr float kMidiNoteSelOp           = 0.95f;
+constexpr float kMidiNoteIdleOp          = 0.70f;
+constexpr float kMidiOutsideRangesInWashOp = 0.28f; /* in-union, unselected, after outside select */
 
 #ifndef WM_DPICHANGED
 #define WM_DPICHANGED 0x02E0
@@ -1935,6 +1939,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "midi-select-outside-loop", [this]() { return _engine.smoke_midi_select_outside_loop (); });
 	run_smoke_check (ok, "midi-select-outside-punch", [this]() { return _engine.smoke_midi_select_outside_punch (); });
 	run_smoke_check (ok, "midi-select-outside-ranges", [this]() { return _engine.smoke_midi_select_outside_ranges (); });
+	run_smoke_check (ok, "midi-outside-ranges-wash", [this]() { return smoke_midi_outside_ranges_wash (); });
 	run_smoke_check (ok, "midi-force-velocity", [this]() { return _engine.smoke_midi_force_velocity (); });
 	run_smoke_check (ok, "midi-program", [this]() { return _engine.smoke_midi_program (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
@@ -4815,6 +4820,68 @@ ShellWindow::do_scroll_mixer (float delta_px)
 	_mixer_scroll_x += delta_px;
 	layout_panes ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+bool
+ShellWindow::smoke_midi_outside_ranges_wash ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-outside-ranges-wash FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	/* In-union wash well below idle note opacity so outside selection pops. */
+	if (!(kMidiOutsideRangesInWashOp < 0.40f
+	      && kMidiOutsideRangesInWashOp < kMidiNoteIdleOp * 0.50f
+	      && kMidiNoteIdleOp < kMidiNoteSelOp
+	      && kMidiNoteSelOp > 0.85f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-outside-ranges-wash FAILED "
+		              "(wash=%.2f idle=%.2f sel=%.2f)\n",
+		              kMidiOutsideRangesInWashOp, kMidiNoteIdleOp, kMidiNoteSelOp);
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.smoke_midi_select_outside_ranges ()) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-outside-ranges-wash FAILED (select)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	int sel_out = 0;
+	int idle_in = 0;
+	for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
+		const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
+		float n1 = n.start_sec + n.length_sec;
+		bool in_loop = (n.start_sec < _engine_snap.loop_end_sec
+		                && n1 > _engine_snap.loop_start_sec);
+		bool in_punch = (n.start_sec < _engine_snap.punch_end_sec
+		                 && n1 > _engine_snap.punch_start_sec);
+		bool in_union = in_loop || in_punch;
+		if (n.selected && !in_union) {
+			++sel_out;
+		}
+		if (!n.selected && in_union) {
+			++idle_in;
+		}
+	}
+	if (sel_out < 1 || idle_in < 1) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-outside-ranges-wash FAILED "
+		              "(sel_out=%d idle_in=%d)\n",
+		              sel_out, idle_in);
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-midi-outside-ranges-wash ok "
+	              "(wash=%.2f · sel_out=%d idle_in=%d)\n",
+	              kMidiOutsideRangesInWashOp, sel_out, idle_in);
+	std::fflush (stderr);
+	return true;
 }
 
 bool
@@ -9893,6 +9960,30 @@ ShellWindow::draw_midi_lane ()
 
 	/* Session MIDI notes — height scales with velocity (bottom-aligned in row). */
 	const bool trimming = (_drag == DragMode::MidiTrimStart || _drag == DragMode::MidiTrimEnd);
+	const bool have_loop = _engine_snap.loop_active
+	                       && _engine_snap.loop_end_sec > _engine_snap.loop_start_sec;
+	const bool have_punch = _engine_snap.punch_range_ok
+	                        && _engine_snap.punch_end_sec > _engine_snap.punch_start_sec;
+	bool outside_ranges_sel = false;
+	if (have_loop && have_punch) {
+		const float L0 = _engine_snap.loop_start_sec;
+		const float L1 = _engine_snap.loop_end_sec;
+		const float P0 = _engine_snap.punch_start_sec;
+		const float P1 = _engine_snap.punch_end_sec;
+		for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
+			if (!n.selected) {
+				continue;
+			}
+			float n1 = n.start_sec + n.length_sec;
+			const bool in_loop = (n.start_sec < L1 && n1 > L0);
+			const bool in_punch = (n.start_sec < P1 && n1 > P0);
+			if (!in_loop && !in_punch) {
+				outside_ranges_sel = true;
+				break;
+			}
+		}
+	}
 	for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
 		const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
 		if (n.pitch < kMidiPitchLo || n.pitch > kMidiPitchHi) {
@@ -9924,7 +10015,18 @@ ShellWindow::draw_midi_lane ()
 		if (!brush) {
 			continue;
 		}
-		brush->SetOpacity (n.selected ? 0.95f : 0.7f);
+		float op = n.selected ? kMidiNoteSelOp : kMidiNoteIdleOp;
+		if (outside_ranges_sel && !n.selected && have_loop && have_punch) {
+			float n1 = n.start_sec + n.length_sec;
+			const bool in_loop = (n.start_sec < _engine_snap.loop_end_sec
+			                      && n1 > _engine_snap.loop_start_sec);
+			const bool in_punch = (n.start_sec < _engine_snap.punch_end_sec
+			                       && n1 > _engine_snap.punch_start_sec);
+			if (in_loop || in_punch) {
+				op = kMidiOutsideRangesInWashOp;
+			}
+		}
+		brush->SetOpacity (op);
 		_rt->FillRectangle (D2D1::RectF (x0, y0, x1, y1), brush);
 		brush->SetOpacity (1.f);
 		if (n.selected && _brush_playhead) {
