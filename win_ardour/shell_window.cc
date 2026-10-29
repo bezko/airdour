@@ -136,6 +136,7 @@ ShellWindow::ShellWindow ()
 	, _mixer_force_min_w (0.f)
 	, _status_bar ()
 	, _status_vst3_bypass_btn ()
+	, _status_vst3_param_reset_btn ()
 	, _status_vst3_unload_btn ()
 	, _d2d_factory (nullptr)
 	, _dwrite_factory (nullptr)
@@ -1963,6 +1964,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "vst3-prefs-unload", [this]() { return smoke_vst3_prefs_unload (); });
 	run_smoke_check (ok, "vst3-status-unload", [this]() { return smoke_vst3_status_unload (); });
 	run_smoke_check (ok, "vst3-status-bypass", [this]() { return smoke_vst3_status_bypass (); });
+	run_smoke_check (ok, "vst3-status-param-reset", [this]() { return smoke_vst3_status_param_reset (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
 	run_smoke_check (ok, "solo-all", [this]() { return _engine.smoke_solo_all (); });
@@ -7677,6 +7679,17 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		}
 		return true;
 	}
+	if (hit_status_vst3_param_reset (x, y)) {
+		if (_engine.is_linked ()) {
+			(void)_engine.reset_vst3_param (0);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_fx_from_engine ();
+			sync_prefs_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+		return true;
+	}
 	if (hit_status_vst3_unload (x, y)) {
 		if (_engine.is_linked ()) {
 			(void)_engine.unload_vst3 ();
@@ -10397,6 +10410,16 @@ ShellWindow::hit_status_vst3_bypass (float x, float y) const
 }
 
 bool
+ShellWindow::hit_status_vst3_param_reset (float x, float y) const
+{
+	if (!_engine_snap.vst3_ok) {
+		return false;
+	}
+	const D2D1_RECT_F& r = _status_vst3_param_reset_btn;
+	return r.right > r.left && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+
+bool
 ShellWindow::status_vst3_unload_center (float* out_x, float* out_y) const
 {
 	if (!out_x || !out_y) {
@@ -10418,6 +10441,21 @@ ShellWindow::status_vst3_bypass_center (float* out_x, float* out_y) const
 		return false;
 	}
 	const D2D1_RECT_F& r = _status_vst3_bypass_btn;
+	if (r.right <= r.left) {
+		return false;
+	}
+	*out_x = 0.5f * (r.left + r.right);
+	*out_y = 0.5f * (r.top + r.bottom);
+	return true;
+}
+
+bool
+ShellWindow::status_vst3_param_reset_center (float* out_x, float* out_y) const
+{
+	if (!out_x || !out_y) {
+		return false;
+	}
+	const D2D1_RECT_F& r = _status_vst3_param_reset_btn;
 	if (r.right <= r.left) {
 		return false;
 	}
@@ -10552,6 +10590,67 @@ ShellWindow::smoke_vst3_status_bypass ()
 	}
 	(void)_engine.toggle_vst3_bypass ();
 	std::fprintf (stderr, "airdour_win_shell: smoke-vst3-status-bypass ok (BYP → toggle)\n");
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+ShellWindow::smoke_vst3_status_param_reset ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-status-param-reset FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	layout_panes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+	UpdateWindow (_hwnd);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+
+	if (!_engine_snap.vst3_ok) {
+		float sx = 0.f;
+		float sy = 0.f;
+		if (status_vst3_param_reset_center (&sx, &sy) || hit_status_vst3_param_reset (sx, sy)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-status-param-reset FAILED "
+			              "(RST chrome without VST3)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		(void)_engine.reset_vst3_param (0);
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-status-param-reset ok "
+		              "(scan-only; no RST; set VST3_PATH to insert)\n");
+		std::fflush (stderr);
+		return true;
+	}
+
+	float sx = 0.f;
+	float sy = 0.f;
+	if (!status_vst3_param_reset_center (&sx, &sy) || !hit_status_vst3_param_reset (sx, sy)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-status-param-reset FAILED "
+		              "(RST not hittable)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (_engine_snap.vst3_param_count > 0) {
+		const float dflt_probe = _engine_snap.vst3_param_norm[0];
+		const float nudge = (dflt_probe < 0.5f) ? 0.85f : 0.15f;
+		(void)_engine.set_vst3_param (0, nudge);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	if (!_engine.reset_vst3_param (0)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-status-param-reset FAILED (reset)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-vst3-status-param-reset ok (RST → default)\n");
 	std::fflush (stderr);
 	return true;
 }
@@ -11264,9 +11363,11 @@ ShellWindow::on_paint ()
 	const float meter_w = 96.f * _dpi_scale;
 	const float unload_w = 18.f * _dpi_scale;
 	const float bypass_w = 28.f * _dpi_scale;
+	const float reset_w = 28.f * _dpi_scale;
 	const float unload_gap = 8.f * _dpi_scale;
 	float text_right = _status_bar.right - 20.f * _dpi_scale - meter_w - 12.f * _dpi_scale;
 	_status_vst3_bypass_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
+	_status_vst3_param_reset_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
 	_status_vst3_unload_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
 	if (_engine_snap.vst3_ok) {
 		float mid_y = (_status_bar.top + _status_bar.bottom) * 0.5f;
@@ -11274,10 +11375,16 @@ ShellWindow::on_paint ()
 		float right = _status_bar.right - 20.f * _dpi_scale - meter_w - unload_gap;
 		_status_vst3_unload_btn = D2D1::RectF (right - unload_w, mid_y - bh * 0.5f,
 		                                       right, mid_y + bh * 0.5f);
-		_status_vst3_bypass_btn = D2D1::RectF (_status_vst3_unload_btn.left - unload_gap - bypass_w,
-		                                       mid_y - bh * 0.5f,
-		                                       _status_vst3_unload_btn.left - unload_gap,
-		                                       mid_y + bh * 0.5f);
+		_status_vst3_param_reset_btn = D2D1::RectF (
+			_status_vst3_unload_btn.left - unload_gap - reset_w,
+			mid_y - bh * 0.5f,
+			_status_vst3_unload_btn.left - unload_gap,
+			mid_y + bh * 0.5f);
+		_status_vst3_bypass_btn = D2D1::RectF (
+			_status_vst3_param_reset_btn.left - unload_gap - bypass_w,
+			mid_y - bh * 0.5f,
+			_status_vst3_param_reset_btn.left - unload_gap,
+			mid_y + bh * 0.5f);
 		text_right = _status_vst3_bypass_btn.left - unload_gap;
 	}
 	_rt->DrawTextW (status, (UINT32)wcslen (status), _fmt_meta,
@@ -11302,6 +11409,12 @@ ShellWindow::on_paint ()
 			_rt->DrawRectangle (_status_vst3_bypass_btn, _brush_accent,
 			                    std::max (1.f, 1.f * _dpi_scale));
 			_rt->DrawTextW (L"BYP", 3, _fmt_meta, _status_vst3_bypass_btn, _brush_brand);
+		}
+		if (_status_vst3_param_reset_btn.right > _status_vst3_param_reset_btn.left) {
+			_rt->FillRectangle (_status_vst3_param_reset_btn, _brush_pane_edge);
+			_rt->DrawRectangle (_status_vst3_param_reset_btn, _brush_accent,
+			                    std::max (1.f, 1.f * _dpi_scale));
+			_rt->DrawTextW (L"RST", 3, _fmt_meta, _status_vst3_param_reset_btn, _brush_brand);
 		}
 		_rt->FillRectangle (_status_vst3_unload_btn, _brush_pane_edge);
 		_rt->DrawRectangle (_status_vst3_unload_btn, _brush_accent,
