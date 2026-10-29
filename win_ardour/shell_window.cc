@@ -1774,6 +1774,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "selection-marquee-tint", [this]() {
 		return smoke_selection_marquee_tint ();
 	});
+	run_smoke_check (ok, "selection-mute-wash", [this]() {
+		return smoke_selection_mute_wash ();
+	});
 	run_smoke_check (ok, "zoom-session", [this]() {
 		if (!_engine.smoke_zoom_session ()) return false;
 		_engine.poll ();
@@ -4832,6 +4835,40 @@ ShellWindow::smoke_selection_marquee_tint ()
 	              "airdour_win_shell: smoke-selection-marquee-tint ok "
 	              "(wash=%.2f edge=%.2f cyan)\n",
 	              WaveStrip::kSelWashOp, WaveStrip::kSelEdgeOp);
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+ShellWindow::smoke_selection_mute_wash ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-selection-mute-wash FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	/* Mute cue: wash well below active, edge still strong, hatch present. */
+	if (!(WaveStrip::kSelMutedWashOp < 0.16f
+	      && WaveStrip::kSelMutedWashOp < WaveStrip::kSelWashOp * 0.45f
+	      && WaveStrip::kSelMutedEdgeOp > 0.65f
+	      && WaveStrip::kSelMutedEdgeOp > WaveStrip::kSelMutedWashOp
+	      && WaveStrip::kSelMutedHatchOp > 0.30f
+	      && WaveStrip::kSelMutedHatchPx >= 4.f
+	      && WaveStrip::kSelMutedHatchPx <= 8.f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-selection-mute-wash FAILED "
+		              "(wash=%.2f edge=%.2f hatch=%.2f/%.1fpx)\n",
+		              WaveStrip::kSelMutedWashOp, WaveStrip::kSelMutedEdgeOp,
+		              WaveStrip::kSelMutedHatchOp, WaveStrip::kSelMutedHatchPx);
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-selection-mute-wash ok "
+	              "(wash=%.2f edge=%.2f hatch=%.2f @%.0fpx)\n",
+	              WaveStrip::kSelMutedWashOp, WaveStrip::kSelMutedEdgeOp,
+	              WaveStrip::kSelMutedHatchOp, WaveStrip::kSelMutedHatchPx);
 	std::fflush (stderr);
 	return true;
 }

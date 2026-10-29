@@ -393,12 +393,24 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 		n0 = std::max (0.f, std::min (1.f, n0));
 		n1 = std::max (0.f, std::min (1.f, n1));
 		if (n1 > n0) {
-			/* Muted selection: cooler / dimmer wash so mute is visible. */
+			/* Muted selection: dimmer wash + hatch so mute is scannable. */
 			selection_brush->SetOpacity (_sel_muted ? kSelMutedWashOp : kSelWashOp);
 			rt->FillRectangle (
 				D2D1::RectF (bounds.left + n0 * w, bounds.top,
 				             bounds.left + n1 * w, bounds.bottom),
 				selection_brush);
+			if (_sel_muted) {
+				selection_brush->SetOpacity (kSelMutedHatchOp);
+				float step = std::max (3.f, kSelMutedHatchPx * dpi_scale);
+				float stripe = std::max (1.f, 1.25f * dpi_scale);
+				float x0 = bounds.left + n0 * w;
+				float x1 = bounds.left + n1 * w;
+				for (float x = x0; x < x1 - stripe; x += step) {
+					rt->FillRectangle (
+						D2D1::RectF (x, bounds.top, x + stripe, bounds.bottom),
+						selection_brush);
+				}
+			}
 			selection_brush->SetOpacity (_sel_muted ? kSelMutedEdgeOp : kSelEdgeOp);
 			float edge = std::max (1.f, 2.f * dpi_scale);
 			rt->FillRectangle (
