@@ -30,6 +30,7 @@ enum class PrefsHit {
 	Period512,
 	ClickToggle,
 	SnapToggle,
+	Vst3Rescan,
 	Save
 };
 
@@ -76,6 +77,7 @@ private:
 	D2D1_RECT_F _per_512;
 	D2D1_RECT_F _click_btn;
 	D2D1_RECT_F _snap_btn;
+	D2D1_RECT_F _vst3_rescan_btn;
 	D2D1_RECT_F _save_btn;
 	bool        _visible;
 	bool        _click_on;

@@ -1920,6 +1920,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "midi-audition", [this]() { return _engine.smoke_midi_audition (); });
 	run_smoke_check (ok, "midi-program", [this]() { return _engine.smoke_midi_program (); });
 	run_smoke_check (ok, "vst3-params", [this]() { return _engine.smoke_vst3_params (); });
+	run_smoke_check (ok, "vst3-lifecycle", [this]() {
+		if (!_engine.smoke_vst3_lifecycle ()) {
+			return false;
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_fx_from_engine ();
+		return true;
+	});
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
 	run_smoke_check (ok, "solo-all", [this]() { return _engine.smoke_solo_all (); });
@@ -2710,6 +2719,21 @@ ShellWindow::sync_mixer_fx_from_engine ()
 			_mixers[i].set_fx_bypassed (_engine_snap.track_fx_bypassed);
 			_mixers[i].set_fx_param_count (1);
 			_mixers[i].set_fx_param (_engine_snap.track_fx_param);
+		} else if (i == 1 && _engine_snap.vst3_ok && _engine_snap.vst3_name[0] != L'\0') {
+			/* Prefer live VST3 insert on Audio 2 over ACE Comp when both present. */
+			_mixers[i].set_fx_label (_engine_snap.vst3_name);
+			_mixers[i].set_fx_bypassed (_engine_snap.vst3_bypassed);
+			const int n = (_engine_snap.vst3_param_count > 0)
+			                  ? (std::min) (_engine_snap.vst3_param_count,
+			                               EngineSnapshot::kMaxVst3Params)
+			                  : 1;
+			_mixers[i].set_fx_param_count (n);
+			_mixers[i].set_fx_param (
+			    (_engine_snap.vst3_param_count > 0) ? _engine_snap.vst3_param_norm[0] : 0.5f);
+			_mixers[i].set_fx_param2 (
+			    (_engine_snap.vst3_param_count > 1) ? _engine_snap.vst3_param_norm[1] : 0.5f);
+			_mixers[i].set_fx_param3 (
+			    (_engine_snap.vst3_param_count > 2) ? _engine_snap.vst3_param_norm[2] : 0.5f);
 		} else if (i == 1 && _engine_snap.track_comp_ok
 		           && !_engine_snap.track_comp_name.empty ()) {
 			wchar_t label[40];
@@ -8406,7 +8430,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_drag = DragMode::FxParam3;
 		_drag_index = fxpi3;
 		if (_mixers[fxpi3].drag_fx_param3_to (x)) {
-			_engine.set_track_eq_gain_h_norm (fxpi3, _mixers[fxpi3].fx_param3 ());
+			if (fxpi3 == 1 && _engine_snap.vst3_ok && _engine_snap.vst3_param_count > 2) {
+				_engine.set_vst3_param (2, _mixers[fxpi3].fx_param3 ());
+			} else {
+				_engine.set_track_eq_gain_h_norm (fxpi3, _mixers[fxpi3].fx_param3 ());
+			}
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
 			sync_mixer_fx_from_engine ();
@@ -8422,7 +8450,9 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_drag = DragMode::FxParam2;
 		_drag_index = fxpi2;
 		if (_mixers[fxpi2].drag_fx_param2_to (x)) {
-			if (fxpi2 == 5 && _engine_snap.track_gate_ok) {
+			if (fxpi2 == 1 && _engine_snap.vst3_ok && _engine_snap.vst3_param_count > 1) {
+				_engine.set_vst3_param (1, _mixers[fxpi2].fx_param2 ());
+			} else if (fxpi2 == 5 && _engine_snap.track_gate_ok) {
 				_engine.set_track_gate_hold_norm (fxpi2, _mixers[fxpi2].fx_param2 ());
 			} else if (fxpi2 == 4 && _engine_snap.track_limiter_ok) {
 				_engine.set_track_limiter_release_norm (fxpi2, _mixers[fxpi2].fx_param2 ());
@@ -8448,7 +8478,9 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_drag = DragMode::FxParam;
 		_drag_index = fxpi;
 		if (_mixers[fxpi].drag_fx_param_to (x)) {
-			if (fxpi == 5 && _engine_snap.track_gate_ok) {
+			if (fxpi == 1 && _engine_snap.vst3_ok) {
+				_engine.set_vst3_param (0, _mixers[fxpi].fx_param ());
+			} else if (fxpi == 5 && _engine_snap.track_gate_ok) {
 				_engine.set_track_gate_threshold_norm (fxpi, _mixers[fxpi].fx_param ());
 			} else if (fxpi == 4 && _engine_snap.track_limiter_ok) {
 				_engine.set_track_limiter_ceiling_norm (fxpi, _mixers[fxpi].fx_param ());
@@ -8507,7 +8539,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 					_engine.insert_track_eq (fxi);
 				}
 			} else if (fxi == 1) {
-				if (_mixers[fxi].has_fx ()) {
+				if (_engine_snap.vst3_ok && _mixers[fxi].has_fx ()) {
+					/* Live VST3 on Audio 2 — click toggles bypass (no Comp SC). */
+					_engine.toggle_vst3_bypass ();
+				} else if (_mixers[fxi].has_fx ()) {
 					if (GetKeyState (VK_SHIFT) & 0x8000) {
 						bool on = !_engine_snap.track_comp_sidechain;
 						_engine.set_track_comp_sidechain (1, 0, on);
@@ -8711,7 +8746,9 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 
 	if (_drag == DragMode::FxParam && _drag_index >= 0 && _drag_index < kTracks) {
 		if (_mixers[_drag_index].drag_fx_param_to (x)) {
-			if (_drag_index == 5 && _engine_snap.track_gate_ok) {
+			if (_drag_index == 1 && _engine_snap.vst3_ok) {
+				_engine.set_vst3_param (0, _mixers[_drag_index].fx_param ());
+			} else if (_drag_index == 5 && _engine_snap.track_gate_ok) {
 				_engine.set_track_gate_threshold_norm (
 					_drag_index, _mixers[_drag_index].fx_param ());
 			} else if (_drag_index == 4 && _engine_snap.track_limiter_ok) {
@@ -8739,7 +8776,9 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 
 	if (_drag == DragMode::FxParam2 && _drag_index >= 0 && _drag_index < kTracks) {
 		if (_mixers[_drag_index].drag_fx_param2_to (x)) {
-			if (_drag_index == 5 && _engine_snap.track_gate_ok) {
+			if (_drag_index == 1 && _engine_snap.vst3_ok && _engine_snap.vst3_param_count > 1) {
+				_engine.set_vst3_param (1, _mixers[_drag_index].fx_param2 ());
+			} else if (_drag_index == 5 && _engine_snap.track_gate_ok) {
 				_engine.set_track_gate_hold_norm (
 					_drag_index, _mixers[_drag_index].fx_param2 ());
 			} else if (_drag_index == 4 && _engine_snap.track_limiter_ok) {
@@ -8765,8 +8804,12 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 
 	if (_drag == DragMode::FxParam3 && _drag_index >= 0 && _drag_index < kTracks) {
 		if (_mixers[_drag_index].drag_fx_param3_to (x)) {
-			_engine.set_track_eq_gain_h_norm (
-				_drag_index, _mixers[_drag_index].fx_param3 ());
+			if (_drag_index == 1 && _engine_snap.vst3_ok && _engine_snap.vst3_param_count > 2) {
+				_engine.set_vst3_param (2, _mixers[_drag_index].fx_param3 ());
+			} else {
+				_engine.set_track_eq_gain_h_norm (
+					_drag_index, _mixers[_drag_index].fx_param3 ());
+			}
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
 			sync_mixer_fx_from_engine ();
@@ -9916,6 +9959,18 @@ ShellWindow::apply_prefs_hit (PrefsHit hit)
 	case PrefsHit::SnapToggle:
 		_engine.set_pref_snap_default (!_engine.snapshot ().pref_snap_default);
 		break;
+	case PrefsHit::Vst3Rescan:
+		if (_engine.rescan_vst3 ()) {
+			_prefs.set_status (L"VST3 rescanned");
+		} else {
+			_prefs.set_status (L"VST3 rescan failed");
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_fx_from_engine ();
+		sync_prefs_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
 	case PrefsHit::Save:
 		if (_engine.save_shell_prefs ()) {
 			_prefs.set_status (L"Saved");

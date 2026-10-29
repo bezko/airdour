@@ -1845,6 +1845,24 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool smoke_vst3_params ();
 
 	/**
+	 * Remove the shell VST3 PluginInsert from Audio 2. Idempotent when none
+	 * is loaded (still clears snapshot). Returns false only on remove failure.
+	 */
+	bool unload_vst3 ();
+
+	/**
+	 * Fresh VST3 path scan (VST3_PATH / AIRDOUR_SMOKE_VST3 + PluginManager
+	 * refresh). Does not insert. For prefs Rescan / lifecycle smoke.
+	 */
+	bool rescan_vst3 ();
+
+	/**
+	 * Scan → insert (when available) → unload → rescan.
+	 * Scan-only with VST3=0 still returns true. For --smoke-vst3-lifecycle.
+	 */
+	bool smoke_vst3_lifecycle ();
+
+	/**
 	 * Sample WASAPI shared timing + working set while transport rolls briefly.
 	 * Prints a one-line PERF summary to stderr. For --smoke-perf.
 	 */
