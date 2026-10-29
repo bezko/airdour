@@ -28812,6 +28812,145 @@ EngineHost::smoke_midi_velocity ()
 	}
 }
 
+bool
+EngineHost::smoke_midi_force_velocity ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-force-velocity failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-velocity FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-velocity FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for force-velocity smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->clear_midi_note_sel ();
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-velocity FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+
+		if (!add_midi_note (60, 0.0f, 0.4f, 40)
+		    || !add_midi_note (64, 0.5f, 0.4f, 80)
+		    || _snap.midi_note_count < 2) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-velocity FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* Select only pitch 60 (v=40). */
+		if (!select_midi_note_at (0.0f, 60) || !_snap.midi_notes[0].selected) {
+			/* Find the p60 note and select by id. */
+			clear_midi_note_selection ();
+			bool picked = false;
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				if (_snap.midi_notes[i].pitch == 60) {
+					_impl->set_midi_note_sel (_snap.midi_notes[i].id);
+					refresh_midi_notes_snap ();
+					picked = true;
+					break;
+				}
+			}
+			if (!picked) {
+				set_snap_enabled (snap_was);
+				std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-velocity FAILED (pick)\n");
+				std::fflush (stderr);
+				return false;
+			}
+		}
+
+		if (!set_midi_velocity (100)) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-velocity FAILED (set 100)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		bool ok100 = false;
+		bool ok80 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 60 && _snap.midi_notes[i].velocity == 100) {
+				ok100 = true;
+			}
+			if (_snap.midi_notes[i].pitch == 64 && _snap.midi_notes[i].velocity == 80) {
+				ok80 = true;
+			}
+		}
+		if (!ok100 || !ok80) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-force-velocity FAILED "
+			              "(after100 p60=%d p64=%d)\n",
+			              ok100 ? 1 : 0, ok80 ? 1 : 0);
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* No selection → force applies to all. */
+		clear_midi_note_selection ();
+		if (!set_midi_velocity (64)) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-velocity FAILED (set 64)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].velocity != 64) {
+				set_snap_enabled (snap_was);
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-midi-force-velocity FAILED "
+				              "(all64 v=%u)\n",
+				              (unsigned)_snap.midi_notes[i].velocity);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+
+		set_snap_enabled (snap_was);
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-velocity ok (notes=%d)\n",
+		              _snap.midi_note_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-force-velocity ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-velocity exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
 namespace {
 constexpr float kMidiMinLengthSec = 0.05f;
 } // namespace
@@ -36840,6 +36979,12 @@ EngineHost::set_midi_velocity (int velocity)
 
 bool
 EngineHost::smoke_midi_velocity ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_force_velocity ()
 {
 	return false;
 }

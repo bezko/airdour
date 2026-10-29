@@ -274,6 +274,7 @@ private:
 	void do_quantize_midi_notes ();
 	void do_transpose_midi_notes (int semitones);
 	void do_nudge_midi_velocity (int delta);
+	void do_force_midi_velocity (int velocity);
 	void do_nudge_midi_length (float delta_sec);
 	void do_copy_midi_notes ();
 	void do_cut_midi_notes ();

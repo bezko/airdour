@@ -1863,6 +1863,11 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool nudge_midi_velocity (int delta);
 	/** Set absolute velocity for selected notes (or all if none selected). */
 	bool set_midi_velocity (int velocity);
+	/**
+	 * Add notes @40/@80, select first, set_midi_velocity(100), verify.
+	 * For --smoke-midi-force-velocity.
+	 */
+	bool smoke_midi_force_velocity ();
 
 	/**
 	 * Nudge length of selected notes (or all if none selected) by delta_sec.

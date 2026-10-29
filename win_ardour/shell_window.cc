@@ -1925,6 +1925,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "midi-marquee", [this]() { return _engine.smoke_midi_marquee (); });
 	run_smoke_check (ok, "midi-select-all", [this]() { return _engine.smoke_midi_select_all (); });
 	run_smoke_check (ok, "midi-invert-select", [this]() { return _engine.smoke_midi_invert_select (); });
+	run_smoke_check (ok, "midi-force-velocity", [this]() { return _engine.smoke_midi_force_velocity (); });
 	run_smoke_check (ok, "midi-program", [this]() { return _engine.smoke_midi_program (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
@@ -5350,6 +5351,19 @@ ShellWindow::do_nudge_midi_velocity (int delta)
 }
 
 void
+ShellWindow::do_force_midi_velocity (int velocity)
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.set_midi_velocity (velocity)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_nudge_midi_length (float delta_sec)
 {
 	if (!_engine.is_linked ()) {
@@ -6182,6 +6196,16 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				InvalidateRect (_hwnd, nullptr, FALSE);
+			}
+			return 0;
+		}
+		if ((GetKeyState (VK_CONTROL) & 0x8000)
+		    && (GetKeyState (VK_MENU) & 0x8000)
+		    && !(GetKeyState (VK_SHIFT) & 0x8000)
+		    && (wparam == 'V' || wparam == 'v')) {
+			/* Ctrl+Alt+V = force MIDI velocity to 100. */
+			if (_engine.is_linked () && _engine_snap.session_ok) {
+				do_force_midi_velocity (100);
 			}
 			return 0;
 		}
@@ -7759,11 +7783,21 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 	if (th == TransportHit::MidiVelUp) {
-		do_nudge_midi_velocity ((GetKeyState (VK_SHIFT) & 0x8000) ? 8 : 1);
+		if (GetKeyState (VK_MENU) & 0x8000) {
+			/* Alt+click V+ = force velocity 100. */
+			do_force_midi_velocity (100);
+		} else {
+			do_nudge_midi_velocity ((GetKeyState (VK_SHIFT) & 0x8000) ? 8 : 1);
+		}
 		return true;
 	}
 	if (th == TransportHit::MidiVelDown) {
-		do_nudge_midi_velocity ((GetKeyState (VK_SHIFT) & 0x8000) ? -8 : -1);
+		if (GetKeyState (VK_MENU) & 0x8000) {
+			/* Alt+click V− = force velocity 64. */
+			do_force_midi_velocity (64);
+		} else {
+			do_nudge_midi_velocity ((GetKeyState (VK_SHIFT) & 0x8000) ? -8 : -1);
+		}
 		return true;
 	}
 	if (th == TransportHit::MidiLenUp || th == TransportHit::MidiLenDown) {
@@ -10092,6 +10126,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+Shift+I", L"Invert MIDI note selection" },
 		{ L". / ,  Shift", L"MIDI transpose ±1 · ±12 (T+/T−)" },
 		{ L"↑ / ↓  Shift", L"MIDI velocity ±1 · ±8 (V+/V−)" },
+		{ L"Ctrl+Alt+V / Alt+V+", L"Force MIDI velocity 100 (Alt+V− → 64)" },
 		{ L"Alt+←/→  Shift", L"MIDI note length ± (L+/L−; snap unit)" },
 		{ L"Ctrl+C / X / V", L"MIDI note copy · cut · paste (at playhead)" },
 		{ L"H / Shift+H", L"MIDI humanize · 2× strength (Hum)" },
