@@ -42,6 +42,7 @@ PrefsPanel::PrefsPanel ()
 	_vst3_hint[0] = L'\0';
 	_vst3_scan_count = 0;
 	_vst3_catalog_count = 0;
+	_vst3_loaded_name[0] = L'\0';
 	for (int i = 0; i < kMaxCatalog; ++i) {
 		_vst3_catalog[i][0] = L'\0';
 		_vst3_catalog_row[i] = D2D1::RectF ();
@@ -156,6 +157,16 @@ PrefsPanel::set_vst3_catalog (int scan_count, const wchar_t names[][kCatalogName
 }
 
 void
+PrefsPanel::set_vst3_loaded_name (const wchar_t* name)
+{
+	if (name && name[0]) {
+		wcsncpy_s (_vst3_loaded_name, kCatalogNameLen, name, _TRUNCATE);
+	} else {
+		_vst3_loaded_name[0] = L'\0';
+	}
+}
+
+void
 PrefsPanel::set_status (const wchar_t* text)
 {
 	if (text) {
@@ -232,6 +243,20 @@ PrefsPanel::catalog_row_center (int index, float* out_x, float* out_y) const
 	*out_x = 0.5f * (r.left + r.right);
 	*out_y = 0.5f * (r.top + r.bottom);
 	return true;
+}
+
+int
+PrefsPanel::vst3_loaded_catalog_index () const
+{
+	if (_vst3_loaded_name[0] == L'\0' || _vst3_catalog_count <= 0) {
+		return -1;
+	}
+	for (int i = 0; i < _vst3_catalog_count; ++i) {
+		if (_wcsicmp (_vst3_catalog[i], _vst3_loaded_name) == 0) {
+			return i;
+		}
+	}
+	return -1;
 }
 
 void
@@ -327,8 +352,15 @@ PrefsPanel::draw (ID2D1RenderTarget* rt,
 	if (_vst3_catalog_count <= 0) {
 		rt->DrawTextW (L"(none scanned)", 14, fmt_meta, _vst3_catalog_row[0], body);
 	} else {
+		const int loaded_i = vst3_loaded_catalog_index ();
 		for (int i = 0; i < _vst3_catalog_count; ++i) {
-			_snwprintf_s (line, _TRUNCATE, L"· %s", _vst3_catalog[i]);
+			if (i == loaded_i && accent) {
+				accent->SetOpacity (0.28f);
+				rt->FillRectangle (_vst3_catalog_row[i], accent);
+				accent->SetOpacity (1.f);
+			}
+			_snwprintf_s (line, _TRUNCATE, L"· %s%s", _vst3_catalog[i],
+			              (i == loaded_i) ? L"  ←" : L"");
 			rt->DrawTextW (line, (UINT32)wcslen (line), fmt_meta, _vst3_catalog_row[i], brand);
 		}
 	}

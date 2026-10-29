@@ -57,6 +57,8 @@ public:
 	void set_vst3_hint (const wchar_t* text);
 	/** scan_count = full list size; names[0..name_count) shown under hint. */
 	void set_vst3_catalog (int scan_count, const wchar_t names[][kCatalogNameLen], int name_count);
+	/** Live insert name for accent highlight (empty → no highlight). */
+	void set_vst3_loaded_name (const wchar_t* name);
 	void set_status (const wchar_t* text);
 
 	PrefsHit hit_test (float x, float y) const;
@@ -64,6 +66,8 @@ public:
 	int hit_vst3_catalog_index (float x, float y) const;
 	/** Geometric center of catalog row `index` (0..kMaxCatalog-1) after layout. */
 	bool catalog_row_center (int index, float* out_x, float* out_y) const;
+	/** Catalog row matching loaded name, or −1. */
+	int vst3_loaded_catalog_index () const;
 
 	void draw (ID2D1RenderTarget* rt,
 	           ID2D1SolidColorBrush* brand,
@@ -100,5 +104,6 @@ private:
 	int         _vst3_scan_count;
 	int         _vst3_catalog_count;
 	wchar_t     _vst3_catalog[kMaxCatalog][kCatalogNameLen];
+	wchar_t     _vst3_loaded_name[kCatalogNameLen];
 	wchar_t     _status[80];
 };
