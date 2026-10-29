@@ -345,6 +345,8 @@ private:
 	bool smoke_loop_punch_edge_ticks ();
 	/** Assert amber≠crimson + stronger wash opacities. For --smoke-punch-loop-tint. */
 	bool smoke_punch_loop_tint ();
+	/** Assert soft hatch when loop range idle. For --smoke-loop-inactive-hatch. */
+	bool smoke_loop_inactive_hatch ();
 	void do_toggle_comp_sidechain ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();

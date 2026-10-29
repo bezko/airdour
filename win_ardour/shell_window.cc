@@ -37,7 +37,10 @@ constexpr D2D1_COLOR_F kPunch      = { 0.960f, 0.220f, 0.320f, 1.f };
 constexpr float kLoopRulerTintOp   = 0.52f; /* was 0.35 */
 constexpr float kPunchRulerTintOn  = 0.72f; /* was 0.55 */
 constexpr float kPunchRulerTintOff = 0.42f; /* was 0.28 */
-constexpr float kLoopLaneTintOp    = 0.18f; /* new lane wash */
+constexpr float kLoopLaneTintOp    = 0.18f; /* play-loop on */
+constexpr float kLoopLaneTintIdle  = 0.10f; /* range on, play off */
+constexpr float kLoopInactiveHatchOp = 0.30f; /* soft hatch when idle */
+constexpr float kLoopInactiveHatchPx = 6.f;   /* stripe pitch @ dpi=1 */
 constexpr float kPunchLaneTintOn   = 0.34f; /* was 0.22 */
 constexpr float kPunchLaneTintOff  = 0.16f; /* was 0.10 */
 constexpr D2D1_COLOR_F kMarker     = { 0.820f, 0.880f, 0.420f, 1.f };
@@ -1735,6 +1738,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	});
 	run_smoke_check (ok, "punch-loop-tint", [this]() {
 		return smoke_punch_loop_tint ();
+	});
+	run_smoke_check (ok, "loop-inactive-hatch", [this]() {
+		return smoke_loop_inactive_hatch ();
 	});
 	run_smoke_check (ok, "playhead-nudge", [this]() { return _engine.smoke_playhead_nudge (); });
 	run_smoke_check (ok, "zoom-punch", [this]() {
@@ -9776,6 +9782,62 @@ ShellWindow::smoke_punch_loop_tint ()
 	return true;
 }
 
+bool
+ShellWindow::smoke_loop_inactive_hatch ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-inactive-hatch FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!(kLoopLaneTintIdle < kLoopLaneTintOp
+	      && kLoopLaneTintIdle < 0.14f
+	      && kLoopInactiveHatchOp > 0.22f
+	      && kLoopInactiveHatchPx >= 4.f
+	      && kLoopInactiveHatchPx <= 10.f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-inactive-hatch FAILED "
+		              "(idle=%.2f play=%.2f hatch=%.2f/%.1fpx)\n",
+		              kLoopLaneTintIdle, kLoopLaneTintOp,
+		              kLoopInactiveHatchOp, kLoopInactiveHatchPx);
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_loop_range (1.0f, 3.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-inactive-hatch FAILED (range)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (!_engine_snap.loop_active) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-inactive-hatch FAILED (no loop)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	/* Ensure play-loop is off so idle hatch path is the live state. */
+	if (_engine_snap.loop_playing) {
+		(void)_engine.set_loop_play (false);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	if (_engine_snap.loop_playing) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-inactive-hatch FAILED (still playing)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-loop-inactive-hatch ok "
+	              "(idle=%.2f hatch=%.2f @%.0fpx)\n",
+	              kLoopLaneTintIdle, kLoopInactiveHatchOp, kLoopInactiveHatchPx);
+	std::fflush (stderr);
+	return true;
+}
+
 void
 ShellWindow::draw_loop_overlay ()
 {
@@ -9791,7 +9853,8 @@ ShellWindow::draw_loop_overlay ()
 	if (n1 <= n0) {
 		return;
 	}
-	_brush_loop->SetOpacity (kLoopLaneTintOp);
+	const bool playing = _engine_snap.loop_playing;
+	_brush_loop->SetOpacity (playing ? kLoopLaneTintOp : kLoopLaneTintIdle);
 	for (int i = 0; i < kTracks; ++i) {
 		const D2D1_RECT_F& lb = _lanes[i].bounds;
 		float w = lb.right - lb.left;
@@ -9800,9 +9863,19 @@ ShellWindow::draw_loop_overlay ()
 		}
 		float bot = (i == 0 && _auto_lane_bounds.bottom > lb.bottom)
 		            ? _auto_lane_bounds.bottom : lb.bottom;
-		_rt->FillRectangle (
-			D2D1::RectF (lb.left + n0 * w, lb.top, lb.left + n1 * w, bot),
-			_brush_loop);
+		float x0 = lb.left + n0 * w;
+		float x1 = lb.left + n1 * w;
+		_rt->FillRectangle (D2D1::RectF (x0, lb.top, x1, bot), _brush_loop);
+		if (!playing) {
+			/* Soft vertical hatch — range present but play-loop idle. */
+			_brush_loop->SetOpacity (kLoopInactiveHatchOp);
+			float step = std::max (3.f, kLoopInactiveHatchPx * _dpi_scale);
+			float stripe = std::max (1.f, 1.2f * _dpi_scale);
+			for (float x = x0; x < x1 - stripe; x += step) {
+				_rt->FillRectangle (D2D1::RectF (x, lb.top, x + stripe, bot), _brush_loop);
+			}
+			_brush_loop->SetOpacity (kLoopLaneTintIdle);
+		}
 	}
 	_brush_loop->SetOpacity (1.f);
 }
