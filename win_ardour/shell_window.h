@@ -322,6 +322,7 @@ private:
 	bool smoke_vst3_mixer_bypass ();
 	bool smoke_vst3_catalog_highlight ();
 	bool smoke_vst3_prefs_bypass ();
+	bool smoke_vst3_prefs_param_reset ();
 	bool smoke_vst3_prefs_unload ();
 	bool smoke_vst3_status_unload ();
 	bool smoke_vst3_status_bypass ();
