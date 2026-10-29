@@ -1962,6 +1962,11 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Rebuilds the MIDI region (Windows-safe).
 	 */
 	bool nudge_midi_length (float delta_sec);
+	/**
+	 * Set length of selected notes (or all) to current snap_unit_sec().
+	 * Starts unchanged. Rebuilds the MIDI region (Windows-safe).
+	 */
+	bool force_midi_note_length_to_grid ();
 	/** Trim start of selected note(s); snaps when snap is on. Min length 0.05s. */
 	bool set_midi_note_start (float start_sec);
 	/** Trim end of selected note(s); snaps when snap is on. Min length 0.05s. */
@@ -2079,6 +2084,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Add fixed-length note, trim end, nudge length, verify. For --smoke-midi-length.
 	 */
 	bool smoke_midi_length ();
+	/** Note len 0.7 → force → length ≈ snap_unit_sec. --smoke-midi-force-length */
+	bool smoke_midi_force_length ();
 
 	/**
 	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.

@@ -279,6 +279,7 @@ private:
 	bool smoke_snap_status_chip ();
 	void do_quantize_midi_notes ();
 	void do_legato_midi_notes ();
+	void do_force_midi_note_length ();
 	void do_transpose_midi_notes (int semitones);
 	void do_nudge_midi_velocity (int delta);
 	void do_nudge_midi_length (float delta_sec);

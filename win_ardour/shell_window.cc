@@ -1961,6 +1961,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "midi-step-piano-highlight", [this]() {
 		return smoke_midi_step_piano_highlight ();
 	});
+	run_smoke_check (ok, "midi-force-length", [this]() { return _engine.smoke_midi_force_length (); });
 	run_smoke_check (ok, "midi-program", [this]() { return _engine.smoke_midi_program (); });
 	run_smoke_check (ok, "vst3-params", [this]() { return _engine.smoke_vst3_params (); });
 	run_smoke_check (ok, "vst3-mixer-param-reset", [this]() {
@@ -6031,6 +6032,19 @@ ShellWindow::do_legato_midi_notes ()
 }
 
 void
+ShellWindow::do_force_midi_note_length ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.force_midi_note_length_to_grid ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_cycle_vst3_insert (int dir)
 {
 	if (!_engine.is_linked ()) {
@@ -7873,6 +7887,9 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			if ((GetKeyState (VK_CONTROL) & 0x8000) && (GetKeyState (VK_MENU) & 0x8000)) {
 				/* Ctrl+Alt+Q = legato selected (or all) MIDI notes. */
 				do_legato_midi_notes ();
+			} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (GetKeyState (VK_SHIFT) & 0x8000)) {
+				/* Shift+Q = force note length to snap unit. */
+				do_force_midi_note_length ();
 			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
 				/* Q = quantize selected (or all) MIDI notes to snap grid. */
 				do_quantize_midi_notes ();
@@ -12908,6 +12925,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Status snap chip", L"Show density · click to cycle" },
 		{ L"Q / Qnt", L"Quantize MIDI notes to snap grid" },
 		{ L"Ctrl+Alt+Q", L"Legato MIDI notes (abut ends)" },
+		{ L"Shift+Q", L"Force MIDI note length to snap unit" },
 		{ L". / ,  Shift", L"MIDI transpose ±1 · ±12 (T+/T−)" },
 		{ L"↑ / ↓  Shift", L"MIDI velocity ±1 · ±8 (V+/V−)" },
 		{ L"Alt+←/→  Shift", L"MIDI note length ± (L+/L−; snap unit)" },
