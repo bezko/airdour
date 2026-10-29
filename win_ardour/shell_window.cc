@@ -1962,6 +1962,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		return smoke_midi_step_piano_highlight ();
 	});
 	run_smoke_check (ok, "midi-force-length", [this]() { return _engine.smoke_midi_force_length (); });
+	run_smoke_check (ok, "midi-playhead-draw", [this]() { return smoke_midi_playhead_draw (); });
 	run_smoke_check (ok, "midi-program", [this]() { return _engine.smoke_midi_program (); });
 	run_smoke_check (ok, "vst3-params", [this]() { return _engine.smoke_vst3_params (); });
 	run_smoke_check (ok, "vst3-mixer-param-reset", [this]() {
@@ -6050,6 +6051,60 @@ ShellWindow::smoke_midi_vel_chord ()
 	std::fprintf (stderr,
 	              "airdour_win_shell: smoke-midi-vel-chord ok "
 	              "(loud p=64 v=110 / quiet p=60 v=40)\n");
+	return true;
+}
+
+bool
+ShellWindow::smoke_midi_playhead_draw ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-playhead-draw FAILED (no session)\n");
+		return false;
+	}
+	if (!_engine.ensure_midi_track ()) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-playhead-draw FAILED (midi track)\n");
+		return false;
+	}
+	layout_panes ();
+	_lanes[0].strip.set_view_window (0.f, 8.f);
+	apply_shared_view (0);
+	/* Drive UI playhead into mid-view (draw uses strip norm, same as audio lanes). */
+	_playhead_sec = 4.f;
+	WaveStripParams wp;
+	wp.engine_running = _engine_snap.running;
+	wp.transport_playing = false;
+	wp.sample_rate = _engine_snap.sample_rate ? _engine_snap.sample_rate : 48000;
+	wp.period_frames = _engine_snap.period_frames ? _engine_snap.period_frames : 512;
+	wp.time_sec = 0.f;
+	wp.playhead_sec = _playhead_sec;
+	wp.gain = 1.f;
+	_lanes[0].strip.update_view (wp);
+
+	float ph = _lanes[0].strip.playhead_norm ();
+	if (ph <= 0.02f || ph >= 0.98f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-playhead-draw FAILED (norm=%.3f ph_sec=%.3f)\n",
+		              ph, _playhead_sec);
+		return false;
+	}
+	const D2D1_RECT_F& r = _midi_lane;
+	float w = r.right - r.left;
+	if (w < 20.f) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-playhead-draw FAILED (midi lane)\n");
+		return false;
+	}
+	float px = r.left + ph * w;
+	if (px < r.left - 0.5f || px > r.right + 0.5f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-playhead-draw FAILED "
+		              "(px=%.1f lane=[%.1f..%.1f])\n",
+		              px, r.left, r.right);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-midi-playhead-draw ok "
+	              "(norm=%.3f px=%.1f lane=[%.1f..%.1f])\n",
+	              ph, px, r.left, r.right);
 	return true;
 }
 
@@ -11739,6 +11794,19 @@ ShellWindow::draw_midi_lane ()
 		_brush_midi->SetOpacity (0.55f);
 		_rt->FillRectangle (D2D1::RectF (x0, y0, x1, y1), _brush_midi);
 		_brush_midi->SetOpacity (1.f);
+	}
+
+	/* Playhead through piano-roll + velocity (matches audio/CC lanes). */
+	if (_brush_playhead) {
+		float ph = _lanes[0].strip.playhead_norm ();
+		if (ph >= 0.f && ph <= 1.f) {
+			float w = r.right - r.left;
+			float px = r.left + ph * w;
+			float thick = std::max (1.5f, 2.f * _dpi_scale);
+			_rt->FillRectangle (
+				D2D1::RectF (px - thick * 0.5f, r.top, px + thick * 0.5f, r.bottom),
+				_brush_playhead);
+		}
 	}
 
 	wchar_t midicap[160];
