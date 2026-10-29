@@ -306,7 +306,7 @@ Honest limits
 - No GTK plugin UIs. Mixer shows FX name / BYP / Blend.
 - Default Engine package is MSVC Release (/MD). Pass -Config Debug for the Debug slice.
 - GitHub Actions publishes UiOnly when waf+vcpkg engine libs are not in CI yet.
-- Signed installer optional: Package-WinShell-Installer.ps1 (Inno Setup → dist\*-setup.exe).
+- Installer: Package-WinShell-Nsis.ps1 (NSIS, open source → dist\*-setup.exe).
 
 Smoke examples (Engine)
 -----------------------
@@ -333,6 +333,11 @@ crt:     $crtNote
 Files copied: $($copied.Count)
 "@
 Set-Content -Path (Join-Path $stage "BUILD_STATUS.txt") -Value $status -Encoding utf8
+
+$copying = Join-Path $RepoRoot "COPYING"
+if (Test-Path $copying) {
+    Copy-Item -Force $copying (Join-Path $stage "COPYING")
+}
 
 $zipName = if ($Mode -eq "Engine") {
     if ($Config -eq "Debug") {

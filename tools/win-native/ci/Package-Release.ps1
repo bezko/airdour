@@ -2,7 +2,7 @@
 # Always builds the CI spine zip (wasapi_io smoke + sources).
 # Also builds a portable win_shell zip when airdour_win_shell.exe is available
 # (UiOnly on GHA; Engine when waf libs exist on a laptop agent).
-# When a shell stage exists, best-effort Inno installer (+ always installer-src zip).
+# When a shell stage exists, build the NSIS installer (+ always installer-src zip).
 param(
     [Parameter(Mandatory = $true)][string]$RepoRoot,
     [Parameter(Mandatory = $true)][string]$OutDir,
@@ -12,7 +12,7 @@ param(
     [string]$WafLibsDir = "",
     [string]$GitSha = "unknown",
     [string]$GitRef = "unknown",
-    [switch]$BootstrapInno
+    [switch]$BootstrapNsis
 )
 
 $ErrorActionPreference = "Stop"
@@ -87,7 +87,9 @@ Write-Host "Created $zipPath"
 $instSrc = Join-Path $OutDir "installer-src-stage"
 if (Test-Path $instSrc) { Remove-Item -Recurse -Force $instSrc }
 New-Item -ItemType Directory -Force -Path $instSrc | Out-Null
+Copy-Item (Join-Path $RepoRoot "tools\win-native\installer\airdour.nsi") $instSrc -Force
 Copy-Item (Join-Path $RepoRoot "tools\win-native\installer\airdour.iss") $instSrc -Force
+Copy-Item (Join-Path $RepoRoot "tools\win-native\ci\Package-WinShell-Nsis.ps1") $instSrc -Force
 Copy-Item (Join-Path $RepoRoot "tools\win-native\ci\Package-WinShell-Installer.ps1") $instSrc -Force
 Copy-Item (Join-Path $RepoRoot "tools\win-native\ci\Package-WinShell-Portable.ps1") $instSrc -Force
 $instReadme = @"
@@ -97,20 +99,25 @@ Brand: Airdour
 Version: $Version
 Git: $GitRef @ $GitSha
 
-These scripts build the Inno Setup installer from a portable shell stage.
+The release installer is NSIS (open source). airdour.nsi + Package-WinShell-Nsis.ps1
+compile a per-user setup.exe from a portable shell stage. airdour.iss is the
+optional Inno Setup script.
 
 On GitHub Actions (windows-latest)
 ----------------------------------
-CI builds a UiOnly shell and may publish airdour-*-win64-setup-ui.exe
-(bootstrap Inno Setup via Package-WinShell-Installer.ps1 -BootstrapInno).
+CI builds a UiOnly shell and publishes airdour-*-win64-setup-ui.exe
+(NSIS via Package-WinShell-Nsis.ps1). Install for the current user:
+
+  airdour-*-win64-setup-ui.exe /S /D=C:\Airdour
+
 Full Engine deps (waf libardour + vcpkg) do NOT fit the default GHA job yet.
 
 On a laptop with Engine Release trees
 -------------------------------------
 1. Package portable Engine stage/zip:
    powershell -File Package-WinShell-Portable.ps1 -RepoRoot <repo> -OutDir dist -Version $Version -Mode Engine -Config Release
-2. Build installer (Program Files\Airdour):
-   powershell -File Package-WinShell-Installer.ps1 -RepoRoot <repo> -OutDir dist -Version $Version -RefreshPortable -BootstrapInno
+2. Build the NSIS installer (per-user, %LOCALAPPDATA%\Airdour):
+   powershell -File Package-WinShell-Nsis.ps1 -RepoRoot <repo> -OutDir dist -Version $Version -RefreshPortable -BootstrapNsis
 
 Attach airdour-*-win64-setup.exe (Engine) to the GitHub Release alongside CI UiOnly artifacts.
 "@
@@ -153,30 +160,26 @@ try {
     Write-Warning "Portable win_shell zip skipped: $($_.Exception.Message)"
 }
 
-# Best-effort Inno installer from shell-stage (UiOnly on GHA; Engine on laptop).
+# NSIS installer from shell-stage (UiOnly on GHA; Engine on a laptop).
 $setupExe = $null
 $shellStage = Join-Path $OutDir "shell-stage"
-if ((Test-Path (Join-Path $shellStage "airdour_win_shell.exe"))) {
-    try {
-        $packInst = Join-Path $RepoRoot "tools\win-native\ci\Package-WinShell-Installer.ps1"
-        $instArgs = @{
-            RepoRoot  = $RepoRoot
-            OutDir    = $OutDir
-            Version   = $Version
-            StageDir  = $shellStage
-            GitSha    = $GitSha
-            GitRef    = $GitRef
-        }
-        if ($BootstrapInno) { $instArgs.BootstrapInno = $true }
-        & $packInst @instArgs | Out-Null
-        $setupExe = Get-ChildItem -Path $OutDir -Filter "airdour-$Version-win64-setup*.exe" -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
-    } catch {
-        Write-Warning "Inno installer skipped: $($_.Exception.Message)"
-    }
-} else {
-    Write-Warning "Inno installer skipped: no shell-stage exe"
+if (-not (Test-Path (Join-Path $shellStage "airdour_win_shell.exe"))) {
+    throw "NSIS installer requires shell-stage\airdour_win_shell.exe"
 }
+$packNsis = Join-Path $RepoRoot "tools\win-native\ci\Package-WinShell-Nsis.ps1"
+$nsisArgs = @{
+    RepoRoot = $RepoRoot
+    OutDir   = $OutDir
+    Version  = $Version
+    StageDir = $shellStage
+    GitSha   = $GitSha
+    GitRef   = $GitRef
+}
+if ($BootstrapNsis) { $nsisArgs.BootstrapNsis = $true }
+& $packNsis @nsisArgs | Out-Null
+$setupExe = Get-ChildItem -Path $OutDir -Filter "airdour-$Version-win64-setup*.exe" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
+if (-not $setupExe) { throw "NSIS installer was not produced" }
 
 Write-Output $zipPath
 Write-Output $instSrcZip
