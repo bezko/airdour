@@ -1952,6 +1952,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "vst3-mixer-unload", [this]() { return smoke_vst3_mixer_unload (); });
 	run_smoke_check (ok, "vst3-catalog-highlight", [this]() { return smoke_vst3_catalog_highlight (); });
 	run_smoke_check (ok, "vst3-cycle-insert", [this]() { return _engine.smoke_vst3_cycle_insert (); });
+	run_smoke_check (ok, "vst3-prefs-bypass", [this]() { return smoke_vst3_prefs_bypass (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
 	run_smoke_check (ok, "solo-all", [this]() { return _engine.smoke_solo_all (); });
@@ -9981,6 +9982,8 @@ ShellWindow::sync_prefs_from_engine ()
 	} else {
 		_prefs.set_vst3_loaded_name (nullptr);
 	}
+	_prefs.set_vst3_ok (_engine_snap.vst3_ok);
+	_prefs.set_vst3_bypassed (_engine_snap.vst3_bypassed);
 }
 
 void
@@ -10242,6 +10245,74 @@ ShellWindow::smoke_vst3_catalog_highlight ()
 	return true;
 }
 
+bool
+ShellWindow::smoke_vst3_prefs_bypass ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-bypass FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	sync_prefs_from_engine ();
+	_prefs.set_visible (true);
+	_prefs_visible = true;
+	_prefs.layout ((float)_width, (float)_height, _dpi_scale);
+
+	float bx = 0.f;
+	float by = 0.f;
+	if (!_prefs.vst3_bypass_btn_center (&bx, &by)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-bypass FAILED (layout)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (_prefs.hit_test (bx, by) != PrefsHit::Vst3Bypass) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-bypass FAILED (hit)\n");
+		std::fflush (stderr);
+		return false;
+	}
+
+	apply_prefs_hit (PrefsHit::Vst3Bypass);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+
+	if (!_engine_snap.vst3_ok) {
+		/* FENIX empty: toggle is a no-op; chrome still hittable. */
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-bypass ok "
+		              "(scan-only; Bypass chrome hittable)\n");
+		std::fflush (stderr);
+		_prefs_visible = false;
+		_prefs.set_visible (false);
+		return true;
+	}
+
+	const bool was = _engine_snap.vst3_bypassed;
+	if (!_engine.toggle_vst3_bypass ()) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-bypass FAILED (toggle)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (_engine_snap.vst3_bypassed == was) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-bypass FAILED (state)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	(void)_engine.toggle_vst3_bypass ();
+	_prefs_visible = false;
+	_prefs.set_visible (false);
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-vst3-prefs-bypass ok (live toggle)\n");
+	std::fflush (stderr);
+	return true;
+}
+
 void
 ShellWindow::apply_prefs_hit (PrefsHit hit)
 {
@@ -10277,6 +10348,20 @@ ShellWindow::apply_prefs_hit (PrefsHit hit)
 			_prefs.set_status (L"VST3 rescanned");
 		} else {
 			_prefs.set_status (L"VST3 rescan failed");
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_fx_from_engine ();
+		sync_prefs_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	case PrefsHit::Vst3Bypass:
+		if (_engine.toggle_vst3_bypass ()) {
+			_prefs.set_status (_engine.snapshot ().vst3_bypassed
+			                       ? L"VST3 bypassed"
+			                       : L"VST3 active");
+		} else {
+			_prefs.set_status (L"VST3 bypass (none loaded)");
 		}
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
