@@ -1722,6 +1722,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "loop-punch-edge-labels", [this]() {
 		return smoke_loop_punch_edge_labels ();
 	});
+	run_smoke_check (ok, "loop-punch-edge-ticks", [this]() {
+		return smoke_loop_punch_edge_ticks ();
+	});
 	run_smoke_check (ok, "playhead-nudge", [this]() { return _engine.smoke_playhead_nudge (); });
 	run_smoke_check (ok, "zoom-punch", [this]() {
 		if (!_engine.smoke_zoom_punch ()) return false;
@@ -9414,8 +9417,21 @@ ShellWindow::draw_editor_ruler ()
 		}
 	}
 
-	/* Edge captions so loop/punch washes are not anonymous washes. */
+	/* Edge tick caps + In/Out captions so washes are scannable. */
 	{
+		D2D1_RECT_F tr;
+		if (loop_punch_edge_tick_rect (true, true, &tr) && _brush_loop) {
+			_rt->FillRectangle (tr, _brush_loop);
+		}
+		if (loop_punch_edge_tick_rect (true, false, &tr) && _brush_loop) {
+			_rt->FillRectangle (tr, _brush_loop);
+		}
+		if (loop_punch_edge_tick_rect (false, true, &tr) && _brush_punch) {
+			_rt->FillRectangle (tr, _brush_punch);
+		}
+		if (loop_punch_edge_tick_rect (false, false, &tr) && _brush_punch) {
+			_rt->FillRectangle (tr, _brush_punch);
+		}
 		D2D1_RECT_F lr;
 		if (loop_punch_edge_label_rect (true, true, &lr) && _brush_loop && _fmt_meta) {
 			_rt->DrawTextW (L"In", 2, _fmt_meta, lr, _brush_loop);
@@ -9508,6 +9524,47 @@ ShellWindow::loop_punch_edge_label_rect (bool is_loop, bool is_start, D2D1_RECT_
 }
 
 bool
+ShellWindow::loop_punch_edge_tick_rect (bool is_loop, bool is_start, D2D1_RECT_F* out) const
+{
+	if (!out) {
+		return false;
+	}
+	const D2D1_RECT_F& rr = _editor_ruler;
+	if (rr.right <= rr.left) {
+		return false;
+	}
+	float t0 = 0.f;
+	float t1 = 0.f;
+	if (is_loop) {
+		if (!_engine_snap.loop_active
+		    || _engine_snap.loop_end_sec <= _engine_snap.loop_start_sec) {
+			return false;
+		}
+		t0 = _engine_snap.loop_start_sec;
+		t1 = _engine_snap.loop_end_sec;
+	} else {
+		if (!_engine_snap.punch_range_ok
+		    || _engine_snap.punch_end_sec <= _engine_snap.punch_start_sec) {
+			return false;
+		}
+		t0 = _engine_snap.punch_start_sec;
+		t1 = _engine_snap.punch_end_sec;
+	}
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float w = rr.right - rr.left;
+	float sec = is_start ? t0 : t1;
+	float n = (sec - view0) / span;
+	if (n < 0.f || n > 1.f) {
+		return false;
+	}
+	float px = rr.left + n * w;
+	float thick = std::max (1.5f, 2.f * _dpi_scale);
+	*out = D2D1::RectF (px - thick * 0.5f, rr.top, px + thick * 0.5f, rr.bottom);
+	return out->right > out->left;
+}
+
+bool
 ShellWindow::smoke_loop_punch_edge_labels ()
 {
 	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
@@ -9564,6 +9621,80 @@ ShellWindow::smoke_loop_punch_edge_labels ()
 	std::fprintf (stderr,
 	              "airdour_win_shell: smoke-loop-punch-edge-labels ok "
 	              "(loop In/Out · punch In/Out in ruler)\n");
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+ShellWindow::smoke_loop_punch_edge_ticks ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_loop_range (1.0f, 3.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (loop)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_punch_range (2.0f, 4.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (punch)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	fit_shared_range (0.5f, 4.5f);
+	layout_panes ();
+
+	D2D1_RECT_F a, b, c, d;
+	if (!loop_punch_edge_tick_rect (true, true, &a)
+	    || !loop_punch_edge_tick_rect (true, false, &b)
+	    || !loop_punch_edge_tick_rect (false, true, &c)
+	    || !loop_punch_edge_tick_rect (false, false, &d)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (rects)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	const D2D1_RECT_F& rr = _editor_ruler;
+	auto inside = [&](const D2D1_RECT_F& r) {
+		return r.left >= rr.left - 1.f && r.right <= rr.right + 1.f
+		       && r.top >= rr.top - 1.f && r.bottom <= rr.bottom + 1.f
+		       && r.right > r.left
+		       && (r.bottom - r.top) >= (rr.bottom - rr.top) * 0.9f
+		       && (r.right - r.left) <= 6.f * _dpi_scale;
+	};
+	if (!inside (a) || !inside (b) || !inside (c) || !inside (d)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (shape)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!(a.left < b.left) || !(c.left < d.left)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (order)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	/* Ticks should sit at the wash edges (left of start labels / right of end). */
+	D2D1_RECT_F la, lb;
+	if (!loop_punch_edge_label_rect (true, true, &la)
+	    || !loop_punch_edge_label_rect (true, false, &lb)
+	    || !(a.right <= la.left + 1.f)
+	    || !(b.left >= lb.right - 1.f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (vs labels)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-loop-punch-edge-ticks ok "
+	              "(loop + punch edge caps)\n");
 	std::fflush (stderr);
 	return true;
 }
