@@ -30,8 +30,16 @@ constexpr D2D1_COLOR_F kPeak       = { 0.200f, 0.940f, 0.820f, 1.f };
 constexpr D2D1_COLOR_F kRms        = { 0.100f, 0.380f, 0.360f, 0.88f };
 constexpr D2D1_COLOR_F kPlayhead   = { 0.990f, 0.820f, 0.280f, 1.f };
 constexpr D2D1_COLOR_F kSelection  = { 0.280f, 0.760f, 0.900f, 1.f };
-constexpr D2D1_COLOR_F kLoop       = { 0.940f, 0.640f, 0.200f, 1.f };
-constexpr D2D1_COLOR_F kPunch      = { 0.920f, 0.340f, 0.280f, 1.f };
+/* Amber vs crimson — high contrast on dark pane (was closer oranges). */
+constexpr D2D1_COLOR_F kLoop       = { 0.980f, 0.780f, 0.120f, 1.f };
+constexpr D2D1_COLOR_F kPunch      = { 0.960f, 0.220f, 0.320f, 1.f };
+/* Ruler / lane wash opacities (smoke-punch-loop-tint asserts these). */
+constexpr float kLoopRulerTintOp   = 0.52f; /* was 0.35 */
+constexpr float kPunchRulerTintOn  = 0.72f; /* was 0.55 */
+constexpr float kPunchRulerTintOff = 0.42f; /* was 0.28 */
+constexpr float kLoopLaneTintOp    = 0.18f; /* new lane wash */
+constexpr float kPunchLaneTintOn   = 0.34f; /* was 0.22 */
+constexpr float kPunchLaneTintOff  = 0.16f; /* was 0.10 */
 constexpr D2D1_COLOR_F kMarker     = { 0.820f, 0.880f, 0.420f, 1.f };
 constexpr D2D1_COLOR_F kMidi       = { 0.320f, 0.780f, 0.920f, 1.f }; /* cyan, not purple */
 constexpr D2D1_COLOR_F kMeterHot   = { 0.96f, 0.38f, 0.24f, 1.f };
@@ -1724,6 +1732,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	});
 	run_smoke_check (ok, "loop-punch-edge-ticks", [this]() {
 		return smoke_loop_punch_edge_ticks ();
+	});
+	run_smoke_check (ok, "punch-loop-tint", [this]() {
+		return smoke_punch_loop_tint ();
 	});
 	run_smoke_check (ok, "playhead-nudge", [this]() { return _engine.smoke_playhead_nudge (); });
 	run_smoke_check (ok, "zoom-punch", [this]() {
@@ -9394,7 +9405,7 @@ ShellWindow::draw_editor_ruler ()
 		n0 = std::max (0.f, std::min (1.f, n0));
 		n1 = std::max (0.f, std::min (1.f, n1));
 		if (n1 > n0) {
-			_brush_loop->SetOpacity (0.35f);
+			_brush_loop->SetOpacity (kLoopRulerTintOp);
 			_rt->FillRectangle (
 				D2D1::RectF (rr.left + n0 * w, rr.top, rr.left + n1 * w, rr.bottom),
 				_brush_loop);
@@ -9408,7 +9419,7 @@ ShellWindow::draw_editor_ruler ()
 		n0 = std::max (0.f, std::min (1.f, n0));
 		n1 = std::max (0.f, std::min (1.f, n1));
 		if (n1 > n0) {
-			float op = _engine_snap.punch_enabled ? 0.55f : 0.28f;
+			float op = _engine_snap.punch_enabled ? kPunchRulerTintOn : kPunchRulerTintOff;
 			_brush_punch->SetOpacity (op);
 			_rt->FillRectangle (
 				D2D1::RectF (rr.left + n0 * w, rr.top, rr.left + n1 * w, rr.bottom),
@@ -9699,6 +9710,103 @@ ShellWindow::smoke_loop_punch_edge_ticks ()
 	return true;
 }
 
+bool
+ShellWindow::smoke_punch_loop_tint ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-loop-tint FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	/* Hue separation: loop amber G high, punch crimson G low. */
+	if (!(kLoop.g > 0.65f && kPunch.g < 0.40f && kLoop.r > 0.85f && kPunch.r > 0.85f
+	      && (kLoop.g - kPunch.g) > 0.35f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-loop-tint FAILED "
+		              "(colors loop g=%.2f punch g=%.2f)\n",
+		              kLoop.g, kPunch.g);
+		std::fflush (stderr);
+		return false;
+	}
+	if (!(kLoopRulerTintOp > 0.45f && kPunchRulerTintOn > kPunchRulerTintOff
+	      && kPunchRulerTintOn > 0.65f && kLoopLaneTintOp > 0.12f
+	      && kPunchLaneTintOn > kPunchLaneTintOff && kPunchLaneTintOn > 0.28f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-loop-tint FAILED (opacity floor)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_loop_range (1.0f, 3.0f) || !_engine.set_punch_range (2.0f, 4.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-loop-tint FAILED (ranges)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (!_engine_snap.loop_active || !_engine_snap.punch_range_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-loop-tint FAILED (snap flags)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	fit_shared_range (0.5f, 4.5f);
+	layout_panes ();
+	/* Lane wash geometry must cover Audio 1. */
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float n0 = (_engine_snap.loop_start_sec - view0) / span;
+	float n1 = (_engine_snap.loop_end_sec - view0) / span;
+	n0 = std::max (0.f, std::min (1.f, n0));
+	n1 = std::max (0.f, std::min (1.f, n1));
+	const D2D1_RECT_F& lb = _lanes[0].bounds;
+	float w = lb.right - lb.left;
+	if (n1 <= n0 || w < 8.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-loop-tint FAILED (lane geometry)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-punch-loop-tint ok "
+	              "(amber≠crimson · ruler %.2f/%.2f · lane loop+punch)\n",
+	              kLoopRulerTintOp, kPunchRulerTintOn);
+	std::fflush (stderr);
+	return true;
+}
+
+void
+ShellWindow::draw_loop_overlay ()
+{
+	if (!_engine_snap.loop_active || !_brush_loop) {
+		return;
+	}
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float n0 = (_engine_snap.loop_start_sec - view0) / span;
+	float n1 = (_engine_snap.loop_end_sec - view0) / span;
+	n0 = std::max (0.f, std::min (1.f, n0));
+	n1 = std::max (0.f, std::min (1.f, n1));
+	if (n1 <= n0) {
+		return;
+	}
+	_brush_loop->SetOpacity (kLoopLaneTintOp);
+	for (int i = 0; i < kTracks; ++i) {
+		const D2D1_RECT_F& lb = _lanes[i].bounds;
+		float w = lb.right - lb.left;
+		if (w < 4.f) {
+			continue;
+		}
+		float bot = (i == 0 && _auto_lane_bounds.bottom > lb.bottom)
+		            ? _auto_lane_bounds.bottom : lb.bottom;
+		_rt->FillRectangle (
+			D2D1::RectF (lb.left + n0 * w, lb.top, lb.left + n1 * w, bot),
+			_brush_loop);
+	}
+	_brush_loop->SetOpacity (1.f);
+}
+
 void
 ShellWindow::draw_punch_overlay ()
 {
@@ -9714,7 +9822,7 @@ ShellWindow::draw_punch_overlay ()
 	if (n1 <= n0) {
 		return;
 	}
-	float op = _engine_snap.punch_enabled ? 0.22f : 0.10f;
+	float op = _engine_snap.punch_enabled ? kPunchLaneTintOn : kPunchLaneTintOff;
 	_brush_punch->SetOpacity (op);
 	for (int i = 0; i < kTracks; ++i) {
 		const D2D1_RECT_F& lb = _lanes[i].bounds;
@@ -9871,6 +9979,7 @@ ShellWindow::draw_editor_pane ()
 	draw_automation_lane ();
 	draw_midi_lane ();
 	draw_midi_cc_lane ();
+	draw_loop_overlay ();
 	draw_punch_overlay ();
 	draw_editor_grid ();
 }
