@@ -1960,6 +1960,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "vst3-mixer-unload", [this]() { return smoke_vst3_mixer_unload (); });
 	run_smoke_check (ok, "vst3-mixer-bypass", [this]() { return smoke_vst3_mixer_bypass (); });
 	run_smoke_check (ok, "vst3-mixer-param12-reset", [this]() { return smoke_vst3_mixer_param12_reset (); });
+	run_smoke_check (ok, "vst3-mixer-param3-reset", [this]() { return smoke_vst3_mixer_param3_reset (); });
 	run_smoke_check (ok, "vst3-catalog-highlight", [this]() { return smoke_vst3_catalog_highlight (); });
 	run_smoke_check (ok, "vst3-cycle-insert", [this]() { return _engine.smoke_vst3_cycle_insert (); });
 	run_smoke_check (ok, "vst3-prefs-bypass", [this]() { return smoke_vst3_prefs_bypass (); });
@@ -8639,7 +8640,7 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
-	/* VST3 B / 1 / 2 / × on Audio 2 FX row (before label bypass toggle). */
+	/* VST3 B / 1 / 2 / 3 / × on Audio 2 FX row (before label bypass toggle). */
 	for (int ui = 0; ui < kTracks; ++ui) {
 		if (_mixers[ui].hit_fx_bypass (x, y)) {
 			if (_engine.is_linked () && _engine.snapshot ().session_ok) {
@@ -8664,6 +8665,16 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		if (_mixers[ui].hit_fx_param_reset2 (x, y)) {
 			if (_engine.is_linked () && _engine.snapshot ().session_ok) {
 				(void)_engine.reset_vst3_param (2);
+				_engine.poll ();
+				_engine_snap = _engine.snapshot ();
+				sync_mixer_fx_from_engine ();
+			}
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
+		if (_mixers[ui].hit_fx_param_reset3 (x, y)) {
+			if (_engine.is_linked () && _engine.snapshot ().session_ok) {
+				(void)_engine.reset_vst3_param (3);
 				_engine.poll ();
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_fx_from_engine ();
@@ -10449,6 +10460,82 @@ after_mixer_p12_hit:
 	sync_mixer_fx_from_engine ();
 	std::fprintf (stderr,
 	              "airdour_win_shell: smoke-vst3-mixer-param12-reset ok (1/2 → reset)\n");
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+ShellWindow::smoke_vst3_mixer_param3_reset ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-param3-reset FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	layout_panes ();
+	sync_mixer_fx_from_engine ();
+
+	if (!_engine_snap.vst3_ok) {
+		/* Empty / scan-only: 3 chip must not hit. */
+		const D2D1_RECT_F& b = _mixers[1].bounds ();
+		bool chrome = false;
+		for (float y = b.top; y < b.bottom && !chrome; y += 2.f * _dpi_scale) {
+			for (float x = b.right - 72.f * _dpi_scale; x < b.right; x += 2.f * _dpi_scale) {
+				if (_mixers[1].hit_fx_param_reset3 (x, y)) {
+					chrome = true;
+					break;
+				}
+			}
+		}
+		if (chrome) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-mixer-param3-reset FAILED "
+			              "(3 chrome without VST3)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		(void)_engine.reset_vst3_param (3);
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-param3-reset ok "
+		              "(scan-only; no 3; set VST3_PATH to insert)\n");
+		std::fflush (stderr);
+		return true;
+	}
+
+	sync_mixer_fx_from_engine ();
+	layout_panes ();
+	if (!_mixers[1].fx_can_unload () || !_mixers[1].has_fx ()) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-param3-reset FAILED "
+		              "(no 3 chrome while vst3_ok)\n");
+		std::fflush (stderr);
+		return false;
+	}
+
+	const D2D1_RECT_F& b = _mixers[1].bounds ();
+	bool hit3 = false;
+	for (float y = b.top; y < b.bottom; y += 2.f * _dpi_scale) {
+		for (float x = b.right - 72.f * _dpi_scale; x < b.right; x += 2.f * _dpi_scale) {
+			if (_mixers[1].hit_fx_param_reset3 (x, y)) {
+				hit3 = true;
+				(void)_engine.reset_vst3_param (3);
+				goto after_mixer_p3_hit;
+			}
+		}
+	}
+after_mixer_p3_hit:
+	if (!hit3) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-param3-reset FAILED (hit3=0)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_fx_from_engine ();
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-vst3-mixer-param3-reset ok (3 → reset)\n");
 	std::fflush (stderr);
 	return true;
 }

@@ -34,6 +34,7 @@ MixerStrip::MixerStrip ()
 	, _fx_bypass_btn ()
 	, _fx_param_reset1_btn ()
 	, _fx_param_reset2_btn ()
+	, _fx_param_reset3_btn ()
 	, _fx_unload_btn ()
 	, _fx_param_track ()
 	, _fx_param_track2 ()
@@ -219,6 +220,7 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 		_fx_bypass_btn = D2D1::RectF (0, 0, 0, 0);
 		_fx_param_reset1_btn = D2D1::RectF (0, 0, 0, 0);
 		_fx_param_reset2_btn = D2D1::RectF (0, 0, 0, 0);
+		_fx_param_reset3_btn = D2D1::RectF (0, 0, 0, 0);
 		_fx_unload_btn = D2D1::RectF (0, 0, 0, 0);
 		_fx_param_track = D2D1::RectF (0, 0, 0, 0);
 		_fx_param_track2 = D2D1::RectF (0, 0, 0, 0);
@@ -243,8 +245,10 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 		_fx_unload_btn = D2D1::RectF (_fx_btn.right - unload_w, _fx_btn.top,
 		                              _fx_btn.right, _fx_btn.bottom);
 		/* Rects always reserved; hit/draw gated by _fx_can_unload (VST3 Audio 2). */
-		_fx_param_reset2_btn = D2D1::RectF (_fx_unload_btn.left - reset_w, _fx_btn.top,
+		_fx_param_reset3_btn = D2D1::RectF (_fx_unload_btn.left - reset_w, _fx_btn.top,
 		                                    _fx_unload_btn.left, _fx_btn.bottom);
+		_fx_param_reset2_btn = D2D1::RectF (_fx_param_reset3_btn.left - reset_w, _fx_btn.top,
+		                                    _fx_param_reset3_btn.left, _fx_btn.bottom);
 		_fx_param_reset1_btn = D2D1::RectF (_fx_param_reset2_btn.left - reset_w, _fx_btn.top,
 		                                    _fx_param_reset2_btn.left, _fx_btn.bottom);
 		_fx_bypass_btn = D2D1::RectF (_fx_param_reset1_btn.left - bypass_w, _fx_btn.top,
@@ -511,7 +515,8 @@ MixerStrip::hit_fx (float x, float y) const
 	if (_fx_can_unload && _fx_label[0] != L'\0') {
 		if (contains (_fx_unload_btn, x, y) || contains (_fx_bypass_btn, x, y)
 		    || contains (_fx_param_reset1_btn, x, y)
-		    || contains (_fx_param_reset2_btn, x, y)) {
+		    || contains (_fx_param_reset2_btn, x, y)
+		    || contains (_fx_param_reset3_btn, x, y)) {
 			return false; /* owned by hit_fx_unload / bypass / reset chips */
 		}
 	}
@@ -554,6 +559,16 @@ MixerStrip::hit_fx_param_reset2 (float x, float y) const
 	}
 	return _fx_param_reset2_btn.right > _fx_param_reset2_btn.left
 	       && contains (_fx_param_reset2_btn, x, y);
+}
+
+bool
+MixerStrip::hit_fx_param_reset3 (float x, float y) const
+{
+	if (_midi_strip || _narrow || !_fx_can_unload || _fx_label[0] == L'\0') {
+		return false;
+	}
+	return _fx_param_reset3_btn.right > _fx_param_reset3_btn.left
+	       && contains (_fx_param_reset3_btn, x, y);
 }
 
 bool
@@ -965,6 +980,9 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 				}
 				if (_fx_param_reset2_btn.right > _fx_param_reset2_btn.left) {
 					rt->DrawTextW (L"2", 1, fmt_meta, _fx_param_reset2_btn, brand);
+				}
+				if (_fx_param_reset3_btn.right > _fx_param_reset3_btn.left) {
+					rt->DrawTextW (L"3", 1, fmt_meta, _fx_param_reset3_btn, brand);
 				}
 				rt->DrawTextW (L"×", 1, fmt_meta, _fx_unload_btn, brand);
 			}
