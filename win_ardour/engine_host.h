@@ -1851,6 +1851,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool select_midi_notes_same_length ();
 	/** Select every note matching primary MIDI channel (0..15). */
 	bool select_midi_notes_same_channel ();
+	/** Select every note intersecting the active loop range. */
+	bool select_midi_notes_in_loop ();
 	void clear_midi_note_selection ();
 	bool delete_selected_midi_note ();
 
@@ -2048,6 +2050,12 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-midi-select-same-channel.
 	 */
 	bool smoke_midi_select_same_channel ();
+
+	/**
+	 * Loop [0.5..2.5], notes inside + outside → only intersecting selected.
+	 * For --smoke-midi-select-in-loop.
+	 */
+	bool smoke_midi_select_in_loop ();
 
 	/**
 	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.
