@@ -1914,6 +1914,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		refresh_midi_cc_lane ();
 		return true;
 	});
+	run_smoke_check (ok, "midi-vel-chord", [this]() { return smoke_midi_vel_chord (); });
 	run_smoke_check (ok, "midi-duplicate", [this]() { return _engine.smoke_midi_duplicate (); });
 	run_smoke_check (ok, "midi-panic", [this]() { return _engine.smoke_midi_panic (); });
 	run_smoke_check (ok, "stop-midi-panic", [this]() { return _engine.smoke_stop_midi_panic (); });
@@ -5303,6 +5304,99 @@ ShellWindow::do_toggle_snap ()
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+bool
+ShellWindow::smoke_midi_vel_chord ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-vel-chord FAILED (no session)\n");
+		return false;
+	}
+	if (!_engine.ensure_midi_track () || !_engine.ensure_midi_region (16.f)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-vel-chord FAILED (track/region)\n");
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	/* Clear existing notes one-by-one so the chord is alone. */
+	for (int guard = 0; guard < 64 && _engine_snap.midi_note_count > 0; ++guard) {
+		const EngineMidiNoteSnap& n = _engine_snap.midi_notes[0];
+		_engine.select_midi_note_at (n.start_sec + n.length_sec * 0.5f, n.pitch);
+		if (!_engine.delete_selected_midi_note ()) {
+			break;
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	if (!_engine.add_midi_note (60, 0.0f, 0.5f, 40)
+	    || !_engine.add_midi_note (64, 0.0f, 0.5f, 110)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-vel-chord FAILED (add)\n");
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (_engine_snap.midi_note_count < 2) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-vel-chord FAILED (count=%d)\n",
+		              _engine_snap.midi_note_count);
+		return false;
+	}
+	layout_panes ();
+	const D2D1_RECT_F& lane = _midi_lane;
+	const D2D1_RECT_F vel = midi_velocity_rect ();
+	float vh = vel.bottom - vel.top;
+	if (vh < 8.f || lane.right <= lane.left) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-vel-chord FAILED (layout)\n");
+		return false;
+	}
+	float cx = _lanes[0].strip.x_at_time (lane, 0.25f);
+	float quiet_h = vh * (40.f / 127.f);
+	float loud_h = vh * (110.f / 127.f);
+	float y_loud_only = vel.bottom - (quiet_h + loud_h) * 0.5f;
+	float y_inner = vel.bottom - quiet_h * 0.5f;
+
+	int i_loud = pick_midi_velocity_note_at (cx, y_loud_only);
+	int i_quiet = pick_midi_velocity_note_at (cx, y_inner);
+	if (i_loud < 0 || i_quiet < 0) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-vel-chord FAILED (pick miss)\n");
+		return false;
+	}
+	if (_engine_snap.midi_notes[i_loud].velocity < 100
+	    || _engine_snap.midi_notes[i_loud].pitch != 64) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-vel-chord FAILED "
+		              "(loud pick p=%u v=%u)\n",
+		              (unsigned)_engine_snap.midi_notes[i_loud].pitch,
+		              (unsigned)_engine_snap.midi_notes[i_loud].velocity);
+		return false;
+	}
+	if (_engine_snap.midi_notes[i_quiet].velocity > 60
+	    || _engine_snap.midi_notes[i_quiet].pitch != 60) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-vel-chord FAILED "
+		              "(quiet pick p=%u v=%u)\n",
+		              (unsigned)_engine_snap.midi_notes[i_quiet].pitch,
+		              (unsigned)_engine_snap.midi_notes[i_quiet].velocity);
+		return false;
+	}
+	/* Apply selection through the same path mouse-down uses. */
+	const EngineMidiNoteSnap& loud = _engine_snap.midi_notes[i_loud];
+	if (!_engine.select_midi_note_at (loud.start_sec + loud.length_sec * 0.5f, loud.pitch)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-vel-chord FAILED (select)\n");
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (_engine_snap.midi_selected_note_id != loud.id) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-vel-chord FAILED (selected id=%d want=%d)\n",
+		              (int)_engine_snap.midi_selected_note_id, (int)loud.id);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-midi-vel-chord ok "
+	              "(loud p=64 v=110 / quiet p=60 v=40)\n");
+	return true;
+}
+
 void
 ShellWindow::do_quantize_midi_notes ()
 {
@@ -7210,6 +7304,49 @@ ShellWindow::hit_midi_velocity_lane (float x, float y) const
 	return x >= vr.left && x <= vr.right && y >= vr.top && y <= vr.bottom;
 }
 
+int
+ShellWindow::pick_midi_velocity_note_at (float x, float y) const
+{
+	const D2D1_RECT_F vr = midi_velocity_rect ();
+	float vh = vr.bottom - vr.top;
+	if (vh <= 1.f) {
+		return -1;
+	}
+	const float time_sec = midi_time_at_x (x);
+	int best_contain = -1;
+	float best_contain_h = 1.e9f;
+	int best_tall = -1;
+	int best_tall_v = -1;
+	for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
+		const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
+		float t0 = n.start_sec;
+		float t1 = n.start_sec + n.length_sec;
+		if (time_sec < t0 - 0.02f || time_sec > t1 + 0.02f) {
+			continue;
+		}
+		float bar_h = vh * ((float)n.velocity / 127.f);
+		if (bar_h < 1.f * _dpi_scale && n.velocity > 0) {
+			bar_h = 1.f * _dpi_scale;
+		}
+		float bar_top = vr.bottom - bar_h;
+		if (y >= bar_top - 0.5f && y <= vr.bottom + 0.5f) {
+			/* Innermost (shortest) containing bar — chord stack tip. */
+			if (best_contain < 0 || bar_h < best_contain_h) {
+				best_contain = i;
+				best_contain_h = bar_h;
+			}
+		}
+		if ((int)n.velocity > best_tall_v) {
+			best_tall = i;
+			best_tall_v = (int)n.velocity;
+		}
+	}
+	if (best_contain >= 0) {
+		return best_contain;
+	}
+	return best_tall;
+}
+
 uint8_t
 ShellWindow::midi_pitch_at_y (float y) const
 {
@@ -7965,22 +8102,16 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_engine.ensure_midi_region ();
 		float time_sec = midi_time_at_x (x);
 		if (hit_midi_velocity_lane (x, y)) {
-			/* Velocity lane: select note under x if any, then drag velocity. */
-			bool hit_note = false;
-			for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
-				const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
-				float t0 = n.start_sec;
-				float t1 = n.start_sec + n.length_sec;
-				if (time_sec >= t0 - 0.02f && time_sec <= t1 + 0.02f) {
-					_engine.select_midi_note_at (time_sec, n.pitch);
-					hit_note = true;
-					break;
-				}
-			}
-			if (!hit_note && _engine_snap.midi_selected_note_id < 0
-			    && _engine_snap.midi_note_count > 0) {
+			/* Velocity lane: chord-aware pick by bar height under (x,y). */
+			int pi = pick_midi_velocity_note_at (x, y);
+			if (pi >= 0 && pi < _engine_snap.midi_note_count) {
+				const EngineMidiNoteSnap& n = _engine_snap.midi_notes[pi];
+				_engine.select_midi_note_at (n.start_sec + n.length_sec * 0.5f, n.pitch);
+			} else if (_engine_snap.midi_selected_note_id < 0
+			           && _engine_snap.midi_note_count > 0) {
 				/* No selection → edit all on drag apply. */
 			}
+			(void)time_sec;
 			_drag = DragMode::MidiVelocity;
 			_drag_index = -1;
 			_midi_vel_drag = midi_velocity_at_y (y);
