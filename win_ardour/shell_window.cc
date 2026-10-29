@@ -1919,6 +1919,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "stop-midi-panic", [this]() { return _engine.smoke_stop_midi_panic (); });
 	run_smoke_check (ok, "midi-audition", [this]() { return _engine.smoke_midi_audition (); });
 	run_smoke_check (ok, "midi-program", [this]() { return _engine.smoke_midi_program (); });
+	run_smoke_check (ok, "vst3-params", [this]() { return _engine.smoke_vst3_params (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
 	run_smoke_check (ok, "solo-all", [this]() { return _engine.smoke_solo_all (); });
@@ -10288,9 +10289,24 @@ ShellWindow::on_paint ()
 		_snwprintf_s (vca_frag, _TRUNCATE, L"  ·  VCA 1 · slaves=%d · g=%.2f",
 		              _engine_snap.vca_slave_count, _engine_snap.vca_gain);
 	}
+	wchar_t vst_frag[160] = L"";
+	if (_engine_snap.vst3_ok) {
+		if (_engine_snap.vst3_param_count > 0) {
+			_snwprintf_s (vst_frag, _TRUNCATE,
+			              L"  ·  VST3 %s%s · %s=%.2f",
+			              _engine_snap.vst3_name,
+			              _engine_snap.vst3_bypassed ? L" BYP" : L"",
+			              _engine_snap.vst3_param_name[0],
+			              _engine_snap.vst3_param_norm[0]);
+		} else {
+			_snwprintf_s (vst_frag, _TRUNCATE, L"  ·  VST3 %s%s",
+			              _engine_snap.vst3_name,
+			              _engine_snap.vst3_bypassed ? L" BYP" : L"");
+		}
+	}
 	if (_engine_snap.running) {
 		_snwprintf_s (status, _TRUNCATE,
-		              L"Engine  %s  ·  %u Hz  ·  period %u  ·  DSP %.1f%%  ·  cb %lluµs avg  ·  xruns %llu%s  ·  %s",
+		              L"Engine  %s  ·  %u Hz  ·  period %u  ·  DSP %.1f%%  ·  cb %lluµs avg  ·  xruns %llu%s%s  ·  %s",
 		              _engine_snap.backend.c_str (),
 		              _engine_snap.sample_rate,
 		              _engine_snap.period_frames,
@@ -10298,15 +10314,16 @@ ShellWindow::on_paint ()
 		              (unsigned long long)_engine_snap.callback_avg_us,
 		              (unsigned long long)_engine_snap.xrun_count,
 		              vca_frag,
+		              vst_frag,
 		              _engine_snap.detail.c_str ());
 	} else if (_engine_snap.available) {
 		_snwprintf_s (status, _TRUNCATE,
-		              L"Engine idle  ·  DSP %.1f%%  ·  %d tracks%s  ·  %s",
-		              dsp, kTracks, vca_frag, _engine_snap.detail.c_str ());
+		              L"Engine idle  ·  DSP %.1f%%  ·  %d tracks%s%s  ·  %s",
+		              dsp, kTracks, vca_frag, vst_frag, _engine_snap.detail.c_str ());
 	} else {
 		_snwprintf_s (status, _TRUNCATE,
-		              L"UI shell  ·  %d tracks%s  ·  %s",
-		              kTracks, vca_frag, _engine_snap.detail.c_str ());
+		              L"UI shell  ·  %d tracks%s%s  ·  %s",
+		              kTracks, vca_frag, vst_frag, _engine_snap.detail.c_str ());
 	}
 
 	const float meter_w = 96.f * _dpi_scale;
