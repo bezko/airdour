@@ -321,6 +321,9 @@ private:
 	bool smoke_vst3_mixer_unload ();
 	bool smoke_vst3_catalog_highlight ();
 	bool smoke_vst3_prefs_bypass ();
+	bool smoke_vst3_status_unload ();
+	bool hit_status_vst3_unload (float x, float y) const;
+	bool status_vst3_unload_center (float* out_x, float* out_y) const;
 	void do_cycle_vst3_insert (int dir);
 	void do_toggle_group_relative ();
 	void do_cycle_group_color ();
@@ -511,6 +514,7 @@ void do_toggle_selection_muted ();
 	float       _mixer_scroll_max; /* layout-computed */
 	float       _mixer_force_min_w; /* smoke: force min strip width (0 = default) */
 	D2D1_RECT_F _status_bar;
+	D2D1_RECT_F _status_vst3_unload_btn; /* × chip when vst3_ok */
 
 	ID2D1Factory*             _d2d_factory;
 	IDWriteFactory*           _dwrite_factory;
