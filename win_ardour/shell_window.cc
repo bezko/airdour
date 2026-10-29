@@ -1968,6 +1968,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "vst3-prefs-param-reset", [this]() { return smoke_vst3_prefs_param_reset (); });
 	run_smoke_check (ok, "vst3-prefs-param12-reset", [this]() { return smoke_vst3_prefs_param12_reset (); });
 	run_smoke_check (ok, "vst3-prefs-param3-reset", [this]() { return smoke_vst3_prefs_param3_reset (); });
+	run_smoke_check (ok, "vst3-prefs-param4-reset", [this]() { return smoke_vst3_prefs_param4_reset (); });
 	run_smoke_check (ok, "vst3-prefs-unload", [this]() { return smoke_vst3_prefs_unload (); });
 	run_smoke_check (ok, "vst3-status-unload", [this]() { return smoke_vst3_status_unload (); });
 	run_smoke_check (ok, "vst3-status-bypass", [this]() { return smoke_vst3_status_bypass (); });
@@ -11416,6 +11417,86 @@ ShellWindow::smoke_vst3_prefs_param3_reset ()
 }
 
 bool
+ShellWindow::smoke_vst3_prefs_param4_reset ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-param4-reset FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	sync_prefs_from_engine ();
+	_prefs.set_visible (true);
+	_prefs_visible = true;
+	_prefs.layout ((float)_width, (float)_height, _dpi_scale);
+
+	float r4x = 0.f, r4y = 0.f;
+	if (!_engine_snap.vst3_ok) {
+		/* Empty / scan-only: no Reset-4 chrome. */
+		if (_prefs.vst3_param_reset4_btn_center (&r4x, &r4y)
+		    || _prefs.hit_test (r4x, r4y) == PrefsHit::Vst3ParamReset4) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-prefs-param4-reset FAILED "
+			              "(Reset-4 chrome without VST3)\n");
+			std::fflush (stderr);
+			_prefs_visible = false;
+			_prefs.set_visible (false);
+			return false;
+		}
+		(void)_engine.reset_vst3_param (4);
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-param4-reset ok "
+		              "(scan-only; no Reset-4; set VST3_PATH to insert)\n");
+		std::fflush (stderr);
+		_prefs_visible = false;
+		_prefs.set_visible (false);
+		return true;
+	}
+
+	if (!_prefs.vst3_param_reset4_btn_center (&r4x, &r4y)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-param4-reset FAILED (layout)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (_prefs.hit_test (r4x, r4y) != PrefsHit::Vst3ParamReset4) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-param4-reset FAILED (hit)\n");
+		std::fflush (stderr);
+		return false;
+	}
+
+	/* Fewer than 5 params: click is a soft no-op (chrome still present). */
+	if (_engine_snap.vst3_param_count < 5) {
+		apply_prefs_hit (PrefsHit::Vst3ParamReset4);
+		_prefs_visible = false;
+		_prefs.set_visible (false);
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-param4-reset ok "
+		              "(chrome; plugin has %d params)\n",
+		              _engine_snap.vst3_param_count);
+		std::fflush (stderr);
+		return true;
+	}
+
+	const float d4 = _engine_snap.vst3_param_norm[4];
+	(void)_engine.set_vst3_param (4, (d4 < 0.5f) ? 0.85f : 0.15f);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+
+	apply_prefs_hit (PrefsHit::Vst3ParamReset4);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_prefs_visible = false;
+	_prefs.set_visible (false);
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-vst3-prefs-param4-reset ok "
+	              "(Reset-4 → default)\n");
+	std::fflush (stderr);
+	return true;
+}
+
+bool
 ShellWindow::smoke_vst3_prefs_unload ()
 {
 	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
@@ -11588,6 +11669,18 @@ ShellWindow::apply_prefs_hit (PrefsHit hit)
 			_prefs.set_status (L"VST3 param3 reset");
 		} else {
 			_prefs.set_status (L"VST3 reset-3 (none / <4 params)");
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_fx_from_engine ();
+		sync_prefs_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	case PrefsHit::Vst3ParamReset4:
+		if (_engine.reset_vst3_param (4)) {
+			_prefs.set_status (L"VST3 param4 reset");
+		} else {
+			_prefs.set_status (L"VST3 reset-4 (none / <5 params)");
 		}
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();

@@ -327,6 +327,7 @@ private:
 	bool smoke_vst3_prefs_param_reset ();
 	bool smoke_vst3_prefs_param12_reset ();
 	bool smoke_vst3_prefs_param3_reset ();
+	bool smoke_vst3_prefs_param4_reset ();
 	bool smoke_vst3_prefs_unload ();
 	bool smoke_vst3_status_unload ();
 	bool smoke_vst3_status_bypass ();
