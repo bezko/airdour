@@ -270,6 +270,9 @@ private:
 	void sync_transport_freeze_from_engine ();
 	void do_toggle_snap ();
 	void do_cycle_snap_density ();
+	/** " ON·beat" / " OFF" style suffix for editor caption. */
+	const wchar_t* snap_caption_suffix () const;
+	bool smoke_snap_density_label ();
 	void do_quantize_midi_notes ();
 	void do_transpose_midi_notes (int semitones);
 	void do_nudge_midi_velocity (int delta);

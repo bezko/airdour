@@ -109,6 +109,13 @@ public:
 	void set_snap_enabled (bool on) { _snap_enabled = on; }
 	bool snap_enabled () const { return _snap_enabled; }
 
+	/** 0=bar 1=beat 2=1/2 3=1/4 — short glyph on Snap btn when enabled. */
+	void set_snap_density (int density_0_to_3);
+	int  snap_density () const { return _snap_density; }
+	/** Button caption: "Snap" when off, else Bar/Beat/1/2/1/4. */
+	const wchar_t* snap_btn_label () const;
+	bool snap_btn_center (float* out_x, float* out_y) const;
+
 	void set_midi_step_enabled (bool on) { _midi_step_enabled = on; }
 	bool midi_step_enabled () const { return _midi_step_enabled; }
 
@@ -268,6 +275,7 @@ private:
 	bool        _loop_active;
 	bool        _punch_enabled;
 	bool        _snap_enabled;
+	int         _snap_density; /* 0=bar 1=beat 2=1/2 3=1/4 */
 	bool        _midi_step_enabled;
 	int         _midi_chord_quality;
 	bool        _midi_arp_enabled;

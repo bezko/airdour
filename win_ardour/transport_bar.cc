@@ -78,6 +78,7 @@ TransportBar::TransportBar ()
 	, _loop_active (false)
 	, _punch_enabled (false)
 	, _snap_enabled (false)
+	, _snap_density (1)
 	, _midi_step_enabled (false)
 	, _midi_chord_quality (0)
 	, _midi_arp_enabled (false)
@@ -105,6 +106,43 @@ TransportBar::TransportBar ()
 	, _tc_seconds (0)
 	, _tc_frames (0)
 {
+}
+
+void
+TransportBar::set_snap_density (int density_0_to_3)
+{
+	if (density_0_to_3 < 0) {
+		density_0_to_3 = 0;
+	}
+	if (density_0_to_3 > 3) {
+		density_0_to_3 = 3;
+	}
+	_snap_density = density_0_to_3;
+}
+
+const wchar_t*
+TransportBar::snap_btn_label () const
+{
+	if (!_snap_enabled) {
+		return L"Snap";
+	}
+	static const wchar_t* labels[] = { L"Bar", L"Beat", L"1/2", L"1/4" };
+	int d = _snap_density;
+	if (d < 0 || d > 3) {
+		d = 1;
+	}
+	return labels[d];
+}
+
+bool
+TransportBar::snap_btn_center (float* out_x, float* out_y) const
+{
+	if (!out_x || !out_y) {
+		return false;
+	}
+	*out_x = 0.5f * (_snap_btn.left + _snap_btn.right);
+	*out_y = 0.5f * (_snap_btn.top + _snap_btn.bottom);
+	return _snap_btn.right > _snap_btn.left;
 }
 
 void
@@ -436,7 +474,7 @@ TransportBar::draw (ID2D1RenderTarget* rt,
 	draw_btn (_strip_silence_btn, L"Sil", false);
 	draw_btn (_consolidate_btn, L"Cons", false);
 	draw_btn (_freeze_btn, L"Frz", _freeze_active);
-	draw_btn (_snap_btn, L"Snap", _snap_enabled);
+	draw_btn (_snap_btn, snap_btn_label (), _snap_enabled);
 	draw_btn (_quantize_btn, L"Qnt", false);
 	draw_btn (_midi_trans_up_btn, L"T+", false);
 	draw_btn (_midi_trans_dn_btn, L"T−", false);
