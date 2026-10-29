@@ -328,6 +328,11 @@ struct EngineSnapshot {
 	bool         pref_click_default; /* mirrors Config clicking when saved */
 	static constexpr int kPrefsHintLen = 96;
 	wchar_t      vst3_path_hint[kPrefsHintLen];
+	/* Last VST3 scan catalog (Prefs list; scan-only safe when count=0). */
+	static constexpr int kMaxVst3Catalog = 8;
+	int          vst3_scan_count; /* full PluginManager VST3 list size */
+	int          vst3_catalog_count; /* names stored below (≤kMaxVst3Catalog) */
+	wchar_t      vst3_catalog_name[kMaxVst3Catalog][40];
 	/* VST3 DSP insert on Audio 2 (D2D host params; no GTK editor). */
 	static constexpr int kMaxVst3Params = 3;
 	static constexpr int kVst3NameLen = 40;
@@ -1861,6 +1866,18 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Scan-only with VST3=0 still returns true. For --smoke-vst3-lifecycle.
 	 */
 	bool smoke_vst3_lifecycle ();
+
+	/**
+	 * Copy PluginManager VST3 names into vst3_catalog_* snapshot fields
+	 * (first kMaxVst3Catalog). Call after scan/rescan.
+	 */
+	void refresh_vst3_catalog_snap ();
+
+	/**
+	 * Rescan → assert snap catalog count matches PluginManager size
+	 * (0 is PASS). For --smoke-vst3-catalog.
+	 */
+	bool smoke_vst3_catalog ();
 
 	/**
 	 * Sample WASAPI shared timing + working set while transport rolls briefly.

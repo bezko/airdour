@@ -836,6 +836,11 @@ EngineHost::EngineHost ()
 	_snap.track_fx_ok = false;
 	_snap.track_fx_bypassed = false;
 	_snap.track_fx_param = 0.3f;
+	_snap.vst3_scan_count = 0;
+	_snap.vst3_catalog_count = 0;
+	for (int ci = 0; ci < EngineSnapshot::kMaxVst3Catalog; ++ci) {
+		_snap.vst3_catalog_name[ci][0] = L'\0';
+	}
 	_snap.vst3_ok = false;
 	_snap.vst3_bypassed = false;
 	_snap.vst3_track = 1;
@@ -27278,6 +27283,7 @@ EngineHost::smoke_vst3 ()
 			std::fflush (stderr);
 			return false;
 		}
+		refresh_vst3_catalog_snap ();
 
 		const size_t n = PluginManager::instance ().vst3_plugin_info ().size ();
 		PluginInfoPtr info = find_smoke_vst3_info ();
@@ -27647,7 +27653,86 @@ EngineHost::rescan_vst3 ()
 		_snap.detail = L"VST3 rescan failed — no Session";
 		return false;
 	}
-	return scan_vst3_fresh ();
+	if (!scan_vst3_fresh ()) {
+		return false;
+	}
+	refresh_vst3_catalog_snap ();
+	return true;
+}
+
+void
+EngineHost::refresh_vst3_catalog_snap ()
+{
+	_snap.vst3_scan_count = 0;
+	_snap.vst3_catalog_count = 0;
+	for (int i = 0; i < EngineSnapshot::kMaxVst3Catalog; ++i) {
+		_snap.vst3_catalog_name[i][0] = L'\0';
+	}
+	try {
+		const PluginInfoList& v3 = PluginManager::instance ().vst3_plugin_info ();
+		_snap.vst3_scan_count = (int)v3.size ();
+		int filled = 0;
+		for (PluginInfoList::const_iterator i = v3.begin ();
+		     i != v3.end () && filled < EngineSnapshot::kMaxVst3Catalog; ++i) {
+			if (!*i) {
+				continue;
+			}
+			copy_name_to_snap (_snap.vst3_catalog_name[filled],
+			                   EngineSnapshot::kVst3NameLen, (*i)->name);
+			++filled;
+		}
+		_snap.vst3_catalog_count = filled;
+	} catch (...) {
+		_snap.vst3_scan_count = 0;
+		_snap.vst3_catalog_count = 0;
+	}
+}
+
+bool
+EngineHost::smoke_vst3_catalog ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-vst3-catalog failed — no Session";
+		return false;
+	}
+	try {
+		if (!rescan_vst3 ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-catalog FAILED (rescan)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const size_t n = PluginManager::instance ().vst3_plugin_info ().size ();
+		if (_snap.vst3_scan_count != (int)n) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-catalog FAILED "
+			              "(snap=%d mgr=%zu)\n",
+			              _snap.vst3_scan_count, n);
+			std::fflush (stderr);
+			return false;
+		}
+		const int expect_cat = (int)std::min (n, (size_t)EngineSnapshot::kMaxVst3Catalog);
+		if (_snap.vst3_catalog_count != expect_cat) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-catalog FAILED "
+			              "(catalog=%d expect=%d)\n",
+			              _snap.vst3_catalog_count, expect_cat);
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-catalog ok (scan=%d catalog=%d%s)\n",
+		              _snap.vst3_scan_count, _snap.vst3_catalog_count,
+		              n == 0 ? "; empty — set VST3_PATH to populate Prefs list" : "");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-vst3-catalog ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst3-catalog exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
 }
 
 bool
@@ -32136,6 +32221,11 @@ EngineHost::EngineHost ()
 	_snap.track_fx_ok = false;
 	_snap.track_fx_bypassed = false;
 	_snap.track_fx_param = 0.3f;
+	_snap.vst3_scan_count = 0;
+	_snap.vst3_catalog_count = 0;
+	for (int ci = 0; ci < EngineSnapshot::kMaxVst3Catalog; ++ci) {
+		_snap.vst3_catalog_name[ci][0] = L'\0';
+	}
 	_snap.vst3_ok = false;
 	_snap.vst3_bypassed = false;
 	_snap.vst3_track = 1;
@@ -36386,6 +36476,17 @@ EngineHost::rescan_vst3 ()
 
 bool
 EngineHost::smoke_vst3_lifecycle ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_vst3_catalog_snap ()
+{
+}
+
+bool
+EngineHost::smoke_vst3_catalog ()
 {
 	return false;
 }
