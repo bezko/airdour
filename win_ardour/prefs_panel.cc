@@ -31,6 +31,8 @@ PrefsPanel::PrefsPanel ()
 	, _vst3_rescan_btn ()
 	, _vst3_bypass_btn ()
 	, _vst3_param_reset_btn ()
+	, _vst3_param_reset1_btn ()
+	, _vst3_param_reset2_btn ()
 	, _vst3_unload_btn ()
 	, _save_btn ()
 	, _visible (false)
@@ -59,7 +61,7 @@ void
 PrefsPanel::layout (float view_w, float view_h, float dpi_scale)
 {
 	float pad = 24.f * dpi_scale;
-	float card_w = std::min (view_w - pad * 2.f, 560.f * dpi_scale);
+	float card_w = std::min (view_w - pad * 2.f, 640.f * dpi_scale);
 	float card_h = std::min (view_h - pad * 2.f, 520.f * dpi_scale);
 	float cx = (view_w - card_w) * 0.5f;
 	float cy = (view_h - card_h) * 0.5f;
@@ -94,19 +96,28 @@ PrefsPanel::layout (float view_w, float view_h, float dpi_scale)
 	}
 	y = cat_y + 8.f * dpi_scale;
 
-	_vst3_rescan_btn = D2D1::RectF (x, y, x + 140.f * dpi_scale, y + btn_h);
+	_vst3_rescan_btn = D2D1::RectF (x, y, x + 120.f * dpi_scale, y + btn_h);
 	_vst3_bypass_btn = D2D1::RectF (_vst3_rescan_btn.right + gap, y,
-	                                _vst3_rescan_btn.right + gap + 120.f * dpi_scale,
+	                                _vst3_rescan_btn.right + gap + 100.f * dpi_scale,
 	                                y + btn_h);
 	if (_vst3_ok) {
+		float rw = 70.f * dpi_scale;
 		_vst3_param_reset_btn = D2D1::RectF (_vst3_bypass_btn.right + gap, y,
-		                                     _vst3_bypass_btn.right + gap + 90.f * dpi_scale,
+		                                     _vst3_bypass_btn.right + gap + rw,
 		                                     y + btn_h);
-		_vst3_unload_btn = D2D1::RectF (_vst3_param_reset_btn.right + gap, y,
-		                                _vst3_param_reset_btn.right + gap + 100.f * dpi_scale,
+		_vst3_param_reset1_btn = D2D1::RectF (_vst3_param_reset_btn.right + gap, y,
+		                                      _vst3_param_reset_btn.right + gap + rw,
+		                                      y + btn_h);
+		_vst3_param_reset2_btn = D2D1::RectF (_vst3_param_reset1_btn.right + gap, y,
+		                                      _vst3_param_reset1_btn.right + gap + rw,
+		                                      y + btn_h);
+		_vst3_unload_btn = D2D1::RectF (_vst3_param_reset2_btn.right + gap, y,
+		                                _vst3_param_reset2_btn.right + gap + 80.f * dpi_scale,
 		                                y + btn_h);
 	} else {
 		_vst3_param_reset_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
+		_vst3_param_reset1_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
+		_vst3_param_reset2_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
 		_vst3_unload_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
 	}
 
@@ -235,6 +246,12 @@ PrefsPanel::hit_test (float x, float y) const
 	if (_vst3_ok && contains (_vst3_param_reset_btn, x, y)) {
 		return PrefsHit::Vst3ParamReset;
 	}
+	if (_vst3_ok && contains (_vst3_param_reset1_btn, x, y)) {
+		return PrefsHit::Vst3ParamReset1;
+	}
+	if (_vst3_ok && contains (_vst3_param_reset2_btn, x, y)) {
+		return PrefsHit::Vst3ParamReset2;
+	}
 	if (_vst3_ok && contains (_vst3_unload_btn, x, y)) {
 		return PrefsHit::Vst3Unload;
 	}
@@ -295,6 +312,34 @@ PrefsPanel::vst3_param_reset_btn_center (float* out_x, float* out_y) const
 	}
 	*out_x = 0.5f * (_vst3_param_reset_btn.left + _vst3_param_reset_btn.right);
 	*out_y = 0.5f * (_vst3_param_reset_btn.top + _vst3_param_reset_btn.bottom);
+	return true;
+}
+
+bool
+PrefsPanel::vst3_param_reset1_btn_center (float* out_x, float* out_y) const
+{
+	if (!out_x || !out_y) {
+		return false;
+	}
+	if (!_vst3_ok || _vst3_param_reset1_btn.right <= _vst3_param_reset1_btn.left) {
+		return false;
+	}
+	*out_x = 0.5f * (_vst3_param_reset1_btn.left + _vst3_param_reset1_btn.right);
+	*out_y = 0.5f * (_vst3_param_reset1_btn.top + _vst3_param_reset1_btn.bottom);
+	return true;
+}
+
+bool
+PrefsPanel::vst3_param_reset2_btn_center (float* out_x, float* out_y) const
+{
+	if (!out_x || !out_y) {
+		return false;
+	}
+	if (!_vst3_ok || _vst3_param_reset2_btn.right <= _vst3_param_reset2_btn.left) {
+		return false;
+	}
+	*out_x = 0.5f * (_vst3_param_reset2_btn.left + _vst3_param_reset2_btn.right);
+	*out_y = 0.5f * (_vst3_param_reset2_btn.top + _vst3_param_reset2_btn.bottom);
 	return true;
 }
 
@@ -437,6 +482,12 @@ PrefsPanel::draw (ID2D1RenderTarget* rt,
 	          _vst3_ok && _vst3_bypassed);
 	if (_vst3_ok && _vst3_param_reset_btn.right > _vst3_param_reset_btn.left) {
 		draw_btn (_vst3_param_reset_btn, L"Reset", false);
+	}
+	if (_vst3_ok && _vst3_param_reset1_btn.right > _vst3_param_reset1_btn.left) {
+		draw_btn (_vst3_param_reset1_btn, L"Reset-1", false);
+	}
+	if (_vst3_ok && _vst3_param_reset2_btn.right > _vst3_param_reset2_btn.left) {
+		draw_btn (_vst3_param_reset2_btn, L"Reset-2", false);
 	}
 	if (_vst3_ok && _vst3_unload_btn.right > _vst3_unload_btn.left) {
 		draw_btn (_vst3_unload_btn, L"Unload", false);
