@@ -180,6 +180,7 @@ private:
 		RegionMovePending, /* click on selection body; may become move */
 		RegionMove, /* drag selected region body */
 		MidiDraw, /* click/drag on MIDI piano-roll to create a note */
+		MidiMarquee, /* Shift+drag empty piano-roll → box-select notes */
 		MidiVelocity, /* drag velocity lane → set selected/all note velocity */
 		MidiTrimStart, /* drag note left edge → trim start */
 		MidiTrimEnd, /* drag note right edge → trim end */
@@ -470,11 +471,14 @@ void do_toggle_selection_muted ();
 	int _focus_audio_track; /* last mixer/editor label click for rename/reorder */
 	bool _group_pick[kTracksMax]; /* Shift+click candidates for Grp */
 	float _pan_last_x;
+	float _pan_last_y;
 	float _pan_down_x;
 	float _pan_down_y;
 	float _region_move_grab_offset_sec; /* pointer time − region start at grab */
 	float _midi_draw_start_sec;
 	uint8_t _midi_draw_pitch;
+	float _midi_marquee_t0;
+	uint8_t _midi_marquee_p0;
 	int     _midi_vel_drag; /* live preview 1..127 while MidiVelocity drag */
 	float   _midi_trim_start_sec; /* live preview while MidiTrim* drag */
 	float   _midi_trim_end_sec;

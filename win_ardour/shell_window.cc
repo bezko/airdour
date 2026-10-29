@@ -104,11 +104,14 @@ ShellWindow::ShellWindow ()
 	, _drag_index (-1)
 	, _focus_audio_track (0)
 	, _pan_last_x (0.f)
+	, _pan_last_y (0.f)
 	, _pan_down_x (0.f)
 	, _pan_down_y (0.f)
 	, _region_move_grab_offset_sec (0.f)
 	, _midi_draw_start_sec (0.f)
 	, _midi_draw_pitch (60)
+	, _midi_marquee_t0 (0.f)
+	, _midi_marquee_p0 (60)
 	, _midi_vel_drag (100)
 	, _midi_trim_start_sec (0.f)
 	, _midi_trim_end_sec (0.f)
@@ -1919,6 +1922,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "stop-midi-panic", [this]() { return _engine.smoke_stop_midi_panic (); });
 	run_smoke_check (ok, "midi-audition", [this]() { return _engine.smoke_midi_audition (); });
 	run_smoke_check (ok, "midi-multi-select", [this]() { return _engine.smoke_midi_multi_select (); });
+	run_smoke_check (ok, "midi-marquee", [this]() { return _engine.smoke_midi_marquee (); });
 	run_smoke_check (ok, "midi-program", [this]() { return _engine.smoke_midi_program (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
@@ -8059,6 +8063,20 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			do_step_input_pitch (pitch);
 			return true;
 		}
+		if ((GetKeyState (VK_SHIFT) & 0x8000) != 0) {
+			/* Shift+drag empty → marquee box-select (Ctrl keeps additive). */
+			_drag = DragMode::MidiMarquee;
+			_drag_index = -1;
+			_midi_marquee_t0 = time_sec;
+			_midi_marquee_p0 = pitch;
+			_pan_down_x = x;
+			_pan_down_y = y;
+			_pan_last_x = x;
+			_pan_last_y = y;
+			SetCapture (_hwnd);
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
 		/* Empty cell → start draw (finalize length on mouse-up). */
 		_engine.clear_midi_note_selection ();
 		_drag = DragMode::MidiDraw;
@@ -8967,8 +8985,9 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 		return true;
 	}
 
-	if (_drag == DragMode::MidiDraw) {
+	if (_drag == DragMode::MidiDraw || _drag == DragMode::MidiMarquee) {
 		_pan_last_x = x;
+		_pan_last_y = y;
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
@@ -9044,6 +9063,16 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 void
 ShellWindow::on_mouse_up ()
 {
+	if (_drag == DragMode::MidiMarquee && _engine.is_linked () && _engine_snap.session_ok) {
+		float t1 = midi_time_at_x (_pan_last_x);
+		uint8_t p1 = midi_pitch_at_y (_pan_last_y);
+		const bool additive = (GetKeyState (VK_CONTROL) & 0x8000) != 0;
+		_engine.select_midi_notes_in_rect (_midi_marquee_t0, t1, _midi_marquee_p0, p1,
+		                                   additive);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
 	if (_drag == DragMode::MidiDraw && _engine.is_linked () && _engine_snap.session_ok) {
 		float end_sec = midi_time_at_x (_pan_last_x);
 		float start = _midi_draw_start_sec;
@@ -9777,6 +9806,35 @@ ShellWindow::draw_midi_lane ()
 		_rt->FillRectangle (D2D1::RectF (x0, y0, x1, y1), _brush_midi);
 		_brush_midi->SetOpacity (1.f);
 	}
+	/* Marquee selection rubber-band. */
+	if (_drag == DragMode::MidiMarquee && _brush_accent) {
+		float t0 = _midi_marquee_t0;
+		float t1 = midi_time_at_x (_pan_last_x);
+		uint8_t p0 = _midi_marquee_p0;
+		uint8_t p1 = midi_pitch_at_y (_pan_last_y);
+		if (t1 < t0) {
+			float tmp = t0;
+			t0 = t1;
+			t1 = tmp;
+		}
+		if (p1 < p0) {
+			uint8_t tmp = p0;
+			p0 = p1;
+			p1 = tmp;
+		}
+		float x0 = _lanes[0].strip.x_at_time (r, t0);
+		float x1 = _lanes[0].strip.x_at_time (r, t1);
+		int row0 = (int)(kMidiPitchHi - p1);
+		int row1 = (int)(kMidiPitchHi - p0);
+		float y0 = piano.top + (float)row0 * row_h;
+		float y1 = piano.top + (float)(row1 + 1) * row_h;
+		_brush_accent->SetOpacity (0.22f);
+		_rt->FillRectangle (D2D1::RectF (x0, y0, x1, y1), _brush_accent);
+		_brush_accent->SetOpacity (0.85f);
+		_rt->DrawRectangle (D2D1::RectF (x0, y0, x1, y1), _brush_accent,
+		                    std::max (1.f, 1.25f * _dpi_scale));
+		_brush_accent->SetOpacity (1.f);
+	}
 
 	wchar_t midicap[160];
 	if (_engine_snap.midi_track_ok) {
@@ -10000,6 +10058,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"Q / Qnt", L"Quantize MIDI notes to snap grid" },
 		{ L"Shift+click note", L"Toggle MIDI note multi-select" },
+		{ L"Shift+drag empty", L"MIDI marquee box-select (Ctrl=add)" },
 		{ L". / ,  Shift", L"MIDI transpose ±1 · ±12 (T+/T−)" },
 		{ L"↑ / ↓  Shift", L"MIDI velocity ±1 · ±8 (V+/V−)" },
 		{ L"Alt+←/→  Shift", L"MIDI note length ± (L+/L−; snap unit)" },

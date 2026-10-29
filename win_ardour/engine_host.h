@@ -1833,6 +1833,9 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 *  When additive (Shift+click), toggles membership; else replaces. */
 	bool select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop = 0.f,
 	                          bool additive = false);
+	/** Select notes overlapping time×pitch box (inclusive pitches). */
+	bool select_midi_notes_in_rect (float t0, float t1, uint8_t pitch_lo, uint8_t pitch_hi,
+	                                bool additive = false);
 	void clear_midi_note_selection ();
 	bool delete_selected_midi_note ();
 
@@ -1977,6 +1980,12 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * clear. For --smoke-midi-multi-select.
 	 */
 	bool smoke_midi_multi_select ();
+
+	/**
+	 * Add three notes, marquee the first two, transpose, verify third untouched.
+	 * For --smoke-midi-marquee.
+	 */
+	bool smoke_midi_marquee ();
 
 	/**
 	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.

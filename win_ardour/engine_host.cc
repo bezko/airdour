@@ -27706,6 +27706,59 @@ EngineHost::select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop
 	return true;
 }
 
+bool
+EngineHost::select_midi_notes_in_rect (float t0, float t1, uint8_t pitch_lo, uint8_t pitch_hi,
+                                       bool additive)
+{
+	refresh_midi_notes_snap ();
+	if (!_impl) {
+		return false;
+	}
+	if (t1 < t0) {
+		float tmp = t0;
+		t0 = t1;
+		t1 = tmp;
+	}
+	if (pitch_hi < pitch_lo) {
+		uint8_t tmp = pitch_lo;
+		pitch_lo = pitch_hi;
+		pitch_hi = tmp;
+	}
+	if (!additive) {
+		_impl->clear_midi_note_sel ();
+	} else if (_impl->selected_midi_note_ids.empty ()
+	           && _impl->selected_midi_note_id >= 0) {
+		_impl->selected_midi_note_ids.insert (_impl->selected_midi_note_id);
+	}
+
+	int hit = 0;
+	Evoral::event_id_t last = -1;
+	for (int i = 0; i < _snap.midi_note_count; ++i) {
+		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+		if (n.pitch < pitch_lo || n.pitch > pitch_hi) {
+			continue;
+		}
+		float n0 = n.start_sec;
+		float n1 = n.start_sec + n.length_sec;
+		if (n1 <= t0 || n0 >= t1) {
+			continue;
+		}
+		_impl->selected_midi_note_ids.insert (n.id);
+		last = n.id;
+		++hit;
+	}
+	if (last >= 0) {
+		_impl->selected_midi_note_id = last;
+	} else if (!additive) {
+		_impl->selected_midi_note_id = -1;
+	}
+	refresh_midi_notes_snap ();
+	std::fprintf (stderr, "airdour_win_shell: marquee select hit=%d additive=%d\n",
+	              hit, additive ? 1 : 0);
+	std::fflush (stderr);
+	return hit > 0;
+}
+
 void
 EngineHost::clear_midi_note_selection ()
 {
@@ -29306,6 +29359,136 @@ EngineHost::smoke_midi_multi_select ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi-select exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_marquee ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-marquee failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-marquee FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-marquee FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for marquee smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->clear_midi_note_sel ();
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-marquee FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+
+		if (!add_midi_note (60, 0.0f, 0.4f, 100)
+		    || !add_midi_note (64, 0.5f, 0.4f, 100)
+		    || !add_midi_note (67, 2.0f, 0.4f, 100)
+		    || _snap.midi_note_count < 3) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-marquee FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* Box covers first two notes; third at t=2 is outside. */
+		if (!select_midi_notes_in_rect (0.0f, 1.2f, 60, 64, false)) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-marquee FAILED (rect)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		int sel = 0;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				++sel;
+			}
+		}
+		if (sel != 2) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-marquee FAILED (sel=%d)\n",
+			              sel);
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!transpose_midi_notes (1)) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-marquee FAILED (transpose)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		bool have61 = false;
+		bool have65 = false;
+		bool have67 = false;
+		bool have60 = false;
+		bool have64 = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			uint8_t p = _snap.midi_notes[i].pitch;
+			if (p == 61) {
+				have61 = true;
+			}
+			if (p == 65) {
+				have65 = true;
+			}
+			if (p == 67) {
+				have67 = true;
+			}
+			if (p == 60) {
+				have60 = true;
+			}
+			if (p == 64) {
+				have64 = true;
+			}
+		}
+		if (!have61 || !have65 || !have67 || have60 || have64) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-marquee FAILED (pitches)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		set_snap_enabled (snap_was);
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-marquee ok (notes=%d)\n",
+		              _snap.midi_note_count);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-marquee ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-marquee exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -36221,6 +36404,18 @@ EngineHost::select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop
 	return false;
 }
 
+bool
+EngineHost::select_midi_notes_in_rect (float t0, float t1, uint8_t pitch_lo, uint8_t pitch_hi,
+                                       bool additive)
+{
+	(void)t0;
+	(void)t1;
+	(void)pitch_lo;
+	(void)pitch_hi;
+	(void)additive;
+	return false;
+}
+
 void
 EngineHost::clear_midi_note_selection ()
 {
@@ -36343,6 +36538,12 @@ EngineHost::smoke_midi_length ()
 
 bool
 EngineHost::smoke_midi_multi_select ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_marquee ()
 {
 	return false;
 }
