@@ -1719,6 +1719,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "punch-navigate", [this]() { return _engine.smoke_punch_navigate (); });
 	run_smoke_check (ok, "session-extent-navigate", [this]() { return _engine.smoke_session_extent_navigate (); });
 	run_smoke_check (ok, "loop-navigate", [this]() { return _engine.smoke_loop_navigate (); });
+	run_smoke_check (ok, "loop-punch-edge-labels", [this]() {
+		return smoke_loop_punch_edge_labels ();
+	});
 	run_smoke_check (ok, "playhead-nudge", [this]() { return _engine.smoke_playhead_nudge (); });
 	run_smoke_check (ok, "zoom-punch", [this]() {
 		if (!_engine.smoke_zoom_punch ()) return false;
@@ -9411,6 +9414,23 @@ ShellWindow::draw_editor_ruler ()
 		}
 	}
 
+	/* Edge captions so loop/punch washes are not anonymous washes. */
+	{
+		D2D1_RECT_F lr;
+		if (loop_punch_edge_label_rect (true, true, &lr) && _brush_loop && _fmt_meta) {
+			_rt->DrawTextW (L"In", 2, _fmt_meta, lr, _brush_loop);
+		}
+		if (loop_punch_edge_label_rect (true, false, &lr) && _brush_loop && _fmt_meta) {
+			_rt->DrawTextW (L"Out", 3, _fmt_meta, lr, _brush_loop);
+		}
+		if (loop_punch_edge_label_rect (false, true, &lr) && _brush_punch && _fmt_meta) {
+			_rt->DrawTextW (L"In", 2, _fmt_meta, lr, _brush_punch);
+		}
+		if (loop_punch_edge_label_rect (false, false, &lr) && _brush_punch && _fmt_meta) {
+			_rt->DrawTextW (L"Out", 3, _fmt_meta, lr, _brush_punch);
+		}
+	}
+
 	for (int i = 0; i < _engine_snap.marker_count; ++i) {
 		float n = (_engine_snap.markers[i].sec - view0) / span;
 		if (n < 0.f || n > 1.f) {
@@ -9439,6 +9459,113 @@ ShellWindow::draw_editor_ruler ()
 			D2D1::RectF (px - thick * 0.5f, rr.top, px + thick * 0.5f, rr.bottom),
 			_brush_playhead);
 	}
+}
+
+bool
+ShellWindow::loop_punch_edge_label_rect (bool is_loop, bool is_start, D2D1_RECT_F* out) const
+{
+	if (!out) {
+		return false;
+	}
+	const D2D1_RECT_F& rr = _editor_ruler;
+	if (rr.right <= rr.left) {
+		return false;
+	}
+	float t0 = 0.f;
+	float t1 = 0.f;
+	if (is_loop) {
+		if (!_engine_snap.loop_active
+		    || _engine_snap.loop_end_sec <= _engine_snap.loop_start_sec) {
+			return false;
+		}
+		t0 = _engine_snap.loop_start_sec;
+		t1 = _engine_snap.loop_end_sec;
+	} else {
+		if (!_engine_snap.punch_range_ok
+		    || _engine_snap.punch_end_sec <= _engine_snap.punch_start_sec) {
+			return false;
+		}
+		t0 = _engine_snap.punch_start_sec;
+		t1 = _engine_snap.punch_end_sec;
+	}
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float w = rr.right - rr.left;
+	float sec = is_start ? t0 : t1;
+	float n = (sec - view0) / span;
+	if (n < 0.f || n > 1.f) {
+		return false;
+	}
+	float px = rr.left + n * w;
+	float tw = (is_start ? 18.f : 28.f) * _dpi_scale;
+	float pad = 2.f * _dpi_scale;
+	if (is_start) {
+		*out = D2D1::RectF (px + pad, rr.top, px + pad + tw, rr.bottom);
+	} else {
+		*out = D2D1::RectF (px - pad - tw, rr.top, px - pad, rr.bottom);
+	}
+	return out->right > out->left;
+}
+
+bool
+ShellWindow::smoke_loop_punch_edge_labels ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-labels FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_loop_range (1.0f, 3.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-labels FAILED (loop)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_punch_range (2.0f, 4.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-labels FAILED (punch)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	fit_shared_range (0.5f, 4.5f);
+	layout_panes ();
+
+	D2D1_RECT_F a, b, c, d;
+	if (!loop_punch_edge_label_rect (true, true, &a)
+	    || !loop_punch_edge_label_rect (true, false, &b)
+	    || !loop_punch_edge_label_rect (false, true, &c)
+	    || !loop_punch_edge_label_rect (false, false, &d)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-labels FAILED (rects)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	const D2D1_RECT_F& rr = _editor_ruler;
+	auto inside = [&](const D2D1_RECT_F& r) {
+		return r.left >= rr.left - 1.f && r.right <= rr.right + 1.f
+		       && r.top >= rr.top - 1.f && r.bottom <= rr.bottom + 1.f
+		       && r.right > r.left;
+	};
+	if (!inside (a) || !inside (b) || !inside (c) || !inside (d)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-labels FAILED (outside ruler)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!(a.left < b.left) || !(c.left < d.left)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-labels FAILED (order)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-loop-punch-edge-labels ok "
+	              "(loop In/Out · punch In/Out in ruler)\n");
+	std::fflush (stderr);
+	return true;
 }
 
 void

@@ -337,6 +337,9 @@ private:
 	void sync_mixer_group_from_engine ();
 	void draw_editor_grid ();
 	void draw_punch_overlay ();
+	/** Ruler edge caption rect for loop/punch In/Out (false if range inactive / off-view). */
+	bool loop_punch_edge_label_rect (bool is_loop, bool is_start, D2D1_RECT_F* out) const;
+	bool smoke_loop_punch_edge_labels ();
 	void do_toggle_comp_sidechain ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
