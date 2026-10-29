@@ -28192,6 +28192,51 @@ EngineHost::select_midi_notes_outside_punch ()
 	return hit > 0;
 }
 
+bool
+EngineHost::select_midi_notes_outside_ranges ()
+{
+	refresh_midi_notes_snap ();
+	if (!_impl) {
+		return false;
+	}
+	if (!_snap.loop_active || _snap.loop_end_sec <= _snap.loop_start_sec) {
+		_snap.detail = L"MIDI select outside ranges: no loop range";
+		return false;
+	}
+	if (!_snap.punch_range_ok || _snap.punch_end_sec <= _snap.punch_start_sec) {
+		_snap.detail = L"MIDI select outside ranges: no punch range";
+		return false;
+	}
+	const float L0 = _snap.loop_start_sec;
+	const float L1 = _snap.loop_end_sec;
+	const float P0 = _snap.punch_start_sec;
+	const float P1 = _snap.punch_end_sec;
+	_impl->clear_midi_note_sel ();
+	Evoral::event_id_t last = -1;
+	int hit = 0;
+	for (int i = 0; i < _snap.midi_note_count; ++i) {
+		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+		float n1 = n.start_sec + n.length_sec;
+		const bool in_loop = (n.start_sec < L1 && n1 > L0);
+		const bool in_punch = (n.start_sec < P1 && n1 > P0);
+		/* Outside union = intersects neither loop nor punch. */
+		if (!in_loop && !in_punch) {
+			_impl->selected_midi_note_ids.insert (n.id);
+			last = n.id;
+			++hit;
+		}
+	}
+	_impl->selected_midi_note_id = last;
+	refresh_midi_notes_snap ();
+	std::fprintf (stderr,
+	              "airdour_win_shell: select_midi_notes_outside_ranges "
+	              "loop[%.3f..%.3f] punch[%.3f..%.3f] hit=%d\n",
+	              L0, L1, P0, P1, hit);
+	std::fflush (stderr);
+	_snap.detail = L"MIDI select outside loop∪punch";
+	return hit > 0;
+}
+
 void
 EngineHost::clear_midi_note_selection ()
 {
@@ -31347,6 +31392,132 @@ EngineHost::smoke_midi_select_outside_punch ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-outside-punch exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_select_outside_ranges ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-select-outside-ranges failed — no Session";
+		return false;
+	}
+	try {
+		refresh_midi_snap ();
+		if (!ensure_midi_track () || !_snap.midi_track_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-outside-ranges FAILED (track)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-outside-ranges FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for select-outside-ranges smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->clear_midi_note_sel ();
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-outside-ranges FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+
+		const bool snap_was = _snap.snap_enabled;
+		set_snap_enabled (false);
+
+		/* Loop [0.5..2.5] ∪ punch [1.5..3.5] = [0.5..3.5].
+		 * Outside @0.0 + @4.0; inside-loop @1.0; inside-punch @3.0. */
+		if (!set_loop_range (0.5f, 2.5f) || !_snap.loop_active) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-outside-ranges FAILED (loop)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_punch_range (1.5f, 3.5f) || !_snap.punch_range_ok) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-outside-ranges FAILED (punch)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!add_midi_note (60, 0.0f, 0.3f, 100)
+		    || !add_midi_note (64, 1.0f, 0.4f, 100)
+		    || !add_midi_note (67, 3.0f, 0.3f, 100)
+		    || !add_midi_note (72, 4.0f, 0.3f, 100)
+		    || _snap.midi_note_count < 4) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-outside-ranges FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!select_midi_notes_outside_ranges ()) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-outside-ranges FAILED (select)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		int sel_out = 0;
+		int sel_in = 0;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			float n1 = n.start_sec + n.length_sec;
+			bool in_loop = (n.start_sec < 2.5f && n1 > 0.5f);
+			bool in_punch = (n.start_sec < 3.5f && n1 > 1.5f);
+			bool in_union = in_loop || in_punch;
+			if (n.selected) {
+				if (in_union) {
+					++sel_in;
+				} else {
+					++sel_out;
+				}
+			} else if (!in_union) {
+				set_snap_enabled (snap_was);
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-midi-select-outside-ranges FAILED "
+				              "(missed outside @%.2f)\n",
+				              n.start_sec);
+				std::fflush (stderr);
+				return false;
+			}
+		}
+		if (sel_out != 2 || sel_in != 0) {
+			set_snap_enabled (snap_was);
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-select-outside-ranges FAILED "
+			              "(sel_out=%d sel_in=%d)\n",
+			              sel_out, sel_in);
+			std::fflush (stderr);
+			return false;
+		}
+
+		set_snap_enabled (snap_was);
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-outside-ranges ok (out×2)\n");
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-select-outside-ranges ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-select-outside-ranges exception: %s\n",
 		              e.what ());
 		std::fflush (stderr);
 		return false;
@@ -38343,6 +38514,12 @@ EngineHost::select_midi_notes_outside_punch ()
 	return false;
 }
 
+bool
+EngineHost::select_midi_notes_outside_ranges ()
+{
+	return false;
+}
+
 void
 EngineHost::clear_midi_note_selection ()
 {
@@ -38543,6 +38720,12 @@ EngineHost::smoke_midi_select_outside_loop ()
 
 bool
 EngineHost::smoke_midi_select_outside_punch ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_select_outside_ranges ()
 {
 	return false;
 }

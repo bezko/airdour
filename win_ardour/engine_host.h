@@ -1859,6 +1859,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool select_midi_notes_outside_loop ();
 	/** Select every note that does not intersect the punch range. */
 	bool select_midi_notes_outside_punch ();
+	/** Select notes outside the union of loop and punch (both ranges required). */
+	bool select_midi_notes_outside_ranges ();
 	void clear_midi_note_selection ();
 	bool delete_selected_midi_note ();
 
@@ -2080,6 +2082,12 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-midi-select-outside-punch.
 	 */
 	bool smoke_midi_select_outside_punch ();
+
+	/**
+	 * Loop [0.5..2.5] + punch [1.5..3.5]; notes outside the union selected.
+	 * For --smoke-midi-select-outside-ranges.
+	 */
+	bool smoke_midi_select_outside_ranges ();
 
 	/**
 	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.
