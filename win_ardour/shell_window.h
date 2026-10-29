@@ -273,6 +273,9 @@ private:
 	/** " ON·beat" / " OFF" style suffix for editor caption. */
 	const wchar_t* snap_caption_suffix () const;
 	bool smoke_snap_density_label ();
+	bool smoke_snap_ruler_ticks ();
+	/** Count bar / subdiv ticks that draw_editor_ruler would paint. */
+	void count_snap_ruler_ticks (int* out_bar, int* out_subdiv) const;
 	void do_quantize_midi_notes ();
 	void do_transpose_midi_notes (int semitones);
 	void do_nudge_midi_velocity (int delta);

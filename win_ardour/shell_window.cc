@@ -1901,6 +1901,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "snap-toggle", [this]() { return _engine.smoke_snap_toggle (); });
 	run_smoke_check (ok, "snap-density", [this]() { return _engine.smoke_snap_density (); });
 	run_smoke_check (ok, "snap-density-label", [this]() { return smoke_snap_density_label (); });
+	run_smoke_check (ok, "snap-ruler-ticks", [this]() { return smoke_snap_ruler_ticks (); });
 	run_smoke_check (ok, "grid-refresh", [this]() { return _engine.smoke_grid_lines (); });
 	run_smoke_check (ok, "tempo-nudge", [this]() { return _engine.smoke_tempo_nudge (); });
 	run_smoke_check (ok, "count-in", [this]() { return _engine.smoke_count_in (); });
@@ -5829,6 +5830,108 @@ ShellWindow::smoke_snap_density_label ()
 	return true;
 }
 
+void
+ShellWindow::count_snap_ruler_ticks (int* out_bar, int* out_subdiv) const
+{
+	int bars = 0;
+	int subdiv = 0;
+	if (_engine_snap.snap_enabled && _engine_snap.grid_line_count > 0) {
+		float view0 = _lanes[0].strip.view_start_sec ();
+		float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+		for (int i = 0; i < _engine_snap.grid_line_count; ++i) {
+			float n = (_engine_snap.grid_line_sec[i] - view0) / span;
+			if (n < 0.f || n > 1.f) {
+				continue;
+			}
+			if (_engine_snap.grid_line_bar[i]) {
+				++bars;
+			} else {
+				++subdiv;
+			}
+		}
+	}
+	if (out_bar) {
+		*out_bar = bars;
+	}
+	if (out_subdiv) {
+		*out_subdiv = subdiv;
+	}
+}
+
+bool
+ShellWindow::smoke_snap_ruler_ticks ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-snap-ruler-ticks FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	layout_panes ();
+	/* Fixed view so grid refresh matches what the ruler would paint. */
+	for (int i = 0; i < kTracks; ++i) {
+		_lanes[i].strip.set_view_window (0.f, 8.f);
+	}
+
+	_engine.set_tempo_bpm (120.f);
+	_engine.set_snap_enabled (true);
+	_engine.set_snap_density (0); /* bars only */
+	_engine.refresh_grid_lines (0.f, 8.f);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+
+	int bars = 0;
+	int subdiv = 0;
+	count_snap_ruler_ticks (&bars, &subdiv);
+	if (bars < 3 || subdiv != 0) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-snap-ruler-ticks FAILED "
+		              "(bar dens bars=%d subdiv=%d)\n",
+		              bars, subdiv);
+		std::fflush (stderr);
+		return false;
+	}
+
+	_engine.set_snap_density (3); /* 1/4 — bars + many subdiv */
+	_engine.refresh_grid_lines (0.f, 8.f);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	int bars_q = 0;
+	int subdiv_q = 0;
+	count_snap_ruler_ticks (&bars_q, &subdiv_q);
+	if (bars_q < 1 || subdiv_q <= subdiv || (bars_q + subdiv_q) <= bars) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-snap-ruler-ticks FAILED "
+		              "(1/4 bars=%d subdiv=%d prev_bars=%d)\n",
+		              bars_q, subdiv_q, bars);
+		std::fflush (stderr);
+		return false;
+	}
+
+	_engine.set_snap_enabled (false);
+	_engine.refresh_grid_lines (0.f, 8.f);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	int bars_off = 0;
+	int subdiv_off = 0;
+	count_snap_ruler_ticks (&bars_off, &subdiv_off);
+	if (bars_off != 0 || subdiv_off != 0) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-snap-ruler-ticks FAILED "
+		              "(off bars=%d subdiv=%d)\n",
+		              bars_off, subdiv_off);
+		std::fflush (stderr);
+		return false;
+	}
+
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-snap-ruler-ticks ok "
+	              "(bar=%d · 1/4 bars=%d subdiv=%d · off=0)\n",
+	              bars, bars_q, subdiv_q);
+	std::fflush (stderr);
+	return true;
+}
+
 float
 ShellWindow::stub_meter_peak (int track, float dt) const
 {
@@ -9520,6 +9623,34 @@ ShellWindow::draw_editor_ruler ()
 		}
 	}
 
+	/* Snap-density ruler ticks (bar = full accent; subdiv = short body). */
+	if (_engine_snap.snap_enabled && _engine_snap.grid_line_count > 0
+	    && _brush_body && _brush_accent) {
+		float rh = rr.bottom - rr.top;
+		for (int i = 0; i < _engine_snap.grid_line_count; ++i) {
+			float n = (_engine_snap.grid_line_sec[i] - view0) / span;
+			if (n < 0.f || n > 1.f) {
+				continue;
+			}
+			float px = rr.left + n * w;
+			bool is_bar = _engine_snap.grid_line_bar[i];
+			float thick = is_bar ? std::max (1.5f, 2.f * _dpi_scale)
+			                     : std::max (1.f, 1.f * _dpi_scale);
+			float tick_top = is_bar ? rr.top : (rr.top + rh * 0.45f);
+			ID2D1SolidColorBrush* br = is_bar ? _brush_accent : _brush_body;
+			float op = is_bar ? 0.85f : 0.40f;
+			/* Fine densities: mild accent wash on every other subdiv. */
+			if (!is_bar && _engine_snap.snap_density >= 2 && (i % 2) == 0) {
+				op = 0.55f;
+			}
+			br->SetOpacity (op);
+			_rt->FillRectangle (
+				D2D1::RectF (px - thick * 0.5f, tick_top, px + thick * 0.5f, rr.bottom),
+				br);
+			br->SetOpacity (1.f);
+		}
+	}
+
 	/* Playhead tick on ruler. */
 	float ph = (_playhead_sec - view0) / span;
 	if (ph >= 0.f && ph <= 1.f) {
@@ -9596,7 +9727,12 @@ ShellWindow::draw_editor_grid ()
 		bool is_bar = _engine_snap.grid_line_bar[i];
 		float thick = is_bar ? std::max (1.25f, 1.5f * _dpi_scale)
 		                     : std::max (1.f, 1.f * _dpi_scale);
-		_brush_body->SetOpacity (is_bar ? 0.28f : 0.14f);
+		/* Density-aware: bars strongest; even subdivs slightly stronger at 1/2·1/4. */
+		float op = is_bar ? 0.32f : 0.12f;
+		if (!is_bar && _engine_snap.snap_density >= 2 && (i % 2) == 0) {
+			op = 0.20f;
+		}
+		_brush_body->SetOpacity (op);
 		_rt->FillRectangle (
 			D2D1::RectF (px - thick * 0.5f, top, px + thick * 0.5f, bot),
 			_brush_body);
