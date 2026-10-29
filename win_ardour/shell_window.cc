@@ -2007,6 +2007,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "vst3-status-unload", [this]() { return smoke_vst3_status_unload (); });
 	run_smoke_check (ok, "vst3-status-bypass", [this]() { return smoke_vst3_status_bypass (); });
 	run_smoke_check (ok, "vst3-status-param-reset", [this]() { return smoke_vst3_status_param_reset (); });
+	run_smoke_check (ok, "meter-clip-led", [this]() { return smoke_meter_clip_led (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
 	run_smoke_check (ok, "solo-all", [this]() { return _engine.smoke_solo_all (); });
@@ -5267,6 +5268,53 @@ ShellWindow::smoke_mixer_scroll_layout ()
 	std::fprintf (stderr,
 	              "airdour_win_shell: smoke-mixer-scroll ok (max=%.0f px, shifted %.0f)\n",
 	              _mixer_scroll_max, left0 - left1);
+	return true;
+}
+
+bool
+ShellWindow::smoke_meter_clip_led ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-meter-clip-led FAILED (no session)\n");
+		return false;
+	}
+	layout_panes ();
+	_mixers[0].set_meter_peak (1.f, true);
+	if (!_mixers[0].meter_clipped ()) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-meter-clip-led FAILED (clip latch)\n");
+		return false;
+	}
+	const D2D1_RECT_F& mb = _mixers[0].meter ().bounds ();
+	float mid_x = 0.5f * (mb.left + mb.right);
+	float body_y = mb.top + 0.55f * (mb.bottom - mb.top);
+	float led_y = mb.top + 1.f * _dpi_scale;
+	if (_mixers[0].hit_meter_clip_led (mid_x, body_y)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-meter-clip-led FAILED (body hit LED)\n");
+		return false;
+	}
+	if (!_mixers[0].hit_meter (mid_x, body_y)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-meter-clip-led FAILED (body miss meter)\n");
+		return false;
+	}
+	/* Body click must not clear (handler requires LED hit). */
+	if (!_mixers[0].meter_clipped ()) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-meter-clip-led FAILED (preclear)\n");
+		return false;
+	}
+	if (!_mixers[0].hit_meter_clip_led (mid_x, led_y)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-meter-clip-led FAILED (LED miss)\n");
+		return false;
+	}
+	_mixers[0].clear_meter_clip ();
+	if (_mixers[0].meter_clipped ()) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-meter-clip-led FAILED (still clipped)\n");
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-meter-clip-led ok "
+	              "(body keeps latch; LED clears)\n");
 	return true;
 }
 
@@ -9611,7 +9659,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
-	if (meter_i >= 0 && _mixers[meter_i].meter_clipped ()) {
+	/* Plain click clears clip only on the LED band — body clicks fall through
+	 * so the fader pad beside the meter stays usable. */
+	if (meter_i >= 0 && _mixers[meter_i].meter_clipped ()
+	    && _mixers[meter_i].hit_meter_clip_led (x, y)) {
 		_mixers[meter_i].clear_meter_clip ();
 		if (meter_i < EngineSnapshot::kMeters && _engine.is_linked ()
 		    && _engine.snapshot ().session_ok) {
