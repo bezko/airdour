@@ -276,6 +276,10 @@ private:
 	bool smoke_snap_ruler_ticks ();
 	/** Count bar / subdiv ticks that draw_editor_ruler would paint. */
 	void count_snap_ruler_ticks (int* out_bar, int* out_subdiv) const;
+	/** Status-bar snap density chip (Bar/Beat/1/2/1/4) when snap is on. */
+	bool hit_status_snap (float x, float y) const;
+	bool status_snap_center (float* out_x, float* out_y) const;
+	bool smoke_snap_status_chip ();
 	void do_quantize_midi_notes ();
 	void do_transpose_midi_notes (int semitones);
 	void do_nudge_midi_velocity (int delta);
@@ -511,6 +515,7 @@ void do_toggle_selection_muted ();
 	float       _mixer_scroll_max; /* layout-computed */
 	float       _mixer_force_min_w; /* smoke: force min strip width (0 = default) */
 	D2D1_RECT_F _status_bar;
+	D2D1_RECT_F _status_snap_btn; /* snap density chip left of DSP meter */
 
 	ID2D1Factory*             _d2d_factory;
 	IDWriteFactory*           _dwrite_factory;
