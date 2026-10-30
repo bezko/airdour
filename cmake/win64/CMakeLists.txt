@@ -93,6 +93,7 @@ add_library(airdour_wasapi_backend INTERFACE)
 target_sources(airdour_wasapi_backend INTERFACE ${WASAPI_BACKEND_SOURCES})
 target_include_directories(airdour_wasapi_backend INTERFACE
   "${AIRDOUR_SRC_ROOT}/libs/backends/wasapi"
+  "${AIRDOUR_SRC_ROOT}/libs/backends/portaudio"
   "${AIRDOUR_SRC_ROOT}/libs/ardour"
   "${AIRDOUR_SRC_ROOT}/libs/pbd"
 )

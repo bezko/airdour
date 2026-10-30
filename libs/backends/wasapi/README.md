@@ -19,7 +19,7 @@ Native Windows audio backend implementing `ARDOUR::AudioBackend`.
 - DSP timing starts **after** `wait_for_period` (Release ~400 µs / 10 ms @ Session+ACE)
 - Multimedia timer resolution (`PBD::MMTIMERS`)
 - System capture/playback ports registered into `PortEngineSharedImpl`
-- **WinMME MIDI** (`winmmemidi_*` in this tree; not PortAudio) — option `WinMME`
+- **WinMME MIDI** (`../portaudio/winmmemidi_*`) — option `WinMME`
 
 ## Out of scope (v1)
 
