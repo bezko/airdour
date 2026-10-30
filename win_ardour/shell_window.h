@@ -319,6 +319,7 @@ private:
 	void do_scroll_mixer (float delta_px);
 	bool smoke_mixer_scroll_layout ();
 	bool smoke_vst3_mixer_unload ();
+	bool smoke_vst3_mixer_bypass ();
 	bool smoke_vst3_catalog_highlight ();
 	bool smoke_vst3_prefs_bypass ();
 	bool smoke_vst3_prefs_unload ();
