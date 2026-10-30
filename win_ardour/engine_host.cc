@@ -27594,6 +27594,169 @@ EngineHost::smoke_vst3_params ()
 }
 
 bool
+EngineHost::unload_vst3 ()
+{
+	if (!_impl) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->vst3_fx.lock ();
+	if (!pi) {
+		_impl->vst3_fx.reset ();
+		refresh_vst3_params_snap ();
+		return true;
+	}
+	try {
+		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
+			collect_tracks ();
+		}
+		std::shared_ptr<AudioTrack> at =
+		    (_impl->tracks.size () >= 2) ? _impl->tracks[1] : std::shared_ptr<AudioTrack> ();
+		if (!at) {
+			/* Orphan weak_ptr — drop it and clear snap. */
+			_impl->vst3_fx.reset ();
+			refresh_vst3_params_snap ();
+			return true;
+		}
+		if (at->remove_processor (pi) != 0) {
+			std::fprintf (stderr, "airdour_win_shell: unload_vst3 FAILED (remove_processor)\n");
+			std::fflush (stderr);
+			_snap.detail = L"VST3 unload failed";
+			return false;
+		}
+		_impl->vst3_fx.reset ();
+		refresh_vst3_params_snap ();
+		if (_snap.vst3_ok) {
+			std::fprintf (stderr, "airdour_win_shell: unload_vst3 FAILED (still live)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: unload_vst3 exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::rescan_vst3 ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"VST3 rescan failed — no Session";
+		return false;
+	}
+	return scan_vst3_fresh ();
+}
+
+bool
+EngineHost::smoke_vst3_lifecycle ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-vst3-lifecycle failed — no Session";
+		return false;
+	}
+	try {
+		if (!rescan_vst3 ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-lifecycle FAILED (scan1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const size_t n1 = PluginManager::instance ().vst3_plugin_info ().size ();
+
+		PluginInfoPtr info = find_smoke_vst3_info ();
+		if (!info) {
+			/* Honest scan-only: still exercise unload (no-op) + second rescan. */
+			if (!unload_vst3 ()) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-vst3-lifecycle FAILED (unload noop)\n");
+				std::fflush (stderr);
+				return false;
+			}
+			if (!rescan_vst3 ()) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-vst3-lifecycle FAILED (scan2)\n");
+				std::fflush (stderr);
+				return false;
+			}
+			const size_t n2 = PluginManager::instance ().vst3_plugin_info ().size ();
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-lifecycle ok (scan-only VST3=%zu→%zu; "
+			              "set VST3_PATH or AIRDOUR_SMOKE_VST3 to insert+unload)\n",
+			              n1, n2);
+			std::fflush (stderr);
+			_snap.detail = L"smoke-vst3-lifecycle scan-only";
+			return true;
+		}
+
+		/* Insert via smoke_vst3 (scan + load + activate + params snap). */
+		if (!smoke_vst3 ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-lifecycle FAILED (insert)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_vst3_params_snap ();
+		if (!_snap.vst3_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-lifecycle FAILED (not live)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		/* Optional param poke when automatable controls exist (mixer drag path). */
+		if (_snap.vst3_param_count > 0) {
+			const float original = _snap.vst3_param_norm[0];
+			const float target = (original < 0.5f) ? 0.7f : 0.3f;
+			if (!set_vst3_param (0, target)) {
+				std::fprintf (stderr, "airdour_win_shell: smoke-vst3-lifecycle FAILED (param)\n");
+				std::fflush (stderr);
+				return false;
+			}
+			(void)set_vst3_param (0, original);
+		}
+
+		if (!unload_vst3 ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-lifecycle FAILED (unload)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_vst3_params_snap ();
+		if (_snap.vst3_ok) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-lifecycle FAILED (still loaded)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (!rescan_vst3 ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-lifecycle FAILED (rescan)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const size_t n2 = PluginManager::instance ().vst3_plugin_info ().size ();
+		if (n2 < 1) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-lifecycle FAILED (rescan empty)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-lifecycle ok "
+		              "(insert→param→unload→rescan; scan=%zu→%zu, fx=%s)\n",
+		              n1, n2, info->name.c_str ());
+		std::fflush (stderr);
+		_snap.detail = L"smoke-vst3-lifecycle ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst3-lifecycle exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::ensure_midi_track ()
 {
 	if (!_impl || !_impl->session) {
@@ -36205,6 +36368,24 @@ EngineHost::toggle_vst3_bypass ()
 
 bool
 EngineHost::smoke_vst3_params ()
+{
+	return false;
+}
+
+bool
+EngineHost::unload_vst3 ()
+{
+	return false;
+}
+
+bool
+EngineHost::rescan_vst3 ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_vst3_lifecycle ()
 {
 	return false;
 }

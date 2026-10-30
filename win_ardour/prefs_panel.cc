@@ -28,6 +28,7 @@ PrefsPanel::PrefsPanel ()
 	, _per_512 ()
 	, _click_btn ()
 	, _snap_btn ()
+	, _vst3_rescan_btn ()
 	, _save_btn ()
 	, _visible (false)
 	, _click_on (false)
@@ -70,13 +71,14 @@ PrefsPanel::layout (float view_w, float view_h, float dpi_scale)
 
 	_click_btn = D2D1::RectF (x, y, x + half, y + btn_h);
 	_snap_btn = D2D1::RectF (x + half + gap, y, x + half + gap + half, y + btn_h);
-	y = _click_btn.bottom + 36.f * dpi_scale;
+	y = _click_btn.bottom + 52.f * dpi_scale;
+
+	_vst3_rescan_btn = D2D1::RectF (x, y, x + 140.f * dpi_scale, y + btn_h);
 
 	_save_btn = D2D1::RectF (x, _card.bottom - 40.f * dpi_scale,
 	                         x + 100.f * dpi_scale, _card.bottom - 14.f * dpi_scale);
 	_close_btn = D2D1::RectF (_card.right - 70.f * dpi_scale, _card.top + 8.f * dpi_scale,
 	                          _card.right - 12.f * dpi_scale, _card.top + 30.f * dpi_scale);
-	(void)y;
 }
 
 void
@@ -157,6 +159,9 @@ PrefsPanel::hit_test (float x, float y) const
 	}
 	if (contains (_snap_btn, x, y)) {
 		return PrefsHit::SnapToggle;
+	}
+	if (contains (_vst3_rescan_btn, x, y)) {
+		return PrefsHit::Vst3Rescan;
 	}
 	if (contains (_save_btn, x, y)) {
 		return PrefsHit::Save;
@@ -255,8 +260,9 @@ PrefsPanel::draw (ID2D1RenderTarget* rt,
 	               (UINT32)wcslen (_vst3_hint[0] ? _vst3_hint : L"(VST3_PATH unset · config @default@)"),
 	               fmt_meta,
 	               D2D1::RectF (_card.left + 16.f * dpi_scale, _click_btn.bottom + 26.f * dpi_scale,
-	                            _card.right - 16.f * dpi_scale, _save_btn.top - 8.f * dpi_scale),
+	                            _card.right - 16.f * dpi_scale, _vst3_rescan_btn.top - 4.f * dpi_scale),
 	               brand);
+	draw_btn (_vst3_rescan_btn, L"Rescan VST3", false);
 
 	draw_btn (_save_btn, L"Save", true);
 	if (_status[0]) {
