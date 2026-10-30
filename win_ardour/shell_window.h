@@ -416,6 +416,10 @@ void do_toggle_selection_muted ();
 	void do_set_region_envelope_mid (float coeff_0_1);
 	bool hit_region_envelope_mid (float x, float y, int* out_lane) const;
 	bool envelope_mid_from_y (int lane, float y, float* out_coeff) const;
+	/** Draw selected-region envelope polyline + mid tip cap (matches hit pad). */
+	void draw_region_envelope ();
+	/** Ensure envelope, verify curve+mid geometry under hit pad. --smoke-envelope-mid-handle */
+	bool smoke_envelope_mid_handle ();
 	void do_toggle_fade_active ();
 	void do_toggle_region_position_lock ();
 	void do_skip_range_from_selection ();

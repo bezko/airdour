@@ -1893,6 +1893,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "region-envelope", [this]() { return _engine.smoke_region_envelope (); });
 	run_smoke_check (ok, "region-envelope-nudge", [this]() { return _engine.smoke_region_envelope_nudge (); });
 	run_smoke_check (ok, "region-envelope-drag", [this]() { return _engine.smoke_region_envelope_drag (); });
+	run_smoke_check (ok, "envelope-mid-handle", [this]() { return smoke_envelope_mid_handle (); }, true);
 	run_smoke_check (ok, "fade-active", [this]() { return _engine.smoke_fade_active (); });
 	run_smoke_check (ok, "region-position-lock", [this]() { return _engine.smoke_region_position_lock (); });
 	run_smoke_check (ok, "skip-range", [this]() { return _engine.smoke_skip_range (); });
@@ -4161,6 +4162,202 @@ ShellWindow::hit_region_envelope_mid (float x, float y, int* out_lane) const
 		return true;
 	}
 	return false;
+}
+
+void
+ShellWindow::draw_region_envelope ()
+{
+	if (!_rt || !_brush_accent || !_engine.is_linked ()) {
+		return;
+	}
+	if (!_engine_snap.region_envelope_ok || !_engine_snap.has_selection
+	    || _engine_snap.selection_end_sec <= _engine_snap.selection_start_sec) {
+		return;
+	}
+	int lane = _engine_snap.selection_track;
+	if (lane < 0 || lane >= kTracks || lane >= n_audio_lanes ()) {
+		return;
+	}
+	const D2D1_RECT_F& lb = _lanes[lane].bounds;
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = _lanes[0].strip.view_span_sec ();
+	if (span < 1e-6f) {
+		return;
+	}
+	float t0 = _engine_snap.selection_start_sec;
+	float t1 = _engine_snap.selection_end_sec;
+	float n0 = (t0 - view0) / span;
+	float n1 = (t1 - view0) / span;
+	if (n1 < 0.f || n0 > 1.f) {
+		return;
+	}
+	n0 = std::max (0.f, std::min (1.f, n0));
+	n1 = std::max (0.f, std::min (1.f, n1));
+	if (n1 - n0 < 1e-4f) {
+		return;
+	}
+
+	static constexpr size_t kEnvPts = 48;
+	float y_0_1[kEnvPts];
+	if (!_engine.fill_selected_region_envelope_curve (y_0_1, kEnvPts)) {
+		return;
+	}
+
+	float pad = 3.f * _dpi_scale;
+	float lane_w = lb.right - lb.left;
+	float lane_h = lb.bottom - lb.top;
+	float usable_h = lane_h - 2.f * pad;
+	if (usable_h < 1.f) {
+		return;
+	}
+	float x0 = lb.left + n0 * lane_w;
+	float x1 = lb.left + n1 * lane_w;
+	float w = x1 - x0;
+	if (w < 2.f) {
+		return;
+	}
+
+	ID2D1PathGeometry* geo = nullptr;
+	ID2D1Factory* fac = nullptr;
+	_rt->GetFactory (&fac);
+	if (!fac || FAILED (fac->CreatePathGeometry (&geo)) || !geo) {
+		return;
+	}
+	ID2D1GeometrySink* sink = nullptr;
+	if (FAILED (geo->Open (&sink)) || !sink) {
+		geo->Release ();
+		return;
+	}
+	for (size_t i = 0; i < kEnvPts; ++i) {
+		float frac = ((float)i + 0.5f) / (float)kEnvPts;
+		float px = x0 + frac * w;
+		float gy = std::max (0.f, std::min (1.f, y_0_1[i]));
+		float py = lb.bottom - pad - gy * usable_h;
+		if (i == 0) {
+			sink->BeginFigure (D2D1::Point2F (px, py), D2D1_FIGURE_BEGIN_HOLLOW);
+		} else {
+			sink->AddLine (D2D1::Point2F (px, py));
+		}
+	}
+	sink->EndFigure (D2D1_FIGURE_END_OPEN);
+	sink->Close ();
+	sink->Release ();
+
+	_brush_accent->SetOpacity (0.85f);
+	_rt->DrawGeometry (geo, _brush_accent, std::max (1.25f, 1.5f * _dpi_scale));
+	_brush_accent->SetOpacity (1.f);
+	geo->Release ();
+
+	/* Mid tip cap — same geometry as hit_region_envelope_mid. */
+	float mid_gain = _engine.selected_region_envelope_mid ();
+	if (mid_gain < 0.f) {
+		return;
+	}
+	float mid_sec = 0.5f * (t0 + t1);
+	float nx = (mid_sec - view0) / span;
+	if (nx < 0.f || nx > 1.f) {
+		return;
+	}
+	float px = lb.left + nx * lane_w;
+	float py = lb.bottom - pad - mid_gain * usable_h;
+	float tip_r = std::max (3.f, 4.5f * _dpi_scale);
+	_brush_accent->SetOpacity (0.95f);
+	_rt->FillEllipse (D2D1::Ellipse (D2D1::Point2F (px, py), tip_r, tip_r), _brush_accent);
+	if (_brush_pane) {
+		_rt->DrawEllipse (D2D1::Ellipse (D2D1::Point2F (px, py), tip_r, tip_r),
+		                  _brush_pane, std::max (1.f, 1.25f * _dpi_scale));
+	}
+	_brush_accent->SetOpacity (1.f);
+}
+
+bool
+ShellWindow::smoke_envelope_mid_handle ()
+{
+	if (!_engine.is_linked ()) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-envelope-mid-handle FAILED (no engine)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (!_engine_snap.session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-envelope-mid-handle FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.smoke_region_envelope_drag ()) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-envelope-mid-handle FAILED (envelope drag)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	apply_region_selection_to_lanes ();
+
+	static constexpr size_t kEnvPts = 32;
+	float y_0_1[kEnvPts];
+	if (!_engine.fill_selected_region_envelope_curve (y_0_1, kEnvPts)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-envelope-mid-handle FAILED (curve)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	float mid_y = y_0_1[kEnvPts / 2];
+	float edge_y = 0.5f * (y_0_1[0] + y_0_1[kEnvPts - 1]);
+	if (!(mid_y + 0.05f < edge_y)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-envelope-mid-handle FAILED "
+		              "(curve not dipped mid=%.3f edge=%.3f)\n",
+		              mid_y, edge_y);
+		std::fflush (stderr);
+		return false;
+	}
+
+	/* Fit selection so mid handle is on-screen, then hit-test the drawn tip. */
+	int lane = _engine_snap.selection_track;
+	if (lane < 0 || lane >= kTracks) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-envelope-mid-handle FAILED (lane)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	float t0 = _engine_snap.selection_start_sec;
+	float t1 = _engine_snap.selection_end_sec;
+	for (int i = 0; i < kTracks; ++i) {
+		_lanes[i].strip.fit_range (t0, t1, 0.12f);
+	}
+	layout_panes ();
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+
+	float mid_gain = _engine.selected_region_envelope_mid ();
+	if (mid_gain < 0.f) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-envelope-mid-handle FAILED (mid gain)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	const D2D1_RECT_F& lb = _lanes[lane].bounds;
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = _lanes[0].strip.view_span_sec ();
+	float mid_sec = 0.5f * (t0 + t1);
+	float nx = (mid_sec - view0) / span;
+	float pad = 3.f * _dpi_scale;
+	float px = lb.left + nx * (lb.right - lb.left);
+	float py = lb.bottom - pad - mid_gain * ((lb.bottom - lb.top) - 2.f * pad);
+	int hit_lane = -1;
+	if (!hit_region_envelope_mid (px, py, &hit_lane) || hit_lane != lane) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-envelope-mid-handle FAILED "
+		              "(hit miss at %.1f,%.1f lane=%d)\n",
+		              px, py, hit_lane);
+		std::fflush (stderr);
+		return false;
+	}
+
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-envelope-mid-handle ok "
+	              "(curve dip mid=%.2f edge=%.2f tip hit T%d)\n",
+	              mid_y, edge_y, lane + 1);
+	std::fflush (stderr);
+	return true;
 }
 
 void
@@ -9713,6 +9910,7 @@ ShellWindow::draw_editor_pane ()
 		}
 	}
 
+	draw_region_envelope ();
 	draw_automation_lane ();
 	draw_midi_lane ();
 	draw_midi_cc_lane ();
