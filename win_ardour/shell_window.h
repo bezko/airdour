@@ -381,6 +381,10 @@ private:
 	bool smoke_selection_marquee_tint ();
 	/** Assert muted selection hatch cue. For --smoke-selection-mute-wash. */
 	bool smoke_selection_mute_wash ();
+	/** Marker hairlines across MIDI piano-roll + CC (audio lanes already draw). */
+	void draw_midi_marker_overlay ();
+	/** Markers present + MIDI/CC layout; hairline x maps on-lane. */
+	bool smoke_midi_marker_overlay ();
 	void do_toggle_comp_sidechain ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
