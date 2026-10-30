@@ -1959,6 +1959,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "vst3-catalog-highlight", [this]() { return smoke_vst3_catalog_highlight (); });
 	run_smoke_check (ok, "vst3-cycle-insert", [this]() { return _engine.smoke_vst3_cycle_insert (); });
 	run_smoke_check (ok, "vst3-prefs-bypass", [this]() { return smoke_vst3_prefs_bypass (); });
+	run_smoke_check (ok, "vst3-prefs-param-reset", [this]() { return smoke_vst3_prefs_param_reset (); });
 	run_smoke_check (ok, "vst3-prefs-unload", [this]() { return smoke_vst3_prefs_unload (); });
 	run_smoke_check (ok, "vst3-status-unload", [this]() { return smoke_vst3_status_unload (); });
 	run_smoke_check (ok, "vst3-status-bypass", [this]() { return smoke_vst3_status_bypass (); });
@@ -10624,6 +10625,76 @@ ShellWindow::smoke_vst3_prefs_bypass ()
 }
 
 bool
+ShellWindow::smoke_vst3_prefs_param_reset ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-param-reset FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	sync_prefs_from_engine ();
+	_prefs.set_visible (true);
+	_prefs_visible = true;
+	_prefs.layout ((float)_width, (float)_height, _dpi_scale);
+
+	float rx = 0.f;
+	float ry = 0.f;
+	if (!_engine_snap.vst3_ok) {
+		/* Empty / scan-only: no Reset chrome; idle reset is a no-op fail. */
+		if (_prefs.vst3_param_reset_btn_center (&rx, &ry)
+		    || _prefs.hit_test (rx, ry) == PrefsHit::Vst3ParamReset) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-prefs-param-reset FAILED "
+			              "(Reset chrome without VST3)\n");
+			std::fflush (stderr);
+			_prefs_visible = false;
+			_prefs.set_visible (false);
+			return false;
+		}
+		(void)_engine.reset_vst3_param (0);
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-param-reset ok "
+		              "(scan-only; no Reset; set VST3_PATH to insert)\n");
+		std::fflush (stderr);
+		_prefs_visible = false;
+		_prefs.set_visible (false);
+		return true;
+	}
+
+	if (!_prefs.vst3_param_reset_btn_center (&rx, &ry)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-param-reset FAILED (layout)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (_prefs.hit_test (rx, ry) != PrefsHit::Vst3ParamReset) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-param-reset FAILED (hit)\n");
+		std::fflush (stderr);
+		return false;
+	}
+
+	if (_engine_snap.vst3_param_count > 0) {
+		const float dflt_probe = _engine_snap.vst3_param_norm[0];
+		const float nudge = (dflt_probe < 0.5f) ? 0.85f : 0.15f;
+		(void)_engine.set_vst3_param (0, nudge);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+
+	apply_prefs_hit (PrefsHit::Vst3ParamReset);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_prefs_visible = false;
+	_prefs.set_visible (false);
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-vst3-prefs-param-reset ok (Reset → default)\n");
+	std::fflush (stderr);
+	return true;
+}
+
+bool
 ShellWindow::smoke_vst3_prefs_unload ()
 {
 	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
@@ -10748,6 +10819,18 @@ ShellWindow::apply_prefs_hit (PrefsHit hit)
 			                       : L"VST3 active");
 		} else {
 			_prefs.set_status (L"VST3 bypass (none loaded)");
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_fx_from_engine ();
+		sync_prefs_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	case PrefsHit::Vst3ParamReset:
+		if (_engine.reset_vst3_param (0)) {
+			_prefs.set_status (L"VST3 param0 reset");
+		} else {
+			_prefs.set_status (L"VST3 reset (none loaded)");
 		}
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();

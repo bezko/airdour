@@ -32,6 +32,7 @@ enum class PrefsHit {
 	SnapToggle,
 	Vst3Rescan,
 	Vst3Bypass,
+	Vst3ParamReset,
 	Vst3Unload,
 	Save
 };
@@ -68,6 +69,8 @@ public:
 	PrefsHit hit_test (float x, float y) const;
 	/** Center of Bypass button after layout (for smoke). */
 	bool vst3_bypass_btn_center (float* out_x, float* out_y) const;
+	/** Center of Reset (param0) button after layout when vst3_ok (for smoke). */
+	bool vst3_param_reset_btn_center (float* out_x, float* out_y) const;
 	/** Center of Unload button after layout when vst3_ok (for smoke). */
 	bool vst3_unload_btn_center (float* out_x, float* out_y) const;
 	/** Catalog name row under (x,y), or −1. Rows laid out even when empty. */
@@ -99,6 +102,7 @@ private:
 	D2D1_RECT_F _snap_btn;
 	D2D1_RECT_F _vst3_rescan_btn;
 	D2D1_RECT_F _vst3_bypass_btn;
+	D2D1_RECT_F _vst3_param_reset_btn;
 	D2D1_RECT_F _vst3_unload_btn;
 	D2D1_RECT_F _vst3_catalog_row[kMaxCatalog];
 	D2D1_RECT_F _save_btn;
