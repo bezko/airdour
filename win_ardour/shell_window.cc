@@ -135,6 +135,7 @@ ShellWindow::ShellWindow ()
 	, _mixer_scroll_max (0.f)
 	, _mixer_force_min_w (0.f)
 	, _status_bar ()
+	, _status_vst3_unload_btn ()
 	, _d2d_factory (nullptr)
 	, _dwrite_factory (nullptr)
 	, _rt (nullptr)
@@ -1953,6 +1954,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "vst3-catalog-highlight", [this]() { return smoke_vst3_catalog_highlight (); });
 	run_smoke_check (ok, "vst3-cycle-insert", [this]() { return _engine.smoke_vst3_cycle_insert (); });
 	run_smoke_check (ok, "vst3-prefs-bypass", [this]() { return smoke_vst3_prefs_bypass (); });
+	run_smoke_check (ok, "vst3-status-unload", [this]() { return smoke_vst3_status_unload (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
 	run_smoke_check (ok, "solo-all", [this]() { return _engine.smoke_solo_all (); });
@@ -7649,6 +7651,18 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
+	if (hit_status_vst3_unload (x, y)) {
+		if (_engine.is_linked ()) {
+			(void)_engine.unload_vst3 ();
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_fx_from_engine ();
+			sync_prefs_from_engine ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+		return true;
+	}
+
 	TransportHit th = _transport.hit_test (x, y);
 	if (th == TransportHit::Help) {
 		toggle_help ();
@@ -10246,6 +10260,99 @@ ShellWindow::smoke_vst3_catalog_highlight ()
 }
 
 bool
+ShellWindow::hit_status_vst3_unload (float x, float y) const
+{
+	if (!_engine_snap.vst3_ok) {
+		return false;
+	}
+	const D2D1_RECT_F& r = _status_vst3_unload_btn;
+	return r.right > r.left && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+
+bool
+ShellWindow::status_vst3_unload_center (float* out_x, float* out_y) const
+{
+	if (!out_x || !out_y) {
+		return false;
+	}
+	const D2D1_RECT_F& r = _status_vst3_unload_btn;
+	if (r.right <= r.left) {
+		return false;
+	}
+	*out_x = 0.5f * (r.left + r.right);
+	*out_y = 0.5f * (r.top + r.bottom);
+	return true;
+}
+
+bool
+ShellWindow::smoke_vst3_status_unload ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-status-unload FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	layout_panes ();
+	/* Force a paint pass layout of the × chip (rects set in on_paint). */
+	InvalidateRect (_hwnd, nullptr, FALSE);
+	UpdateWindow (_hwnd);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+
+	if (!_engine_snap.vst3_ok) {
+		/* Empty / scan-only: no × chrome; idle unload still ok. */
+		float sx = 0.f;
+		float sy = 0.f;
+		if (status_vst3_unload_center (&sx, &sy) || hit_status_vst3_unload (sx, sy)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-status-unload FAILED "
+			              "(× chrome without VST3)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!_engine.unload_vst3 ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-status-unload FAILED "
+			              "(idle unload)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-status-unload ok "
+		              "(scan-only; no ×; idle unload; set VST3_PATH to insert)\n");
+		std::fflush (stderr);
+		return true;
+	}
+
+	float sx = 0.f;
+	float sy = 0.f;
+	if (!status_vst3_unload_center (&sx, &sy) || !hit_status_vst3_unload (sx, sy)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-status-unload FAILED (× not hittable)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.unload_vst3 ()) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-status-unload FAILED (unload)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (_engine_snap.vst3_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-status-unload FAILED (still loaded)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr, "airdour_win_shell: smoke-vst3-status-unload ok (× → unload)\n");
+	std::fflush (stderr);
+	return true;
+}
+
+bool
 ShellWindow::smoke_vst3_prefs_bypass ()
 {
 	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
@@ -10781,11 +10888,36 @@ ShellWindow::on_paint ()
 	}
 
 	const float meter_w = 96.f * _dpi_scale;
-	const float text_right = _status_bar.right - 20.f * _dpi_scale - meter_w - 12.f * _dpi_scale;
+	const float unload_w = 18.f * _dpi_scale;
+	const float unload_gap = 8.f * _dpi_scale;
+	float text_right = _status_bar.right - 20.f * _dpi_scale - meter_w - 12.f * _dpi_scale;
+	_status_vst3_unload_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
+	if (_engine_snap.vst3_ok) {
+		float mid_y = (_status_bar.top + _status_bar.bottom) * 0.5f;
+		float bh = 16.f * _dpi_scale;
+		float right = _status_bar.right - 20.f * _dpi_scale - meter_w - unload_gap;
+		_status_vst3_unload_btn = D2D1::RectF (right - unload_w, mid_y - bh * 0.5f,
+		                                       right, mid_y + bh * 0.5f);
+		text_right = _status_vst3_unload_btn.left - unload_gap;
+	}
 	_rt->DrawTextW (status, (UINT32)wcslen (status), _fmt_meta,
 	                D2D1::RectF (_status_bar.left + 20.f * _dpi_scale, _status_bar.top,
 	                             text_right, _status_bar.bottom),
 	                _brush_body);
+
+	if (_engine_snap.vst3_ok && _brush_accent && _fmt_meta
+	    && _status_vst3_unload_btn.right > _status_vst3_unload_btn.left) {
+		_rt->FillRectangle (_status_vst3_unload_btn, _brush_pane_edge);
+		_rt->DrawRectangle (_status_vst3_unload_btn, _brush_accent,
+		                    std::max (1.f, 1.f * _dpi_scale));
+		DWRITE_TEXT_ALIGNMENT ta = _fmt_meta->GetTextAlignment ();
+		DWRITE_PARAGRAPH_ALIGNMENT pa = _fmt_meta->GetParagraphAlignment ();
+		_fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
+		_fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+		_rt->DrawTextW (L"\x00D7", 1, _fmt_meta, _status_vst3_unload_btn, _brush_brand);
+		_fmt_meta->SetTextAlignment (ta);
+		_fmt_meta->SetParagraphAlignment (pa);
+	}
 
 	/* Status-bar DSP meter (same load % as transport; UI-rate from poll). */
 	if (_engine_snap.available) {
