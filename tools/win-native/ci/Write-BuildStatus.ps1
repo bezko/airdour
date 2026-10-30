@@ -41,10 +41,7 @@ GREEN  tools/win-native docs and packaging scripts
 What is NOT in this artifact yet
 --------------------------------
 STAGED   libpbd / libardour / hardour — laptop-proven; wire into CI next
-STAGED   WinMME MIDI inside wasapi backend
 OUT      gtk2_ardour / libs/tk / libs/canvas / libs/surfaces (GTK) on Windows-only
-OUT      Cairo / cairomm — not required for win_shell or hardour
-BLOCKED  NSIS / MSIX installer (zip only for now)
 
 Dependency expectations (Windows-only product)
 ----------------------------------------------

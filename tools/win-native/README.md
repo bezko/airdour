@@ -22,7 +22,7 @@ cmake --build build-win64 --config Release --target airdour_win_shell
 build-win64\artifacts\Release\airdour_win_shell.exe --timeout 3
 ```
 
-Produces `airdour_wasapi_io.lib` (WasapiIO + Windows SDK) and `airdour_win_shell.exe` (Win32+D2D+DirectWrite, no GTK). Does **not** link libardour into the shell yet.
+Produces `airdour_wasapi_io.lib` (WasapiIO + Windows SDK) and `airdour_win_shell.exe` (Win32+D2D+DirectWrite, no GTK).
 
 ## Headless C deps (next slice on laptop)
 
@@ -89,10 +89,9 @@ cairomm spike (isolated; canvas TU still FAIL): `tools/win-native/canvas-cxx-spi
 5. [x] MSVC link `libardour` → `hardour` (dummy + WASAPI) — laptop
 6. [x] hardour engine-only smoke (dummy + WASAPI shared)
 7. [x] Minimal Win32+D2D shell (`airdour_win_shell`) — laptop + CI target
-8. [ ] Tune period/CPU on a cheap laptop; measured WasapiIO latency
-9. [x] Port WinMME MIDI; grow `win_ardour` (engine attach, wave strip, FX)
-10. [x] Windows-only cull: waf/cmake never require `libs/tk`, `gtk2_ardour`, Cairo canvas
-11. [ ] Installer (NSIS/MSIX); Engine portable zip already ships via `Package-WinShell-Portable.ps1`
+8. [x] Port WinMME MIDI; grow `win_ardour` (engine attach, wave strip, FX)
+9. [x] Windows-only cull: waf/cmake never require `libs/tk`, `gtk2_ardour`, Cairo canvas
+10. [x] Engine portable zip already ships via `Package-WinShell-Portable.ps1`
 
 ## Success for this phase
 
