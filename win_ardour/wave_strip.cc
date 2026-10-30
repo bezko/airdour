@@ -22,6 +22,8 @@ WaveStrip::WaveStrip ()
 	, _sel_fade_in_sec (0.f)
 	, _sel_fade_out_sec (0.f)
 	, _sel_muted (false)
+	, _sel_sync_marked (false)
+	, _sel_sync_sec (0.f)
 	, _loop_active (false)
 	, _loop_start_sec (0.f)
 	, _loop_end_sec (0.f)
@@ -154,6 +156,16 @@ WaveStrip::set_selection (bool active, float start_sec, float end_sec,
 	_sel_end_sec = end_sec;
 	_sel_fade_in_sec = std::max (0.f, fade_in_sec);
 	_sel_fade_out_sec = std::max (0.f, fade_out_sec);
+	if (!active) {
+		_sel_sync_marked = false;
+	}
+}
+
+void
+WaveStrip::set_sync_marker (bool marked, float sync_sec)
+{
+	_sel_sync_marked = marked;
+	_sel_sync_sec = sync_sec;
 }
 
 int
@@ -477,6 +489,42 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 				float ty = bounds.top + tip_r;
 				rt->FillEllipse (D2D1::Ellipse (D2D1::Point2F (tx, ty), tip_r, tip_r),
 				                 selection_brush);
+			}
+
+			/* Sync-point marker — vertical tick + mid diamond (Region sync). */
+			if (_sel_sync_marked
+			    && _sel_sync_sec >= _sel_start_sec - 0.001f
+			    && _sel_sync_sec <= _sel_end_sec + 0.001f) {
+				float ns = (_sel_sync_sec - _view_start_sec) / span;
+				if (ns >= 0.f && ns <= 1.f) {
+					float sx = bounds.left + ns * w;
+					float thick = std::max (1.25f, 1.75f * dpi_scale);
+					float diam = std::max (3.5f, 5.f * dpi_scale);
+					float mid_y = (bounds.top + bounds.bottom) * 0.5f;
+					selection_brush->SetOpacity (0.95f);
+					rt->FillRectangle (
+						D2D1::RectF (sx - thick * 0.5f, bounds.top,
+						             sx + thick * 0.5f, bounds.bottom),
+						selection_brush);
+					ID2D1PathGeometry* geo = nullptr;
+					ID2D1Factory* fac = nullptr;
+					rt->GetFactory (&fac);
+					if (fac && SUCCEEDED (fac->CreatePathGeometry (&geo)) && geo) {
+						ID2D1GeometrySink* sink = nullptr;
+						if (SUCCEEDED (geo->Open (&sink)) && sink) {
+							sink->BeginFigure (D2D1::Point2F (sx, mid_y - diam),
+							                   D2D1_FIGURE_BEGIN_FILLED);
+							sink->AddLine (D2D1::Point2F (sx + diam, mid_y));
+							sink->AddLine (D2D1::Point2F (sx, mid_y + diam));
+							sink->AddLine (D2D1::Point2F (sx - diam, mid_y));
+							sink->EndFigure (D2D1_FIGURE_END_CLOSED);
+							sink->Close ();
+							sink->Release ();
+							rt->FillGeometry (geo, selection_brush);
+						}
+						geo->Release ();
+					}
+				}
 			}
 			selection_brush->SetOpacity (1.f);
 		}

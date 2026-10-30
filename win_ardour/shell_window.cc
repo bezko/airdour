@@ -1714,6 +1714,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "cd-marker", [this]() { return _engine.smoke_cd_marker (); });
 	run_smoke_check (ok, "range-marker", [this]() { return _engine.smoke_range_marker (); });
 	run_smoke_check (ok, "region-sync", [this]() { return _engine.smoke_region_sync (); });
+	run_smoke_check (ok, "region-sync-draw", [this]() { return smoke_region_sync_draw (); }, true);
 	run_smoke_check (ok, "scene-channel", [this]() { return _engine.smoke_scene_channel (); });
 	run_smoke_check (ok, "cue-navigate", [this]() { return _engine.smoke_cue_navigate (); });
 	run_smoke_check (ok, "section-rename", [this]() { return _engine.smoke_section_rename (); });
@@ -4481,7 +4482,80 @@ ShellWindow::apply_region_selection_to_lanes ()
 			active ? _engine_snap.selection_fade_in_sec : 0.f,
 			active ? _engine_snap.selection_fade_out_sec : 0.f,
 			active ? _engine_snap.selection_muted : false);
+		_lanes[i].strip.set_sync_marker (
+			active && _engine_snap.selection_sync_marked,
+			_engine_snap.selection_sync_sec);
 	}
+}
+
+bool
+ShellWindow::smoke_region_sync_draw ()
+{
+	if (!_engine.is_linked ()) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-sync-draw FAILED (no engine)\n");
+		return false;
+	}
+	if (!_engine.snapshot ().session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-sync-draw FAILED (no session)\n");
+		return false;
+	}
+	/* Reuse API smoke to place a mid sync, then leave it marked for draw check. */
+	if (!_engine.import_test_tone (0, 440.f, 1.2f)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-sync-draw FAILED (import)\n");
+		return false;
+	}
+	if (!_engine.select_region_at (0, 0.3f)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-sync-draw FAILED (select)\n");
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	float s0 = _engine_snap.selection_start_sec;
+	float e0 = _engine_snap.selection_end_sec;
+	float mid = s0 + 0.40f;
+	if (mid >= e0 - 0.05f) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-sync-draw FAILED (len)\n");
+		return false;
+	}
+	if (!_engine.set_selection_sync_at (mid)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-sync-draw FAILED (set)\n");
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (!_engine_snap.selection_sync_marked
+	    || std::fabs (_engine_snap.selection_sync_sec - mid) > 0.05f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-region-sync-draw FAILED "
+		              "(sync=%.3f want=%.3f marked=%d)\n",
+		              _engine_snap.selection_sync_sec, mid,
+		              _engine_snap.selection_sync_marked ? 1 : 0);
+		return false;
+	}
+	apply_region_selection_to_lanes ();
+	do_fit_selection ();
+	layout_panes ();
+	const int lane = _engine_snap.selection_track;
+	if (lane < 0 || lane >= kTracks) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-region-sync-draw FAILED (lane)\n");
+		return false;
+	}
+	const D2D1_RECT_F& b = _lanes[lane].bounds;
+	float sx = _lanes[lane].strip.x_at_time (b, _engine_snap.selection_sync_sec);
+	float x0 = _lanes[lane].strip.x_at_time (b, _engine_snap.selection_start_sec);
+	float x1 = _lanes[lane].strip.x_at_time (b, _engine_snap.selection_end_sec);
+	if (sx < x0 - 1.f || sx > x1 + 1.f || sx < b.left - 1.f || sx > b.right + 1.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-region-sync-draw FAILED "
+		              "(sx=%.1f region=[%.1f..%.1f] bounds=[%.1f..%.1f])\n",
+		              sx, x0, x1, b.left, b.right);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-region-sync-draw ok "
+	              "(sync=%.3fs sx=%.1f in [%.1f..%.1f])\n",
+	              _engine_snap.selection_sync_sec, sx, x0, x1);
+	return true;
 }
 
 void
