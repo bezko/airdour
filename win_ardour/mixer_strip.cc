@@ -123,12 +123,6 @@ MixerStrip::set_fx_param_count (int count_1_to_3)
 }
 
 void
-MixerStrip::set_fx_dual (bool dual)
-{
-	_fx_param_count = dual ? 2 : 1;
-}
-
-void
 MixerStrip::set_fx_param2 (float value_0_1)
 {
 	_fx_param2 = std::max (0.f, std::min (1.f, value_0_1));

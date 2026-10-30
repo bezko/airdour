@@ -59,7 +59,6 @@ public:
 
 	void set_smoke_flags (const std::set<std::string>& flags) { _smoke_flags = flags; }
 	bool has_smoke (const std::string& name) const { return _smoke_flags.count (name) > 0; }
-	void add_smoke_flag (const std::string& name) { _smoke_flags.insert (name); }
 
 	bool create (HINSTANCE instance, int show_cmd);
 	/** Show brief branded splash (ignored if already dismissed / --no-splash). */
@@ -88,12 +87,8 @@ public:
 	                    unsigned period_frames = 0,
 	                    bool smoke_vst3 = false,
 	                    bool smoke_mute_solo = false,
-	                    bool smoke_meter_point = false,
 	                    bool smoke_pan = false,
-	                    bool smoke_pan_width = false,
 	                    bool smoke_send = false,
-	                    bool smoke_send_mute = false,
-	                    bool smoke_send_pan = false,
 	                    bool smoke_automation = false,
 	                    bool smoke_edit = false,
 	                    bool smoke_snap = false,
@@ -146,11 +141,7 @@ public:
 	                    bool smoke_auto_state = false,
 	                    bool smoke_pan_auto_state = false,
 	                    bool smoke_send_auto_state = false,
-	                    bool smoke_auto_state_unify = false,
-	                    bool smoke_master_fx = false,
-	                    bool smoke_mixer_reset = false,
-	                    bool smoke_send_reset = false,
-	                    bool smoke_track_color = false);
+	                    bool smoke_auto_state_unify = false);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
@@ -412,7 +403,6 @@ void do_toggle_selection_muted ();
 	void do_lower_selection (bool to_bottom);
 	void do_toggle_selection_opaque ();
 	void prompt_export_selection_wav ();
-	void do_export_selection ();
 	void do_punch_from_selection ();
 	void prompt_rename_selected_region ();
 	void do_loop_from_selection ();
