@@ -448,6 +448,9 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 					}
 					geo->Release ();
 				}
+				if (fac) {
+					fac->Release ();
+				}
 			}
 			if (fo > 0.001f) {
 				float nf = (_sel_end_sec - fo - _view_start_sec) / span;
@@ -469,6 +472,9 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 						rt->FillGeometry (geo, selection_brush);
 					}
 					geo->Release ();
+				}
+				if (fac) {
+					fac->Release ();
 				}
 			}
 			/* Tip caps — visible grab targets at fade wedge tips. */
