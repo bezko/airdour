@@ -328,6 +328,18 @@ struct EngineSnapshot {
 	bool         pref_click_default; /* mirrors Config clicking when saved */
 	static constexpr int kPrefsHintLen = 96;
 	wchar_t      vst3_path_hint[kPrefsHintLen];
+	/* VST3 DSP insert on Audio 2 (D2D host params; no GTK editor). */
+	static constexpr int kMaxVst3Params = 3;
+	static constexpr int kVst3NameLen = 40;
+	static constexpr int kVst3ParamNameLen = 24;
+	bool         vst3_ok; /* PluginInsert live on Audio 2 */
+	bool         vst3_bypassed;
+	int          vst3_track; /* usually 1 = Audio 2 */
+	int          vst3_param_count; /* 0..kMaxVst3Params automatable inputs */
+	wchar_t      vst3_name[kVst3NameLen];
+	wchar_t      vst3_param_name[kMaxVst3Params][kVst3ParamNameLen];
+	float        vst3_param_norm[kMaxVst3Params]; /* 0..1 interface */
+	uint32_t     vst3_param_port[kMaxVst3Params];
 	/* Recent sessions (WinShellRecent instant.xml, beside WinShellPrefs). */
 	static constexpr int kMaxRecent = 8;
 	static constexpr int kRecentLabelLen = 48;
@@ -1809,6 +1821,28 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Scan-only with VST3=0 still returns true (proves path). For --smoke-vst3.
 	 */
 	bool smoke_vst3 ();
+
+	/**
+	 * Refresh vst3_* snapshot fields from the live Audio-2 PluginInsert
+	 * (first kMaxVst3Params automatable input controls as 0..1 norms).
+	 */
+	void refresh_vst3_params_snap ();
+
+	/**
+	 * Set VST3 param by snapshot index (0..vst3_param_count-1) from a
+	 * normalized 0..1 UI value. No-op / false when no insert.
+	 */
+	bool set_vst3_param (int index, float norm_0_1);
+
+	/** Bypass / activate the shell VST3 insert on Audio 2. */
+	bool set_vst3_bypassed (bool bypassed);
+	bool toggle_vst3_bypass ();
+
+	/**
+	 * Scan → insert (when available) → set param0 → readback.
+	 * Scan-only with VST3=0 still returns true. For --smoke-vst3-params.
+	 */
+	bool smoke_vst3_params ();
 
 	/**
 	 * Sample WASAPI shared timing + working set while transport rolls briefly.

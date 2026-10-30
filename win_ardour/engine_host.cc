@@ -524,6 +524,9 @@ public:
 	float           track_fx_param; /* Blend 0..1 */
 	std::string     track_fx_name;
 	std::weak_ptr<PluginInsert> track_fx;
+	std::weak_ptr<PluginInsert> vst3_fx; /* shell VST3 insert (Audio 2) */
+	uint32_t        vst3_param_ports[EngineSnapshot::kMaxVst3Params];
+	int             vst3_param_count;
 	bool            track_comp_ok;
 	bool            track_comp_bypassed;
 	float           track_comp_threshold_db;
@@ -582,6 +585,7 @@ public:
 		, track_fx_ok (false)
 		, track_fx_bypassed (false)
 		, track_fx_param (0.3f)
+		, vst3_param_count (0)
 		, track_comp_ok (false)
 		, track_comp_bypassed (false)
 		, track_comp_threshold_db (0.f)
@@ -610,6 +614,9 @@ public:
 		, track_gate_hold_ms (50.f)
 		, plugins_scanned (false)
 	{
+		for (int i = 0; i < EngineSnapshot::kMaxVst3Params; ++i) {
+			vst3_param_ports[i] = 0;
+		}
 	}
 };
 
@@ -829,6 +836,16 @@ EngineHost::EngineHost ()
 	_snap.track_fx_ok = false;
 	_snap.track_fx_bypassed = false;
 	_snap.track_fx_param = 0.3f;
+	_snap.vst3_ok = false;
+	_snap.vst3_bypassed = false;
+	_snap.vst3_track = 1;
+	_snap.vst3_param_count = 0;
+	_snap.vst3_name[0] = L'\0';
+	for (int vi = 0; vi < EngineSnapshot::kMaxVst3Params; ++vi) {
+		_snap.vst3_param_name[vi][0] = L'\0';
+		_snap.vst3_param_norm[vi] = 0.f;
+		_snap.vst3_param_port[vi] = 0;
+	}
 	_snap.track_comp_ok = false;
 	_snap.track_comp_bypassed = false;
 	_snap.track_comp_threshold_db = 0.f;
@@ -27329,10 +27346,13 @@ EngineHost::smoke_vst3 ()
 			return false;
 		}
 
+		_impl->vst3_fx = pi;
+		refresh_vst3_params_snap ();
+
 		std::fprintf (stderr,
 		              "airdour_win_shell: smoke-vst3 ok (fx=%s on Audio 2, "
-		              "scan=%zu, bypass ok, no GTK UI)\n",
-		              info->name.c_str (), n);
+		              "scan=%zu, bypass ok, params=%d, no GTK UI)\n",
+		              info->name.c_str (), n, _snap.vst3_param_count);
 		std::fflush (stderr);
 		_snap.detail = L"smoke-vst3 ok";
 		return true;
@@ -27343,6 +27363,232 @@ EngineHost::smoke_vst3 ()
 	} catch (...) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-vst3 FAILED (exception)\n");
 		std::fflush (stderr);
+		return false;
+	}
+}
+
+void
+EngineHost::refresh_vst3_params_snap ()
+{
+	_snap.vst3_ok = false;
+	_snap.vst3_bypassed = false;
+	_snap.vst3_track = 1;
+	_snap.vst3_param_count = 0;
+	_snap.vst3_name[0] = L'\0';
+	for (int i = 0; i < EngineSnapshot::kMaxVst3Params; ++i) {
+		_snap.vst3_param_name[i][0] = L'\0';
+		_snap.vst3_param_norm[i] = 0.f;
+		_snap.vst3_param_port[i] = 0;
+		if (_impl) {
+			_impl->vst3_param_ports[i] = 0;
+		}
+	}
+	if (_impl) {
+		_impl->vst3_param_count = 0;
+	}
+	if (!_impl) {
+		return;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->vst3_fx.lock ();
+	if (!pi || !pi->plugin (0)) {
+		return;
+	}
+
+	std::string name = pi->name ();
+	if (name.empty () && pi->plugin (0)->get_info ()) {
+		name = pi->plugin (0)->get_info ()->name;
+	}
+	copy_name_to_snap (_snap.vst3_name, EngineSnapshot::kVst3NameLen, name);
+	_snap.vst3_bypassed = !pi->active ();
+	_snap.vst3_ok = true;
+
+	PluginPtr plug = pi->plugin (0);
+	const uint32_t nports = plug->parameter_count ();
+	int filled = 0;
+	for (uint32_t port = 0; port < nports && filled < EngineSnapshot::kMaxVst3Params; ++port) {
+		if (!plug->parameter_is_control (port) || !plug->parameter_is_input (port)) {
+			continue;
+		}
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, port));
+		if (!ac) {
+			continue;
+		}
+		if (ac->flags () & Controllable::HiddenControl) {
+			continue;
+		}
+		if (ac->flags () & Controllable::NotAutomatable) {
+			continue;
+		}
+		_impl->vst3_param_ports[filled] = port;
+		_snap.vst3_param_port[filled] = port;
+		float norm = (float)ac->internal_to_interface (ac->get_value ());
+		if (norm < 0.f) {
+			norm = 0.f;
+		}
+		if (norm > 1.f) {
+			norm = 1.f;
+		}
+		_snap.vst3_param_norm[filled] = norm;
+		std::string pname = ac->name ();
+		if (pname.empty ()) {
+			pname = plug->describe_parameter (Evoral::Parameter (PluginAutomation, 0, port));
+		}
+		if (pname.empty ()) {
+			char buf[32];
+			std::snprintf (buf, sizeof (buf), "P%u", port);
+			pname = buf;
+		}
+		copy_name_to_snap (_snap.vst3_param_name[filled],
+		                   EngineSnapshot::kVst3ParamNameLen, pname);
+		++filled;
+	}
+	_impl->vst3_param_count = filled;
+	_snap.vst3_param_count = filled;
+}
+
+bool
+EngineHost::set_vst3_param (int index, float norm_0_1)
+{
+	if (!_impl || index < 0 || index >= EngineSnapshot::kMaxVst3Params) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->vst3_fx.lock ();
+	if (!pi) {
+		refresh_vst3_params_snap ();
+		return false;
+	}
+	if (_impl->vst3_param_count <= 0) {
+		refresh_vst3_params_snap ();
+	}
+	if (index >= _impl->vst3_param_count) {
+		return false;
+	}
+	const uint32_t port = _impl->vst3_param_ports[index];
+	float n = std::max (0.f, std::min (1.f, norm_0_1));
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, port));
+		if (!ac) {
+			_snap.detail = L"VST3 param control missing";
+			return false;
+		}
+		const double internal = ac->interface_to_internal ((double)n);
+		ac->set_value (internal, Controllable::NoGroup);
+		refresh_vst3_params_snap ();
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: set_vst3_param: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::set_vst3_bypassed (bool bypassed)
+{
+	if (!_impl) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->vst3_fx.lock ();
+	if (!pi) {
+		return false;
+	}
+	if (bypassed) {
+		pi->deactivate ();
+	} else {
+		pi->activate ();
+	}
+	refresh_vst3_params_snap ();
+	return _snap.vst3_bypassed == bypassed;
+}
+
+bool
+EngineHost::toggle_vst3_bypass ()
+{
+	refresh_vst3_params_snap ();
+	if (!_snap.vst3_ok) {
+		return false;
+	}
+	return set_vst3_bypassed (!_snap.vst3_bypassed);
+}
+
+bool
+EngineHost::smoke_vst3_params ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-vst3-params failed — no Session";
+		return false;
+	}
+	try {
+		/* Reuse insert path from smoke_vst3 (stores weak_ptr + params). */
+		if (!smoke_vst3 ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-params FAILED (insert/scan)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_vst3_params_snap ();
+		if (!_snap.vst3_ok) {
+			/* Honest scan-only: no plugin on this machine. */
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-params ok (scan-only; "
+			              "set VST3_PATH / AIRDOUR_SMOKE_VST3 to exercise params)\n");
+			std::fflush (stderr);
+			_snap.detail = L"smoke-vst3-params scan-only";
+			return true;
+		}
+		if (_snap.vst3_param_count <= 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-params ok (fx loaded, 0 automatable params)\n");
+			std::fflush (stderr);
+			_snap.detail = L"smoke-vst3-params no params";
+			return true;
+		}
+
+		const float original = _snap.vst3_param_norm[0];
+		const float target = (original < 0.5f) ? 0.75f : 0.25f;
+		if (!set_vst3_param (0, target)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-params FAILED (set)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_vst3_params_snap ();
+		if (std::fabs (_snap.vst3_param_norm[0] - target) > 0.08f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-params FAILED (readback got=%.3f want=%.3f)\n",
+			              _snap.vst3_param_norm[0], target);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_vst3_param (0, original)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-params FAILED (restore)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_vst3_bypassed (true) || !_snap.vst3_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-params FAILED (bypass)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!set_vst3_bypassed (false) || _snap.vst3_bypassed) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-params FAILED (activate)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-params ok (fx params=%d p0 %.2f→%.2f→restored, bypass ok)\n",
+		              _snap.vst3_param_count, original, target);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-vst3-params ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst3-params exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
 		return false;
 	}
 }
@@ -31479,6 +31725,7 @@ EngineHost::refresh_snapshot ()
 			refresh_clock_snap ();
 			refresh_midi_snap ();
 			refresh_track_fx_snap ();
+			refresh_vst3_params_snap ();
 			refresh_track_comp_snap ();
 			refresh_track_eq_snap ();
 			refresh_track_delay_snap ();
@@ -31726,6 +31973,16 @@ EngineHost::EngineHost ()
 	_snap.track_fx_ok = false;
 	_snap.track_fx_bypassed = false;
 	_snap.track_fx_param = 0.3f;
+	_snap.vst3_ok = false;
+	_snap.vst3_bypassed = false;
+	_snap.vst3_track = 1;
+	_snap.vst3_param_count = 0;
+	_snap.vst3_name[0] = L'\0';
+	for (int vi = 0; vi < EngineSnapshot::kMaxVst3Params; ++vi) {
+		_snap.vst3_param_name[vi][0] = L'\0';
+		_snap.vst3_param_norm[vi] = 0.f;
+		_snap.vst3_param_port[vi] = 0;
+	}
 	_snap.track_comp_ok = false;
 	_snap.track_comp_bypassed = false;
 	_snap.track_comp_threshold_db = 0.f;
@@ -35916,6 +36173,38 @@ EngineHost::refresh_loudness_snap ()
 
 bool
 EngineHost::smoke_vst3 ()
+{
+	return false;
+}
+
+void
+EngineHost::refresh_vst3_params_snap ()
+{
+}
+
+bool
+EngineHost::set_vst3_param (int index, float norm_0_1)
+{
+	(void)index;
+	(void)norm_0_1;
+	return false;
+}
+
+bool
+EngineHost::set_vst3_bypassed (bool bypassed)
+{
+	(void)bypassed;
+	return false;
+}
+
+bool
+EngineHost::toggle_vst3_bypass ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_vst3_params ()
 {
 	return false;
 }
