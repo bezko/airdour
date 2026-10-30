@@ -271,6 +271,7 @@ private:
 	void do_toggle_snap ();
 	void do_cycle_snap_density ();
 	void do_quantize_midi_notes ();
+	void do_legato_midi_notes ();
 	void do_transpose_midi_notes (int semitones);
 	void do_nudge_midi_velocity (int delta);
 	void do_nudge_midi_length (float delta_sec);

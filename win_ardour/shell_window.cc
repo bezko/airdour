@@ -1923,6 +1923,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "midi-panic", [this]() { return _engine.smoke_midi_panic (); });
 	run_smoke_check (ok, "stop-midi-panic", [this]() { return _engine.smoke_stop_midi_panic (); });
 	run_smoke_check (ok, "midi-audition", [this]() { return _engine.smoke_midi_audition (); });
+	run_smoke_check (ok, "midi-legato", [this]() { return _engine.smoke_midi_legato (); });
 	run_smoke_check (ok, "midi-program", [this]() { return _engine.smoke_midi_program (); });
 	run_smoke_check (ok, "vst3-params", [this]() { return _engine.smoke_vst3_params (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
@@ -5784,6 +5785,19 @@ ShellWindow::do_quantize_midi_notes ()
 }
 
 void
+ShellWindow::do_legato_midi_notes ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.legato_midi_notes ()) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_transpose_midi_notes (int semitones)
 {
 	if (!_engine.is_linked ()) {
@@ -7230,9 +7244,14 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else {
 				do_toggle_snap ();
 			}
-		} else if (!(GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'Q' || wparam == 'q')) {
-			/* Q = quantize selected (or all) MIDI notes to snap grid. */
-			do_quantize_midi_notes ();
+		} else if ((wparam == 'Q' || wparam == 'q')) {
+			if ((GetKeyState (VK_CONTROL) & 0x8000) && (GetKeyState (VK_MENU) & 0x8000)) {
+				/* Ctrl+Alt+Q = legato selected (or all) MIDI notes. */
+				do_legato_midi_notes ();
+			} else if (!(GetKeyState (VK_CONTROL) & 0x8000)) {
+				/* Q = quantize selected (or all) MIDI notes to snap grid. */
+				do_quantize_midi_notes ();
+			}
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
 		           && (GetKeyState (VK_MENU) & 0x8000)
 		           && (wparam == 'H' || wparam == 'h')) {
@@ -10499,6 +10518,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Z", L"Freeze / unfreeze focused audio track" },
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"Q / Qnt", L"Quantize MIDI notes to snap grid" },
+		{ L"Ctrl+Alt+Q", L"Legato MIDI notes (abut ends)" },
 		{ L". / ,  Shift", L"MIDI transpose ±1 · ±12 (T+/T−)" },
 		{ L"↑ / ↓  Shift", L"MIDI velocity ±1 · ±8 (V+/V−)" },
 		{ L"Alt+←/→  Shift", L"MIDI note length ± (L+/L−; snap unit)" },
