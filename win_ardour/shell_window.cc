@@ -1948,6 +1948,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		sync_prefs_from_engine ();
 		return true;
 	});
+	run_smoke_check (ok, "vst3-prefs-click", [this]() { return smoke_vst3_prefs_click (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
 	run_smoke_check (ok, "solo-all", [this]() { return _engine.smoke_solo_all (); });
@@ -7593,6 +7594,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 
 	if (_prefs_visible) {
+		int cat = _prefs.hit_vst3_catalog_index (x, y);
+		if (cat >= 0) {
+			apply_prefs_vst3_catalog_click (cat);
+			return true;
+		}
 		PrefsHit ph = _prefs.hit_test (x, y);
 		apply_prefs_hit (ph);
 		return true;
@@ -9949,6 +9955,99 @@ ShellWindow::toggle_prefs ()
 		_prefs.layout ((float)_width, (float)_height, _dpi_scale);
 	}
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::apply_prefs_vst3_catalog_click (int index)
+{
+	if (!_engine.is_linked ()) {
+		_prefs.set_status (L"No engine");
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	if (_engine.insert_vst3_by_index (index)) {
+		_prefs.set_status (L"VST3 inserted");
+	} else {
+		_prefs.set_status (L"VST3 insert skipped");
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_fx_from_engine ();
+	sync_prefs_from_engine ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+bool
+ShellWindow::smoke_vst3_prefs_click ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst3-prefs-click FAILED (no session)\n");
+		return false;
+	}
+	if (!_engine.rescan_vst3 ()) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst3-prefs-click FAILED (rescan)\n");
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_prefs_from_engine ();
+	_prefs_visible = true;
+	_prefs.set_visible (true);
+	_prefs.layout ((float)_width, (float)_height, _dpi_scale);
+
+	float cx = 0.f, cy = 0.f;
+	if (!_prefs.catalog_row_center (0, &cx, &cy)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst3-prefs-click FAILED (row geometry)\n");
+		return false;
+	}
+
+	if (_engine_snap.vst3_catalog_count <= 0) {
+		if (_prefs.hit_vst3_catalog_index (cx, cy) >= 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-prefs-click FAILED "
+			              "(empty catalog hit index)\n");
+			return false;
+		}
+		/* Direct insert still rejected — mirrors Prefs no-op when empty. */
+		if (_engine.insert_vst3_by_index (0)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-prefs-click FAILED "
+			              "(empty insert unexpectedly ok)\n");
+			return false;
+		}
+		_prefs_visible = false;
+		_prefs.set_visible (false);
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-click ok "
+		              "(scan-only; empty catalog no hit; set VST3_PATH to insert)\n");
+		return true;
+	}
+
+	int hit = _prefs.hit_vst3_catalog_index (cx, cy);
+	if (hit != 0) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-click FAILED (hit=%d want=0)\n",
+		              hit);
+		return false;
+	}
+	const int catalog_n = _engine_snap.vst3_catalog_count;
+	apply_prefs_vst3_catalog_click (0);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	/* Insert may skip instruments — either vst3_ok or honest skip is PASS. */
+	if (_engine_snap.vst3_ok) {
+		(void)_engine.unload_vst3 ();
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_fx_from_engine ();
+	}
+	_prefs_visible = false;
+	_prefs.set_visible (false);
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-vst3-prefs-click ok "
+	              "(catalog=%d row0 hit→insert path)\n",
+	              catalog_n);
+	return true;
 }
 
 void
