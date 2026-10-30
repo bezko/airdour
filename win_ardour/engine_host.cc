@@ -665,7 +665,6 @@ EngineHost::EngineHost ()
 		_snap.track_monitor_choice[i] = 0;
 		_snap.track_stereo[i] = false;
 		_snap.track_active[i] = true;
-		_snap.track_monitor_choice[i] = 0;
 		_snap.track_monitor_peer_count[i] = 0;
 		_snap.track_pan[i] = 0.5f;
 		_snap.track_pan_auto_state[i] = 0;
@@ -696,12 +695,8 @@ EngineHost::EngineHost ()
 	_snap.group_shares_monitoring = false;
 	_snap.group_shares_route_active = false;
 	_snap.group_shares_select = false;
-	_snap.group_shares_monitoring = false;
 	_snap.group_name[0] = L'\0';
 	_snap.mixer_narrow = false;
-	_snap.vca_ok = false;
-	_snap.vca_slave_count = 0;
-	_snap.vca_gain = 1.f;
 	_snap.vca_ok = false;
 	_snap.vca_slave_count = 0;
 	_snap.vca_gain = 1.f;
@@ -2843,12 +2838,6 @@ EngineHost::smoke_export_wav (std::string* out_path)
 		*out_path = _last_export_path;
 	}
 	return true;
-}
-
-std::string
-EngineHost::last_export_path () const
-{
-	return _last_export_path;
 }
 
 bool
@@ -10530,16 +10519,6 @@ EngineHost::split_at (float time_sec, int track)
 }
 
 bool
-EngineHost::split_at_playhead (int track)
-{
-	float t = _snap.transport_sec;
-	if (t < 0.f) {
-		t = 0.f;
-	}
-	return split_at (t, track);
-}
-
-bool
 EngineHost::set_selected_fade_in_sec (float sec)
 {
 	if (!_impl || !_impl->session) {
@@ -14518,38 +14497,6 @@ EngineHost::clear_route_group ()
 	} catch (...) {
 		return false;
 	}
-}
-
-bool
-EngineHost::set_route_group_active (bool enable)
-{
-	if (!_impl || !_impl->session) {
-		return false;
-	}
-	try {
-		std::shared_ptr<RouteGroup> rg = _impl->shell_group;
-		if (!rg) {
-			rg = _impl->session->route_group_by_name ("Group 1");
-			_impl->shell_group = rg;
-		}
-		if (!rg) {
-			_snap.detail = L"no group to activate";
-			return false;
-		}
-		rg->set_active (enable, nullptr);
-		refresh_group_flags ();
-		_snap.detail = enable ? L"group active" : L"group inactive";
-		return _snap.group_active == enable;
-	} catch (...) {
-		return false;
-	}
-}
-
-bool
-EngineHost::toggle_route_group_active ()
-{
-	refresh_group_flags ();
-	return set_route_group_active (!_snap.group_active);
 }
 
 bool
@@ -20218,49 +20165,6 @@ EngineHost::smoke_clear_selection ()
 }
 
 bool
-EngineHost::smoke_click_toggle ()
-{
-	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-click-toggle failed — no Session";
-		return false;
-	}
-	try {
-		set_clicking (false);
-		if (_snap.click_enabled || Config->get_clicking ()) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-click-toggle FAILED (start off)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!toggle_clicking () || !_snap.click_enabled || !Config->get_clicking ()) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-click-toggle FAILED (on)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!toggle_clicking () || _snap.click_enabled || Config->get_clicking ()) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-click-toggle FAILED (off)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!toggle_clicking () || !_snap.click_enabled || !Config->get_clicking ()) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-click-toggle FAILED (on2)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		set_clicking (false);
-		std::fprintf (stderr, "airdour_win_shell: smoke-click-toggle ok (off→on→off→on)\n");
-		std::fflush (stderr);
-		_snap.detail = L"smoke-click-toggle ok";
-		return true;
-	} catch (std::exception& e) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-click-toggle exception: %s\n", e.what ());
-		std::fflush (stderr);
-		return false;
-	} catch (...) {
-		return false;
-	}
-}
-
-bool
 EngineHost::smoke_count_in ()
 {
 	if (!_impl || !_impl->session) {
@@ -20899,53 +20803,6 @@ EngineHost::smoke_punch_selection ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-punch-selection exception: %s\n", e.what ());
-		std::fflush (stderr);
-		return false;
-	} catch (...) {
-		return false;
-	}
-}
-
-bool
-EngineHost::smoke_punch_toggle ()
-{
-	if (!_impl || !_impl->session) {
-		_snap.detail = L"smoke-punch-toggle failed — no Session";
-		return false;
-	}
-	try {
-		if (!set_punch_range (0.5f, 2.5f) || !_snap.punch_range_ok) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle FAILED (range)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!set_punch_enabled (false) || _snap.punch_enabled) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle FAILED (start off)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!toggle_punch_enabled () || !_snap.punch_enabled) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle FAILED (on)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!_impl->session->config.get_punch_in ()
-		    || !_impl->session->config.get_punch_out ()) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle FAILED (config)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		if (!toggle_punch_enabled () || _snap.punch_enabled) {
-			std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle FAILED (off)\n");
-			std::fflush (stderr);
-			return false;
-		}
-		std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle ok (off→on→off)\n");
-		std::fflush (stderr);
-		_snap.detail = L"smoke-punch-toggle ok";
-		return true;
-	} catch (std::exception& e) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-punch-toggle exception: %s\n", e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -31608,12 +31465,8 @@ EngineHost::EngineHost ()
 	_snap.group_shares_monitoring = false;
 	_snap.group_shares_route_active = false;
 	_snap.group_shares_select = false;
-	_snap.group_shares_monitoring = false;
 	_snap.group_name[0] = L'\0';
 	_snap.mixer_narrow = false;
-	_snap.vca_ok = false;
-	_snap.vca_slave_count = 0;
-	_snap.vca_gain = 1.f;
 	_snap.vca_ok = false;
 	_snap.vca_slave_count = 0;
 	_snap.vca_gain = 1.f;
@@ -33659,13 +33512,6 @@ EngineHost::split_at (float time_sec, int track)
 }
 
 bool
-EngineHost::split_at_playhead (int track)
-{
-	(void)track;
-	return false;
-}
-
-bool
 EngineHost::set_selected_fade_in_sec (float sec)
 {
 	(void)sec;
@@ -34179,19 +34025,6 @@ EngineHost::create_route_group (const int* indices, int n)
 
 bool
 EngineHost::clear_route_group ()
-{
-	return false;
-}
-
-bool
-EngineHost::set_route_group_active (bool enable)
-{
-	(void)enable;
-	return false;
-}
-
-bool
-EngineHost::toggle_route_group_active ()
 {
 	return false;
 }
@@ -35097,12 +34930,6 @@ EngineHost::smoke_clear_selection ()
 }
 
 bool
-EngineHost::smoke_click_toggle ()
-{
-	return false;
-}
-
-bool
 EngineHost::smoke_count_in ()
 {
 	return false;
@@ -35159,12 +34986,6 @@ EngineHost::smoke_loop_selection ()
 
 bool
 EngineHost::smoke_punch_selection ()
-{
-	return false;
-}
-
-bool
-EngineHost::smoke_punch_toggle ()
 {
 	return false;
 }
@@ -36553,12 +36374,6 @@ EngineHost::refresh_selection_snap ()
 void
 EngineHost::refresh_locations_snap ()
 {
-}
-
-std::string
-EngineHost::last_export_path () const
-{
-	return std::string ();
 }
 
 std::string

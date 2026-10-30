@@ -998,8 +998,6 @@ public:
 
 	/** Split playlist region(s) at time_sec on track (−1 = selection track or 0). */
 	bool split_at (float time_sec, int track = -1);
-	/** Split at current transport playhead. */
-	bool split_at_playhead (int track = -1);
 
 	/** Set fade-in/out length (seconds) on selected AudioRegion; activates fades. */
 	bool set_selected_fade_in_sec (float sec);
@@ -1303,7 +1301,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool set_selection_opaque (bool opaque);
 	bool set_selection_position_locked (bool locked);
 	bool smoke_clear_selection ();
-	bool smoke_click_toggle ();
 	bool smoke_count_in ();
 	bool smoke_crossfade_handles ();
 	bool smoke_crossfade_shape ();
@@ -1314,7 +1311,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool smoke_grid_lines ();
 	bool smoke_loop_selection ();
 	bool smoke_punch_selection ();
-	bool smoke_punch_toggle ();
 	bool smoke_region_caption ();
 	bool smoke_region_cycle ();
 	bool smoke_region_duplicate ();
@@ -1475,8 +1471,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool create_route_group (const int* indices, int n);
 	/** Remove shell RouteGroup members (and drop empty group). */
 	bool clear_route_group ();
-	bool set_route_group_active (bool enable);
-	bool toggle_route_group_active ();
 	/** Relative (proportional) gain linking. Alt+Shift+G / --smoke-group-relative. */
 	bool set_route_group_relative (bool enable);
 	bool toggle_route_group_relative ();
@@ -2074,7 +2068,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	/* smoke_midi_cc declared with MIDI CC automation APIs above. */
 
 	std::string session_dir () const;
-	std::string last_export_path () const;
 
 	EngineSnapshot snapshot () const;
 

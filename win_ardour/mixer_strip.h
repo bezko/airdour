@@ -36,7 +36,6 @@ public:
 	void set_fx_param (float value_0_1);
 	/** FX param track count: 1=Reverb, 2=Comp, 3=EQ. Extra tracks reserved in layout. */
 	void set_fx_param_count (int count_1_to_3);
-	void set_fx_dual (bool dual); /* legacy: dual → count 2 */
 	void set_fx_param2 (float value_0_1);
 	void set_fx_param3 (float value_0_1);
 	void layout (const D2D1_RECT_F& strip_bounds, float dpi_scale);
@@ -124,7 +123,7 @@ public:
 	void set_narrow (bool narrow) { _narrow = narrow; }
 	bool narrow () const { return _narrow; }
 
-	/** Session RouteGroup membership + Shift-pick for upcoming Grp. */
+	/** Session RouteGroup membership + Shift-pick for Grp. */
 	void set_in_group (bool in_group) { _in_group = in_group; }
 	bool in_group () const { return _in_group; }
 	void set_group_picked (bool picked) { _group_picked = picked; }
@@ -139,7 +138,6 @@ public:
 	/** True when strip has a non-empty FX label (insert/bypass is live). */
 	bool has_fx () const { return _fx_label[0] != L'\0'; }
 	bool fx_bypassed () const { return _fx_bypassed; }
-	bool fx_dual () const { return _fx_param_count >= 2; }
 	int  fx_param_count () const { return _fx_param_count; }
 	float fx_param () const { return _fx_param; }
 	float fx_param2 () const { return _fx_param2; }

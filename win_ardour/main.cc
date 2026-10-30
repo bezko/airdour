@@ -160,10 +160,6 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_midi_cc = parse_flag (argc, argv, L"--smoke-midi-cc");
 	bool smoke_midi_bend = parse_flag (argc, argv, L"--smoke-midi-bend");
 	bool smoke_midi_pressure = parse_flag (argc, argv, L"--smoke-midi-pressure");
-	bool smoke_mixer_reset = parse_flag (argc, argv, L"--smoke-mixer-reset");
-	bool smoke_send_reset = parse_flag (argc, argv, L"--smoke-send-reset");
-	bool smoke_track_color = parse_flag (argc, argv, L"--smoke-track-color");
-	bool smoke_master_fx = parse_flag (argc, argv, L"--smoke-master-fx");
 	bool smoke_locate_selection = parse_flag (argc, argv, L"--smoke-locate-selection");
 	bool smoke_pan_automation = parse_flag (argc, argv, L"--smoke-pan-automation");
 	bool smoke_auto_lane_unify = parse_flag (argc, argv, L"--smoke-auto-lane-unify");
@@ -174,12 +170,8 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_plugin = parse_flag (argc, argv, L"--smoke-plugin");
 	bool smoke_vst3 = parse_flag (argc, argv, L"--smoke-vst3");
 	bool smoke_mute_solo = parse_flag (argc, argv, L"--smoke-mute-solo");
-	bool smoke_meter_point = parse_flag (argc, argv, L"--smoke-meter-point");
 	bool smoke_pan = parse_flag (argc, argv, L"--smoke-pan");
-	bool smoke_pan_width = parse_flag (argc, argv, L"--smoke-pan-width");
 	bool smoke_send = parse_flag (argc, argv, L"--smoke-send");
-	bool smoke_send_mute = parse_flag (argc, argv, L"--smoke-send-mute");
-	bool smoke_send_pan = parse_flag (argc, argv, L"--smoke-send-pan");
 	bool smoke_automation = parse_flag (argc, argv, L"--smoke-automation");
 	bool smoke_edit = parse_flag (argc, argv, L"--smoke-edit");
 	bool smoke_snap = parse_flag (argc, argv, L"--smoke-snap");
@@ -252,8 +244,8 @@ wmain (int argc, wchar_t** argv)
 		                         smoke_save_load, smoke_export, smoke_undo,
 		                         smoke_loop, smoke_midi, smoke_midi_edit,
 		                         smoke_plugin, smoke_perf, session_path, period,
-		                         smoke_vst3, smoke_mute_solo, smoke_meter_point, smoke_pan, smoke_pan_width,
-		                         smoke_send, smoke_send_mute, smoke_send_pan,
+		                         smoke_vst3, smoke_mute_solo, smoke_pan,
+		                         smoke_send,
 		                         smoke_automation, smoke_edit, smoke_snap, smoke_punch,
 		                         smoke_tempo, smoke_click, smoke_tracks,
 		                         smoke_stereo_track,
@@ -275,9 +267,7 @@ wmain (int argc, wchar_t** argv)
 	                         smoke_midi_pressure, smoke_locate_selection,
 	                         smoke_pan_automation, smoke_auto_lane_unify,
 	                         smoke_auto_state, smoke_pan_auto_state,
-	                         smoke_send_auto_state, smoke_auto_state_unify,
-	                         smoke_master_fx, smoke_mixer_reset,
-	                         smoke_send_reset, smoke_track_color)) {
+	                         smoke_send_auto_state, smoke_auto_state_unify)) {
 			const char* be = backend.empty () ? "(prefs/Dummy)" : backend.c_str ();
 			std::fwprintf (stderr, L"airdour_win_shell: engine attached backend=%hs\n", be);
 		} else {

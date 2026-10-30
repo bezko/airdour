@@ -250,12 +250,8 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             unsigned period_frames,
                             bool smoke_vst3,
                             bool smoke_mute_solo,
-                            bool smoke_meter_point,
                             bool smoke_pan,
-                            bool smoke_pan_width,
                             bool smoke_send,
-                            bool smoke_send_mute,
-                            bool smoke_send_pan,
                             bool smoke_automation,
                             bool smoke_edit,
                             bool smoke_snap,
@@ -308,11 +304,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
                             bool smoke_auto_state,
                             bool smoke_pan_auto_state,
                             bool smoke_send_auto_state,
-                            bool smoke_auto_state_unify,
-                            bool smoke_master_fx,
-                            bool smoke_mixer_reset,
-                            bool smoke_send_reset,
-                            bool smoke_track_color)
+                            bool smoke_auto_state_unify)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -1905,7 +1897,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "count-in", [this]() { return _engine.smoke_count_in (); });
 	run_smoke_check (ok, "click-toggle", [this]() { return _engine.smoke_click (); });
 	run_smoke_check (ok, "punch-toggle", [this]() { return _engine.smoke_punch (); });
-	run_smoke_check (ok, "cairo-wave", [this]() { return CairoWaveBlit::smoke_offline (); });
 	run_smoke_check (ok, "midi-note-pressure", [this]() {
 		if (!_engine.smoke_midi_note_pressure ()) {
 			return false;
@@ -3834,33 +3825,6 @@ ShellWindow::do_ensure_region_envelope ()
 		apply_region_selection_to_lanes ();
 		InvalidateRect (_hwnd, nullptr, FALSE);
 	}
-}
-
-void
-ShellWindow::do_export_selection ()
-{
-	if (!_engine.is_linked () || !_engine_snap.session_ok) {
-		return;
-	}
-	if (!_engine_snap.has_selection) {
-		std::fprintf (stderr, "airdour_win_shell: export selection — no selection\n");
-		std::fflush (stderr);
-		return;
-	}
-	if (!_engine.start ()) {
-		_engine_snap = _engine.snapshot ();
-		InvalidateRect (_hwnd, nullptr, FALSE);
-		return;
-	}
-	if (_engine.export_selection_wav ()) {
-		std::fprintf (stderr, "airdour_win_shell: export selection ok\n");
-	} else {
-		std::fprintf (stderr, "airdour_win_shell: export selection failed\n");
-	}
-	std::fflush (stderr);
-	_engine.poll ();
-	_engine_snap = _engine.snapshot ();
-	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
 void
