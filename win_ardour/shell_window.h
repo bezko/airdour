@@ -266,6 +266,13 @@ private:
 	/** " ON·beat" / " OFF" style suffix for editor caption. */
 	const wchar_t* snap_caption_suffix () const;
 	bool smoke_snap_density_label ();
+	bool smoke_snap_ruler_ticks ();
+	/** Count bar / subdiv ticks that draw_editor_ruler would paint. */
+	void count_snap_ruler_ticks (int* out_bar, int* out_subdiv) const;
+	/** Status-bar snap density chip (Bar/Beat/1/2/1/4) when snap is on. */
+	bool hit_status_snap (float x, float y) const;
+	bool status_snap_center (float* out_x, float* out_y) const;
+	bool smoke_snap_status_chip ();
 	void do_quantize_midi_notes ();
 	void do_legato_midi_notes ();
 	void do_transpose_midi_notes (int semitones);
@@ -555,6 +562,7 @@ void do_toggle_selection_muted ();
 	D2D1_RECT_F _status_vst3_param_reset2_btn; /* 2 = param2 reset */
 	D2D1_RECT_F _status_vst3_param_reset3_btn; /* 3 = param3 reset */
 	D2D1_RECT_F _status_vst3_unload_btn; /* × chip when vst3_ok */
+	D2D1_RECT_F _status_snap_btn; /* snap density chip left of DSP meter */
 
 	ID2D1Factory*             _d2d_factory;
 	IDWriteFactory*           _dwrite_factory;
