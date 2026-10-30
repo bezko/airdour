@@ -118,7 +118,7 @@ flowchart TD
 | :--- | :--- | :--- |
 | **Windowing & GUI Toolkit** | GTK2 + X11 compatibility shims + Cairo | **Native Win32 + Direct2D + DirectWrite** |
 | **Audio Backend** | PortAudio / ASIO third-party drivers required | **Native WASAPI Shared-Mode** (Zero driver install) |
-| **MIDI Subsystem** | PortAudio MIDI Bridge / ALSA-layer emulation | **Native WinMME subsystem** ([winmmemidi_io.cc](file:///c:/Users/mathieu/Documents/GitHub/airdour/libs/backends/wasapi/winmmemidi_io.cc)) |
+| **MIDI Subsystem** | PortAudio MIDI Bridge / ALSA-layer emulation | **Native WinMME subsystem** ([winmmemidi_io.cc](file:///c:/Users/mathieu/Documents/GitHub/airdour/libs/backends/portaudio/winmmemidi_io.cc)) |
 | **AI Integration** | None / Manual OSC / Lua scripts | **Native MCP HTTP Server** ([libs/surfaces/mcp_http](file:///c:/Users/mathieu/Documents/GitHub/airdour/libs/surfaces/mcp_http/README.md)) |
 | **Startup Memory Footprint** | ~400 MB – 600 MB working set | **~116 MB** working set in Release engine |
 | **DSP Overhead** | High due to POSIX translation layers | **~11% DSP load** baseline on standard mobile hardware |
