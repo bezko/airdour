@@ -337,6 +337,10 @@ private:
 	void sync_mixer_group_from_engine ();
 	void draw_editor_grid ();
 	void draw_punch_overlay ();
+	/** Truncate marker name for ruler draw (ellipsis when longer than max_chars). */
+	static void format_marker_ruler_label (const wchar_t* name, wchar_t* out, size_t out_len,
+	                                       int max_chars = 8);
+	bool smoke_marker_name_ellipsis ();
 	void do_toggle_comp_sidechain ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
