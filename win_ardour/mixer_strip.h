@@ -155,6 +155,8 @@ public:
 	bool hit_fx_param_reset2 (float x, float y) const;
 	/** "3" chip — reset VST3 param3 (between B and ×). */
 	bool hit_fx_param_reset3 (float x, float y) const;
+	/** "4" chip — reset VST3 param4 (between B and ×). */
+	bool hit_fx_param_reset4 (float x, float y) const;
 	void set_fx_can_unload (bool on) { _fx_can_unload = on; }
 	bool fx_can_unload () const { return _fx_can_unload; }
 	bool hit_fx_param (float x, float y) const;
@@ -218,6 +220,7 @@ private:
 	D2D1_RECT_F _fx_param_reset1_btn;
 	D2D1_RECT_F _fx_param_reset2_btn;
 	D2D1_RECT_F _fx_param_reset3_btn;
+	D2D1_RECT_F _fx_param_reset4_btn;
 	D2D1_RECT_F _fx_unload_btn;
 	D2D1_RECT_F _fx_param_track;
 	D2D1_RECT_F _fx_param_track2;
