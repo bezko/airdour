@@ -438,10 +438,18 @@ void do_toggle_selection_muted ();
 	bool hit_editor_ruler (float x, float y) const;
 	bool hit_midi_lane (float x, float y) const;
 	bool hit_midi_velocity_lane (float x, float y) const;
+	/**
+	 * Among notes covering x's time, pick the velocity-bar hit: innermost
+	 * bar containing y, else tallest bar (chord-aware). Returns snap index
+	 * or -1.
+	 */
+	int  pick_midi_velocity_note_at (float x, float y) const;
 	D2D1_RECT_F midi_piano_rect () const;
 	D2D1_RECT_F midi_velocity_rect () const;
 	int  midi_velocity_at_y (float y) const;
 	uint8_t midi_pitch_at_y (float y) const;
+	/** Two overlapping notes → Vel pick selects by bar height, not first. */
+	bool smoke_midi_vel_chord ();
 	float midi_time_at_x (float x) const;
 	int  hit_editor_lane (float x, float y) const;
 	int  hit_mixer_fader (float x, float y) const;
