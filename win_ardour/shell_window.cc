@@ -1929,6 +1929,15 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		sync_mixer_fx_from_engine ();
 		return true;
 	});
+	run_smoke_check (ok, "vst3-catalog", [this]() {
+		if (!_engine.smoke_vst3_catalog ()) {
+			return false;
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_prefs_from_engine ();
+		return true;
+	});
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
 	run_smoke_check (ok, "solo-all", [this]() { return _engine.smoke_solo_all (); });
@@ -9905,6 +9914,9 @@ ShellWindow::sync_prefs_from_engine ()
 	_prefs.set_click_default (_engine_snap.pref_click_default);
 	_prefs.set_snap_default (_engine_snap.pref_snap_default);
 	_prefs.set_vst3_hint (_engine_snap.vst3_path_hint);
+	_prefs.set_vst3_catalog (_engine_snap.vst3_scan_count,
+	                         _engine_snap.vst3_catalog_name,
+	                         _engine_snap.vst3_catalog_count);
 }
 
 void

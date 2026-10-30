@@ -40,6 +40,11 @@ PrefsPanel::PrefsPanel ()
 	wcsncpy_s (_cur_backend, L"Dummy", _TRUNCATE);
 	wcsncpy_s (_pref_backend, L"Dummy", _TRUNCATE);
 	_vst3_hint[0] = L'\0';
+	_vst3_scan_count = 0;
+	_vst3_catalog_count = 0;
+	for (int i = 0; i < kMaxCatalog; ++i) {
+		_vst3_catalog[i][0] = L'\0';
+	}
 	_status[0] = L'\0';
 }
 
@@ -48,7 +53,7 @@ PrefsPanel::layout (float view_w, float view_h, float dpi_scale)
 {
 	float pad = 24.f * dpi_scale;
 	float card_w = std::min (view_w - pad * 2.f, 560.f * dpi_scale);
-	float card_h = std::min (view_h - pad * 2.f, 420.f * dpi_scale);
+	float card_h = std::min (view_h - pad * 2.f, 520.f * dpi_scale);
 	float cx = (view_w - card_w) * 0.5f;
 	float cy = (view_h - card_h) * 0.5f;
 	_card = D2D1::RectF (cx, cy, cx + card_w, cy + card_h);
@@ -71,7 +76,8 @@ PrefsPanel::layout (float view_w, float view_h, float dpi_scale)
 
 	_click_btn = D2D1::RectF (x, y, x + half, y + btn_h);
 	_snap_btn = D2D1::RectF (x + half + gap, y, x + half + gap + half, y + btn_h);
-	y = _click_btn.bottom + 52.f * dpi_scale;
+	/* Leave room for path hint + up to kMaxCatalog name lines. */
+	y = _click_btn.bottom + (52.f + 15.f * (float)kMaxCatalog) * dpi_scale;
 
 	_vst3_rescan_btn = D2D1::RectF (x, y, x + 140.f * dpi_scale, y + btn_h);
 
@@ -117,6 +123,26 @@ PrefsPanel::set_vst3_hint (const wchar_t* text)
 		wcsncpy_s (_vst3_hint, kHintLen, text, _TRUNCATE);
 	} else {
 		_vst3_hint[0] = L'\0';
+	}
+}
+
+void
+PrefsPanel::set_vst3_catalog (int scan_count, const wchar_t names[][kCatalogNameLen], int name_count)
+{
+	_vst3_scan_count = std::max (0, scan_count);
+	_vst3_catalog_count = 0;
+	for (int i = 0; i < kMaxCatalog; ++i) {
+		_vst3_catalog[i][0] = L'\0';
+	}
+	if (!names || name_count <= 0) {
+		return;
+	}
+	const int n = std::min (name_count, kMaxCatalog);
+	for (int i = 0; i < n; ++i) {
+		if (names[i][0]) {
+			wcsncpy_s (_vst3_catalog[i], kCatalogNameLen, names[i], _TRUNCATE);
+			_vst3_catalog_count = i + 1;
+		}
 	}
 }
 
@@ -251,7 +277,7 @@ PrefsPanel::draw (ID2D1RenderTarget* rt,
 	draw_btn (_click_btn, _click_on ? L"Click ON" : L"Click OFF", _click_on);
 	draw_btn (_snap_btn, _snap_on ? L"Snap ON" : L"Snap OFF", _snap_on);
 
-	_snwprintf_s (line, _TRUNCATE, L"VST3 path hint");
+	_snwprintf_s (line, _TRUNCATE, L"VST3 path hint · scanned %d", _vst3_scan_count);
 	rt->DrawTextW (line, (UINT32)wcslen (line), fmt_meta,
 	               D2D1::RectF (_card.left + 16.f * dpi_scale, _click_btn.bottom + 10.f * dpi_scale,
 	                            _card.right - 16.f * dpi_scale, _click_btn.bottom + 26.f * dpi_scale),
@@ -260,8 +286,24 @@ PrefsPanel::draw (ID2D1RenderTarget* rt,
 	               (UINT32)wcslen (_vst3_hint[0] ? _vst3_hint : L"(VST3_PATH unset · config @default@)"),
 	               fmt_meta,
 	               D2D1::RectF (_card.left + 16.f * dpi_scale, _click_btn.bottom + 26.f * dpi_scale,
-	                            _card.right - 16.f * dpi_scale, _vst3_rescan_btn.top - 4.f * dpi_scale),
+	                            _card.right - 16.f * dpi_scale, _click_btn.bottom + 42.f * dpi_scale),
 	               brand);
+	float cat_y = _click_btn.bottom + 44.f * dpi_scale;
+	if (_vst3_catalog_count <= 0) {
+		rt->DrawTextW (L"(none scanned)", 14, fmt_meta,
+		               D2D1::RectF (_card.left + 16.f * dpi_scale, cat_y,
+		                            _card.right - 16.f * dpi_scale, cat_y + 16.f * dpi_scale),
+		               body);
+	} else {
+		for (int i = 0; i < _vst3_catalog_count; ++i) {
+			_snwprintf_s (line, _TRUNCATE, L"· %s", _vst3_catalog[i]);
+			rt->DrawTextW (line, (UINT32)wcslen (line), fmt_meta,
+			               D2D1::RectF (_card.left + 16.f * dpi_scale, cat_y,
+			                            _card.right - 16.f * dpi_scale, cat_y + 15.f * dpi_scale),
+			               brand);
+			cat_y += 15.f * dpi_scale;
+		}
+	}
 	draw_btn (_vst3_rescan_btn, L"Rescan VST3", false);
 
 	draw_btn (_save_btn, L"Save", true);

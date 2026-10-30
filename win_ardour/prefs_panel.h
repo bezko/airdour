@@ -38,6 +38,8 @@ class PrefsPanel
 {
 public:
 	static constexpr int kHintLen = 96;
+	static constexpr int kMaxCatalog = 8;
+	static constexpr int kCatalogNameLen = 40;
 
 	PrefsPanel ();
 
@@ -53,6 +55,8 @@ public:
 	void set_click_default (bool on) { _click_on = on; }
 	void set_snap_default (bool on) { _snap_on = on; }
 	void set_vst3_hint (const wchar_t* text);
+	/** scan_count = full list size; names[0..name_count) shown under hint. */
+	void set_vst3_catalog (int scan_count, const wchar_t names[][kCatalogNameLen], int name_count);
 	void set_status (const wchar_t* text);
 
 	PrefsHit hit_test (float x, float y) const;
@@ -88,5 +92,8 @@ private:
 	wchar_t     _cur_backend[32];
 	wchar_t     _pref_backend[32];
 	wchar_t     _vst3_hint[kHintLen];
+	int         _vst3_scan_count;
+	int         _vst3_catalog_count;
+	wchar_t     _vst3_catalog[kMaxCatalog][kCatalogNameLen];
 	wchar_t     _status[80];
 };
