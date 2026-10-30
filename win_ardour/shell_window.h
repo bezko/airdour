@@ -251,6 +251,10 @@ private:
 	void do_undo_to_index (int index);
 	void sync_history_from_engine ();
 	void do_delete_selection ();
+	/** Clear automation for the active MIDI CC/bend/pressure/PolyAT lane. */
+	bool do_clear_active_midi_cc_lane ();
+	/** Write CC points → clear via shell path → assert empty. */
+	bool smoke_midi_cc_clear ();
 	void do_split_at_playhead ();
 	void do_apply_crossfade ();
 	void do_stretch_selection (float time_ratio = 1.5f);
