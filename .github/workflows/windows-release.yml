@@ -7,12 +7,13 @@
 # Publishes (GHA windows-latest — honest UiOnly + scripts):
 #   1) airdour-*-win64-ci.zip — WASAPI I/O smoke lib + sources + BUILD_STATUS
 #   2) airdour-*-win64-shell-ui.zip — portable D2D shell (UiOnly)
-#   3) airdour-*-win64-setup-ui.exe — Inno installer of the UiOnly shell (when ISCC works)
-#   4) airdour-*-win64-installer-src.zip — .iss + packaging scripts for laptop Engine setup.exe
+#   3) airdour-*-win64-setup-ui.exe — NSIS installer of the UiOnly shell (per-user)
+#   4) airdour-*-win64-installer-src.zip — airdour.nsi + packaging scripts
 #
 # Full Engine portable zip + Engine setup.exe (Dummy/WASAPI + ACE LV2, MSVC Release /MD)
-# are produced on a laptop agent via Package-WinShell-Portable.ps1 + Package-WinShell-Installer.ps1
+# are produced on a laptop via Package-WinShell-Portable.ps1 + Package-WinShell-Nsis.ps1
 # (Mode=Engine -Config Release). Attach those to the same GitHub Release.
+# Tags containing test/rc/alpha/beta/pre are published as GitHub prereleases.
 
 name: Windows MSVC Release
 
@@ -50,8 +51,14 @@ jobs:
             $short = "${{ github.sha }}".Substring(0, 7)
             $v = "ci-$short"
           }
+          $pre = "false"
+          if ($v -match '(?i)(^|[.-])(test|rc|alpha|beta|pre|dev)([.-]|$)') { $pre = "true" }
+          if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.prerelease }}" -eq "true") {
+            $pre = "true"
+          }
           echo "version=$v" >> $env:GITHUB_OUTPUT
-          Write-Host "version=$v"
+          echo "prerelease=$pre" >> $env:GITHUB_OUTPUT
+          Write-Host "version=$v prerelease=$pre"
 
       - name: Setup MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
@@ -77,6 +84,27 @@ jobs:
         run: cmake --build build-win64 --config Release --target airdour_win_shell -j $env:NUMBER_OF_PROCESSORS
         shell: pwsh
 
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "${env:ProgramFiles(x86)}\NSIS\makensis.exe",
+            "$env:ProgramFiles\NSIS\makensis.exe"
+          )
+          $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $found) {
+            choco install nsis --yes --no-progress
+            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010) {
+              throw "choco install nsis failed (exit $LASTEXITCODE)"
+            }
+            $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $found) { throw "makensis.exe not found after NSIS install" }
+          $dir = Split-Path $found -Parent
+          Add-Content -Path $env:GITHUB_PATH -Value $dir
+          & $found -VERSION
+          Write-Host "makensis=$found"
+
       - name: Smoke UiOnly shell
         shell: pwsh
         run: |
@@ -85,7 +113,7 @@ jobs:
           & $exe.FullName --timeout 2 --no-engine
           if ($LASTEXITCODE -ne 0) { throw "UiOnly shell smoke exit $LASTEXITCODE" }
 
-      - name: Package release zips + UiOnly installer
+      - name: Package release zips + NSIS installer
         id: pkg
         shell: pwsh
         run: |
@@ -99,7 +127,7 @@ jobs:
             -ShellExe $(if ($shell) { $shell.FullName } else { "" }) `
             -GitSha "${{ github.sha }}" `
             -GitRef "${{ github.ref }}" `
-            -BootstrapInno
+            -BootstrapNsis
           Get-ChildItem dist -Filter "*.zip" | ForEach-Object {
             Write-Host "ZIP $($_.Name) ($([int]($_.Length/1KB)) KB)"
           }
@@ -110,36 +138,35 @@ jobs:
           $shellZip = Get-ChildItem dist -Filter "airdour-*-win64-shell*.zip" | Select-Object -First 1
           if ($shellZip) { echo "shell_zip=$($shellZip.FullName)" >> $env:GITHUB_OUTPUT }
           $setup = Get-ChildItem dist -Filter "airdour-*-win64-setup*.exe" | Select-Object -First 1
-          if ($setup) {
-            echo "setup_exe=$($setup.FullName)" >> $env:GITHUB_OUTPUT
-            echo "has_setup=true" >> $env:GITHUB_OUTPUT
-          } else {
-            echo "has_setup=false" >> $env:GITHUB_OUTPUT
-            Write-Warning "No setup.exe produced (Inno bootstrap or compile failed) - installer-src.zip still published"
-          }
+          if (-not $setup) { throw "No setup.exe produced" }
+          echo "setup_exe=$($setup.FullName)" >> $env:GITHUB_OUTPUT
+          echo "has_setup=true" >> $env:GITHUB_OUTPUT
 
-      - name: Smoke UiOnly installer (silent CURRENTUSER)
-        if: steps.pkg.outputs.has_setup == 'true'
+      - name: Smoke UiOnly installer (silent per-user)
         shell: pwsh
         run: |
           $setup = Get-ChildItem dist -Filter "airdour-*-win64-setup*.exe" | Select-Object -First 1
-          $inst = Join-Path $env:TEMP "Airdour-gha-install"
+          if (-not $setup) { throw "setup exe missing" }
+          # NSIS /D= must be the last argument and must not be quoted. Keep this path space-free.
+          $inst = "C:\AirdourCiSmoke"
           if (Test-Path $inst) { Remove-Item $inst -Recurse -Force }
-          $p = Start-Process -FilePath $setup.FullName -ArgumentList @(
-            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER", "/SP-",
-            "/DIR=$inst"
-          ) -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "Silent install exit $($p.ExitCode)" }
-          $bat = Join-Path $inst "run-airdour.bat"
-          if (-not (Test-Path $bat)) { throw "Missing $bat after install" }
-          & $bat --timeout 2 --no-engine
+          $cmd = '"{0}" /S /D={1}' -f $setup.FullName, $inst
+          Write-Host "install: $cmd"
+          cmd.exe /c $cmd
+          if ($LASTEXITCODE -ne 0) { throw "Silent install exit $LASTEXITCODE" }
+          foreach ($rel in @("run-airdour.bat", "airdour_win_shell.exe", "Uninstall.exe", "COPYING")) {
+            $p = Join-Path $inst $rel
+            if (-not (Test-Path $p)) { throw "Missing $p after install" }
+          }
+          & (Join-Path $inst "run-airdour.bat") --timeout 2 --no-engine
           if ($LASTEXITCODE -ne 0) { throw "Installed UiOnly smoke exit $LASTEXITCODE" }
-          $unins = Get-ChildItem $inst -Filter "unins*.exe" | Select-Object -First 1
-          if ($unins) {
-            $u = Start-Process -FilePath $unins.FullName -ArgumentList @(
-              "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"
-            ) -Wait -PassThru
-            Write-Host "uninstall_exit=$($u.ExitCode)"
+          $unins = Join-Path $inst "Uninstall.exe"
+          # _?= keeps uninstall in this process so cmd waits until files are gone.
+          # It must be the last argument and must not be quoted.
+          cmd.exe /c "`"$unins`" /S _?=$inst"
+          if ($LASTEXITCODE -ne 0) { throw "Silent uninstall exit $LASTEXITCODE" }
+          if (Test-Path (Join-Path $inst "airdour_win_shell.exe")) {
+            throw "Uninstall left airdour_win_shell.exe in $inst"
           }
 
       - name: Upload release artifacts (Actions)
@@ -175,7 +202,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: Airdour ${{ steps.ver.outputs.version }} (win64)
           draft: false
-          prerelease: ${{ inputs.prerelease == true }}
+          prerelease: ${{ steps.ver.outputs.prerelease == 'true' }}
           generate_release_notes: true
           files: ${{ steps.files.outputs.list }}
           body: |
@@ -187,15 +214,22 @@ jobs:
             ### Artifacts from GitHub Actions (`windows-latest`)
             - `airdour-*-win64-ci.zip` — WASAPI I/O smoke lib + sources + BUILD_STATUS
             - `airdour-*-win64-shell-ui.zip` — portable **UiOnly** `airdour_win_shell` (unzip + `run-airdour.bat --no-engine`)
-            - `airdour-*-win64-setup-ui.exe` — **Inno Setup** installer of the UiOnly shell (when ISCC bootstrap succeeds)
-            - `airdour-*-win64-installer-src.zip` — `airdour.iss` + packaging scripts to build the **Engine** installer offline
+            - `airdour-*-win64-setup-ui.exe` — **NSIS** installer of the UiOnly shell (per-user, no UAC)
+            - `airdour-*-win64-installer-src.zip` — `airdour.nsi` + packaging scripts to rebuild the installer
+
+            Silent install (the `/D=` path is last and is not quoted):
+
+            ```bat
+            airdour-*-win64-setup-ui.exe /S /D=C:\Airdour
+            Uninstall.exe /S _?=C:\Airdour
+            ```
 
             ### Engine portable + installer (laptop — MSVC Release; not built on GHA yet)
             Full Dummy/WASAPI + ACE LV2 package needs `build-rel` + vcpkg Release DLLs (too heavy for default GHA):
 
             ```bat
             powershell -File tools\win-native\ci\Package-WinShell-Portable.ps1 -RepoRoot %CD% -OutDir dist -Version ${{ steps.ver.outputs.version }} -Mode Engine -Config Release
-            powershell -File tools\win-native\ci\Package-WinShell-Installer.ps1 -RepoRoot %CD% -OutDir dist -Version ${{ steps.ver.outputs.version }} -RefreshPortable -BootstrapInno
+            powershell -File tools\win-native\ci\Package-WinShell-Nsis.ps1 -RepoRoot %CD% -OutDir dist -Version ${{ steps.ver.outputs.version }} -RefreshPortable -BootstrapNsis
             ```
 
             Attach `airdour-*-win64-shell.zip` and `airdour-*-win64-setup.exe` to this release.

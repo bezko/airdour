@@ -79,6 +79,7 @@ cairomm spike (isolated; canvas TU still FAIL): `tools/win-native/canvas-cxx-spi
 
 - `tools/win-native/ci/Write-BuildStatus.ps1`
 - `tools/win-native/ci/Package-Release.ps1`
+- `tools/win-native/ci/Package-WinShell-Nsis.ps1` (open-source NSIS installer)
 
 ## Bring-up checklist
 
@@ -92,7 +93,7 @@ cairomm spike (isolated; canvas TU still FAIL): `tools/win-native/canvas-cxx-spi
 8. [ ] Tune period/CPU on a cheap laptop; measured WasapiIO latency
 9. [x] Port WinMME MIDI; grow `win_ardour` (engine attach, wave strip, FX)
 10. [x] Windows-only cull: waf/cmake never require `libs/tk`, `gtk2_ardour`, Cairo canvas
-11. [ ] Installer (NSIS/MSIX); Engine portable zip already ships via `Package-WinShell-Portable.ps1`
+11. [x] NSIS per-user installer (`tools/win-native/installer/airdour.nsi`); [ ] MSIX. Engine portable zip via `Package-WinShell-Portable.ps1`
 
 ## Success for this phase
 

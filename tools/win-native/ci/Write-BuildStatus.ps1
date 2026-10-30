@@ -44,7 +44,9 @@ STAGED   libpbd / libardour / hardour — laptop-proven; wire into CI next
 STAGED   WinMME MIDI inside wasapi backend
 OUT      gtk2_ardour / libs/tk / libs/canvas / libs/surfaces (GTK) on Windows-only
 OUT      Cairo / cairomm — not required for win_shell or hardour
-BLOCKED  NSIS / MSIX installer (zip only for now)
+GREEN  NSIS installer script (tools/win-native/installer/airdour.nsi)
+OUT    MSIX package
+OUT    Authenticode code signing
 
 Dependency expectations (Windows-only product)
 ----------------------------------------------

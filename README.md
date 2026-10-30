@@ -123,7 +123,7 @@ flowchart TD
 | **Startup Memory Footprint** | ~400 MB – 600 MB working set | **~116 MB** working set in Release engine |
 | **DSP Overhead** | High due to POSIX translation layers | **~11% DSP load** baseline on standard mobile hardware |
 | **Toolchain & Compiler** | MinGW / MSYS2 / GCC cross-compilation | **Visual Studio 2022 (MSVC / cl.exe) + CMake + Waf** |
-| **Package Format** | Installer requiring extensive GTK runtime | **Self-contained portable ZIP** & Inno Setup installer |
+| **Package Format** | Installer requiring extensive GTK runtime | **Self-contained portable ZIP** and an NSIS installer |
 
 ---
 
@@ -416,8 +416,8 @@ The script [`tools/win-native/ci/Package-WinShell-Portable.ps1`](file:///c:/User
 powershell -File tools\win-native\ci\Package-WinShell-Portable.ps1 -RepoRoot $PWD -OutDir dist -Version "0.1.0" -Mode Engine -Config Release
 ```
 
-### 2. Inno Setup Windows Installer
-The script [`tools/win-native/ci/Package-WinShell-Installer.ps1`](file:///c:/Users/mathieu/Documents/GitHub/airdour/tools/win-native/ci/Package-WinShell-Installer.ps1) and [`tools/win-native/installer/airdour.iss`](file:///c:/Users/mathieu/Documents/GitHub/airdour/tools/win-native/installer/airdour.iss) produce a single-file, 64-bit Windows setup executable (`airdour-v*-setup.exe`) supporting desktop shortcuts and clean uninstallation.
+### 2. NSIS Windows Installer
+[`tools/win-native/installer/airdour.nsi`](file:///c:/Users/mathieu/Documents/GitHub/airdour/tools/win-native/installer/airdour.nsi) is a small [NSIS](https://nsis.sourceforge.io/) script (open source). [`tools/win-native/ci/Package-WinShell-Nsis.ps1`](file:///c:/Users/mathieu/Documents/GitHub/airdour/tools/win-native/ci/Package-WinShell-Nsis.ps1) compiles it into a 64-bit setup executable (`airdour-*-win64-setup.exe`, or `*-setup-ui.exe` for the UI-only shell). The installer copies the portable tree for the current user, adds a Start menu shortcut, and registers an uninstaller. GitHub Actions publishes that setup executable with each tagged Windows release.
 
 ### 3. GitHub Actions CI Matrix
 - [`.github/workflows/windows-msvc.yml`](file:///c:/Users/mathieu/Documents/GitHub/airdour/.github/workflows/windows-msvc.yml): Validates MSVC builds on every pull request using `windows-2022`.
@@ -464,7 +464,7 @@ airdour/
 ├── tools/
 │   └── win-native/               # Windows build scripts, vcpkg manifests, overlays, and CI
 │       ├── ci/                   # PowerShell scripts for portable zip and installer generation
-│       ├── installer/            # Inno Setup 6 installer definition (.iss)
+│       ├── installer/            # NSIS installer script (airdour.nsi); optional Inno .iss
 │       ├── overlays/             # vcpkg port overlays for glibmm-2.4 and sigc++-2.0
 │       └── Install-HeadlessDeps.ps1
 ├── win_ardour/                   # Hardware-accelerated Win32 + Direct2D / DirectWrite GUI
