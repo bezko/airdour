@@ -87,9 +87,6 @@ Optional MSVC **GTK3/Cairo libs** (not product UI): `-WithGtkLibs` → feature `
 9. [x] Port WinMME MIDI; grow `win_ardour` (engine attach, wave strip, FX)
 10. [x] Windows-only cull: waf/cmake never require `libs/tk`, `gtk2_ardour`, Cairo canvas
 11. [x] NSIS per-user installer (`tools/win-native/installer/airdour.nsi`); [ ] MSIX. Engine portable zip via `Package-WinShell-Portable.ps1`
-8. [x] Port WinMME MIDI; grow `win_ardour` (engine attach, wave strip, FX)
-9. [x] Windows-only cull: waf/cmake never require `libs/tk`, `gtk2_ardour`, Cairo canvas
-10. [x] Engine portable zip already ships via `Package-WinShell-Portable.ps1`
 
 ## Success for this phase
 
