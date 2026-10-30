@@ -1839,6 +1839,12 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 */
 	bool set_vst3_param (int index, float norm_0_1);
 
+	/**
+	 * Reset one VST3 mixer param (snapshot index) to the plugin's default
+	 * value. For dbl-click Audio 2 FX knob when vst3_ok.
+	 */
+	bool reset_vst3_param (int index);
+
 	/** Bypass / activate the shell VST3 insert on Audio 2. */
 	bool set_vst3_bypassed (bool bypassed);
 	bool toggle_vst3_bypass ();
@@ -1848,6 +1854,12 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Scan-only with VST3=0 still returns true. For --smoke-vst3-params.
 	 */
 	bool smoke_vst3_params ();
+
+	/**
+	 * Nudge Audio 2 VST param0 → reset_vst3_param → near plugin default.
+	 * Scan-only with VST3=0 still returns true. For --smoke-vst3-mixer-param-reset.
+	 */
+	bool smoke_vst3_mixer_param_reset ();
 
 	/**
 	 * Remove the shell VST3 PluginInsert from Audio 2. Idempotent when none

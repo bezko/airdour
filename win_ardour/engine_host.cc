@@ -27495,6 +27495,48 @@ EngineHost::set_vst3_param (int index, float norm_0_1)
 }
 
 bool
+EngineHost::reset_vst3_param (int index)
+{
+	if (!_impl || index < 0 || index >= EngineSnapshot::kMaxVst3Params) {
+		return false;
+	}
+	std::shared_ptr<PluginInsert> pi = _impl->vst3_fx.lock ();
+	if (!pi || !pi->plugin (0)) {
+		refresh_vst3_params_snap ();
+		return false;
+	}
+	if (_impl->vst3_param_count <= 0) {
+		refresh_vst3_params_snap ();
+	}
+	if (index >= _impl->vst3_param_count) {
+		return false;
+	}
+	const uint32_t port = _impl->vst3_param_ports[index];
+	try {
+		std::shared_ptr<AutomationControl> ac = pi->automation_control (
+		    Evoral::Parameter (PluginAutomation, 0, port));
+		if (!ac) {
+			_snap.detail = L"VST3 param control missing";
+			return false;
+		}
+		const float dflt = pi->plugin (0)->default_value (port);
+		ac->set_value (dflt, Controllable::NoGroup);
+		refresh_vst3_params_snap ();
+		std::fprintf (stderr, "airdour_win_shell: reset_vst3_param idx=%d port=%u dflt=%.4f norm=%.3f\n",
+		              index, port, dflt, _snap.vst3_param_norm[index]);
+		std::fflush (stderr);
+		_snap.detail = L"VST3 param reset";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: reset_vst3_param: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::set_vst3_bypassed (bool bypassed)
 {
 	if (!_impl) {
@@ -27594,6 +27636,97 @@ EngineHost::smoke_vst3_params ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-vst3-params exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_vst3_mixer_param_reset ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-vst3-mixer-param-reset failed — no Session";
+		return false;
+	}
+	try {
+		if (!smoke_vst3 ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-mixer-param-reset FAILED (insert/scan)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_vst3_params_snap ();
+		if (!_snap.vst3_ok) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-mixer-param-reset ok (scan-only; "
+			              "set VST3_PATH / AIRDOUR_SMOKE_VST3 to exercise reset)\n");
+			std::fflush (stderr);
+			_snap.detail = L"smoke-vst3-mixer-param-reset scan-only";
+			return true;
+		}
+		if (_snap.vst3_param_count <= 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-mixer-param-reset ok "
+			              "(fx loaded, 0 automatable params)\n");
+			std::fflush (stderr);
+			_snap.detail = L"smoke-vst3-mixer-param-reset no params";
+			return true;
+		}
+
+		/* Establish plugin default as interface norm. */
+		if (!reset_vst3_param (0)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-mixer-param-reset FAILED (baseline reset)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_vst3_params_snap ();
+		const float dflt = _snap.vst3_param_norm[0];
+		const float nudge = (dflt < 0.5f) ? 0.85f : 0.15f;
+		if (!set_vst3_param (0, nudge)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-mixer-param-reset FAILED (nudge)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_vst3_params_snap ();
+		if (std::fabs (_snap.vst3_param_norm[0] - nudge) > 0.08f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-mixer-param-reset FAILED "
+			              "(nudge got=%.3f want=%.3f)\n",
+			              _snap.vst3_param_norm[0], nudge);
+			std::fflush (stderr);
+			return false;
+		}
+		if (!reset_vst3_param (0)) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-mixer-param-reset FAILED (reset)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_vst3_params_snap ();
+		if (std::fabs (_snap.vst3_param_norm[0] - dflt) > 0.08f) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-mixer-param-reset FAILED "
+			              "(after reset got=%.3f want≈%.3f)\n",
+			              _snap.vst3_param_norm[0], dflt);
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-param-reset ok "
+		              "(p0 %.2f→%.2f→%.2f default)\n",
+		              dflt, nudge, _snap.vst3_param_norm[0]);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-vst3-mixer-param-reset ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-mixer-param-reset exception: %s\n",
+		              e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -36791,6 +36924,13 @@ EngineHost::set_vst3_param (int index, float norm_0_1)
 }
 
 bool
+EngineHost::reset_vst3_param (int index)
+{
+	(void)index;
+	return false;
+}
+
+bool
 EngineHost::set_vst3_bypassed (bool bypassed)
 {
 	(void)bypassed;
@@ -36805,6 +36945,12 @@ EngineHost::toggle_vst3_bypass ()
 
 bool
 EngineHost::smoke_vst3_params ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_vst3_mixer_param_reset ()
 {
 	return false;
 }

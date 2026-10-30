@@ -1922,6 +1922,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "midi-audition", [this]() { return _engine.smoke_midi_audition (); });
 	run_smoke_check (ok, "midi-program", [this]() { return _engine.smoke_midi_program (); });
 	run_smoke_check (ok, "vst3-params", [this]() { return _engine.smoke_vst3_params (); });
+	run_smoke_check (ok, "vst3-mixer-param-reset", [this]() {
+		return _engine.smoke_vst3_mixer_param_reset ();
+	});
 	run_smoke_check (ok, "vst3-lifecycle", [this]() {
 		if (!_engine.smoke_vst3_lifecycle ()) {
 			return false;
@@ -7139,7 +7142,14 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				which = 1;
 			}
 			if (which > 0 && fxi >= 0 && fxi < n_audio_lanes ()) {
-				if (_engine.reset_track_fx_param (fxi, which)) {
+				bool ok = false;
+				/* Audio 2 + live VST3 → plugin default; else ACE insert defaults. */
+				if (fxi == 1 && _engine_snap.vst3_ok) {
+					ok = _engine.reset_vst3_param (which - 1);
+				} else {
+					ok = _engine.reset_track_fx_param (fxi, which);
+				}
+				if (ok) {
 					_engine.poll ();
 					_engine_snap = _engine.snapshot ();
 					sync_mixer_fx_from_engine ();
@@ -10910,7 +10920,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
 		{ L"Ctrl+±", L"Zoom in / out (center)" },
 		{ L"F2", L"Rename focused track" },
-		{ L"Dbl-click FX param", L"Reset FX knob to insert default" },
+		{ L"Dbl-click FX param", L"Reset FX/VST3 knob to insert default" },
 		{ L"Dbl-click fader/pan", L"Reset fader → unity · pan → center" },
 		{ L"Dbl-click send", L"Reset aux send → 0 (off)" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
