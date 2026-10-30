@@ -885,8 +885,6 @@ def options(opt):
                     help='Specify which backend modules are to be included(jack,alsa,portaudio,coreaudio,pulseaudio,wasapi,dummy)')
     opt.add_option('--windows-only', action='store_true', default=False, dest='windows_only',
                     help='Airdour: force Windows-only product graph (WASAPI shared + dummy; drop Linux/mac helpers)')
-    opt.add_option('--with-portaudio-bridge', action='store_true', default=False, dest='with_portaudio_bridge',
-                    help='Airdour: keep PortAudio backend as temporary bridge alongside WASAPI')
     opt.add_option('--backtrace', action='store_true', default=False, dest='backtrace',
                     help='Compile with -rdynamic -- allow obtaining backtraces from within Ardour')
     opt.add_option('--no-carbon', action='store_true', default=False, dest='nocarbon',
@@ -1470,8 +1468,6 @@ int main () { __int128 x = 0; return 0; }
         if windows_only:
             # Product audio path: native WASAPI shared mode.
             backends += ['wasapi']
-            if opts.with_portaudio_bridge:
-                backends += ['portaudio']
         else:
             autowaf.check_pkg(conf, 'jack', uselib_store='JACK', atleast_version='1.9.10', mandatory=False)
             if conf.is_defined('HAVE_JACK'):

@@ -32,13 +32,8 @@ powershell -ExecutionPolicy Bypass -File tools\win-native\Install-HeadlessDeps.p
 cmake -S cmake\win64 -B build-win64-deps -G "Visual Studio 17 2022" -A x64 ^
   -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
   -DVCPKG_MANIFEST_DIR=%CD%/tools/win-native ^
-  -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON ^
-  -DAIRDOUR_BUILD_DEPS_HEADLESS_SMOKE=ON
-
-cmake --build build-win64-deps --config Release --target deps_headless_smoke
+  -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON
 ```
-
-`deps_headless_smoke` links **glib / libxml2 / libsndfile / curl / libarchive / pthreads** from the manifest. It does **not** link `libpbd`.
 
 ### Blocker before `libpbd`
 
@@ -72,8 +67,6 @@ Default backends: **dummy** + **wasapi**. Needs MSVC deps above **plus** the gli
 
 Manifest: `tools/win-native/vcpkg.json` (core headless deps; **no GTK2 chrome**).  
 Optional MSVC **GTK3/Cairo libs** (not product UI): `-WithGtkLibs` → feature `gtk-libs`.  
-Probe (no windows): `tools/win-native/gtk-lib-probe/build-and-run.cmd` — see store doc `gtk-native-msvc.md`.  
-cairomm spike (isolated; canvas TU still FAIL): `tools/win-native/canvas-cxx-spike/` — gtkmm2 **not** available via vcpkg.
 
 ### Packaging scripts
 
@@ -83,8 +76,8 @@ cairomm spike (isolated; canvas TU still FAIL): `tools/win-native/canvas-cxx-spi
 ## Bring-up checklist
 
 1. [x] CI compiles WasapiIO with MSVC (smoke)
-2. [x] Laptop: vcpkg headless C deps + `deps_headless_smoke` target wired
-3. [x] Overlay `glibmm-2.4` + `sigc++-2.0` installed; waf past glibmm; `deps_glibmm_smoke`
+2. [x] Laptop: vcpkg headless C deps
+3. [x] Overlay `glibmm-2.4` + `sigc++-2.0` installed; waf past glibmm
 4. [x] waf Windows-only configure green; MSVC link `libpbd` (`build\libs\pbd\pbd.dll`)
 5. [x] MSVC link `libardour` → `hardour` (dummy + WASAPI) — laptop
 6. [x] hardour engine-only smoke (dummy + WASAPI shared)

@@ -95,25 +95,3 @@ jobs:
             tools/win-native/**
           if-no-files-found: error
           retention-days: 14
-
-  # Placeholder job documenting the next CI stage (deps). Does not fail the workflow.
-  deps-notes:
-    name: Deps bootstrap notes
-    runs-on: windows-2022
-    needs: wasapi-smoke
-    steps:
-      - name: Document vcpkg expectations
-        shell: pwsh
-        run: |
-          Write-Host @"
-          Next CI stage (laptop-proven path first):
-            - tools/win-native/Install-HeadlessDeps.ps1 + vcpkg.json (glib, libxml2, sndfile, curl, archive, pthreads, boost-*, …)
-            - cmake -DAIRDOUR_BUILD_DEPS_HEADLESS_SMOKE=ON with CMAKE_TOOLCHAIN_FILE=vcpkg.cmake
-            - then overlay glibmm-2.4 + sigc++-2.0 (stock vcpkg glibmm/libsigcpp are WRONG generation)
-            - then libpbd → libardour → hardour (dummy + WASAPI)
-
-          Blocked / out of scope:
-            - GTK2-on-MSVC (dead end; GUI is win_ardour Direct2D)
-            - No ASIO/DirectSound in product path
-            - Full gtk2_ardour port (not planned)
-          "@

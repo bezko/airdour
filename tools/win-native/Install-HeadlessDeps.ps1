@@ -162,7 +162,6 @@ if ($WithGtkLibs) {
   $gtkH = Join-Path $installed "include\gtk-3.0\gtk\gtk.h"
   if (Test-Path $gtkH) {
     Write-Host "GTK3 libs ready: $gtkH"
-    Write-Host "Probe: tools\win-native\gtk-lib-probe\build-and-run.cmd"
   } else {
     Write-Warning "WithGtkLibs set but gtk/gtk.h missing under $installed"
   }
