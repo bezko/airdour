@@ -32,7 +32,7 @@ def build(bld):
               includes     = [ '../../ardour' ],
               target       = '../../LV2/%s/a-reverb' % bundle,
               install_path = '${LV2DIR}/%s' % bundle,
-              # DSP-only; no Cairo UI (unlike a-comp/a-eq). Keep off Windows-only deps.
+              # DSP-only; no Cairo UI. Keep off Windows-only deps.
               use          = 'LV2_1_0_0'
               )
     obj.env.cshlib_PATTERN = module_pat

@@ -3,10 +3,10 @@
 > **A lightweight, Windows-native Digital Audio Workstation (DAW)** powered by the Ardour 9 audio engine, a hardware-accelerated **Win32 + Direct2D / DirectWrite** shell, a native **WASAPI shared-mode** audio backend with **WinMME MIDI**, and a built-in **Model Context Protocol (MCP) HTTP surface** for AI assistant integration.
 
 [![Windows MSVC CI](https://github.com/bezko/airdour/actions/workflows/windows-msvc.yml/badge.svg)](https://github.com/bezko/airdour/actions/workflows/windows-msvc.yml)
-[![License: GPL-2.0](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](file:///c:/Users/mathieu/Documents/GitHub/airdour/COPYING)
-[![Platform: Windows x64](https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0078D6.svg)](file:///c:/Users/mathieu/Documents/GitHub/airdour/cmake/win64/CMakeLists.txt)
-[![Audio: WASAPI Shared](https://img.shields.io/badge/Audio-WASAPI%20Shared-success.svg)](file:///c:/Users/mathieu/Documents/GitHub/airdour/libs/backends/wasapi/README.md)
-[![UI: Direct2D](https://img.shields.io/badge/UI-Direct2D%20%2B%20DirectWrite-purple.svg)](file:///c:/Users/mathieu/Documents/GitHub/airdour/win_ardour/README.md)
+[![License: GPL-2.0](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](COPYING)
+[![Platform: Windows x64](https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0078D6.svg)](cmake/win64/CMakeLists.txt)
+[![Audio: WASAPI Shared](https://img.shields.io/badge/Audio-WASAPI%20Shared-success.svg)](libs/backends/wasapi/README.md)
+[![UI: Direct2D](https://img.shields.io/badge/UI-Direct2D%20%2B%20DirectWrite-purple.svg)](win_ardour/README.md)
 
 ---
 
@@ -105,8 +105,8 @@ flowchart TD
 
 ### Threading Architecture
 
-1. **UI Thread (Main STA)**: Executes the Win32 message loop (`wmain` in [main.cc](file:///c:/Users/mathieu/Documents/GitHub/airdour/win_ardour/main.cc)), handles keyboard/mouse interaction, and issues Direct2D drawing commands in [shell_window.cc](file:///c:/Users/mathieu/Documents/GitHub/airdour/win_ardour/shell_window.cc). **Never** executes blocking disk I/O or DSP code.
-2. **Realtime Audio Thread**: Driven by WASAPI event-driven process buffers (`wait_for_period` in [wasapi_backend.cc](file:///c:/Users/mathieu/Documents/GitHub/airdour/libs/backends/wasapi/wasapi_backend.cc)). Boosted to Windows MMCSS `"Pro Audio"` category with `AVRT_PRIORITY_HIGH`. Responsible for audio sample deinterleaving, format conversion (float32/int16/int24/int32), buffer routing, and DSP plugin processing.
+1. **UI Thread (Main STA)**: Executes the Win32 message loop (`wmain` in [main.cc](win_ardour/main.cc)), handles keyboard/mouse interaction, and issues Direct2D drawing commands in [shell_window.cc](win_ardour/shell_window.cc). **Never** executes blocking disk I/O or DSP code.
+2. **Realtime Audio Thread**: Driven by WASAPI event-driven process buffers (`wait_for_period` in [wasapi_backend.cc](libs/backends/wasapi/wasapi_backend.cc)). Boosted to Windows MMCSS `"Pro Audio"` category with `AVRT_PRIORITY_HIGH`. Responsible for audio sample deinterleaving, format conversion (float32/int16/int24/int32), buffer routing, and DSP plugin processing.
 3. **MIDI Processing**: Real-time MIDI events are gathered asynchronously via Windows Multimedia Extensions (`winmm.dll`) and ingested into the audio cycle buffer with microsecond timestamps.
 4. **Analysis & Background Workers**: Peak calculation for wave strips (`AudioRegion::read_peaks`), session autosave threads, and RubberBand offline stretches operate in background worker threads without interrupting audio stream continuity.
 
@@ -118,8 +118,8 @@ flowchart TD
 | :--- | :--- | :--- |
 | **Windowing & GUI Toolkit** | GTK2 + X11 compatibility shims + Cairo | **Native Win32 + Direct2D + DirectWrite** |
 | **Audio Backend** | PortAudio / ASIO third-party drivers required | **Native WASAPI Shared-Mode** (Zero driver install) |
-| **MIDI Subsystem** | PortAudio MIDI Bridge / ALSA-layer emulation | **Native WinMME subsystem** ([winmmemidi_io.cc](file:///c:/Users/mathieu/Documents/GitHub/airdour/libs/backends/portaudio/winmmemidi_io.cc)) |
-| **AI Integration** | None / Manual OSC / Lua scripts | **Native MCP HTTP Server** ([libs/surfaces/mcp_http](file:///c:/Users/mathieu/Documents/GitHub/airdour/libs/surfaces/mcp_http/README.md)) |
+| **MIDI Subsystem** | PortAudio MIDI Bridge / ALSA-layer emulation | **Native WinMME subsystem** ([winmmemidi_io.cc](libs/backends/portaudio/winmmemidi_io.cc)) |
+| **AI Integration** | None / Manual OSC / Lua scripts | **Native MCP HTTP Server** ([libs/surfaces/mcp_http](libs/surfaces/mcp_http/README.md)) |
 | **Startup Memory Footprint** | ~400 MB – 600 MB working set | **~116 MB** working set in Release engine |
 | **DSP Overhead** | High due to POSIX translation layers | **~11% DSP load** baseline on standard mobile hardware |
 | **Toolchain & Compiler** | MinGW / MSYS2 / GCC cross-compilation | **Visual Studio 2022 (MSVC / cl.exe) + CMake + Waf** |
@@ -131,7 +131,7 @@ flowchart TD
 
 ### 1. Direct2D Native GUI Shell (`win_ardour`)
 
-Located in [`win_ardour/`](file:///c:/Users/mathieu/Documents/GitHub/airdour/win_ardour/README.md), the user interface is completely written in C++17 utilizing Windows Direct2D and DirectWrite.
+Located in [`win_ardour/`](win_ardour/README.md), the user interface is completely written in C++17 utilizing Windows Direct2D and DirectWrite.
 
 - **High-DPI Awareness**: Per-Monitor V2 DPI scaling (`GetDpiForWindow` / `ID2D1Factory`). Layout dimensions, fonts, and controls dynamically adjust across display migrations.
 - **Stacked Track Editor**: Multi-lane audio timeline rendering region waveforms directly from mipmapped audio peak caches (`AudioRegion::read_peaks`).
@@ -141,7 +141,7 @@ Located in [`win_ardour/`](file:///c:/Users/mathieu/Documents/GitHub/airdour/win
 
 ### 2. WASAPI Shared-Mode Backend (`libs/backends/wasapi`)
 
-Located in [`libs/backends/wasapi/`](file:///c:/Users/mathieu/Documents/GitHub/airdour/libs/backends/wasapi/README.md), implementing the full `ARDOUR::AudioBackend` interface.
+Located in [`libs/backends/wasapi/`](libs/backends/wasapi/README.md), implementing the full `ARDOUR::AudioBackend` interface.
 
 - **Shared Mode Exclusivity**: Operates exclusively in Windows shared mode (`AUDCLNT_SHAREMODE_SHARED`). Users can mix DAW audio with YouTube, Spotify, and browser playback simultaneously without audio device lockouts.
 - **Period Laddering & Rate Adaptation**: Dynamically negotiates formats using `IMMDeviceEnumerator` and `IAudioClient3::InitializeSharedAudioStream`. Snaps to hardware engine period fundamentals (e.g. 128, 240, 256, or 480 samples).
@@ -156,7 +156,7 @@ The Ardour DAW engine can run fully decoupled from any GUI:
 
 ### 4. Model Context Protocol (MCP) HTTP Surface
 
-Located in [`libs/surfaces/mcp_http/`](file:///c:/Users/mathieu/Documents/GitHub/airdour/libs/surfaces/mcp_http/README.md). Airdour natively exposes an HTTP-based MCP server at `http://127.0.0.1:4820/mcp`, allowing Large Language Models (Claude, Gemini, OpenAI Codex, Ollama) to programmatically orchestrate the DAW:
+Located in [`libs/surfaces/mcp_http/`](libs/surfaces/mcp_http/README.md). Airdour natively exposes an HTTP-based MCP server at `http://127.0.0.1:4820/mcp`, allowing Large Language Models (Claude, Gemini, OpenAI Codex, Ollama) to programmatically orchestrate the DAW:
 
 - **Transport Control**: `transport/play`, `transport/stop`, `transport/locate`, `transport/loop_toggle`, `transport/set_record_enable`.
 - **Track & Bus Management**: `tracks/list`, `tracks/add`, `buses/add`, `track/set_fader`, `track/set_pan`, `track/set_mute`, `track/set_solo`.
@@ -316,10 +316,10 @@ Run any flag in combination with `--timeout 3` to verify subsystem health headle
 
 ### Dependency Setup via vcpkg
 
-Airdour provides an automated PowerShell installation script located in [`tools/win-native/Install-HeadlessDeps.ps1`](file:///c:/Users/mathieu/Documents/GitHub/airdour/tools/win-native/Install-HeadlessDeps.ps1).
+Airdour provides an automated PowerShell installation script located in [`tools/win-native/Install-HeadlessDeps.ps1`](tools/win-native/Install-HeadlessDeps.ps1).
 
 > [!IMPORTANT]
-> Upstream vcpkg supplies modern `glibmm` 2.68+ and `sigc++` 3.x, which are ABI-incompatible with Ardour. Airdour includes custom overlay ports for **`glibmm-2.4`** and **`sigc++-2.0`** in [`tools/win-native/overlays/`](file:///c:/Users/mathieu/Documents/GitHub/airdour/tools/win-native/overlays/README.md).
+> Upstream vcpkg supplies modern `glibmm` 2.68+ and `sigc++` 3.x, which are ABI-incompatible with Ardour. Airdour includes custom overlay ports for **`glibmm-2.4`** and **`sigc++-2.0`** in [`tools/win-native/overlays/`](tools/win-native/overlays/README.md).
 
 Run the automated dependency bootstrapper:
 
@@ -405,7 +405,7 @@ win_ardour\run-engine-shell.bat --backend WASAPI
 Airdour includes production-grade packaging automation for distribution:
 
 ### 1. Portable Release Zip Generator
-The script [`tools/win-native/ci/Package-WinShell-Portable.ps1`](file:///c:/Users/mathieu/Documents/GitHub/airdour/tools/win-native/ci/Package-WinShell-Portable.ps1) stages a zero-install portable folder containing:
+The script [`tools/win-native/ci/Package-WinShell-Portable.ps1`](tools/win-native/ci/Package-WinShell-Portable.ps1) stages a zero-install portable folder containing:
 - `airdour_win_shell.exe`
 - All required dynamic libraries (`ardour.dll`, `pbd.dll`, `temporal.dll`, `ptformat.dll`, vcpkg CRT runtime)
 - Panner modules (`pan1in2out.dll`, `panbalance.dll`, `panvbap.dll`)
@@ -417,11 +417,13 @@ powershell -File tools\win-native\ci\Package-WinShell-Portable.ps1 -RepoRoot $PW
 ```
 
 ### 2. NSIS Windows Installer
-[`tools/win-native/installer/airdour.nsi`](file:///c:/Users/mathieu/Documents/GitHub/airdour/tools/win-native/installer/airdour.nsi) is a small [NSIS](https://nsis.sourceforge.io/) script (open source). [`tools/win-native/ci/Package-WinShell-Nsis.ps1`](file:///c:/Users/mathieu/Documents/GitHub/airdour/tools/win-native/ci/Package-WinShell-Nsis.ps1) compiles it into a 64-bit setup executable (`airdour-*-win64-setup.exe`, or `*-setup-ui.exe` for the UI-only shell). The installer copies the portable tree for the current user, adds a Start menu shortcut, and registers an uninstaller. GitHub Actions publishes that setup executable with each tagged Windows release.
+[`tools/win-native/installer/airdour.nsi`](tools/win-native/installer/airdour.nsi) is a small [NSIS](https://nsis.sourceforge.io/) script (open source). [`tools/win-native/ci/Package-WinShell-Nsis.ps1`](tools/win-native/ci/Package-WinShell-Nsis.ps1) compiles it into a 64-bit setup executable (`airdour-*-win64-setup.exe`, or `*-setup-ui.exe` for the UI-only shell). The installer copies the portable tree for the current user, adds a Start menu shortcut, and registers an uninstaller. GitHub Actions publishes that setup executable with each tagged Windows release.
+### 2. Inno Setup Windows Installer
+The script [`tools/win-native/ci/Package-WinShell-Installer.ps1`](tools/win-native/ci/Package-WinShell-Installer.ps1) and [`tools/win-native/installer/airdour.iss`](tools/win-native/installer/airdour.iss) produce a single-file, 64-bit Windows setup executable (`airdour-v*-setup.exe`) supporting desktop shortcuts and clean uninstallation.
 
 ### 3. GitHub Actions CI Matrix
-- [`.github/workflows/windows-msvc.yml`](file:///c:/Users/mathieu/Documents/GitHub/airdour/.github/workflows/windows-msvc.yml): Validates MSVC builds on every pull request using `windows-2022`.
-- [`.github/workflows/windows-release.yml`](file:///c:/Users/mathieu/Documents/GitHub/airdour/.github/workflows/windows-release.yml): Triggers automated artifact generation and GitHub Release publication on git tags (`v*`).
+- [`.github/workflows/windows-msvc.yml`](.github/workflows/windows-msvc.yml): Validates MSVC builds on every pull request using `windows-2022`.
+- [`.github/workflows/windows-release.yml`](.github/workflows/windows-release.yml): Triggers automated artifact generation and GitHub Release publication on git tags (`v*`).
 
 ---
 
@@ -437,7 +439,7 @@ powershell -File tools\win-native\ci\Package-WinShell-Portable.ps1 -RepoRoot $PW
 
 > [!IMPORTANT]
 > **Windows Synchronization Primitives**  
-> Under MSVC and Windows SRWLOCK semantics, calling `process_lock().trylock()` from a thread that already holds ownership causes an immediate deadlock (unlike POSIX recursive mutexes). Synchronization in [wasapi_backend.cc](file:///c:/Users/mathieu/Documents/GitHub/airdour/libs/backends/wasapi/wasapi_backend.cc) is specifically structured to eliminate recursive lock acquisition on Windows audio cycles.
+> Under MSVC and Windows SRWLOCK semantics, calling `process_lock().trylock()` from a thread that already holds ownership causes an immediate deadlock (unlike POSIX recursive mutexes). Synchronization in [wasapi_backend.cc](libs/backends/wasapi/wasapi_backend.cc) is specifically structured to eliminate recursive lock acquisition on Windows audio cycles.
 
 ---
 
@@ -482,6 +484,6 @@ airdour/
 
 ## License & Acknowledgments
 
-- **Airdour** is distributed under the terms of the **GNU General Public License Version 2 (GPL-2.0)**. See [COPYING](file:///c:/Users/mathieu/Documents/GitHub/airdour/COPYING) for complete license details.
+- **Airdour** is distributed under the terms of the **GNU General Public License Version 2 (GPL-2.0)**. See [COPYING](COPYING) for complete license details.
 - Airdour is based on the [Ardour](https://ardour.org/) project created by **Paul Davis** and the international Ardour community.
 - Direct2D, DirectWrite, WASAPI, and WinMME integrations developed by the Airdour contributors.
