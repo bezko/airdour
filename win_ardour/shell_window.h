@@ -321,6 +321,7 @@ private:
 	bool smoke_vst3_mixer_unload ();
 	bool smoke_vst3_catalog_highlight ();
 	bool smoke_vst3_prefs_bypass ();
+	bool smoke_vst3_prefs_unload ();
 	bool smoke_vst3_status_unload ();
 	bool hit_status_vst3_unload (float x, float y) const;
 	bool status_vst3_unload_center (float* out_x, float* out_y) const;

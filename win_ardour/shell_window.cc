@@ -1954,6 +1954,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "vst3-catalog-highlight", [this]() { return smoke_vst3_catalog_highlight (); });
 	run_smoke_check (ok, "vst3-cycle-insert", [this]() { return _engine.smoke_vst3_cycle_insert (); });
 	run_smoke_check (ok, "vst3-prefs-bypass", [this]() { return smoke_vst3_prefs_bypass (); });
+	run_smoke_check (ok, "vst3-prefs-unload", [this]() { return smoke_vst3_prefs_unload (); });
 	run_smoke_check (ok, "vst3-status-unload", [this]() { return smoke_vst3_status_unload (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
@@ -10420,6 +10421,82 @@ ShellWindow::smoke_vst3_prefs_bypass ()
 	return true;
 }
 
+bool
+ShellWindow::smoke_vst3_prefs_unload ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-unload FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	sync_prefs_from_engine ();
+	_prefs.set_visible (true);
+	_prefs_visible = true;
+	_prefs.layout ((float)_width, (float)_height, _dpi_scale);
+
+	float ux = 0.f;
+	float uy = 0.f;
+	if (!_engine_snap.vst3_ok) {
+		/* Empty / scan-only: no Unload chrome; idle unload still ok. */
+		if (_prefs.vst3_unload_btn_center (&ux, &uy)
+		    || _prefs.hit_test (ux, uy) == PrefsHit::Vst3Unload) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-prefs-unload FAILED "
+			              "(Unload chrome without VST3)\n");
+			std::fflush (stderr);
+			_prefs_visible = false;
+			_prefs.set_visible (false);
+			return false;
+		}
+		if (!_engine.unload_vst3 ()) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-prefs-unload FAILED "
+			              "(idle unload)\n");
+			std::fflush (stderr);
+			_prefs_visible = false;
+			_prefs.set_visible (false);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-unload ok "
+		              "(scan-only; no Unload; idle unload; set VST3_PATH to insert)\n");
+		std::fflush (stderr);
+		_prefs_visible = false;
+		_prefs.set_visible (false);
+		return true;
+	}
+
+	if (!_prefs.vst3_unload_btn_center (&ux, &uy)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-unload FAILED (layout)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (_prefs.hit_test (ux, uy) != PrefsHit::Vst3Unload) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-unload FAILED (hit)\n");
+		std::fflush (stderr);
+		return false;
+	}
+
+	apply_prefs_hit (PrefsHit::Vst3Unload);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (_engine_snap.vst3_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-prefs-unload FAILED (still loaded)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_prefs_visible = false;
+	_prefs.set_visible (false);
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-vst3-prefs-unload ok (Unload → clear)\n");
+	std::fflush (stderr);
+	return true;
+}
+
 void
 ShellWindow::apply_prefs_hit (PrefsHit hit)
 {
@@ -10469,6 +10546,18 @@ ShellWindow::apply_prefs_hit (PrefsHit hit)
 			                       : L"VST3 active");
 		} else {
 			_prefs.set_status (L"VST3 bypass (none loaded)");
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_fx_from_engine ();
+		sync_prefs_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	case PrefsHit::Vst3Unload:
+		if (_engine.unload_vst3 ()) {
+			_prefs.set_status (L"VST3 unloaded");
+		} else {
+			_prefs.set_status (L"VST3 unload failed");
 		}
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();

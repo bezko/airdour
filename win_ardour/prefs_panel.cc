@@ -30,6 +30,7 @@ PrefsPanel::PrefsPanel ()
 	, _snap_btn ()
 	, _vst3_rescan_btn ()
 	, _vst3_bypass_btn ()
+	, _vst3_unload_btn ()
 	, _save_btn ()
 	, _visible (false)
 	, _click_on (false)
@@ -96,6 +97,13 @@ PrefsPanel::layout (float view_w, float view_h, float dpi_scale)
 	_vst3_bypass_btn = D2D1::RectF (_vst3_rescan_btn.right + gap, y,
 	                                _vst3_rescan_btn.right + gap + 120.f * dpi_scale,
 	                                y + btn_h);
+	if (_vst3_ok) {
+		_vst3_unload_btn = D2D1::RectF (_vst3_bypass_btn.right + gap, y,
+		                                _vst3_bypass_btn.right + gap + 100.f * dpi_scale,
+		                                y + btn_h);
+	} else {
+		_vst3_unload_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
+	}
 
 	_save_btn = D2D1::RectF (x, _card.bottom - 40.f * dpi_scale,
 	                         x + 100.f * dpi_scale, _card.bottom - 14.f * dpi_scale);
@@ -219,6 +227,9 @@ PrefsPanel::hit_test (float x, float y) const
 	if (contains (_vst3_bypass_btn, x, y)) {
 		return PrefsHit::Vst3Bypass;
 	}
+	if (_vst3_ok && contains (_vst3_unload_btn, x, y)) {
+		return PrefsHit::Vst3Unload;
+	}
 	if (contains (_save_btn, x, y)) {
 		return PrefsHit::Save;
 	}
@@ -263,6 +274,20 @@ PrefsPanel::vst3_bypass_btn_center (float* out_x, float* out_y) const
 	*out_x = 0.5f * (_vst3_bypass_btn.left + _vst3_bypass_btn.right);
 	*out_y = 0.5f * (_vst3_bypass_btn.top + _vst3_bypass_btn.bottom);
 	return _vst3_bypass_btn.right > _vst3_bypass_btn.left;
+}
+
+bool
+PrefsPanel::vst3_unload_btn_center (float* out_x, float* out_y) const
+{
+	if (!out_x || !out_y) {
+		return false;
+	}
+	if (!_vst3_ok || _vst3_unload_btn.right <= _vst3_unload_btn.left) {
+		return false;
+	}
+	*out_x = 0.5f * (_vst3_unload_btn.left + _vst3_unload_btn.right);
+	*out_y = 0.5f * (_vst3_unload_btn.top + _vst3_unload_btn.bottom);
+	return true;
 }
 
 int
@@ -388,6 +413,9 @@ PrefsPanel::draw (ID2D1RenderTarget* rt,
 	draw_btn (_vst3_bypass_btn,
 	          _vst3_bypassed ? L"Bypassed" : L"Bypass",
 	          _vst3_ok && _vst3_bypassed);
+	if (_vst3_ok && _vst3_unload_btn.right > _vst3_unload_btn.left) {
+		draw_btn (_vst3_unload_btn, L"Unload", false);
+	}
 
 	draw_btn (_save_btn, L"Save", true);
 	if (_status[0]) {
