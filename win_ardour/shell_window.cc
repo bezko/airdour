@@ -1917,6 +1917,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		return true;
 	});
 	run_smoke_check (ok, "midi-duplicate", [this]() { return _engine.smoke_midi_duplicate (); });
+	run_smoke_check (ok, "midi-tempo-map", [this]() { return _engine.smoke_midi_tempo_map (); });
 	run_smoke_check (ok, "midi-panic", [this]() { return _engine.smoke_midi_panic (); });
 	run_smoke_check (ok, "stop-midi-panic", [this]() { return _engine.smoke_stop_midi_panic (); });
 	run_smoke_check (ok, "midi-audition", [this]() { return _engine.smoke_midi_audition (); });

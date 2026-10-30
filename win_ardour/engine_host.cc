@@ -8620,9 +8620,8 @@ EngineHost::write_midi_cc_automation (float time_sec, float value_0_1, int cc, i
 			return false;
 		}
 		/* Fixed 120 BPM matches add_midi_note / MidiModel BeatTime domain. */
-		const double beats_per_sec = 120.0 / 60.0;
 		Temporal::Beats beats =
-		    Temporal::Beats::from_double ((double)time_sec * beats_per_sec);
+		    Temporal::Beats::from_double (midi_beats_from_sec (time_sec));
 		if (beats < Temporal::Beats ()) {
 			beats = Temporal::Beats ();
 		}
@@ -8661,7 +8660,6 @@ EngineHost::fill_midi_cc_automation_curve (float view_start_sec,
 		if (!al || al->empty ()) {
 			return true;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
 		float span = std::max (0.001f, view_span_sec);
 		for (size_t i = 0; i < n; ++i) {
 			float t = view_start_sec + ((float)i + 0.5f) / (float)n * span;
@@ -8669,7 +8667,7 @@ EngineHost::fill_midi_cc_automation_curve (float view_start_sec,
 				t = 0.f;
 			}
 			Temporal::Beats beats =
-			    Temporal::Beats::from_double ((double)t * beats_per_sec);
+			    Temporal::Beats::from_double (midi_beats_from_sec (t));
 			float v = (float)al->eval (timepos_t (beats));
 			y_0_1[i] = std::max (0.f, std::min (1.f, v / 127.f));
 		}
@@ -8699,7 +8697,6 @@ EngineHost::fill_midi_cc_automation_points (float view_start_sec,
 		if (!al || al->empty ()) {
 			return 0;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
 		float span = std::max (0.001f, view_span_sec);
 		float view_end = view_start_sec + span;
 		int written = 0;
@@ -8708,8 +8705,8 @@ EngineHost::fill_midi_cc_automation_points (float view_start_sec,
 			if (!*it) {
 				continue;
 			}
-			double sec = Temporal::DoubleableBeats ((*it)->when.beats ()).to_double ()
-			             / beats_per_sec;
+			double sec = midi_sec_from_beats (
+			    Temporal::DoubleableBeats ((*it)->when.beats ()).to_double ());
 			if (sec < (double)view_start_sec || sec > (double)view_end) {
 				continue;
 			}
@@ -8755,8 +8752,7 @@ EngineHost::smoke_midi_cc ()
 			std::fflush (stderr);
 			return false;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
-		Temporal::Beats mid_b = Temporal::Beats::from_double (2.0 * beats_per_sec);
+		Temporal::Beats mid_b = Temporal::Beats::from_double (midi_beats_from_sec (2.0f));
 		float mid = (float)al->eval (timepos_t (mid_b));
 		/* 0.90 * 127 ≈ 114.3 */
 		if (mid < 110.f || mid > 119.f) {
@@ -8783,7 +8779,7 @@ EngineHost::smoke_midi_cc ()
 			std::fflush (stderr);
 			return false;
 		}
-		Temporal::Beats one_b = Temporal::Beats::from_double (1.0 * beats_per_sec);
+		Temporal::Beats one_b = Temporal::Beats::from_double (midi_beats_from_sec (1.0f));
 		float cc1 = (float)al1->eval (timepos_t (one_b));
 		if (cc1 < 60.f || cc1 > 70.f) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc FAILED (CC1 eval=%.3f)\n",
@@ -8860,9 +8856,8 @@ EngineHost::write_midi_bend_automation (float time_sec, float value_0_1, int cha
 		if (!al) {
 			return false;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
 		Temporal::Beats beats =
-		    Temporal::Beats::from_double ((double)time_sec * beats_per_sec);
+		    Temporal::Beats::from_double (midi_beats_from_sec (time_sec));
 		if (beats < Temporal::Beats ()) {
 			beats = Temporal::Beats ();
 		}
@@ -8900,7 +8895,6 @@ EngineHost::fill_midi_bend_automation_curve (float view_start_sec,
 		if (!al || al->empty ()) {
 			return true;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
 		float span = std::max (0.001f, view_span_sec);
 		for (size_t i = 0; i < n; ++i) {
 			float t = view_start_sec + ((float)i + 0.5f) / (float)n * span;
@@ -8908,7 +8902,7 @@ EngineHost::fill_midi_bend_automation_curve (float view_start_sec,
 				t = 0.f;
 			}
 			Temporal::Beats beats =
-			    Temporal::Beats::from_double ((double)t * beats_per_sec);
+			    Temporal::Beats::from_double (midi_beats_from_sec (t));
 			float v = (float)al->eval (timepos_t (beats));
 			y_0_1[i] = std::max (0.f, std::min (1.f, v / 16383.f));
 		}
@@ -8937,7 +8931,6 @@ EngineHost::fill_midi_bend_automation_points (float view_start_sec,
 		if (!al || al->empty ()) {
 			return 0;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
 		float span = std::max (0.001f, view_span_sec);
 		float view_end = view_start_sec + span;
 		int written = 0;
@@ -8946,8 +8939,8 @@ EngineHost::fill_midi_bend_automation_points (float view_start_sec,
 			if (!*it) {
 				continue;
 			}
-			double sec = Temporal::DoubleableBeats ((*it)->when.beats ()).to_double ()
-			             / beats_per_sec;
+			double sec = midi_sec_from_beats (
+			    Temporal::DoubleableBeats ((*it)->when.beats ()).to_double ());
 			if (sec < (double)view_start_sec || sec > (double)view_end) {
 				continue;
 			}
@@ -8994,8 +8987,7 @@ EngineHost::smoke_midi_bend ()
 			std::fflush (stderr);
 			return false;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
-		Temporal::Beats mid_b = Temporal::Beats::from_double (2.0 * beats_per_sec);
+		Temporal::Beats mid_b = Temporal::Beats::from_double (midi_beats_from_sec (2.0f));
 		float mid = (float)al->eval (timepos_t (mid_b));
 		if (mid < 8000.f || mid > 8400.f) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi-bend FAILED (eval@2s=%.3f)\n",
@@ -9077,9 +9069,8 @@ EngineHost::write_midi_pressure_automation (float time_sec, float value_0_1, int
 		if (!al) {
 			return false;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
 		Temporal::Beats beats =
-		    Temporal::Beats::from_double ((double)time_sec * beats_per_sec);
+		    Temporal::Beats::from_double (midi_beats_from_sec (time_sec));
 		if (beats < Temporal::Beats ()) {
 			beats = Temporal::Beats ();
 		}
@@ -9116,7 +9107,6 @@ EngineHost::fill_midi_pressure_automation_curve (float view_start_sec,
 		if (!al || al->empty ()) {
 			return true;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
 		float span = std::max (0.001f, view_span_sec);
 		for (size_t i = 0; i < n; ++i) {
 			float t = view_start_sec + ((float)i + 0.5f) / (float)n * span;
@@ -9124,7 +9114,7 @@ EngineHost::fill_midi_pressure_automation_curve (float view_start_sec,
 				t = 0.f;
 			}
 			Temporal::Beats beats =
-			    Temporal::Beats::from_double ((double)t * beats_per_sec);
+			    Temporal::Beats::from_double (midi_beats_from_sec (t));
 			float v = (float)al->eval (timepos_t (beats));
 			y_0_1[i] = std::max (0.f, std::min (1.f, v / 127.f));
 		}
@@ -9153,7 +9143,6 @@ EngineHost::fill_midi_pressure_automation_points (float view_start_sec,
 		if (!al || al->empty ()) {
 			return 0;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
 		float span = std::max (0.001f, view_span_sec);
 		float view_end = view_start_sec + span;
 		int written = 0;
@@ -9162,8 +9151,8 @@ EngineHost::fill_midi_pressure_automation_points (float view_start_sec,
 			if (!*it) {
 				continue;
 			}
-			double sec = Temporal::DoubleableBeats ((*it)->when.beats ()).to_double ()
-			             / beats_per_sec;
+			double sec = midi_sec_from_beats (
+			    Temporal::DoubleableBeats ((*it)->when.beats ()).to_double ());
 			if (sec < (double)view_start_sec || sec > (double)view_end) {
 				continue;
 			}
@@ -9209,8 +9198,7 @@ EngineHost::smoke_midi_pressure ()
 			std::fflush (stderr);
 			return false;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
-		Temporal::Beats mid_b = Temporal::Beats::from_double (2.0 * beats_per_sec);
+		Temporal::Beats mid_b = Temporal::Beats::from_double (midi_beats_from_sec (2.0f));
 		float mid = (float)al->eval (timepos_t (mid_b));
 		if (mid < 110.f || mid > 119.f) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi-pressure FAILED (eval@2s=%.3f)\n",
@@ -9435,9 +9423,8 @@ EngineHost::write_midi_note_pressure_automation (float time_sec, float value_0_1
 		if (!al) {
 			return false;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
 		Temporal::Beats beats =
-		    Temporal::Beats::from_double ((double)time_sec * beats_per_sec);
+		    Temporal::Beats::from_double (midi_beats_from_sec (time_sec));
 		if (beats < Temporal::Beats ()) {
 			beats = Temporal::Beats ();
 		}
@@ -9476,7 +9463,6 @@ EngineHost::fill_midi_note_pressure_automation_curve (float view_start_sec,
 		if (!al || al->empty ()) {
 			return true;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
 		float span = std::max (0.001f, view_span_sec);
 		for (size_t i = 0; i < n; ++i) {
 			float t = view_start_sec + ((float)i + 0.5f) / (float)n * span;
@@ -9484,7 +9470,7 @@ EngineHost::fill_midi_note_pressure_automation_curve (float view_start_sec,
 				t = 0.f;
 			}
 			Temporal::Beats beats =
-			    Temporal::Beats::from_double ((double)t * beats_per_sec);
+			    Temporal::Beats::from_double (midi_beats_from_sec (t));
 			float v = (float)al->eval (timepos_t (beats));
 			y_0_1[i] = std::max (0.f, std::min (1.f, v / 127.f));
 		}
@@ -9515,7 +9501,6 @@ EngineHost::fill_midi_note_pressure_automation_points (float view_start_sec,
 		if (!al || al->empty ()) {
 			return 0;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
 		float span = std::max (0.001f, view_span_sec);
 		float view_end = view_start_sec + span;
 		int written = 0;
@@ -9524,8 +9509,8 @@ EngineHost::fill_midi_note_pressure_automation_points (float view_start_sec,
 			if (!*it) {
 				continue;
 			}
-			double sec = Temporal::DoubleableBeats ((*it)->when.beats ()).to_double ()
-			             / beats_per_sec;
+			double sec = midi_sec_from_beats (
+			    Temporal::DoubleableBeats ((*it)->when.beats ()).to_double ());
 			if (sec < (double)view_start_sec || sec > (double)view_end) {
 				continue;
 			}
@@ -9573,8 +9558,7 @@ EngineHost::smoke_midi_note_pressure ()
 			std::fflush (stderr);
 			return false;
 		}
-		const double beats_per_sec = 120.0 / 60.0;
-		Temporal::Beats mid_b = Temporal::Beats::from_double (2.0 * beats_per_sec);
+		Temporal::Beats mid_b = Temporal::Beats::from_double (midi_beats_from_sec (2.0f));
 		float mid = (float)al->eval (timepos_t (mid_b));
 		if (mid < 110.f || mid > 119.f) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi-note-pressure FAILED (eval@2s=%.3f)\n",
@@ -23403,9 +23387,7 @@ EngineHost::refresh_midi_notes_snap ()
 			return;
 		}
 		_snap.midi_region_ok = true;
-		/* Map beats→seconds at a fixed 120 BPM to avoid TempoMap locks while
-		 * the process thread may be reading the same MidiModel. */
-		const double sec_per_beat = 60.0 / 120.0;
+		/* Map beats→seconds via Session TempoMap (same domain as grid/snap). */
 		const MidiModel::Notes& notes = model->notes ();
 		int n = 0;
 		for (MidiModel::Notes::const_iterator it = notes.begin ();
@@ -23416,8 +23398,9 @@ EngineHost::refresh_midi_notes_snap ()
 			}
 			const double t_beats = Temporal::DoubleableBeats (note->time ()).to_double ();
 			const double l_beats = Temporal::DoubleableBeats (note->length ()).to_double ();
-			float start_sec = (float)(t_beats * sec_per_beat);
-			float len = (float)(l_beats * sec_per_beat);
+			float start_sec = midi_sec_from_beats (t_beats);
+			float end_sec = midi_sec_from_beats (t_beats + l_beats);
+			float len = end_sec - start_sec;
 			if (len < 0.01f) {
 				len = 0.01f;
 			}
@@ -27778,6 +27761,72 @@ EngineHost::ensure_midi_region (float length_sec)
 	}
 }
 
+double
+EngineHost::midi_beats_from_sec (float time_sec) const
+{
+	if (time_sec < 0.f) {
+		time_sec = 0.f;
+	}
+	try {
+		Temporal::TempoMap::SharedPtr tm = Temporal::TempoMap::fetch ();
+		samplecnt_t sr = 48000;
+		if (_impl && _impl->session) {
+			sr = _impl->session->sample_rate ();
+			if (sr <= 0 && _impl->engine) {
+				sr = (samplecnt_t)_impl->engine->sample_rate ();
+			}
+		} else if (_impl && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		if (tm) {
+			samplepos_t sample = (samplepos_t)std::llround ((double)time_sec * (double)sr);
+			if (sample < 0) {
+				sample = 0;
+			}
+			Temporal::Beats q = tm->quarters_at_sample (sample);
+			return Temporal::DoubleableBeats (q).to_double ();
+		}
+	} catch (...) {
+	}
+	return (double)time_sec * (120.0 / 60.0);
+}
+
+float
+EngineHost::midi_sec_from_beats (double beats) const
+{
+	if (beats < 0.0) {
+		beats = 0.0;
+	}
+	try {
+		Temporal::TempoMap::SharedPtr tm = Temporal::TempoMap::fetch ();
+		samplecnt_t sr = 48000;
+		if (_impl && _impl->session) {
+			sr = _impl->session->sample_rate ();
+			if (sr <= 0 && _impl->engine) {
+				sr = (samplecnt_t)_impl->engine->sample_rate ();
+			}
+		} else if (_impl && _impl->engine) {
+			sr = (samplecnt_t)_impl->engine->sample_rate ();
+		}
+		if (sr <= 0) {
+			sr = 48000;
+		}
+		if (tm) {
+			Temporal::Beats b = Temporal::Beats::from_double (beats);
+			samplepos_t smp = tm->sample_at (b);
+			if (smp < 0) {
+				smp = 0;
+			}
+			return (float)smp / (float)sr;
+		}
+	} catch (...) {
+	}
+	return (float)(beats * (60.0 / 120.0));
+}
+
 bool
 EngineHost::add_midi_note (uint8_t pitch, float start_sec, float length_sec, uint8_t velocity)
 {
@@ -27804,12 +27853,11 @@ EngineHost::add_midi_note (uint8_t pitch, float start_sec, float length_sec, uin
 		if (!model) {
 			return false;
 		}
-		/* Fixed 120 BPM: 1 beat = 0.5s. Avoids TempoMap during UI edits. */
-		const double beats_per_sec = 120.0 / 60.0;
-		Temporal::Beats start_beats =
-		    Temporal::Beats::from_double ((double)start_sec * beats_per_sec);
-		Temporal::Beats length_beats =
-		    Temporal::Beats::from_double ((double)length_sec * beats_per_sec);
+		/* TempoMap BeatTime so notes stay on the editor grid when BPM ≠ 120. */
+		const double start_b = midi_beats_from_sec (start_sec);
+		const double end_b = midi_beats_from_sec (start_sec + length_sec);
+		Temporal::Beats start_beats = Temporal::Beats::from_double (start_b);
+		Temporal::Beats length_beats = Temporal::Beats::from_double (std::max (0.0, end_b - start_b));
 		if (length_beats < Temporal::Beats::one_tick ()) {
 			length_beats = Temporal::Beats::from_double (0.5);
 		}
@@ -28575,7 +28623,160 @@ EngineHost::smoke_midi_transpose ()
 	}
 }
 
+bool
+EngineHost::smoke_midi_tempo_map ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-midi-tempo-map failed — no Session";
+		return false;
+	}
+	const float bpm_was = _snap.tempo_bpm > 1.f ? _snap.tempo_bpm : 120.f;
+	try {
+		if (!set_tempo_bpm (100.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-tempo-map FAILED (set 100)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		if (!ensure_midi_region (32.f)) {
+			set_tempo_bpm (bpm_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-tempo-map FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		/* Clear prior notes. */
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for tempo-map smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+				if (!ensure_midi_region (32.f)) {
+					set_tempo_bpm (bpm_was);
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-tempo-map FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
 
+		/* One beat at 100 BPM = 0.6 s. Place note there; BeatTime must round-trip. */
+		const float beat1_sec = 0.6f;
+		const double beats_expect = midi_beats_from_sec (beat1_sec);
+		if (std::fabs (beats_expect - 1.0) > 0.05) {
+			set_tempo_bpm (bpm_was);
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-tempo-map FAILED "
+			              "(beats_from_sec(0.6)=%.3f want≈1.0)\n",
+			              beats_expect);
+			std::fflush (stderr);
+			return false;
+		}
+		const float sec_rt = midi_sec_from_beats (1.0);
+		if (std::fabs (sec_rt - beat1_sec) > 0.03f) {
+			set_tempo_bpm (bpm_was);
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-tempo-map FAILED "
+			              "(sec_from_beats(1)=%.3f want≈0.6)\n",
+			              sec_rt);
+			std::fflush (stderr);
+			return false;
+		}
+
+		const bool was_snap = _snap.snap_enabled;
+		_snap.snap_enabled = false;
+		if (!add_midi_note (60, beat1_sec, 0.3f, 100)) {
+			_snap.snap_enabled = was_snap;
+			set_tempo_bpm (bpm_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-tempo-map FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		_snap.snap_enabled = was_snap;
+
+		bool found = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 60
+			    && std::fabs (_snap.midi_notes[i].start_sec - beat1_sec) < 0.03f) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-tempo-map FAILED "
+			              "(note not at 0.6s; count=%d)\n",
+			              _snap.midi_note_count);
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				std::fprintf (stderr, "  note p=%u t=%.3f\n",
+				              (unsigned)_snap.midi_notes[i].pitch,
+				              _snap.midi_notes[i].start_sec);
+			}
+			std::fflush (stderr);
+			set_tempo_bpm (bpm_was);
+			return false;
+		}
+
+		/* Quantize at beat density should keep the note on the beat. */
+		set_snap_density (1);
+		set_snap_enabled (true);
+		clear_midi_note_selection ();
+		if (!quantize_midi_notes ()) {
+			set_snap_enabled (was_snap);
+			set_tempo_bpm (bpm_was);
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-tempo-map FAILED (quantize)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		found = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].pitch == 60
+			    && std::fabs (_snap.midi_notes[i].start_sec - beat1_sec) < 0.04f) {
+				found = true;
+				break;
+			}
+		}
+		set_snap_enabled (was_snap);
+		if (!found) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-tempo-map FAILED (quantize drift)\n");
+			std::fflush (stderr);
+			set_tempo_bpm (bpm_was);
+			return false;
+		}
+
+		if (!set_tempo_bpm (bpm_was)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-tempo-map FAILED (restore tempo)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-tempo-map ok "
+		              "(100 BPM beat1=%.2fs ↔ 1.0 beats, quantize stable)\n",
+		              beat1_sec);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-tempo-map ok";
+		return true;
+	} catch (std::exception& e) {
+		set_tempo_bpm (bpm_was);
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-tempo-map exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		set_tempo_bpm (bpm_was);
+		return false;
+	}
+}
 
 bool
 EngineHost::nudge_midi_velocity (int delta)
@@ -36350,6 +36551,26 @@ EngineHost::transpose_midi_notes (int semitones)
 
 bool
 EngineHost::smoke_midi_transpose ()
+{
+	return false;
+}
+
+double
+EngineHost::midi_beats_from_sec (float time_sec) const
+{
+	(void)time_sec;
+	return 0.0;
+}
+
+float
+EngineHost::midi_sec_from_beats (double beats) const
+{
+	(void)beats;
+	return 0.f;
+}
+
+bool
+EngineHost::smoke_midi_tempo_map ()
 {
 	return false;
 }
