@@ -1361,7 +1361,9 @@ int main () { __int128 x = 0; return 0; }
 
     # Bundled YTK/SUIL are for the GTK UI stack. MSVC / --windows-only headless
     # excludes libs/tk/suil — do not claim HAVE_SUIL or libardour will include suil.h.
-    if Options.options.dist_target != 'msvc' and not Options.options.windows_only:
+    opts = Options.options
+    windows_only = opts.windows_only or Options.options.dist_target in ('mingw', 'msvc')
+    if not windows_only:
         conf.define('YTK', 1)
         conf.define('HAVE_SUIL', 1)
 
@@ -1369,8 +1371,6 @@ int main () { __int128 x = 0; return 0; }
 
     conf.env.append_value('CFLAGS', '-DWAF_BUILD')
     conf.env.append_value('CXXFLAGS', '-DWAF_BUILD')
-
-    opts = Options.options
 
     # (optionally) Adopt Microsoft-like convention that makes all non-explicitly exported
     # symbols invisible (rather than doing this all over the wscripts in the src tree)
@@ -1456,7 +1456,6 @@ int main () { __int128 x = 0; return 0; }
     backends = opts.with_backends.split(',')
 
     # Airdour: treat mingw/msvc dist targets as Windows-only unless explicitly disabled.
-    windows_only = opts.windows_only or Options.options.dist_target in ('mingw', 'msvc')
     if windows_only:
         conf.define('AIRDOUR_WINDOWS_ONLY', 1)
         conf.env['AIRDOUR_WINDOWS_ONLY'] = True
