@@ -1950,6 +1950,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	});
 	run_smoke_check (ok, "vst3-prefs-click", [this]() { return smoke_vst3_prefs_click (); });
 	run_smoke_check (ok, "vst3-mixer-unload", [this]() { return smoke_vst3_mixer_unload (); });
+	run_smoke_check (ok, "vst3-catalog-highlight", [this]() { return smoke_vst3_catalog_highlight (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
 	run_smoke_check (ok, "solo-all", [this]() { return _engine.smoke_solo_all (); });
@@ -9950,6 +9951,11 @@ ShellWindow::sync_prefs_from_engine ()
 	_prefs.set_vst3_catalog (_engine_snap.vst3_scan_count,
 	                         _engine_snap.vst3_catalog_name,
 	                         _engine_snap.vst3_catalog_count);
+	if (_engine_snap.vst3_ok && _engine_snap.vst3_name[0] != L'\0') {
+		_prefs.set_vst3_loaded_name (_engine_snap.vst3_name);
+	} else {
+		_prefs.set_vst3_loaded_name (nullptr);
+	}
 }
 
 void
@@ -10137,6 +10143,77 @@ after_hit:
 		return false;
 	}
 	std::fprintf (stderr, "airdour_win_shell: smoke-vst3-mixer-unload ok (× → unload)\n");
+	return true;
+}
+
+bool
+ShellWindow::smoke_vst3_catalog_highlight ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-catalog-highlight FAILED (no session)\n");
+		return false;
+	}
+	sync_prefs_from_engine ();
+	_prefs.layout ((float)_width, (float)_height, _dpi_scale);
+
+	if (_engine_snap.vst3_catalog_count <= 0) {
+		if (_prefs.vst3_loaded_catalog_index () >= 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-catalog-highlight FAILED "
+			              "(highlight on empty catalog)\n");
+			return false;
+		}
+		/* Synthetic catalog + loaded name exercises highlight without plugins. */
+		wchar_t names[PrefsPanel::kMaxCatalog][PrefsPanel::kCatalogNameLen];
+		for (int i = 0; i < PrefsPanel::kMaxCatalog; ++i) {
+			names[i][0] = L'\0';
+		}
+		wcsncpy_s (names[0], PrefsPanel::kCatalogNameLen, L"AlphaFX", _TRUNCATE);
+		wcsncpy_s (names[1], PrefsPanel::kCatalogNameLen, L"BetaFX", _TRUNCATE);
+		_prefs.set_vst3_catalog (2, names, 2);
+		_prefs.set_vst3_loaded_name (L"BetaFX");
+		if (_prefs.vst3_loaded_catalog_index () != 1) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-catalog-highlight FAILED "
+			              "(want index 1 got %d)\n",
+			              _prefs.vst3_loaded_catalog_index ());
+			return false;
+		}
+		_prefs.set_vst3_loaded_name (nullptr);
+		if (_prefs.vst3_loaded_catalog_index () >= 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-catalog-highlight FAILED "
+			              "(clear failed)\n");
+			return false;
+		}
+		sync_prefs_from_engine (); /* restore real empty catalog */
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-catalog-highlight ok "
+		              "(scan-only; synthetic row1 highlight)\n");
+		return true;
+	}
+
+	/* Plugins present: if vst3_ok, loaded name should match a catalog row. */
+	sync_prefs_from_engine ();
+	if (_engine_snap.vst3_ok) {
+		int hi = _prefs.vst3_loaded_catalog_index ();
+		if (hi < 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-catalog-highlight FAILED "
+			              "(live insert not in catalog)\n");
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-catalog-highlight ok "
+		              "(live row=%d)\n",
+		              hi);
+		return true;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-vst3-catalog-highlight ok "
+	              "(catalog=%d no live insert)\n",
+	              _engine_snap.vst3_catalog_count);
 	return true;
 }
 
