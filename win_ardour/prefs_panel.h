@@ -31,6 +31,7 @@ enum class PrefsHit {
 	ClickToggle,
 	SnapToggle,
 	Vst3Rescan,
+	Vst3Bypass,
 	Save
 };
 
@@ -59,9 +60,13 @@ public:
 	void set_vst3_catalog (int scan_count, const wchar_t names[][kCatalogNameLen], int name_count);
 	/** Live insert name for accent highlight (empty → no highlight). */
 	void set_vst3_loaded_name (const wchar_t* name);
+	void set_vst3_bypassed (bool on) { _vst3_bypassed = on; }
+	void set_vst3_ok (bool on) { _vst3_ok = on; }
 	void set_status (const wchar_t* text);
 
 	PrefsHit hit_test (float x, float y) const;
+	/** Center of Bypass button after layout (for smoke). */
+	bool vst3_bypass_btn_center (float* out_x, float* out_y) const;
 	/** Catalog name row under (x,y), or −1. Rows laid out even when empty. */
 	int hit_vst3_catalog_index (float x, float y) const;
 	/** Geometric center of catalog row `index` (0..kMaxCatalog-1) after layout. */
@@ -90,11 +95,14 @@ private:
 	D2D1_RECT_F _click_btn;
 	D2D1_RECT_F _snap_btn;
 	D2D1_RECT_F _vst3_rescan_btn;
+	D2D1_RECT_F _vst3_bypass_btn;
 	D2D1_RECT_F _vst3_catalog_row[kMaxCatalog];
 	D2D1_RECT_F _save_btn;
 	bool        _visible;
 	bool        _click_on;
 	bool        _snap_on;
+	bool        _vst3_ok;
+	bool        _vst3_bypassed;
 	uint32_t    _cur_period;
 	uint32_t    _cur_sr;
 	uint32_t    _pref_period;

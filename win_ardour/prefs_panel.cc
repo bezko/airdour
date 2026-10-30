@@ -29,10 +29,13 @@ PrefsPanel::PrefsPanel ()
 	, _click_btn ()
 	, _snap_btn ()
 	, _vst3_rescan_btn ()
+	, _vst3_bypass_btn ()
 	, _save_btn ()
 	, _visible (false)
 	, _click_on (false)
 	, _snap_on (false)
+	, _vst3_ok (false)
+	, _vst3_bypassed (false)
 	, _cur_period (0)
 	, _cur_sr (0)
 	, _pref_period (0)
@@ -90,6 +93,9 @@ PrefsPanel::layout (float view_w, float view_h, float dpi_scale)
 	y = cat_y + 8.f * dpi_scale;
 
 	_vst3_rescan_btn = D2D1::RectF (x, y, x + 140.f * dpi_scale, y + btn_h);
+	_vst3_bypass_btn = D2D1::RectF (_vst3_rescan_btn.right + gap, y,
+	                                _vst3_rescan_btn.right + gap + 120.f * dpi_scale,
+	                                y + btn_h);
 
 	_save_btn = D2D1::RectF (x, _card.bottom - 40.f * dpi_scale,
 	                         x + 100.f * dpi_scale, _card.bottom - 14.f * dpi_scale);
@@ -210,6 +216,9 @@ PrefsPanel::hit_test (float x, float y) const
 	if (contains (_vst3_rescan_btn, x, y)) {
 		return PrefsHit::Vst3Rescan;
 	}
+	if (contains (_vst3_bypass_btn, x, y)) {
+		return PrefsHit::Vst3Bypass;
+	}
 	if (contains (_save_btn, x, y)) {
 		return PrefsHit::Save;
 	}
@@ -243,6 +252,17 @@ PrefsPanel::catalog_row_center (int index, float* out_x, float* out_y) const
 	*out_x = 0.5f * (r.left + r.right);
 	*out_y = 0.5f * (r.top + r.bottom);
 	return true;
+}
+
+bool
+PrefsPanel::vst3_bypass_btn_center (float* out_x, float* out_y) const
+{
+	if (!out_x || !out_y) {
+		return false;
+	}
+	*out_x = 0.5f * (_vst3_bypass_btn.left + _vst3_bypass_btn.right);
+	*out_y = 0.5f * (_vst3_bypass_btn.top + _vst3_bypass_btn.bottom);
+	return _vst3_bypass_btn.right > _vst3_bypass_btn.left;
 }
 
 int
@@ -365,6 +385,9 @@ PrefsPanel::draw (ID2D1RenderTarget* rt,
 		}
 	}
 	draw_btn (_vst3_rescan_btn, L"Rescan VST3", false);
+	draw_btn (_vst3_bypass_btn,
+	          _vst3_bypassed ? L"Bypassed" : L"Bypass",
+	          _vst3_ok && _vst3_bypassed);
 
 	draw_btn (_save_btn, L"Save", true);
 	if (_status[0]) {
