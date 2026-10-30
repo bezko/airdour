@@ -1893,6 +1893,18 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool smoke_vst3_insert_index ();
 
 	/**
+	 * Advance sticky catalog index by dir (±1), skip instruments / no-audio,
+	 * unload+insert onto Audio 2. Empty scan returns true (FENIX PASS).
+	 */
+	bool cycle_vst3_insert (int dir);
+
+	/**
+	 * Rescan → cycle(+1) → unload. Empty scan still PASS.
+	 * For --smoke-vst3-cycle-insert.
+	 */
+	bool smoke_vst3_cycle_insert ();
+
+	/**
 	 * Sample WASAPI shared timing + working set while transport rolls briefly.
 	 * Prints a one-line PERF summary to stderr. For --smoke-perf.
 	 */

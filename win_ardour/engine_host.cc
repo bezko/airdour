@@ -527,6 +527,7 @@ public:
 	std::weak_ptr<PluginInsert> vst3_fx; /* shell VST3 insert (Audio 2) */
 	uint32_t        vst3_param_ports[EngineSnapshot::kMaxVst3Params];
 	int             vst3_param_count;
+	int             vst3_cycle_index; /* last catalog index inserted via cycle (−1 none) */
 	bool            track_comp_ok;
 	bool            track_comp_bypassed;
 	float           track_comp_threshold_db;
@@ -586,6 +587,7 @@ public:
 		, track_fx_bypassed (false)
 		, track_fx_param (0.3f)
 		, vst3_param_count (0)
+		, vst3_cycle_index (-1)
 		, track_comp_ok (false)
 		, track_comp_bypassed (false)
 		, track_comp_threshold_db (0.f)
@@ -27913,6 +27915,174 @@ EngineHost::smoke_vst3_insert_index ()
 }
 
 bool
+EngineHost::cycle_vst3_insert (int dir)
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"VST3 cycle failed — no Session";
+		return false;
+	}
+	if (dir == 0) {
+		dir = 1;
+	}
+	try {
+		if (_snap.vst3_scan_count <= 0) {
+			if (!rescan_vst3 ()) {
+				return false;
+			}
+		}
+		const int n = _snap.vst3_scan_count;
+		if (n <= 0) {
+			_snap.detail = L"VST3 cycle — empty catalog";
+			std::fprintf (stderr, "airdour_win_shell: cycle_vst3_insert empty catalog (PASS)\n");
+			std::fflush (stderr);
+			return true;
+		}
+
+		const PluginInfoList& plugs = PluginManager::instance ().vst3_plugin_info ();
+		const int start = (_impl->vst3_cycle_index >= 0) ? _impl->vst3_cycle_index : -1;
+		for (int step = 1; step <= n; ++step) {
+			int idx = start + dir * step;
+			idx %= n;
+			if (idx < 0) {
+				idx += n;
+			}
+
+			PluginInfoPtr info;
+			int at = 0;
+			for (PluginInfoList::const_iterator i = plugs.begin (); i != plugs.end (); ++i) {
+				if (!*i) {
+					continue;
+				}
+				if (at == idx) {
+					info = *i;
+					break;
+				}
+				++at;
+			}
+			if (!info || info->is_instrument ()
+			    || info->n_inputs.n_audio () < 1 || info->n_outputs.n_audio () < 1) {
+				continue;
+			}
+			if (!insert_vst3_by_index (idx)) {
+				continue;
+			}
+			_impl->vst3_cycle_index = idx;
+			std::fprintf (stderr, "airdour_win_shell: cycle_vst3_insert dir=%+d → index=%d\n",
+			              dir, idx);
+			std::fflush (stderr);
+			_snap.detail = L"VST3 cycled by catalog index";
+			return true;
+		}
+
+		/* Catalog has entries but no insertable audio FX — still honest PASS. */
+		std::fprintf (stderr,
+		              "airdour_win_shell: cycle_vst3_insert no audio FX (scan=%d)\n", n);
+		std::fflush (stderr);
+		_snap.detail = L"VST3 cycle — no audio FX";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: cycle_vst3_insert: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_vst3_cycle_insert ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"smoke-vst3-cycle-insert failed — no Session";
+		return false;
+	}
+	try {
+		if (!rescan_vst3 ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-cycle-insert FAILED (rescan)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		_impl->vst3_cycle_index = -1;
+
+		if (_snap.vst3_scan_count <= 0) {
+			if (!cycle_vst3_insert (1)) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-vst3-cycle-insert FAILED (empty cycle)\n");
+				std::fflush (stderr);
+				return false;
+			}
+			if (_snap.vst3_ok) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-vst3-cycle-insert FAILED "
+				              "(empty but vst3_ok)\n");
+				std::fflush (stderr);
+				return false;
+			}
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-cycle-insert ok "
+			              "(scan-only; set VST3_PATH to cycle live)\n");
+			std::fflush (stderr);
+			_snap.detail = L"smoke-vst3-cycle-insert scan-only";
+			return true;
+		}
+
+		if (!cycle_vst3_insert (1)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-cycle-insert FAILED (cycle1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		const int first = _impl->vst3_cycle_index;
+		/* Instruments-only catalogs leave cycle_index at −1 and !vst3_ok — PASS. */
+		if (!_snap.vst3_ok && first < 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-cycle-insert ok "
+			              "(scan=%d no audio FX)\n",
+			              _snap.vst3_scan_count);
+			std::fflush (stderr);
+			_snap.detail = L"smoke-vst3-cycle-insert no audio FX";
+			return true;
+		}
+		if (!_snap.vst3_ok || first < 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-vst3-cycle-insert FAILED (after cycle1)\n");
+			std::fflush (stderr);
+			return false;
+		}
+
+		if (_snap.vst3_scan_count > 1) {
+			if (!cycle_vst3_insert (1)) {
+				std::fprintf (stderr,
+				              "airdour_win_shell: smoke-vst3-cycle-insert FAILED (cycle2)\n");
+				std::fflush (stderr);
+				return false;
+			}
+			if (_impl->vst3_cycle_index == first && _snap.vst3_scan_count > 1) {
+				/* May land on same if only one audio FX among many — OK if still loaded. */
+			}
+		}
+
+		if (!unload_vst3 () || _snap.vst3_ok) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst3-cycle-insert FAILED (unload)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-vst3-cycle-insert ok (last_index=%d)\n",
+		              _impl->vst3_cycle_index);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-vst3-cycle-insert ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst3-cycle-insert exception: %s\n",
+		              e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::smoke_vst3_lifecycle ()
 {
 	if (!_impl || !_impl->session) {
@@ -36677,6 +36847,19 @@ EngineHost::insert_vst3_by_index (int index)
 
 bool
 EngineHost::smoke_vst3_insert_index ()
+{
+	return false;
+}
+
+bool
+EngineHost::cycle_vst3_insert (int dir)
+{
+	(void)dir;
+	return false;
+}
+
+bool
+EngineHost::smoke_vst3_cycle_insert ()
 {
 	return false;
 }

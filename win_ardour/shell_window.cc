@@ -1951,6 +1951,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "vst3-prefs-click", [this]() { return smoke_vst3_prefs_click (); });
 	run_smoke_check (ok, "vst3-mixer-unload", [this]() { return smoke_vst3_mixer_unload (); });
 	run_smoke_check (ok, "vst3-catalog-highlight", [this]() { return smoke_vst3_catalog_highlight (); });
+	run_smoke_check (ok, "vst3-cycle-insert", [this]() { return _engine.smoke_vst3_cycle_insert (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
 	run_smoke_check (ok, "solo-all", [this]() { return _engine.smoke_solo_all (); });
@@ -5366,6 +5367,21 @@ ShellWindow::do_quantize_midi_notes ()
 }
 
 void
+ShellWindow::do_cycle_vst3_insert (int dir)
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (_engine.cycle_vst3_insert (dir)) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_fx_from_engine ();
+		sync_prefs_from_engine ();
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
 ShellWindow::do_transpose_midi_notes (int semitones)
 {
 	if (!_engine.is_linked ()) {
@@ -6198,6 +6214,15 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else if (wparam == VK_RETURN || wparam == 'Y' || wparam == 'y') {
 				apply_recovery_hit (RecoveryHit::Restore);
 			}
+			return 0;
+		}
+		/* Early outs keep the WM_KEYDOWN else-if chain under MSVC C1061. */
+		if ((GetKeyState (VK_CONTROL) & 0x8000)
+		    && (GetKeyState (VK_MENU) & 0x8000)
+		    && (GetKeyState (VK_SHIFT) & 0x8000)
+		    && (wparam == VK_OEM_COMMA || wparam == VK_OEM_PERIOD)) {
+			/* Ctrl+Alt+Shift+,/. = cycle VST3 catalog insert on Audio 2. */
+			do_cycle_vst3_insert (wparam == VK_OEM_PERIOD ? 1 : -1);
 			return 0;
 		}
 		if (wparam == VK_ESCAPE) {
@@ -10363,6 +10388,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Ctrl+Alt+Y", L"Region sync at playhead (Shift=clear)" },
 		{ L"Ctrl+Alt+Shift+C", L"Cycle scene marker MIDI channel 0..15" },
 		{ L"Ctrl+Alt+,/.", L"Previous / next cue marker" },
+		{ L"Ctrl+Alt+Shift+,/.", L"Cycle VST3 catalog insert on Audio 2" },
 		{ L"Alt+Shift+S", L"Rename nearest section marker" },
 		{ L"Ctrl+Alt+[ / ]", L"Locate punch in / out" },
 		{ L"Ctrl+[ / ]", L"Locate loop start / end" },
