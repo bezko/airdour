@@ -376,6 +376,7 @@ private:
 	void sync_mixer_gains_from_engine ();
 	void sync_mixer_group_from_engine ();
 	void draw_editor_grid ();
+	void draw_loop_overlay ();
 	void draw_punch_overlay ();
 	/** Truncate marker name for ruler draw (ellipsis when longer than max_chars). */
 	static void format_marker_ruler_label (const wchar_t* name, wchar_t* out, size_t out_len,
@@ -389,6 +390,17 @@ private:
 	void draw_midi_marker_overlay ();
 	/** Markers present + MIDI/CC layout; hairline x maps on-lane. */
 	bool smoke_midi_marker_overlay ();
+	/** Ruler edge caption rect for loop/punch In/Out (false if range inactive / off-view). */
+	bool loop_punch_edge_label_rect (bool is_loop, bool is_start, D2D1_RECT_F* out) const;
+	bool loop_punch_edge_tick_rect (bool is_loop, bool is_start, D2D1_RECT_F* out) const;
+	bool smoke_loop_punch_edge_labels ();
+	bool smoke_loop_punch_edge_ticks ();
+	/** Assert amber≠crimson + stronger wash opacities. For --smoke-punch-loop-tint. */
+	bool smoke_punch_loop_tint ();
+	/** Assert soft hatch when loop range idle. For --smoke-loop-inactive-hatch. */
+	bool smoke_loop_inactive_hatch ();
+	/** Assert soft hatch when punch disarmed. For --smoke-punch-inactive-hatch. */
+	bool smoke_punch_inactive_hatch ();
 	void do_toggle_comp_sidechain ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
