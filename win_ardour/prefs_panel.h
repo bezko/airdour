@@ -35,6 +35,7 @@ enum class PrefsHit {
 	Vst3ParamReset,
 	Vst3ParamReset1,
 	Vst3ParamReset2,
+	Vst3ParamReset3,
 	Vst3Unload,
 	Save
 };
@@ -77,6 +78,8 @@ public:
 	bool vst3_param_reset1_btn_center (float* out_x, float* out_y) const;
 	/** Center of Reset-2 (param2) button after layout when vst3_ok (for smoke). */
 	bool vst3_param_reset2_btn_center (float* out_x, float* out_y) const;
+	/** Center of Reset-3 (param3) button after layout when vst3_ok (for smoke). */
+	bool vst3_param_reset3_btn_center (float* out_x, float* out_y) const;
 	/** Center of Unload button after layout when vst3_ok (for smoke). */
 	bool vst3_unload_btn_center (float* out_x, float* out_y) const;
 	/** Catalog name row under (x,y), or −1. Rows laid out even when empty. */
@@ -111,6 +114,7 @@ private:
 	D2D1_RECT_F _vst3_param_reset_btn;
 	D2D1_RECT_F _vst3_param_reset1_btn;
 	D2D1_RECT_F _vst3_param_reset2_btn;
+	D2D1_RECT_F _vst3_param_reset3_btn;
 	D2D1_RECT_F _vst3_unload_btn;
 	D2D1_RECT_F _vst3_catalog_row[kMaxCatalog];
 	D2D1_RECT_F _save_btn;
