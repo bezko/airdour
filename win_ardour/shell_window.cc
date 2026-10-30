@@ -1903,6 +1903,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "clear-selection", [this]() { return _engine.smoke_clear_selection (); });
 	run_smoke_check (ok, "snap-toggle", [this]() { return _engine.smoke_snap_toggle (); });
 	run_smoke_check (ok, "snap-density", [this]() { return _engine.smoke_snap_density (); });
+	run_smoke_check (ok, "snap-density-label", [this]() { return smoke_snap_density_label (); });
 	run_smoke_check (ok, "grid-refresh", [this]() { return _engine.smoke_grid_lines (); });
 	run_smoke_check (ok, "tempo-nudge", [this]() { return _engine.smoke_tempo_nudge (); });
 	run_smoke_check (ok, "count-in", [this]() { return _engine.smoke_count_in (); });
@@ -2070,6 +2071,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	sync_prefs_from_engine ();
 	sync_recent_from_engine ();
 	_transport.set_snap_enabled (_engine_snap.snap_enabled);
+	_transport.set_snap_density (_engine_snap.snap_density);
 	_transport.set_midi_step_enabled (_engine_snap.midi_step_enabled);
 	_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 	_transport.set_midi_arp_enabled (_engine_snap.midi_arp_enabled);
@@ -5667,6 +5669,7 @@ ShellWindow::do_toggle_snap ()
 	_engine.toggle_snap ();
 	_engine_snap = _engine.snapshot ();
 	_transport.set_snap_enabled (_engine_snap.snap_enabled);
+	_transport.set_snap_density (_engine_snap.snap_density);
 	_transport.set_midi_step_enabled (_engine_snap.midi_step_enabled);
 	_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 	if (_engine_snap.snap_enabled) {
@@ -6216,9 +6219,95 @@ ShellWindow::do_cycle_snap_density ()
 		_lanes[0].strip.view_span_sec ());
 	_engine_snap = _engine.snapshot ();
 	_transport.set_snap_enabled (_engine_snap.snap_enabled);
+	_transport.set_snap_density (_engine_snap.snap_density);
 	_transport.set_midi_step_enabled (_engine_snap.midi_step_enabled);
 	_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+const wchar_t*
+ShellWindow::snap_caption_suffix () const
+{
+	if (!_engine_snap.snap_enabled) {
+		return L" OFF";
+	}
+	static const wchar_t* suf[] = {
+		L" ON·bar", L" ON·beat", L" ON·1/2", L" ON·1/4"
+	};
+	int d = _engine_snap.snap_density;
+	if (d < 0 || d > 3) {
+		d = 1;
+	}
+	return suf[d];
+}
+
+bool
+ShellWindow::smoke_snap_density_label ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-snap-density-label FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	static const wchar_t* want_on[] = { L"Bar", L"Beat", L"1/2", L"1/4" };
+	static const wchar_t* want_cap[] = {
+		L" ON·bar", L" ON·beat", L" ON·1/2", L" ON·1/4"
+	};
+	_engine.set_snap_enabled (true);
+	for (int d = 0; d < 4; ++d) {
+		_engine.set_snap_density (d);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		_transport.set_snap_enabled (_engine_snap.snap_enabled);
+		_transport.set_snap_density (_engine_snap.snap_density);
+		if (wcscmp (_transport.snap_btn_label (), want_on[d]) != 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-snap-density-label FAILED "
+			              "(btn dens=%d got=%ls want=%ls)\n",
+			              d, _transport.snap_btn_label (), want_on[d]);
+			std::fflush (stderr);
+			return false;
+		}
+		if (wcscmp (snap_caption_suffix (), want_cap[d]) != 0) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-snap-density-label FAILED "
+			              "(cap dens=%d got=%ls)\n",
+			              d, snap_caption_suffix ());
+			std::fflush (stderr);
+			return false;
+		}
+	}
+	_engine.set_snap_enabled (false);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	_transport.set_snap_enabled (false);
+	_transport.set_snap_density (_engine_snap.snap_density);
+	if (wcscmp (_transport.snap_btn_label (), L"Snap") != 0) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-snap-density-label FAILED (off label)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (wcscmp (snap_caption_suffix (), L" OFF") != 0) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-snap-density-label FAILED (off cap)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	float sx = 0.f;
+	float sy = 0.f;
+	if (!_transport.snap_btn_center (&sx, &sy)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-snap-density-label FAILED (center)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-snap-density-label ok "
+	              "(Bar/Beat/1/2/1/4 · Snap off)\n");
+	std::fflush (stderr);
+	return true;
 }
 
 float
@@ -9777,6 +9866,7 @@ ShellWindow::on_tick ()
 		refresh_automation_lane ();
 		refresh_midi_cc_lane ();
 		_transport.set_snap_enabled (_engine_snap.snap_enabled);
+		_transport.set_snap_density (_engine_snap.snap_density);
 		_transport.set_midi_step_enabled (_engine_snap.midi_step_enabled);
 		_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 		_transport.set_midi_arp_enabled (_engine_snap.midi_arp_enabled);
@@ -10072,12 +10162,12 @@ ShellWindow::draw_editor_pane ()
 			              L"sel T%d [%.1f–%.1f]  ·  trim/move  S/F  G=snap%s",
 			              _engine_snap.selection_track + 1,
 			              _engine_snap.selection_start_sec, _engine_snap.selection_end_sec,
-			              _engine_snap.snap_enabled ? L" ON" : L"");
+			              snap_caption_suffix ());
 		} else if (with_audio > 0) {
 			_snwprintf_s (caption, _TRUNCATE,
 			              L"%d tracks  ·  %d with audio  ·  G=snap%s  ·  marks %d",
 			              kTracks, with_audio,
-			              _engine_snap.snap_enabled ? L" ON" : L"",
+			              snap_caption_suffix (),
 			              _engine_snap.marker_count);
 		} else {
 			_snwprintf_s (caption, _TRUNCATE,
@@ -10457,6 +10547,7 @@ ShellWindow::apply_prefs_hit (PrefsHit hit)
 	sync_prefs_from_engine ();
 	sync_transport_tempo_from_engine ();
 	_transport.set_snap_enabled (_engine_snap.snap_enabled);
+	_transport.set_snap_density (_engine_snap.snap_density);
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
