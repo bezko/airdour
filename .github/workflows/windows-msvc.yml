@@ -2,8 +2,7 @@
 #
 # Product path: AIRDOUR_WINDOWS_ONLY / WASAPI shared.
 # This job compiles the WasapiIO smoke library (Windows SDK only) and
-# configures the cmake/win64 spine. Full headless/GUI link is staged later
-# once an MSVC dependency prefix (vcpkg) is wired — see tools/win-native/README.md.
+# configures the cmake/win64 spine.
 
 name: Windows MSVC CI
 

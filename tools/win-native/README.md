@@ -22,7 +22,7 @@ cmake --build build-win64 --config Release --target airdour_win_shell
 build-win64\artifacts\Release\airdour_win_shell.exe --timeout 3
 ```
 
-Produces `airdour_wasapi_io.lib` (WasapiIO + Windows SDK) and `airdour_win_shell.exe` (Win32+D2D+DirectWrite, no GTK). Does **not** link libardour into the shell yet.
+Produces `airdour_wasapi_io.lib` (WasapiIO + Windows SDK) and `airdour_win_shell.exe` (Win32+D2D+DirectWrite, no GTK).
 
 ## Headless C deps (next slice on laptop)
 

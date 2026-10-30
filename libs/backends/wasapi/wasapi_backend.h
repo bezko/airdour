@@ -24,9 +24,9 @@
 #include "ardour/port_engine_shared.h"
 #include "ardour/types.h"
 
-#include "cycle_timer.h"
+#include "../portaudio/cycle_timer.h"
 #include "wasapi_io.h"
-#include "winmmemidi_io.h"
+#include "../portaudio/winmmemidi_io.h"
 
 namespace ARDOUR {
 

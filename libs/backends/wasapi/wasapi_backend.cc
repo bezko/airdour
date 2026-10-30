@@ -31,10 +31,10 @@
 #include "ardour/audioengine.h"
 #include "ardour/debug.h"
 
-#include "audio_utils.h"
-#include "debug.h"
+#include "../portaudio/audio_utils.h"
+#include "../portaudio/debug.h"
 #include "wasapi_backend.h"
-#include "winmmemidi_output_device.h"
+#include "../portaudio/winmmemidi_output_device.h"
 
 using namespace ARDOUR;
 using namespace PBD;
@@ -886,7 +886,7 @@ WasapiBackend::run_one_cycle ()
 	     it != _system_inputs.end (); ++it, ++i) {
 		float* buf = (float*)(*it)->get_buffer (nframes);
 		if (cap && i < n_in) {
-			wasapi_deinterleave (cap, buf, nframes, i, n_in);
+			deinterleave_audio_data (cap, buf, nframes, i, n_in);
 		} else {
 			memset (buf, 0, nframes * sizeof (Sample));
 		}
@@ -912,7 +912,7 @@ WasapiBackend::run_one_cycle ()
 	     it != _system_outputs.end (); ++it, ++i) {
 		float* buf = (float*)(*it)->get_buffer (nframes);
 		if (play && i < n_out) {
-			wasapi_interleave (buf, play, nframes, i, n_out);
+			interleave_audio_data (buf, play, nframes, i, n_out);
 		}
 	}
 

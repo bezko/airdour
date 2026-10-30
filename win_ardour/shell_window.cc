@@ -29,9 +29,22 @@ constexpr D2D1_COLOR_F kPaneEdge   = { 0.140f, 0.190f, 0.220f, 1.f };
 constexpr D2D1_COLOR_F kPeak       = { 0.200f, 0.940f, 0.820f, 1.f };
 constexpr D2D1_COLOR_F kRms        = { 0.100f, 0.380f, 0.360f, 0.88f };
 constexpr D2D1_COLOR_F kPlayhead   = { 0.990f, 0.820f, 0.280f, 1.f };
-constexpr D2D1_COLOR_F kSelection  = { 0.280f, 0.760f, 0.900f, 1.f };
+constexpr D2D1_COLOR_F kSelection  = { 0.220f, 0.820f, 0.960f, 1.f }; /* brighter cyan marquee */
 constexpr D2D1_COLOR_F kLoop       = { 0.940f, 0.640f, 0.200f, 1.f };
 constexpr D2D1_COLOR_F kPunch      = { 0.920f, 0.340f, 0.280f, 1.f };
+/* Amber vs crimson — high contrast on dark pane (was closer oranges). */
+/* Ruler / lane wash opacities (smoke-punch-loop-tint asserts these). */
+constexpr float kLoopRulerTintOp   = 0.52f; /* was 0.35 */
+constexpr float kPunchRulerTintOn  = 0.72f; /* was 0.55 */
+constexpr float kPunchRulerTintOff = 0.42f; /* was 0.28 */
+constexpr float kLoopLaneTintOp    = 0.18f; /* play-loop on */
+constexpr float kLoopLaneTintIdle  = 0.10f; /* range on, play off */
+constexpr float kLoopInactiveHatchOp = 0.30f; /* soft hatch when idle */
+constexpr float kLoopInactiveHatchPx = 6.f;   /* stripe pitch @ dpi=1 */
+constexpr float kPunchLaneTintOn   = 0.34f; /* was 0.22 */
+constexpr float kPunchLaneTintOff  = 0.12f; /* was 0.16 — idle + hatch */
+constexpr float kPunchInactiveHatchOp = 0.32f; /* soft hatch when disarmed */
+constexpr float kPunchInactiveHatchPx = 6.f;
 constexpr D2D1_COLOR_F kMarker     = { 0.820f, 0.880f, 0.420f, 1.f };
 constexpr D2D1_COLOR_F kMidi       = { 0.320f, 0.780f, 0.920f, 1.f }; /* cyan, not purple */
 constexpr D2D1_COLOR_F kMeterHot   = { 0.96f, 0.38f, 0.24f, 1.f };
@@ -1710,6 +1723,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "marker-rename", [this]() { return _engine.smoke_marker_rename (); });
 	run_smoke_check (ok, "marker-name-ellipsis", [this]() { return smoke_marker_name_ellipsis (); });
 	run_smoke_check (ok, "marker-lock", [this]() { return _engine.smoke_marker_lock (); });
+	run_smoke_check (ok, "midi-marker-overlay", [this]() { return smoke_midi_marker_overlay (); });
 	run_smoke_check (ok, "cd-marker", [this]() { return _engine.smoke_cd_marker (); });
 	run_smoke_check (ok, "range-marker", [this]() { return _engine.smoke_range_marker (); });
 	run_smoke_check (ok, "region-sync", [this]() { return _engine.smoke_region_sync (); });
@@ -1720,6 +1734,21 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "punch-navigate", [this]() { return _engine.smoke_punch_navigate (); });
 	run_smoke_check (ok, "session-extent-navigate", [this]() { return _engine.smoke_session_extent_navigate (); });
 	run_smoke_check (ok, "loop-navigate", [this]() { return _engine.smoke_loop_navigate (); });
+	run_smoke_check (ok, "loop-punch-edge-labels", [this]() {
+		return smoke_loop_punch_edge_labels ();
+	});
+	run_smoke_check (ok, "loop-punch-edge-ticks", [this]() {
+		return smoke_loop_punch_edge_ticks ();
+	});
+	run_smoke_check (ok, "punch-loop-tint", [this]() {
+		return smoke_punch_loop_tint ();
+	});
+	run_smoke_check (ok, "loop-inactive-hatch", [this]() {
+		return smoke_loop_inactive_hatch ();
+	});
+	run_smoke_check (ok, "punch-inactive-hatch", [this]() {
+		return smoke_punch_inactive_hatch ();
+	});
 	run_smoke_check (ok, "playhead-nudge", [this]() { return _engine.smoke_playhead_nudge (); });
 	run_smoke_check (ok, "zoom-punch", [this]() {
 		if (!_engine.smoke_zoom_punch ()) return false;
@@ -1771,6 +1800,12 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-zoom-selection ok (span=%.2fs)\n", span);
 		layout_panes ();
 		return true;
+	});
+	run_smoke_check (ok, "selection-marquee-tint", [this]() {
+		return smoke_selection_marquee_tint ();
+	});
+	run_smoke_check (ok, "selection-mute-wash", [this]() {
+		return smoke_selection_mute_wash ();
 	});
 	run_smoke_check (ok, "zoom-session", [this]() {
 		if (!_engine.smoke_zoom_session ()) return false;
@@ -1919,6 +1954,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		return true;
 	});
 	run_smoke_check (ok, "midi-vel-chord", [this]() { return smoke_midi_vel_chord (); });
+	run_smoke_check (ok, "midi-cc-clear", [this]() { return smoke_midi_cc_clear (); });
 	run_smoke_check (ok, "midi-duplicate", [this]() { return _engine.smoke_midi_duplicate (); });
 	run_smoke_check (ok, "midi-tempo-map", [this]() { return _engine.smoke_midi_tempo_map (); });
 	run_smoke_check (ok, "midi-panic", [this]() { return _engine.smoke_midi_panic (); });
@@ -5118,6 +5154,74 @@ ShellWindow::do_scroll_mixer (float delta_px)
 }
 
 bool
+ShellWindow::smoke_selection_marquee_tint ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-selection-marquee-tint FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	/* Floors: wash > prior 0.28, edge > wash, muted still below active. */
+	if (!(WaveStrip::kSelWashOp > 0.35f
+	      && WaveStrip::kSelEdgeOp > WaveStrip::kSelWashOp
+	      && WaveStrip::kSelEdgeOp > 0.90f
+	      && WaveStrip::kSelMutedWashOp < WaveStrip::kSelWashOp
+	      && WaveStrip::kSelMutedEdgeOp < WaveStrip::kSelEdgeOp
+	      && WaveStrip::kSelFadeWashOp > 0.50f
+	      && kSelection.r < kSelection.g && kSelection.b > 0.90f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-selection-marquee-tint FAILED "
+		              "(wash=%.2f edge=%.2f muted=%.2f/%.2f fade=%.2f)\n",
+		              WaveStrip::kSelWashOp, WaveStrip::kSelEdgeOp,
+		              WaveStrip::kSelMutedWashOp, WaveStrip::kSelMutedEdgeOp,
+		              WaveStrip::kSelFadeWashOp);
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-selection-marquee-tint ok "
+	              "(wash=%.2f edge=%.2f cyan)\n",
+	              WaveStrip::kSelWashOp, WaveStrip::kSelEdgeOp);
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+ShellWindow::smoke_selection_mute_wash ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-selection-mute-wash FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	/* Mute cue: wash well below active, edge still strong, hatch present. */
+	if (!(WaveStrip::kSelMutedWashOp < 0.16f
+	      && WaveStrip::kSelMutedWashOp < WaveStrip::kSelWashOp * 0.45f
+	      && WaveStrip::kSelMutedEdgeOp > 0.65f
+	      && WaveStrip::kSelMutedEdgeOp > WaveStrip::kSelMutedWashOp
+	      && WaveStrip::kSelMutedHatchOp > 0.30f
+	      && WaveStrip::kSelMutedHatchPx >= 4.f
+	      && WaveStrip::kSelMutedHatchPx <= 8.f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-selection-mute-wash FAILED "
+		              "(wash=%.2f edge=%.2f hatch=%.2f/%.1fpx)\n",
+		              WaveStrip::kSelMutedWashOp, WaveStrip::kSelMutedEdgeOp,
+		              WaveStrip::kSelMutedHatchOp, WaveStrip::kSelMutedHatchPx);
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-selection-mute-wash ok "
+	              "(wash=%.2f edge=%.2f hatch=%.2f @%.0fpx)\n",
+	              WaveStrip::kSelMutedWashOp, WaveStrip::kSelMutedEdgeOp,
+	              WaveStrip::kSelMutedHatchOp, WaveStrip::kSelMutedHatchPx);
+	std::fflush (stderr);
+	return true;
+}
+
+bool
 ShellWindow::smoke_mixer_scroll_layout ()
 {
 	/* Force overflow with wide min strip; scroll to end; strip 0 must leave clip. */
@@ -5504,11 +5608,44 @@ ShellWindow::do_undo_to_index (int index)
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
+bool
+ShellWindow::do_clear_active_midi_cc_lane ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		return false;
+	}
+	bool ok = false;
+	if (_midi_cc_number == -1) {
+		ok = _engine.clear_midi_bend_automation ();
+	} else if (_midi_cc_number == -2) {
+		ok = _engine.clear_midi_pressure_automation ();
+	} else if (_midi_cc_number == -3) {
+		ok = _engine.clear_midi_note_pressure_automation ();
+	} else if (_midi_cc_number >= 0) {
+		ok = _engine.clear_midi_cc_automation (_midi_cc_number);
+	}
+	if (ok) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		refresh_midi_cc_lane ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+	return ok;
+}
+
 void
 ShellWindow::do_delete_selection ()
 {
 	if (!_engine.is_linked () || !_engine_snap.session_ok) {
 		return;
+	}
+	/* Del over the CC lane clears that lane's automation first. */
+	POINT pt;
+	if (GetCursorPos (&pt) && ScreenToClient (_hwnd, &pt)
+	    && _midi_cc_lane.hit (_midi_cc_lane_bounds, (float)pt.x, (float)pt.y)) {
+		if (do_clear_active_midi_cc_lane ()) {
+			return;
+		}
 	}
 	/* Prefer MIDI note selection when present. */
 	if (_engine_snap.midi_selected_note_id >= 0) {
@@ -5528,6 +5665,57 @@ ShellWindow::do_delete_selection ()
 	_engine_snap = _engine.snapshot ();
 	apply_region_selection_to_lanes ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+bool
+ShellWindow::smoke_midi_cc_clear ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (no session)\n");
+		return false;
+	}
+	if (!_engine.ensure_midi_track () || !_engine.ensure_midi_region (16.f)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (region)\n");
+		return false;
+	}
+	_midi_cc_number = 7;
+	if (!_engine.clear_midi_cc_automation (7)
+	    || !_engine.write_midi_cc_automation (0.0f, 0.25f, 7)
+	    || !_engine.write_midi_cc_automation (1.5f, 0.80f, 7)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (write)\n");
+		return false;
+	}
+	float xn[8], yn[8];
+	int n = _engine.fill_midi_cc_automation_points (0.f, 8.f, xn, yn, 8, 7);
+	if (n < 2) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (pts=%d)\n", n);
+		return false;
+	}
+	if (!do_clear_active_midi_cc_lane ()) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (clear)\n");
+		return false;
+	}
+	n = _engine.fill_midi_cc_automation_points (0.f, 8.f, xn, yn, 8, 7);
+	if (n != 0) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (after=%d)\n", n);
+		return false;
+	}
+	/* Also clear bend via the same shell path. */
+	_midi_cc_number = -1;
+	if (!_engine.write_midi_bend_automation (0.5f, 0.75f)
+	    || !do_clear_active_midi_cc_lane ()) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (bend)\n");
+		return false;
+	}
+	n = _engine.fill_midi_bend_automation_points (0.f, 8.f, xn, yn, 8);
+	if (n != 0) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear FAILED (bend after=%d)\n", n);
+		return false;
+	}
+	_midi_cc_number = 7;
+	refresh_midi_cc_lane ();
+	std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc-clear ok (CC7+bend cleared)\n");
+	return true;
 }
 
 void
@@ -9637,6 +9825,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	if (_midi_cc_lane.hit (_midi_cc_lane_bounds, x, y)
 	    && _engine.is_linked () && _engine_snap.session_ok) {
+		/* Alt+click clears the active CC/bend/pressure/PolyAT lane. */
+		if ((GetKeyState (VK_MENU) & 0x8000) != 0) {
+			do_clear_active_midi_cc_lane ();
+			return true;
+		}
 		_drag = DragMode::MidiCcWrite;
 		_drag_index = 0;
 		_midi_cc_last_write_sec = -1.f;
@@ -9644,6 +9837,8 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			_engine.ensure_midi_bend_automation ();
 		} else if (_midi_cc_number == -2) {
 			_engine.ensure_midi_pressure_automation ();
+		} else if (_midi_cc_number == -3) {
+			_engine.ensure_midi_note_pressure_automation ();
 		} else {
 			_engine.ensure_midi_cc_automation (_midi_cc_number);
 		}
@@ -10450,7 +10645,7 @@ ShellWindow::draw_editor_ruler ()
 		n0 = std::max (0.f, std::min (1.f, n0));
 		n1 = std::max (0.f, std::min (1.f, n1));
 		if (n1 > n0) {
-			_brush_loop->SetOpacity (0.35f);
+			_brush_loop->SetOpacity (kLoopRulerTintOp);
 			_rt->FillRectangle (
 				D2D1::RectF (rr.left + n0 * w, rr.top, rr.left + n1 * w, rr.bottom),
 				_brush_loop);
@@ -10464,12 +10659,42 @@ ShellWindow::draw_editor_ruler ()
 		n0 = std::max (0.f, std::min (1.f, n0));
 		n1 = std::max (0.f, std::min (1.f, n1));
 		if (n1 > n0) {
-			float op = _engine_snap.punch_enabled ? 0.55f : 0.28f;
+			float op = _engine_snap.punch_enabled ? kPunchRulerTintOn : kPunchRulerTintOff;
 			_brush_punch->SetOpacity (op);
 			_rt->FillRectangle (
 				D2D1::RectF (rr.left + n0 * w, rr.top, rr.left + n1 * w, rr.bottom),
 				_brush_punch);
 			_brush_punch->SetOpacity (1.f);
+		}
+	}
+
+	/* Edge tick caps + In/Out captions so washes are scannable. */
+	{
+		D2D1_RECT_F tr;
+		if (loop_punch_edge_tick_rect (true, true, &tr) && _brush_loop) {
+			_rt->FillRectangle (tr, _brush_loop);
+		}
+		if (loop_punch_edge_tick_rect (true, false, &tr) && _brush_loop) {
+			_rt->FillRectangle (tr, _brush_loop);
+		}
+		if (loop_punch_edge_tick_rect (false, true, &tr) && _brush_punch) {
+			_rt->FillRectangle (tr, _brush_punch);
+		}
+		if (loop_punch_edge_tick_rect (false, false, &tr) && _brush_punch) {
+			_rt->FillRectangle (tr, _brush_punch);
+		}
+		D2D1_RECT_F lr;
+		if (loop_punch_edge_label_rect (true, true, &lr) && _brush_loop && _fmt_meta) {
+			_rt->DrawTextW (L"In", 2, _fmt_meta, lr, _brush_loop);
+		}
+		if (loop_punch_edge_label_rect (true, false, &lr) && _brush_loop && _fmt_meta) {
+			_rt->DrawTextW (L"Out", 3, _fmt_meta, lr, _brush_loop);
+		}
+		if (loop_punch_edge_label_rect (false, true, &lr) && _brush_punch && _fmt_meta) {
+			_rt->DrawTextW (L"In", 2, _fmt_meta, lr, _brush_punch);
+		}
+		if (loop_punch_edge_label_rect (false, false, &lr) && _brush_punch && _fmt_meta) {
+			_rt->DrawTextW (L"Out", 3, _fmt_meta, lr, _brush_punch);
 		}
 	}
 
@@ -10533,6 +10758,447 @@ ShellWindow::draw_editor_ruler ()
 	}
 }
 
+bool
+ShellWindow::loop_punch_edge_label_rect (bool is_loop, bool is_start, D2D1_RECT_F* out) const
+{
+	if (!out) {
+		return false;
+	}
+	const D2D1_RECT_F& rr = _editor_ruler;
+	if (rr.right <= rr.left) {
+		return false;
+	}
+	float t0 = 0.f;
+	float t1 = 0.f;
+	if (is_loop) {
+		if (!_engine_snap.loop_active
+		    || _engine_snap.loop_end_sec <= _engine_snap.loop_start_sec) {
+			return false;
+		}
+		t0 = _engine_snap.loop_start_sec;
+		t1 = _engine_snap.loop_end_sec;
+	} else {
+		if (!_engine_snap.punch_range_ok
+		    || _engine_snap.punch_end_sec <= _engine_snap.punch_start_sec) {
+			return false;
+		}
+		t0 = _engine_snap.punch_start_sec;
+		t1 = _engine_snap.punch_end_sec;
+	}
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float w = rr.right - rr.left;
+	float sec = is_start ? t0 : t1;
+	float n = (sec - view0) / span;
+	if (n < 0.f || n > 1.f) {
+		return false;
+	}
+	float px = rr.left + n * w;
+	float tw = (is_start ? 18.f : 28.f) * _dpi_scale;
+	float pad = 2.f * _dpi_scale;
+	if (is_start) {
+		*out = D2D1::RectF (px + pad, rr.top, px + pad + tw, rr.bottom);
+	} else {
+		*out = D2D1::RectF (px - pad - tw, rr.top, px - pad, rr.bottom);
+	}
+	return out->right > out->left;
+}
+
+bool
+ShellWindow::loop_punch_edge_tick_rect (bool is_loop, bool is_start, D2D1_RECT_F* out) const
+{
+	if (!out) {
+		return false;
+	}
+	const D2D1_RECT_F& rr = _editor_ruler;
+	if (rr.right <= rr.left) {
+		return false;
+	}
+	float t0 = 0.f;
+	float t1 = 0.f;
+	if (is_loop) {
+		if (!_engine_snap.loop_active
+		    || _engine_snap.loop_end_sec <= _engine_snap.loop_start_sec) {
+			return false;
+		}
+		t0 = _engine_snap.loop_start_sec;
+		t1 = _engine_snap.loop_end_sec;
+	} else {
+		if (!_engine_snap.punch_range_ok
+		    || _engine_snap.punch_end_sec <= _engine_snap.punch_start_sec) {
+			return false;
+		}
+		t0 = _engine_snap.punch_start_sec;
+		t1 = _engine_snap.punch_end_sec;
+	}
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float w = rr.right - rr.left;
+	float sec = is_start ? t0 : t1;
+	float n = (sec - view0) / span;
+	if (n < 0.f || n > 1.f) {
+		return false;
+	}
+	float px = rr.left + n * w;
+	float thick = std::max (1.5f, 2.f * _dpi_scale);
+	*out = D2D1::RectF (px - thick * 0.5f, rr.top, px + thick * 0.5f, rr.bottom);
+	return out->right > out->left;
+}
+
+bool
+ShellWindow::smoke_loop_punch_edge_labels ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-labels FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_loop_range (1.0f, 3.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-labels FAILED (loop)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_punch_range (2.0f, 4.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-labels FAILED (punch)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	fit_shared_range (0.5f, 4.5f);
+	layout_panes ();
+
+	D2D1_RECT_F a, b, c, d;
+	if (!loop_punch_edge_label_rect (true, true, &a)
+	    || !loop_punch_edge_label_rect (true, false, &b)
+	    || !loop_punch_edge_label_rect (false, true, &c)
+	    || !loop_punch_edge_label_rect (false, false, &d)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-labels FAILED (rects)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	const D2D1_RECT_F& rr = _editor_ruler;
+	auto inside = [&](const D2D1_RECT_F& r) {
+		return r.left >= rr.left - 1.f && r.right <= rr.right + 1.f
+		       && r.top >= rr.top - 1.f && r.bottom <= rr.bottom + 1.f
+		       && r.right > r.left;
+	};
+	if (!inside (a) || !inside (b) || !inside (c) || !inside (d)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-labels FAILED (outside ruler)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!(a.left < b.left) || !(c.left < d.left)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-labels FAILED (order)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-loop-punch-edge-labels ok "
+	              "(loop In/Out · punch In/Out in ruler)\n");
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+ShellWindow::smoke_loop_punch_edge_ticks ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_loop_range (1.0f, 3.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (loop)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_punch_range (2.0f, 4.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (punch)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	fit_shared_range (0.5f, 4.5f);
+	layout_panes ();
+
+	D2D1_RECT_F a, b, c, d;
+	if (!loop_punch_edge_tick_rect (true, true, &a)
+	    || !loop_punch_edge_tick_rect (true, false, &b)
+	    || !loop_punch_edge_tick_rect (false, true, &c)
+	    || !loop_punch_edge_tick_rect (false, false, &d)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (rects)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	const D2D1_RECT_F& rr = _editor_ruler;
+	auto inside = [&](const D2D1_RECT_F& r) {
+		return r.left >= rr.left - 1.f && r.right <= rr.right + 1.f
+		       && r.top >= rr.top - 1.f && r.bottom <= rr.bottom + 1.f
+		       && r.right > r.left
+		       && (r.bottom - r.top) >= (rr.bottom - rr.top) * 0.9f
+		       && (r.right - r.left) <= 6.f * _dpi_scale;
+	};
+	if (!inside (a) || !inside (b) || !inside (c) || !inside (d)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (shape)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!(a.left < b.left) || !(c.left < d.left)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (order)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	/* Ticks should sit at the wash edges (left of start labels / right of end). */
+	D2D1_RECT_F la, lb;
+	if (!loop_punch_edge_label_rect (true, true, &la)
+	    || !loop_punch_edge_label_rect (true, false, &lb)
+	    || !(a.right <= la.left + 1.f)
+	    || !(b.left >= lb.right - 1.f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-punch-edge-ticks FAILED (vs labels)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-loop-punch-edge-ticks ok "
+	              "(loop + punch edge caps)\n");
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+ShellWindow::smoke_punch_loop_tint ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-loop-tint FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	/* Hue separation: loop amber G high, punch crimson G low. */
+	if (!(kLoop.g > 0.65f && kPunch.g < 0.40f && kLoop.r > 0.85f && kPunch.r > 0.85f
+	      && (kLoop.g - kPunch.g) > 0.35f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-loop-tint FAILED "
+		              "(colors loop g=%.2f punch g=%.2f)\n",
+		              kLoop.g, kPunch.g);
+		std::fflush (stderr);
+		return false;
+	}
+	if (!(kLoopRulerTintOp > 0.45f && kPunchRulerTintOn > kPunchRulerTintOff
+	      && kPunchRulerTintOn > 0.65f && kLoopLaneTintOp > 0.12f
+	      && kPunchLaneTintOn > kPunchLaneTintOff && kPunchLaneTintOn > 0.28f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-loop-tint FAILED (opacity floor)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_loop_range (1.0f, 3.0f) || !_engine.set_punch_range (2.0f, 4.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-loop-tint FAILED (ranges)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (!_engine_snap.loop_active || !_engine_snap.punch_range_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-loop-tint FAILED (snap flags)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	fit_shared_range (0.5f, 4.5f);
+	layout_panes ();
+	/* Lane wash geometry must cover Audio 1. */
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float n0 = (_engine_snap.loop_start_sec - view0) / span;
+	float n1 = (_engine_snap.loop_end_sec - view0) / span;
+	n0 = std::max (0.f, std::min (1.f, n0));
+	n1 = std::max (0.f, std::min (1.f, n1));
+	const D2D1_RECT_F& lb = _lanes[0].bounds;
+	float w = lb.right - lb.left;
+	if (n1 <= n0 || w < 8.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-loop-tint FAILED (lane geometry)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-punch-loop-tint ok "
+	              "(amber≠crimson · ruler %.2f/%.2f · lane loop+punch)\n",
+	              kLoopRulerTintOp, kPunchRulerTintOn);
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+ShellWindow::smoke_loop_inactive_hatch ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-inactive-hatch FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!(kLoopLaneTintIdle < kLoopLaneTintOp
+	      && kLoopLaneTintIdle < 0.14f
+	      && kLoopInactiveHatchOp > 0.22f
+	      && kLoopInactiveHatchPx >= 4.f
+	      && kLoopInactiveHatchPx <= 10.f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-inactive-hatch FAILED "
+		              "(idle=%.2f play=%.2f hatch=%.2f/%.1fpx)\n",
+		              kLoopLaneTintIdle, kLoopLaneTintOp,
+		              kLoopInactiveHatchOp, kLoopInactiveHatchPx);
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_loop_range (1.0f, 3.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-inactive-hatch FAILED (range)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (!_engine_snap.loop_active) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-inactive-hatch FAILED (no loop)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	/* Ensure play-loop is off so idle hatch path is the live state. */
+	if (_engine_snap.loop_playing) {
+		(void)_engine.set_loop_play (false);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	if (_engine_snap.loop_playing) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-loop-inactive-hatch FAILED (still playing)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-loop-inactive-hatch ok "
+	              "(idle=%.2f hatch=%.2f @%.0fpx)\n",
+	              kLoopLaneTintIdle, kLoopInactiveHatchOp, kLoopInactiveHatchPx);
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+ShellWindow::smoke_punch_inactive_hatch ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-inactive-hatch FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!(kPunchLaneTintOff < kPunchLaneTintOn
+	      && kPunchLaneTintOff < 0.15f
+	      && kPunchInactiveHatchOp > 0.24f
+	      && kPunchInactiveHatchPx >= 4.f
+	      && kPunchInactiveHatchPx <= 10.f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-inactive-hatch FAILED "
+		              "(off=%.2f on=%.2f hatch=%.2f/%.1fpx)\n",
+		              kPunchLaneTintOff, kPunchLaneTintOn,
+		              kPunchInactiveHatchOp, kPunchInactiveHatchPx);
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.set_punch_range (1.0f, 3.0f)) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-inactive-hatch FAILED (range)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (!_engine_snap.punch_range_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-inactive-hatch FAILED (no punch)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (_engine_snap.punch_enabled) {
+		(void)_engine.set_punch_enabled (false);
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	if (_engine_snap.punch_enabled) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-punch-inactive-hatch FAILED (still armed)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-punch-inactive-hatch ok "
+	              "(off=%.2f hatch=%.2f @%.0fpx)\n",
+	              kPunchLaneTintOff, kPunchInactiveHatchOp, kPunchInactiveHatchPx);
+	std::fflush (stderr);
+	return true;
+}
+
+void
+ShellWindow::draw_loop_overlay ()
+{
+	if (!_engine_snap.loop_active || !_brush_loop) {
+		return;
+	}
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float n0 = (_engine_snap.loop_start_sec - view0) / span;
+	float n1 = (_engine_snap.loop_end_sec - view0) / span;
+	n0 = std::max (0.f, std::min (1.f, n0));
+	n1 = std::max (0.f, std::min (1.f, n1));
+	if (n1 <= n0) {
+		return;
+	}
+	const bool playing = _engine_snap.loop_playing;
+	_brush_loop->SetOpacity (playing ? kLoopLaneTintOp : kLoopLaneTintIdle);
+	for (int i = 0; i < kTracks; ++i) {
+		const D2D1_RECT_F& lb = _lanes[i].bounds;
+		float w = lb.right - lb.left;
+		if (w < 4.f) {
+			continue;
+		}
+		float bot = (i == 0 && _auto_lane_bounds.bottom > lb.bottom)
+		            ? _auto_lane_bounds.bottom : lb.bottom;
+		float x0 = lb.left + n0 * w;
+		float x1 = lb.left + n1 * w;
+		_rt->FillRectangle (D2D1::RectF (x0, lb.top, x1, bot), _brush_loop);
+		if (!playing) {
+			/* Soft vertical hatch — range present but play-loop idle. */
+			_brush_loop->SetOpacity (kLoopInactiveHatchOp);
+			float step = std::max (3.f, kLoopInactiveHatchPx * _dpi_scale);
+			float stripe = std::max (1.f, 1.2f * _dpi_scale);
+			for (float x = x0; x < x1 - stripe; x += step) {
+				_rt->FillRectangle (D2D1::RectF (x, lb.top, x + stripe, bot), _brush_loop);
+			}
+			_brush_loop->SetOpacity (kLoopLaneTintIdle);
+		}
+	}
+	_brush_loop->SetOpacity (1.f);
+}
+
 void
 ShellWindow::draw_punch_overlay ()
 {
@@ -10548,7 +11214,8 @@ ShellWindow::draw_punch_overlay ()
 	if (n1 <= n0) {
 		return;
 	}
-	float op = _engine_snap.punch_enabled ? 0.22f : 0.10f;
+	const bool armed = _engine_snap.punch_enabled;
+	float op = armed ? kPunchLaneTintOn : kPunchLaneTintOff;
 	_brush_punch->SetOpacity (op);
 	for (int i = 0; i < kTracks; ++i) {
 		const D2D1_RECT_F& lb = _lanes[i].bounds;
@@ -10558,9 +11225,19 @@ ShellWindow::draw_punch_overlay ()
 		}
 		float bot = (i == 0 && _auto_lane_bounds.bottom > lb.bottom)
 		            ? _auto_lane_bounds.bottom : lb.bottom;
-		_rt->FillRectangle (
-			D2D1::RectF (lb.left + n0 * w, lb.top, lb.left + n1 * w, bot),
-			_brush_punch);
+		float x0 = lb.left + n0 * w;
+		float x1 = lb.left + n1 * w;
+		_rt->FillRectangle (D2D1::RectF (x0, lb.top, x1, bot), _brush_punch);
+		if (!armed) {
+			/* Soft vertical hatch — range present but punch disarmed. */
+			_brush_punch->SetOpacity (kPunchInactiveHatchOp);
+			float step = std::max (3.f, kPunchInactiveHatchPx * _dpi_scale);
+			float stripe = std::max (1.f, 1.2f * _dpi_scale);
+			for (float x = x0; x < x1 - stripe; x += step) {
+				_rt->FillRectangle (D2D1::RectF (x, lb.top, x + stripe, bot), _brush_punch);
+			}
+			_brush_punch->SetOpacity (kPunchLaneTintOff);
+		}
 	}
 	_brush_punch->SetOpacity (1.f);
 }
@@ -10711,8 +11388,116 @@ ShellWindow::draw_editor_pane ()
 	draw_automation_lane ();
 	draw_midi_lane ();
 	draw_midi_cc_lane ();
+	draw_midi_marker_overlay ();
+	draw_loop_overlay ();
 	draw_punch_overlay ();
 	draw_editor_grid ();
+}
+
+void
+ShellWindow::draw_midi_marker_overlay ()
+{
+	if (!_brush_marker || _engine_snap.marker_count <= 0) {
+		return;
+	}
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float left = _lanes[0].bounds.left;
+	float right = _lanes[0].bounds.right;
+	float w = right - left;
+	if (w < 4.f) {
+		return;
+	}
+	_brush_marker->SetOpacity (0.50f);
+	for (int m = 0; m < _engine_snap.marker_count; ++m) {
+		float n = (_engine_snap.markers[m].sec - view0) / span;
+		if (n < 0.f || n > 1.f) {
+			continue;
+		}
+		float px = left + n * w;
+		if (_midi_lane.bottom > _midi_lane.top + 2.f) {
+			_rt->DrawLine (D2D1::Point2F (px, _midi_lane.top),
+			               D2D1::Point2F (px, _midi_lane.bottom),
+			               _brush_marker, 1.f * _dpi_scale);
+		}
+		if (_midi_cc_lane_bounds.bottom > _midi_cc_lane_bounds.top + 2.f) {
+			_rt->DrawLine (D2D1::Point2F (px, _midi_cc_lane_bounds.top),
+			               D2D1::Point2F (px, _midi_cc_lane_bounds.bottom),
+			               _brush_marker, 1.f * _dpi_scale);
+		}
+	}
+	_brush_marker->SetOpacity (1.f);
+}
+
+bool
+ShellWindow::smoke_midi_marker_overlay ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-marker-overlay FAILED (no session)\n");
+		return false;
+	}
+	layout_panes ();
+	if (_midi_lane.bottom <= _midi_lane.top + 8.f
+	    || _midi_cc_lane_bounds.bottom <= _midi_cc_lane_bounds.top + 4.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-marker-overlay FAILED (layout)\n");
+		return false;
+	}
+	if (!_engine.add_marker_at (1.25f, "M-MIDI")) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-marker-overlay FAILED (add)\n");
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (_engine_snap.marker_count < 1) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-marker-overlay FAILED (count)\n");
+		return false;
+	}
+	float view0 = _lanes[0].strip.view_start_sec ();
+	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+	float left = _lanes[0].bounds.left;
+	float w = _lanes[0].bounds.right - left;
+	bool found = false;
+	float px = 0.f;
+	for (int m = 0; m < _engine_snap.marker_count; ++m) {
+		if (std::fabs (_engine_snap.markers[m].sec - 1.25f) > 0.08f) {
+			continue;
+		}
+		float n = (_engine_snap.markers[m].sec - view0) / span;
+		px = left + n * w;
+		found = (n >= 0.f && n <= 1.f && px >= left - 1.f && px <= left + w + 1.f);
+		break;
+	}
+	if (!found) {
+		/* Fit so marker is on-screen then recheck. */
+		_lanes[0].strip.fit_range (0.f, 4.f, 0.05f);
+		for (int i = 1; i < kTracks; ++i) {
+			_lanes[i].strip.sync_view_from (_lanes[0].strip);
+		}
+		layout_panes ();
+		view0 = _lanes[0].strip.view_start_sec ();
+		span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
+		left = _lanes[0].bounds.left;
+		w = _lanes[0].bounds.right - left;
+		for (int m = 0; m < _engine_snap.marker_count; ++m) {
+			if (std::fabs (_engine_snap.markers[m].sec - 1.25f) > 0.08f) {
+				continue;
+			}
+			float n = (_engine_snap.markers[m].sec - view0) / span;
+			px = left + n * w;
+			found = (n >= 0.f && n <= 1.f);
+			break;
+		}
+	}
+	if (!found) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-marker-overlay FAILED (x map)\n");
+		return false;
+	}
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-midi-marker-overlay ok "
+	              "(marker@1.25s px=%.1f across midi+cc)\n",
+	              px);
+	return true;
 }
 
 void
