@@ -230,6 +230,8 @@ private:
 	void toggle_about ();
 	void sync_prefs_from_engine ();
 	void apply_prefs_hit (PrefsHit hit);
+	void apply_prefs_vst3_catalog_click (int index);
+	bool smoke_vst3_prefs_click ();
 	void transport_play ();
 	void transport_stop ();
 	void transport_toggle ();
@@ -313,6 +315,36 @@ private:
 	bool smoke_mixer_scroll_layout ();
 	/** Import → select → set sync mid → assert D2D x maps inside strip. */
 	bool smoke_region_sync_draw ();
+	bool smoke_vst3_mixer_unload ();
+	bool smoke_vst3_mixer_bypass ();
+	bool smoke_vst3_mixer_param12_reset ();
+	bool smoke_vst3_mixer_param3_reset ();
+	bool smoke_vst3_mixer_param4_reset ();
+	bool smoke_vst3_catalog_highlight ();
+	bool smoke_vst3_prefs_bypass ();
+	bool smoke_vst3_prefs_param_reset ();
+	bool smoke_vst3_prefs_param12_reset ();
+	bool smoke_vst3_prefs_param3_reset ();
+	bool smoke_vst3_prefs_param4_reset ();
+	bool smoke_vst3_prefs_unload ();
+	bool smoke_vst3_status_unload ();
+	bool smoke_vst3_status_bypass ();
+	bool smoke_vst3_status_param_reset ();
+	bool smoke_vst3_status_param12_reset ();
+	bool smoke_vst3_status_param3_reset ();
+	bool hit_status_vst3_unload (float x, float y) const;
+	bool hit_status_vst3_bypass (float x, float y) const;
+	bool hit_status_vst3_param_reset (float x, float y) const;
+	bool hit_status_vst3_param_reset1 (float x, float y) const;
+	bool hit_status_vst3_param_reset2 (float x, float y) const;
+	bool hit_status_vst3_param_reset3 (float x, float y) const;
+	bool status_vst3_unload_center (float* out_x, float* out_y) const;
+	bool status_vst3_bypass_center (float* out_x, float* out_y) const;
+	bool status_vst3_param_reset_center (float* out_x, float* out_y) const;
+	bool status_vst3_param_reset1_center (float* out_x, float* out_y) const;
+	bool status_vst3_param_reset2_center (float* out_x, float* out_y) const;
+	bool status_vst3_param_reset3_center (float* out_x, float* out_y) const;
+	void do_cycle_vst3_insert (int dir);
 	void do_toggle_group_relative ();
 	void do_cycle_group_color ();
 	void do_toggle_focused_track_active ();
@@ -517,6 +549,12 @@ void do_toggle_selection_muted ();
 	float       _mixer_scroll_max; /* layout-computed */
 	float       _mixer_force_min_w; /* smoke: force min strip width (0 = default) */
 	D2D1_RECT_F _status_bar;
+	D2D1_RECT_F _status_vst3_bypass_btn; /* BYP chip when vst3_ok */
+	D2D1_RECT_F _status_vst3_param_reset_btn; /* RST chip when vst3_ok */
+	D2D1_RECT_F _status_vst3_param_reset1_btn; /* 1 = param1 reset */
+	D2D1_RECT_F _status_vst3_param_reset2_btn; /* 2 = param2 reset */
+	D2D1_RECT_F _status_vst3_param_reset3_btn; /* 3 = param3 reset */
+	D2D1_RECT_F _status_vst3_unload_btn; /* × chip when vst3_ok */
 
 	ID2D1Factory*             _d2d_factory;
 	IDWriteFactory*           _dwrite_factory;

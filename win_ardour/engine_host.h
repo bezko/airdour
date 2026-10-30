@@ -328,6 +328,11 @@ struct EngineSnapshot {
 	bool         pref_click_default; /* mirrors Config clicking when saved */
 	static constexpr int kPrefsHintLen = 96;
 	wchar_t      vst3_path_hint[kPrefsHintLen];
+	/* Last VST3 scan catalog (Prefs list; scan-only safe when count=0). */
+	static constexpr int kMaxVst3Catalog = 8;
+	int          vst3_scan_count; /* full PluginManager VST3 list size */
+	int          vst3_catalog_count; /* names stored below (≤kMaxVst3Catalog) */
+	wchar_t      vst3_catalog_name[kMaxVst3Catalog][40];
 	/* VST3 DSP insert on Audio 2 (D2D host params; no GTK editor). */
 	static constexpr int kMaxVst3Params = 3;
 	static constexpr int kVst3NameLen = 40;
@@ -1828,6 +1833,12 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 */
 	bool set_vst3_param (int index, float norm_0_1);
 
+	/**
+	 * Reset one VST3 mixer param (snapshot index) to the plugin's default
+	 * value. For dbl-click Audio 2 FX knob when vst3_ok.
+	 */
+	bool reset_vst3_param (int index);
+
 	/** Bypass / activate the shell VST3 insert on Audio 2. */
 	bool set_vst3_bypassed (bool bypassed);
 	bool toggle_vst3_bypass ();
@@ -1837,6 +1848,67 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Scan-only with VST3=0 still returns true. For --smoke-vst3-params.
 	 */
 	bool smoke_vst3_params ();
+
+	/**
+	 * Nudge Audio 2 VST param0 → reset_vst3_param → near plugin default.
+	 * Scan-only with VST3=0 still returns true. For --smoke-vst3-mixer-param-reset.
+	 */
+	bool smoke_vst3_mixer_param_reset ();
+
+	/**
+	 * Remove the shell VST3 PluginInsert from Audio 2. Idempotent when none
+	 * is loaded (still clears snapshot). Returns false only on remove failure.
+	 */
+	bool unload_vst3 ();
+
+	/**
+	 * Fresh VST3 path scan (VST3_PATH / AIRDOUR_SMOKE_VST3 + PluginManager
+	 * refresh). Does not insert. For prefs Rescan / lifecycle smoke.
+	 */
+	bool rescan_vst3 ();
+
+	/**
+	 * Scan → insert (when available) → unload → rescan.
+	 * Scan-only with VST3=0 still returns true. For --smoke-vst3-lifecycle.
+	 */
+	bool smoke_vst3_lifecycle ();
+
+	/**
+	 * Copy PluginManager VST3 names into vst3_catalog_* snapshot fields
+	 * (first kMaxVst3Catalog). Call after scan/rescan.
+	 */
+	void refresh_vst3_catalog_snap ();
+
+	/**
+	 * Rescan → assert snap catalog count matches PluginManager size
+	 * (0 is PASS). For --smoke-vst3-catalog.
+	 */
+	bool smoke_vst3_catalog ();
+
+	/**
+	 * Unload any shell VST3, then load PluginManager VST3 list[index]
+	 * onto Audio 2 (DSP-only). index is into the scanned list (same order
+	 * as vst3_catalog_*). Returns false when out of range / load fails.
+	 */
+	bool insert_vst3_by_index (int index);
+
+	/**
+	 * Rescan → insert index 0 when plugins exist → unload.
+	 * Scan-only with VST3=0 still returns true. For --smoke-vst3-insert-index.
+	 */
+	bool smoke_vst3_insert_index ();
+
+	/**
+	 * Advance sticky catalog index by dir (±1), skip instruments / no-audio,
+	 * unload+insert onto Audio 2. Empty scan returns true (FENIX PASS).
+	 */
+	bool cycle_vst3_insert (int dir);
+
+	/**
+	 * Rescan → cycle(+1) → unload. Empty scan still PASS.
+	 * For --smoke-vst3-cycle-insert.
+	 */
+	bool smoke_vst3_cycle_insert ();
 
 	/**
 	 * Sample WASAPI shared timing + working set while transport rolls briefly.

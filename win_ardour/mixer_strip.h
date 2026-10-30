@@ -143,6 +143,20 @@ public:
 	float fx_param2 () const { return _fx_param2; }
 	float fx_param3 () const { return _fx_param3; }
 	bool hit_fx (float x, float y) const;
+	/** × on FX row when set_fx_can_unload(true) — VST3 Audio 2 unload. */
+	bool hit_fx_unload (float x, float y) const;
+	/** B chip left of × when set_fx_can_unload(true) — VST3 Audio 2 bypass. */
+	bool hit_fx_bypass (float x, float y) const;
+	/** "1" chip — reset VST3 param1 (between B and ×). */
+	bool hit_fx_param_reset1 (float x, float y) const;
+	/** "2" chip — reset VST3 param2 (between B and ×). */
+	bool hit_fx_param_reset2 (float x, float y) const;
+	/** "3" chip — reset VST3 param3 (between B and ×). */
+	bool hit_fx_param_reset3 (float x, float y) const;
+	/** "4" chip — reset VST3 param4 (between B and ×). */
+	bool hit_fx_param_reset4 (float x, float y) const;
+	void set_fx_can_unload (bool on) { _fx_can_unload = on; }
+	bool fx_can_unload () const { return _fx_can_unload; }
 	bool hit_fx_param (float x, float y) const;
 	bool hit_fx_param2 (float x, float y) const;
 	bool hit_fx_param3 (float x, float y) const;
@@ -200,6 +214,12 @@ private:
 	D2D1_RECT_F _pan_track;
 	D2D1_RECT_F _send_track;
 	D2D1_RECT_F _fx_btn;
+	D2D1_RECT_F _fx_bypass_btn;
+	D2D1_RECT_F _fx_param_reset1_btn;
+	D2D1_RECT_F _fx_param_reset2_btn;
+	D2D1_RECT_F _fx_param_reset3_btn;
+	D2D1_RECT_F _fx_param_reset4_btn;
+	D2D1_RECT_F _fx_unload_btn;
 	D2D1_RECT_F _fx_param_track;
 	D2D1_RECT_F _fx_param_track2;
 	D2D1_RECT_F _fx_param_track3;
@@ -232,6 +252,7 @@ private:
 	int         _listen_mode; /* 0=S 1=P 2=A */
 	bool        _route_active;
 	bool        _fx_bypassed;
+	bool        _fx_can_unload;
 	int         _fx_param_count; /* 1..3 */
 	bool        _midi_strip;
 	bool        _narrow;

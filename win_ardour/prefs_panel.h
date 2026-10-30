@@ -30,6 +30,14 @@ enum class PrefsHit {
 	Period512,
 	ClickToggle,
 	SnapToggle,
+	Vst3Rescan,
+	Vst3Bypass,
+	Vst3ParamReset,
+	Vst3ParamReset1,
+	Vst3ParamReset2,
+	Vst3ParamReset3,
+	Vst3ParamReset4,
+	Vst3Unload,
 	Save
 };
 
@@ -37,6 +45,8 @@ class PrefsPanel
 {
 public:
 	static constexpr int kHintLen = 96;
+	static constexpr int kMaxCatalog = 8;
+	static constexpr int kCatalogNameLen = 40;
 
 	PrefsPanel ();
 
@@ -52,9 +62,35 @@ public:
 	void set_click_default (bool on) { _click_on = on; }
 	void set_snap_default (bool on) { _snap_on = on; }
 	void set_vst3_hint (const wchar_t* text);
+	/** scan_count = full list size; names[0..name_count) shown under hint. */
+	void set_vst3_catalog (int scan_count, const wchar_t names[][kCatalogNameLen], int name_count);
+	/** Live insert name for accent highlight (empty → no highlight). */
+	void set_vst3_loaded_name (const wchar_t* name);
+	void set_vst3_bypassed (bool on) { _vst3_bypassed = on; }
+	void set_vst3_ok (bool on) { _vst3_ok = on; }
 	void set_status (const wchar_t* text);
 
 	PrefsHit hit_test (float x, float y) const;
+	/** Center of Bypass button after layout (for smoke). */
+	bool vst3_bypass_btn_center (float* out_x, float* out_y) const;
+	/** Center of Reset (param0) button after layout when vst3_ok (for smoke). */
+	bool vst3_param_reset_btn_center (float* out_x, float* out_y) const;
+	/** Center of Reset-1 (param1) button after layout when vst3_ok (for smoke). */
+	bool vst3_param_reset1_btn_center (float* out_x, float* out_y) const;
+	/** Center of Reset-2 (param2) button after layout when vst3_ok (for smoke). */
+	bool vst3_param_reset2_btn_center (float* out_x, float* out_y) const;
+	/** Center of Reset-3 (param3) button after layout when vst3_ok (for smoke). */
+	bool vst3_param_reset3_btn_center (float* out_x, float* out_y) const;
+	/** Center of Reset-4 (param4) button after layout when vst3_ok (for smoke). */
+	bool vst3_param_reset4_btn_center (float* out_x, float* out_y) const;
+	/** Center of Unload button after layout when vst3_ok (for smoke). */
+	bool vst3_unload_btn_center (float* out_x, float* out_y) const;
+	/** Catalog name row under (x,y), or −1. Rows laid out even when empty. */
+	int hit_vst3_catalog_index (float x, float y) const;
+	/** Geometric center of catalog row `index` (0..kMaxCatalog-1) after layout. */
+	bool catalog_row_center (int index, float* out_x, float* out_y) const;
+	/** Catalog row matching loaded name, or −1. */
+	int vst3_loaded_catalog_index () const;
 
 	void draw (ID2D1RenderTarget* rt,
 	           ID2D1SolidColorBrush* brand,
@@ -76,15 +112,30 @@ private:
 	D2D1_RECT_F _per_512;
 	D2D1_RECT_F _click_btn;
 	D2D1_RECT_F _snap_btn;
+	D2D1_RECT_F _vst3_rescan_btn;
+	D2D1_RECT_F _vst3_bypass_btn;
+	D2D1_RECT_F _vst3_param_reset_btn;
+	D2D1_RECT_F _vst3_param_reset1_btn;
+	D2D1_RECT_F _vst3_param_reset2_btn;
+	D2D1_RECT_F _vst3_param_reset3_btn;
+	D2D1_RECT_F _vst3_param_reset4_btn;
+	D2D1_RECT_F _vst3_unload_btn;
+	D2D1_RECT_F _vst3_catalog_row[kMaxCatalog];
 	D2D1_RECT_F _save_btn;
 	bool        _visible;
 	bool        _click_on;
 	bool        _snap_on;
+	bool        _vst3_ok;
+	bool        _vst3_bypassed;
 	uint32_t    _cur_period;
 	uint32_t    _cur_sr;
 	uint32_t    _pref_period;
 	wchar_t     _cur_backend[32];
 	wchar_t     _pref_backend[32];
 	wchar_t     _vst3_hint[kHintLen];
+	int         _vst3_scan_count;
+	int         _vst3_catalog_count;
+	wchar_t     _vst3_catalog[kMaxCatalog][kCatalogNameLen];
+	wchar_t     _vst3_loaded_name[kCatalogNameLen];
 	wchar_t     _status[80];
 };
