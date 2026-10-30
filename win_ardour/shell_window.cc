@@ -5832,6 +5832,7 @@ ShellWindow::ensure_device_resources ()
 		return true;
 	}
 	if (!_d2d_factory || !_hwnd) {
+		discard_device_resources ();
 		return false;
 	}
 
@@ -5846,6 +5847,7 @@ ShellWindow::ensure_device_resources ()
 		D2D1::HwndRenderTargetProperties (_hwnd, size),
 		&_rt);
 	if (FAILED (hr)) {
+		discard_device_resources ();
 		return false;
 	}
 
@@ -5876,9 +5878,13 @@ ShellWindow::ensure_device_resources ()
 		stops->Release ();
 	}
 
-	return _brush_brand && _brush_body && _brush_accent && _brush_pane
+	if (_brush_brand && _brush_body && _brush_accent && _brush_pane
 	    && _brush_peak && _brush_rms && _brush_playhead && _brush_selection
-	    && _brush_loop && _brush_punch && _brush_marker && _brush_midi && _brush_meter_hot && _brush_bg;
+	    && _brush_loop && _brush_punch && _brush_marker && _brush_midi && _brush_meter_hot && _brush_bg) {
+		return true;
+	}
+	discard_device_resources ();
+	return false;
 }
 
 void
