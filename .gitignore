@@ -136,9 +136,6 @@ waf3-*
 /libs/taglib/taglib/tlist.tcc
 /libs/taglib/taglib/tmap.tcc
 
-/MSVCMixbus3/MSVCMixbus3.vsprops
-/MSVCardour3/MSVCMixbus3.vsprops
-/MSVCvst_scan/vst_scan.rc
 /icons/win32/msvc_resources.rc
 
 /tools/osx_packaging/Ardour/*.app
