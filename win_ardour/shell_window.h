@@ -377,6 +377,10 @@ private:
 	static void format_marker_ruler_label (const wchar_t* name, wchar_t* out, size_t out_len,
 	                                       int max_chars = 8);
 	bool smoke_marker_name_ellipsis ();
+	/** Assert stronger region marquee wash opacities. For --smoke-selection-marquee-tint. */
+	bool smoke_selection_marquee_tint ();
+	/** Assert muted selection hatch cue. For --smoke-selection-mute-wash. */
+	bool smoke_selection_mute_wash ();
 	void do_toggle_comp_sidechain ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
