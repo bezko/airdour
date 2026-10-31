@@ -5,7 +5,7 @@
 #
 # Audio product path: WASAPI shared (libs/backends/wasapi).
 # Exclusive / DirectSound / ASIO: out of scope.
-# GTK chrome: out of scope — D2D shell is product UI; GTK3 only as optional libs.
+# GTK chrome: out of scope — D2D shell is product UI.
 
 cmake_minimum_required(VERSION 3.20)
 project(airdour_win64 LANGUAGES C CXX)
@@ -30,21 +30,7 @@ add_compile_definitions(
   WIN32_LEAN_AND_MEAN
 )
 
-# Multi-config (VS) + vcpkg: map Release consumers onto RelWithDebInfo/Release imported locs.
-set(CMAKE_MAP_IMPORTED_CONFIG_RELEASE RelWithDebInfo Release MinSizeRel "")
-set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO RelWithDebInfo Release MinSizeRel "")
-set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL MinSizeRel Release RelWithDebInfo "")
-
-set(AIRDOUR_DEPS_ROOT "" CACHE PATH "MSVC dependency root (glib, sndfile, …)")
-if(AIRDOUR_DEPS_ROOT)
-  list(APPEND CMAKE_PREFIX_PATH "${AIRDOUR_DEPS_ROOT}")
-endif()
-
 set(AIRDOUR_SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
-
-# --- Slice order (full product) ---
-# 1. pbd  2. temporal / midipp / evoral  3. ardour  4. dummy + wasapi  5. headless
-# glibmm-2.4 + sigc++-2.0: overlay ports in tools/win-native/overlays.
 
 set(WASAPI_IO_SOURCES
   "${AIRDOUR_SRC_ROOT}/libs/backends/wasapi/wasapi_io.cc"
@@ -66,164 +52,6 @@ if(AIRDOUR_BUILD_WASAPI_IO_SMOKE)
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
   )
   message(STATUS "Airdour win64: wasapi_io_smoke (STATIC) enabled")
-endif()
-
-# Full backend still needs libardour — keep as INTERFACE inventory until deps land.
-add_library(airdour_wasapi_backend INTERFACE)
-target_sources(airdour_wasapi_backend INTERFACE ${WASAPI_BACKEND_SOURCES})
-target_include_directories(airdour_wasapi_backend INTERFACE
-  "${AIRDOUR_SRC_ROOT}/libs/backends/wasapi"
-  "${AIRDOUR_SRC_ROOT}/libs/backends/portaudio"
-  "${AIRDOUR_SRC_ROOT}/libs/ardour"
-  "${AIRDOUR_SRC_ROOT}/libs/pbd"
-)
-target_compile_definitions(airdour_wasapi_backend INTERFACE
-  BACKEND_NAME=\"WASAPI\"
-  ARDOURBACKEND_DLL_EXPORTS
-  USE_MMCSS_THREAD_PRIORITIES
-  AIRDOUR_WINDOWS_ONLY=1
-)
-if(WIN32)
-  target_link_libraries(airdour_wasapi_backend INTERFACE ole32 winmm uuid avrt)
-endif()
-
-message(STATUS "Airdour win64: full wasapi_backend remains INTERFACE until libardour links")
-
-# --- Headless C deps probe (vcpkg) ---
-# Prefer CMake CONFIG/BUILTIN packages so multi-config Release does not pull debug/*.lib.
-if(AIRDOUR_BUILD_DEPS_HEADLESS_SMOKE)
-  find_package(PkgConfig REQUIRED)
-  pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0)
-
-  find_package(LibXml2 REQUIRED)
-  find_package(CURL REQUIRED)
-  find_package(SndFile CONFIG REQUIRED)
-  find_package(PThreads4W CONFIG REQUIRED)
-
-  # VS multi-config + pkg-config often resolves to debug/*.lib; prefer explicit release paths.
-  if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
-    set(_vcpkg_lib "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib")
-    set(_vcpkg_inc "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include")
-  else()
-    set(_vcpkg_lib "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/lib")
-    set(_vcpkg_inc "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/include")
-  endif()
-
-  add_executable(deps_headless_smoke
-    "${CMAKE_CURRENT_SOURCE_DIR}/deps_headless_smoke.cc"
-  )
-
-  target_include_directories(deps_headless_smoke PRIVATE
-    "${_vcpkg_inc}"
-    "${_vcpkg_inc}/glib-2.0"
-    "${_vcpkg_lib}/glib-2.0/include"
-  )
-
-  target_link_libraries(deps_headless_smoke PRIVATE
-    LibXml2::LibXml2
-    CURL::libcurl
-    SndFile::sndfile
-    PThreads4W::PThreads4W
-  )
-
-  foreach(_rel_lib IN ITEMS glib-2.0.lib intl.lib archive.lib)
-    if(EXISTS "${_vcpkg_lib}/${_rel_lib}")
-      target_link_libraries(deps_headless_smoke PRIVATE "${_vcpkg_lib}/${_rel_lib}")
-    endif()
-  endforeach()
-
-  set_target_properties(deps_headless_smoke PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
-  )
-  message(STATUS "Airdour win64: deps_headless_smoke enabled (vcpkg C stack)")
-endif()
-
-# --- Overlay glibmm-2.4 + sigc++-2.0 probe ---
-if(AIRDOUR_BUILD_DEPS_GLIBMM_SMOKE)
-  if(DEFINED VCPKG_INSTALLED_DIR AND DEFINED VCPKG_TARGET_TRIPLET)
-    set(_gmm_lib "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/lib")
-    set(_gmm_inc "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/include")
-  else()
-    set(_gmm_lib "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/lib")
-    set(_gmm_inc "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/include")
-  endif()
-
-  # Manifest install may live under tools/win-native when installed via Install-HeadlessDeps.ps1.
-  if(NOT EXISTS "${_gmm_lib}/glibmm-2.4.lib")
-    set(_manifest_gmm "${AIRDOUR_SRC_ROOT}/tools/win-native/vcpkg_installed/x64-windows")
-    if(EXISTS "${_manifest_gmm}/lib/glibmm-2.4.lib")
-      set(_gmm_lib "${_manifest_gmm}/lib")
-      set(_gmm_inc "${_manifest_gmm}/include")
-    endif()
-  endif()
-
-  if(NOT EXISTS "${_gmm_lib}/glibmm-2.4.lib")
-    message(FATAL_ERROR "glibmm-2.4.lib not found under ${_gmm_lib}; run tools/win-native/Install-HeadlessDeps.ps1")
-  endif()
-
-  add_executable(deps_glibmm_smoke
-    "${CMAKE_CURRENT_SOURCE_DIR}/deps_glibmm_smoke.cc"
-  )
-
-  target_include_directories(deps_glibmm_smoke PRIVATE
-    "${_gmm_inc}"
-    "${_gmm_inc}/glibmm-2.4"
-    "${_gmm_lib}/glibmm-2.4/include"
-    "${_gmm_inc}/sigc++-2.0"
-    "${_gmm_lib}/sigc++-2.0/include"
-    "${_gmm_inc}/glib-2.0"
-    "${_gmm_lib}/glib-2.0/include"
-  )
-
-  foreach(_rel_lib IN ITEMS glibmm-2.4.lib sigc-2.0.lib gobject-2.0.lib gio-2.0.lib glib-2.0.lib intl.lib)
-    if(EXISTS "${_gmm_lib}/${_rel_lib}")
-      target_link_libraries(deps_glibmm_smoke PRIVATE "${_gmm_lib}/${_rel_lib}")
-    endif()
-  endforeach()
-
-  set_target_properties(deps_glibmm_smoke PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
-  )
-  message(STATUS "Airdour win64: deps_glibmm_smoke enabled (overlay glibmm-2.4)")
-endif()
-
-# --- GTK3 + Cairo MSVC lib probe (optional; not product chrome) ---
-if(AIRDOUR_BUILD_GTK_LIB_PROBE)
-  set(_gtk_prefix "${AIRDOUR_SRC_ROOT}/tools/win-native/vcpkg_installed/x64-windows")
-  if(NOT EXISTS "${_gtk_prefix}/include/gtk-3.0/gtk/gtk.h")
-    message(FATAL_ERROR
-      "GTK3 missing under ${_gtk_prefix}. "
-      "Run tools/win-native/Install-HeadlessDeps.ps1 -WithGtkLibs")
-  endif()
-  set(_gtk_inc "${_gtk_prefix}/include")
-  set(_gtk_lib "${_gtk_prefix}/lib")
-  add_executable(gtk_lib_probe
-    "${AIRDOUR_SRC_ROOT}/tools/win-native/gtk-lib-probe/main.cc"
-  )
-  target_include_directories(gtk_lib_probe PRIVATE
-    "${_gtk_inc}"
-    "${_gtk_inc}/gtk-3.0"
-    "${_gtk_inc}/glib-2.0"
-    "${_gtk_lib}/glib-2.0/include"
-    "${_gtk_inc}/cairo"
-    "${_gtk_inc}/pango-1.0"
-    "${_gtk_inc}/harfbuzz"
-    "${_gtk_inc}/gdk-pixbuf-2.0"
-    "${_gtk_inc}/atk-1.0"
-    "${_gtk_inc}/fribidi"
-  )
-  foreach(_rel_lib IN ITEMS
-      gtk-3.lib gdk-3.lib gobject-2.0.lib gio-2.0.lib glib-2.0.lib gmodule-2.0.lib
-      cairo.lib pangocairo-1.0.lib pango-1.0.lib pangowin32-1.0.lib
-      gdk_pixbuf-2.0.lib atk-1.0.lib harfbuzz.lib intl.lib fribidi.lib)
-    if(EXISTS "${_gtk_lib}/${_rel_lib}")
-      target_link_libraries(gtk_lib_probe PRIVATE "${_gtk_lib}/${_rel_lib}")
-    endif()
-  endforeach()
-  set_target_properties(gtk_lib_probe PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
-  )
-  message(STATUS "Airdour win64: gtk_lib_probe enabled (MSVC GTK3+Cairo libs; no chrome)")
 endif()
 
 # --- Minimal Win32 + Direct2D + DirectWrite GUI shell (no GTK2) ---

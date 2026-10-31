@@ -449,7 +449,7 @@ The script [`tools/win-native/ci/Package-WinShell-Installer.ps1`](tools/win-nati
 airdour/
 ├── cmake/
 │   └── win64/                    # CMake build spine for MSVC / Windows SDK
-│       └── CMakeLists.txt        # Definitions for wasapi_io_smoke, win_shell, and probes
+│       └── CMakeLists.txt        # Definitions for wasapi_io_smoke and win_shell
 ├── doc/                          # Technical diagrams, Doxygen specs, and architecture notes
 ├── headless/                     # Headless command-line Ardour runner (hardour)
 ├── libs/
