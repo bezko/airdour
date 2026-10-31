@@ -1455,7 +1455,7 @@ int main () { __int128 x = 0; return 0; }
 
     backends = opts.with_backends.split(',')
 
-    # Airdour: treat mingw/msvc dist targets as Windows-only unless explicitly disabled.
+    # Airdour: treat mingw/msvc dist targets as Windows-only.
     windows_only = opts.windows_only or Options.options.dist_target in ('mingw', 'msvc')
     if windows_only:
         conf.define('AIRDOUR_WINDOWS_ONLY', 1)
@@ -1479,8 +1479,6 @@ int main () { __int128 x = 0; return 0; }
                 backends += ['alsa']
             if sys.platform == 'darwin':
                 backends += ['coreaudio']
-            if Options.options.dist_target == 'mingw' or Options.options.dist_target == 'msvc':
-                backends += ['portaudio']
 
     if 'dummy' not in backends:
         backends += ['dummy']

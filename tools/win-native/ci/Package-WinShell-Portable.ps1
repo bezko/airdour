@@ -298,7 +298,7 @@ airdour_win_shell.exe   Win32 + Direct2D/DirectWrite shell
 run-airdour.bat         Sets PATH / ARDOUR_DLL_PATH / ARDOUR_BACKEND_PATH
 backends\               Dummy + WASAPI backend DLLs (Engine mode)
 panners\                libardour panner plugins (Engine mode)
-LV2\                    ACE Reasonable Synth + Reverb + Compressor (Engine mode)
+LV2\                    Bundled LV2 plugins (Engine mode)
 *.dll                   waf + vcpkg (+ CRT redistributables)
 
 Honest limits

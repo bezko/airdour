@@ -13,7 +13,7 @@ Native Windows audio backend implementing `ARDOUR::AudioBackend`.
 - Event-driven cycle: `wait_for_period` → `read_capture` → engine process → `write_playback`
 - Float convert/mix for IEEE float32, PCM16, PCM24, PCM32
 - MMCSS “Pro Audio” **HIGH** on the main process thread (`PBD::MMCSS`)
-- Default **Auto** (0); on many laptops (incl. TUFNUTZ) the shared engine is locked to **480** / 10 ms
+- Default **Auto** (0); on many laptops the shared engine is locked to **480** / 10 ms
 - Shell override: `--period N` → `set_buffer_size` before start
 - `--smoke-perf` reports callback µs vs period
 - DSP timing starts **after** `wait_for_period` (Release ~400 µs / 10 ms @ Session+ACE)

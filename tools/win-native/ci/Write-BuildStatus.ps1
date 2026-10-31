@@ -38,15 +38,6 @@ GREEN  libs/backends/wasapi sources (shared-mode implementation)
 GREEN  win_ardour minimal shell sources
 GREEN  tools/win-native docs and packaging scripts
 
-What is NOT in this artifact yet
---------------------------------
-STAGED   libpbd / libardour / hardour — laptop-proven; wire into CI next
-OUT      gtk2_ardour / libs/tk / libs/canvas / libs/surfaces (GTK) on Windows-only
-OUT      Cairo / cairomm — not required for win_shell or hardour
-GREEN  NSIS installer script (tools/win-native/installer/airdour.nsi)
-OUT    MSIX package
-OUT    Authenticode code signing
-
 Dependency expectations (Windows-only product)
 ----------------------------------------------
 Prefer vcpkg (x64-windows) with binary caching:
