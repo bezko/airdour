@@ -50,6 +50,7 @@ struct EngineMidiNoteSnap {
 	float   length_sec = 0.f;
 	uint8_t pitch = 0;
 	uint8_t velocity = 0;
+	uint8_t channel = 0; /* 0..15 */
 	bool    selected = false;
 };
 
@@ -1995,10 +1996,41 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Returns false if track/region/model unavailable or overlap policy rejects.
 	 */
 	bool add_midi_note (uint8_t pitch, float start_sec, float length_sec,
-	                    uint8_t velocity = 100);
+	                    uint8_t velocity = 100, uint8_t channel = 0);
 
-	/** Hit-test piano-roll; selects note under (time,pitch) if any. */
-	bool select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop = 0.f);
+	/** Hit-test piano-roll; selects note under (time,pitch) if any.
+	 *  When additive (Shift+click), toggles membership; else replaces. */
+	bool select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop = 0.f,
+	                          bool additive = false);
+	/** Select notes overlapping time×pitch box (inclusive pitches). */
+	bool select_midi_notes_in_rect (float t0, float t1, uint8_t pitch_lo, uint8_t pitch_hi,
+	                                bool additive = false);
+	/** Select every note in the MIDI region (primary = last id). */
+	bool select_all_midi_notes ();
+	/** Flip selection: unselected notes become selected and vice versa. */
+	bool invert_midi_note_selection ();
+	/** Select every note matching primary selected pitch (no-op if none selected). */
+	bool select_midi_notes_same_pitch ();
+	/** Select every note matching primary selected velocity (no-op if none selected). */
+	bool select_midi_notes_same_velocity ();
+	/** Select every note matching primary pitch class (pitch%12; all octaves). */
+	bool select_midi_notes_same_pitch_class ();
+	/** Select every note matching primary length_sec (±1 ms). */
+	bool select_midi_notes_same_length ();
+	/** Select every note matching primary MIDI channel (0..15). */
+	bool select_midi_notes_same_channel ();
+	/** Select every note intersecting the active loop range. */
+	bool select_midi_notes_in_loop ();
+	/** Select every note intersecting the punch range. */
+	bool select_midi_notes_in_punch ();
+	/** Select notes intersecting both loop and punch (both ranges required). */
+	bool select_midi_notes_in_ranges ();
+	/** Select every note that does not intersect the active loop range. */
+	bool select_midi_notes_outside_loop ();
+	/** Select every note that does not intersect the punch range. */
+	bool select_midi_notes_outside_punch ();
+	/** Select notes outside the union of loop and punch (both ranges required). */
+	bool select_midi_notes_outside_ranges ();
 	void clear_midi_note_selection ();
 	bool delete_selected_midi_note ();
 
@@ -2029,6 +2061,11 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool nudge_midi_velocity (int delta);
 	/** Set absolute velocity for selected notes (or all if none selected). */
 	bool set_midi_velocity (int velocity);
+	/**
+	 * Add notes @40/@80, select first, set_midi_velocity(100), verify.
+	 * For --smoke-midi-force-velocity.
+	 */
+	bool smoke_midi_force_velocity ();
 
 	/**
 	 * Nudge length of selected notes (or all if none selected) by delta_sec.
@@ -2173,6 +2210,96 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool smoke_midi_length ();
 	/** Note len 0.7 → force → length ≈ snap_unit_sec. --smoke-midi-force-length */
 	bool smoke_midi_force_length ();
+
+	/**
+	 * Add two notes, select then Shift+select, verify both .selected, transpose,
+	 * clear. For --smoke-midi-multi-select.
+	 */
+	bool smoke_midi_multi_select ();
+
+	/**
+	 * Add three notes, marquee the first two, transpose, verify third untouched.
+	 * For --smoke-midi-marquee.
+	 */
+	bool smoke_midi_marquee ();
+
+	/**
+	 * Add three notes, select_all, transpose, verify all moved.
+	 * For --smoke-midi-select-all.
+	 */
+	bool smoke_midi_select_all ();
+
+	/**
+	 * Add three notes, select one, invert → two; invert again → one.
+	 * For --smoke-midi-invert-select.
+	 */
+	bool smoke_midi_invert_select ();
+
+	/**
+	 * Add p60×2 + p64, select one p60, same-pitch → both p60; p64 untouched.
+	 * For --smoke-midi-select-same-pitch.
+	 */
+	bool smoke_midi_select_same_pitch ();
+
+	/**
+	 * Add v100×2 + v80, select one v100, same-velocity → both v100.
+	 * For --smoke-midi-select-same-velocity.
+	 */
+	bool smoke_midi_select_same_velocity ();
+
+	/**
+	 * Add C4+C5+D4, select C4, pitch-class → both C's; D untouched.
+	 * For --smoke-midi-select-pitch-class.
+	 */
+	bool smoke_midi_select_pitch_class ();
+
+	/**
+	 * Add 0.5s×2 + 0.25s, select a 0.5s note → both 0.5s; 0.25 untouched.
+	 * For --smoke-midi-select-same-length.
+	 */
+	bool smoke_midi_select_same_length ();
+
+	/**
+	 * Add ch0×2 + ch1, select a ch0 note → both ch0; ch1 untouched.
+	 * For --smoke-midi-select-same-channel.
+	 */
+	bool smoke_midi_select_same_channel ();
+
+	/**
+	 * Loop [0.5..2.5], notes inside + outside → only intersecting selected.
+	 * For --smoke-midi-select-in-loop.
+	 */
+	bool smoke_midi_select_in_loop ();
+
+	/**
+	 * Punch [0.5..2.5], notes inside + outside → only intersecting selected.
+	 * For --smoke-midi-select-in-punch.
+	 */
+	bool smoke_midi_select_in_punch ();
+
+	/**
+	 * Loop [0.5..2.5], notes inside + outside → only non-intersecting selected.
+	 * For --smoke-midi-select-outside-loop.
+	 */
+	bool smoke_midi_select_outside_loop ();
+
+	/**
+	 * Punch [0.5..2.5], notes inside + outside → only non-intersecting selected.
+	 * For --smoke-midi-select-outside-punch.
+	 */
+	bool smoke_midi_select_outside_punch ();
+
+	/**
+	 * Loop [0.5..2.5] + punch [1.5..3.5]; notes outside the union selected.
+	 * For --smoke-midi-select-outside-ranges.
+	 */
+	bool smoke_midi_select_outside_ranges ();
+
+	/**
+	 * Loop [0.5..2.5] ∩ punch [1.5..3.5]; only notes in the intersection selected.
+	 * For --smoke-midi-select-in-ranges.
+	 */
+	bool smoke_midi_select_in_ranges ();
 
 	/**
 	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.

@@ -176,6 +176,7 @@ private:
 		RegionMovePending, /* click on selection body; may become move */
 		RegionMove, /* drag selected region body */
 		MidiDraw, /* click/drag on MIDI piano-roll to create a note */
+		MidiMarquee, /* Shift+drag empty piano-roll → box-select notes */
 		MidiVelocity, /* drag velocity lane → set selected/all note velocity */
 		MidiTrimStart, /* drag note left edge → trim start */
 		MidiTrimEnd, /* drag note right edge → trim end */
@@ -295,6 +296,7 @@ private:
 	void do_force_midi_note_length ();
 	void do_transpose_midi_notes (int semitones);
 	void do_nudge_midi_velocity (int delta);
+	void do_force_midi_velocity (int velocity);
 	void do_nudge_midi_length (float delta_sec);
 	void do_copy_midi_notes ();
 	void do_cut_midi_notes ();
@@ -366,6 +368,7 @@ private:
 	bool smoke_midi_punch_grid ();
 	/** Audition a pitch → assert snap + piano row geometry for ghost wash. */
 	bool smoke_midi_audition_ghost ();
+	bool smoke_midi_outside_ranges_wash ();
 	void do_toggle_group_relative ();
 	void do_cycle_group_color ();
 	void do_toggle_focused_track_active ();
@@ -569,6 +572,8 @@ void do_toggle_selection_muted ();
 	float _region_move_grab_offset_sec; /* pointer time − region start at grab */
 	float _midi_draw_start_sec;
 	uint8_t _midi_draw_pitch;
+	float _midi_marquee_t0;
+	uint8_t _midi_marquee_p0;
 	int     _midi_vel_drag; /* live preview 1..127 while MidiVelocity drag */
 	float   _midi_trim_start_sec; /* live preview while MidiTrim* drag */
 	float   _midi_trim_end_sec;
