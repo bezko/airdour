@@ -397,7 +397,6 @@ public:
 	                              const std::string& snapshot = "win_shell",
 	                              bool persist = true);
 	void clear_recent_sessions (bool persist = true);
-	int  recent_count () const;
 	/** Copy path/snapshot for index; false if out of range. */
 	bool recent_entry (int index, std::string* path, std::string* snapshot) const;
 	/** open_session for a remembered index. */
@@ -516,7 +515,6 @@ public:
 	 */
 	bool set_track_mute_points (int track, int points_0_main_1_all);
 	bool cycle_track_mute_points (int track);
-	int  track_mute_points (int track) const;
 	/** Main → AllPoints → Main. For --smoke-mute-points. */
 	bool smoke_mute_points ();
 	bool set_track_soloed (int track, bool soloed);
@@ -629,15 +627,12 @@ public:
 	 */
 	bool  set_track_trim (int track, float linear);
 	bool  set_track_trim_norm (int track, float norm_0_1);
-	float track_trim (int track) const;
-	float track_trim_norm (int track) const;
 
 	/** Unity → −6 dB → +6 dB → unity on Audio 1. For --smoke-strip-trim. */
 	bool smoke_strip_trim ();
 
 	/** Pan azimuth 0=L … 0.5=C … 1=R via Route::pan_azimuth_control. */
 	bool  set_track_pan (int track, float pan_0_1);
-	float track_pan (int track) const;
 	/**
 	 * Pan AutoState: 0=Off 1=Play 2=Write 3=Touch.
 	 * --smoke-pan-auto-state / Alt+Shift+Y (Pan lane).
@@ -662,7 +657,6 @@ public:
 	 * Shift+drag pan. UI may pass 0..1 iface → mapped as 2v−1.
 	 */
 	bool  set_track_pan_width (int track, float width_m1_to_1);
-	float track_pan_width (int track) const;
 	/** Full → 0 → full. For --smoke-pan-width. */
 	bool smoke_pan_width ();
 
@@ -674,7 +668,6 @@ public:
 
 	/** Aux send level 0..1 (gain coeff) via InternalSend → Aux bus. */
 	bool  set_track_send (int track, float send_0_1);
-	float track_send (int track) const;
 	/**
 	 * Aux-send AutoState: 0=Off 1=Play 2=Write 3=Touch.
 	 * --smoke-send-auto-state / Alt+Shift+Y (Send lane).
@@ -721,7 +714,6 @@ public:
 	 * Shift+drag send.
 	 */
 	bool  set_track_send_pan (int track, float pan_0_1);
-	float track_send_pan (int track) const;
 	/** L → R → C on Audio 1 send. For --smoke-send-pan. */
 	bool smoke_send_pan ();
 
@@ -2180,18 +2172,14 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 */
 	bool set_midi_program (int program);
 	bool nudge_midi_program (int delta);
-	int  midi_program () const;
 	bool set_midi_bank (int bank);
 	bool nudge_midi_bank (int delta);
-	int  midi_bank () const;
 	/** Apply current bank+program (or explicit args) to MidiTrack. */
 	bool send_midi_program_change (int program = -1, int bank = -1);
 	/** Set bank+program, verify immediate writes. For --smoke-midi-program. */
 	bool smoke_midi_program ();
 
 	/* smoke_midi_cc declared with MIDI CC automation APIs above. */
-
-	std::string session_dir () const;
 
 	EngineSnapshot snapshot () const;
 

@@ -95,16 +95,6 @@ AutomationLane::value_at_y (const D2D1_RECT_F& bounds, float y) const
 	return std::max (0.f, std::min (1.f, t));
 }
 
-float
-AutomationLane::x_norm_at (const D2D1_RECT_F& bounds, float x) const
-{
-	float w = bounds.right - bounds.left;
-	if (w < 1.f) {
-		return 0.f;
-	}
-	return std::max (0.f, std::min (1.f, (x - bounds.left) / w));
-}
-
 void
 AutomationLane::draw (ID2D1RenderTarget* rt,
                        const D2D1_RECT_F& bounds,

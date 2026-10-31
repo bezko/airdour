@@ -40,12 +40,6 @@ AboutPanel::layout (float view_w, float view_h, float dpi_scale)
 }
 
 bool
-AboutPanel::hit_close (float x, float y) const
-{
-	return _about_visible && contains (_close_btn, x, y);
-}
-
-bool
 AboutPanel::hit_dismiss_about (float x, float y) const
 {
 	if (!_about_visible) {

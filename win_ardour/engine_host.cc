@@ -1069,12 +1069,6 @@ EngineHost::clear_recent_sessions (bool persist)
 	}
 }
 
-int
-EngineHost::recent_count () const
-{
-	return (int)_recent.size ();
-}
-
 bool
 EngineHost::recent_entry (int index, std::string* path, std::string* snapshot) const
 {
@@ -1960,15 +1954,6 @@ EngineHost::update_session_path_snap ()
 	} else {
 		_snap.session_path.clear ();
 	}
-}
-
-std::string
-EngineHost::session_dir () const
-{
-	if (_impl) {
-		return _impl->session_dir;
-	}
-	return std::string ();
 }
 
 bool
@@ -4202,15 +4187,6 @@ EngineHost::cycle_track_mute_points (int track)
 	return set_track_mute_points (track, next);
 }
 
-int
-EngineHost::track_mute_points (int track) const
-{
-	if (track < 0 || track >= EngineSnapshot::kMeters) {
-		return 0;
-	}
-	return _snap.track_mute_points[track];
-}
-
 bool
 EngineHost::smoke_mute_points ()
 {
@@ -4999,24 +4975,6 @@ EngineHost::set_track_trim_norm (int track, float norm_0_1)
 	return set_track_trim (track, trim_coeff_from_norm (norm_0_1));
 }
 
-float
-EngineHost::track_trim (int track) const
-{
-	if (track < 0 || track >= EngineSnapshot::kMeters) {
-		return 1.f;
-	}
-	return _snap.track_trim[track];
-}
-
-float
-EngineHost::track_trim_norm (int track) const
-{
-	if (track < 0 || track >= EngineSnapshot::kMeters) {
-		return 0.5f;
-	}
-	return _snap.track_trim_norm[track];
-}
-
 bool
 EngineHost::smoke_strip_trim ()
 {
@@ -5588,15 +5546,6 @@ EngineHost::set_track_pan (int track, float pan_0_1)
 	}
 }
 
-float
-EngineHost::track_pan (int track) const
-{
-	if (track < 0 || track >= EngineSnapshot::kMeters) {
-		return 0.5f;
-	}
-	return _snap.track_pan[track];
-}
-
 bool
 EngineHost::reset_all_pans ()
 {
@@ -5765,15 +5714,6 @@ EngineHost::set_track_pan_width (int track, float width_m1_to_1)
 	} catch (...) {
 		return false;
 	}
-}
-
-float
-EngineHost::track_pan_width (int track) const
-{
-	if (track < 0 || track >= EngineSnapshot::kMeters) {
-		return 1.f;
-	}
-	return _snap.track_pan_width[track];
 }
 
 bool
@@ -6266,15 +6206,6 @@ EngineHost::set_track_send (int track, float send_0_1)
 	} catch (...) {
 		return false;
 	}
-}
-
-float
-EngineHost::track_send (int track) const
-{
-	if (track < 0 || track >= EngineSnapshot::kMeters) {
-		return 0.f;
-	}
-	return _snap.track_send[track];
 }
 
 bool
@@ -6965,15 +6896,6 @@ EngineHost::set_track_send_pan (int track, float pan_0_1)
 	} catch (...) {
 		return false;
 	}
-}
-
-float
-EngineHost::track_send_pan (int track) const
-{
-	if (track < 0 || track >= EngineSnapshot::kMeters) {
-		return 0.5f;
-	}
-	return _snap.track_send_pan[track];
 }
 
 bool
@@ -31752,12 +31674,6 @@ EngineHost::nudge_midi_program (int delta)
 	return set_midi_program (p);
 }
 
-int
-EngineHost::midi_program () const
-{
-	return _snap.midi_program;
-}
-
 bool
 EngineHost::set_midi_bank (int bank)
 {
@@ -31782,12 +31698,6 @@ EngineHost::nudge_midi_bank (int delta)
 		b = 127;
 	}
 	return set_midi_bank (b);
-}
-
-int
-EngineHost::midi_bank () const
-{
-	return _snap.midi_bank;
 }
 
 bool
@@ -32648,12 +32558,6 @@ EngineHost::clear_recent_sessions (bool persist)
 	refresh_recent_snap ();
 }
 
-int
-EngineHost::recent_count () const
-{
-	return 0;
-}
-
 bool
 EngineHost::recent_entry (int index, std::string* path, std::string* snapshot) const
 {
@@ -33020,13 +32924,6 @@ EngineHost::cycle_track_mute_points (int track)
 	return false;
 }
 
-int
-EngineHost::track_mute_points (int track) const
-{
-	(void)track;
-	return 0;
-}
-
 bool
 EngineHost::smoke_mute_points ()
 {
@@ -33323,20 +33220,6 @@ EngineHost::set_track_trim_norm (int track, float norm_0_1)
 	return false;
 }
 
-float
-EngineHost::track_trim (int track) const
-{
-	(void)track;
-	return 1.f;
-}
-
-float
-EngineHost::track_trim_norm (int track) const
-{
-	(void)track;
-	return 0.5f;
-}
-
 bool
 EngineHost::smoke_strip_trim ()
 {
@@ -33354,13 +33237,6 @@ EngineHost::set_track_pan (int track, float pan_0_1)
 	(void)track;
 	(void)pan_0_1;
 	return false;
-}
-
-float
-EngineHost::track_pan (int track) const
-{
-	(void)track;
-	return 0.5f;
 }
 
 bool
@@ -33387,13 +33263,6 @@ EngineHost::set_track_pan_width (int track, float width_m1_to_1)
 	(void)track;
 	(void)width_m1_to_1;
 	return false;
-}
-
-float
-EngineHost::track_pan_width (int track) const
-{
-	(void)track;
-	return 1.f;
 }
 
 bool
@@ -33451,13 +33320,6 @@ EngineHost::set_track_send (int track, float send_0_1)
 	(void)track;
 	(void)send_0_1;
 	return false;
-}
-
-float
-EngineHost::track_send (int track) const
-{
-	(void)track;
-	return 0.f;
 }
 
 bool
@@ -33563,13 +33425,6 @@ EngineHost::set_track_send_pan (int track, float pan_0_1)
 	(void)track;
 	(void)pan_0_1;
 	return false;
-}
-
-float
-EngineHost::track_send_pan (int track) const
-{
-	(void)track;
-	return 0.5f;
 }
 
 bool
@@ -37005,12 +36860,6 @@ EngineHost::nudge_midi_program (int delta)
 	return false;
 }
 
-int
-EngineHost::midi_program () const
-{
-	return _snap.midi_program;
-}
-
 bool
 EngineHost::set_midi_bank (int bank)
 {
@@ -37029,12 +36878,6 @@ EngineHost::nudge_midi_bank (int delta)
 {
 	(void)delta;
 	return false;
-}
-
-int
-EngineHost::midi_bank () const
-{
-	return _snap.midi_bank;
 }
 
 bool
@@ -37354,12 +37197,6 @@ EngineHost::refresh_selection_snap ()
 void
 EngineHost::refresh_locations_snap ()
 {
-}
-
-std::string
-EngineHost::session_dir () const
-{
-	return std::string ();
 }
 
 void
