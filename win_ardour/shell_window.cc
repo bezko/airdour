@@ -4303,11 +4303,17 @@ ShellWindow::draw_region_envelope ()
 	ID2D1Factory* fac = nullptr;
 	_rt->GetFactory (&fac);
 	if (!fac || FAILED (fac->CreatePathGeometry (&geo)) || !geo) {
+		if (fac) {
+			fac->Release ();
+		}
 		return;
 	}
 	ID2D1GeometrySink* sink = nullptr;
 	if (FAILED (geo->Open (&sink)) || !sink) {
 		geo->Release ();
+		if (fac) {
+			fac->Release ();
+		}
 		return;
 	}
 	for (size_t i = 0; i < kEnvPts; ++i) {
@@ -4329,6 +4335,9 @@ ShellWindow::draw_region_envelope ()
 	_rt->DrawGeometry (geo, _brush_accent, std::max (1.25f, 1.5f * _dpi_scale));
 	_brush_accent->SetOpacity (1.f);
 	geo->Release ();
+	if (fac) {
+		fac->Release ();
+	}
 
 	/* Mid tip cap — same geometry as hit_region_envelope_mid. */
 	float mid_gain = _engine.selected_region_envelope_mid ();

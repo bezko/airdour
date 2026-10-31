@@ -542,6 +542,9 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 						}
 						geo->Release ();
 					}
+					if (fac) {
+						fac->Release ();
+					}
 				}
 			}
 			selection_brush->SetOpacity (1.f);
