@@ -6496,13 +6496,11 @@ bool
 ShellWindow::smoke_midi_playhead_draw ()
 {
 	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-midi-playhead-draw FAILED (no session)
-");
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-playhead-draw FAILED (no session)\n");
 		return false;
 	}
 	if (!_engine.ensure_midi_track ()) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-midi-playhead-draw FAILED (midi track)
-");
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-playhead-draw FAILED (midi track)\n");
 		return false;
 	}
 	layout_panes ();
@@ -6523,31 +6521,27 @@ ShellWindow::smoke_midi_playhead_draw ()
 	float ph = _lanes[0].strip.playhead_norm ();
 	if (ph <= 0.02f || ph >= 0.98f) {
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-midi-playhead-draw FAILED (norm=%.3f ph_sec=%.3f)
-",
+		              "airdour_win_shell: smoke-midi-playhead-draw FAILED (norm=%.3f ph_sec=%.3f)\n",
 		              ph, _playhead_sec);
 		return false;
 	}
 	const D2D1_RECT_F& r = _midi_lane;
 	float w = r.right - r.left;
 	if (w < 20.f) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-midi-playhead-draw FAILED (midi lane)
-");
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-playhead-draw FAILED (midi lane)\n");
 		return false;
 	}
 	float px = r.left + ph * w;
 	if (px < r.left - 0.5f || px > r.right + 0.5f) {
 		std::fprintf (stderr,
 		              "airdour_win_shell: smoke-midi-playhead-draw FAILED "
-		              "(px=%.1f lane=[%.1f..%.1f])
-",
+		              "(px=%.1f lane=[%.1f..%.1f])\n",
 		              px, r.left, r.right);
 		return false;
 	}
 	std::fprintf (stderr,
 	              "airdour_win_shell: smoke-midi-playhead-draw ok "
-	              "(norm=%.3f px=%.1f lane=[%.1f..%.1f])
-",
+	              "(norm=%.3f px=%.1f lane=[%.1f..%.1f])\n",
 	              ph, px, r.left, r.right);
 	return true;
 }
@@ -6556,35 +6550,30 @@ bool
 ShellWindow::smoke_midi_audition_ghost ()
 {
 	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition-ghost FAILED (no session)
-");
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition-ghost FAILED (no session)\n");
 		return false;
 	}
 	if (!_engine.ensure_midi_track () || !_engine.ensure_midi_region (8.f)) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition-ghost FAILED (region)
-");
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition-ghost FAILED (region)\n");
 		return false;
 	}
 	layout_panes ();
 	const D2D1_RECT_F piano = midi_piano_rect ();
 	float h = piano.bottom - piano.top;
 	if (h < 20.f) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition-ghost FAILED (piano)
-");
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition-ghost FAILED (piano)\n");
 		return false;
 	}
 	const uint8_t pitch = 64; /* E4 */
 	if (!_engine.audition_midi_note (pitch, 100)) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition-ghost FAILED (audition)
-");
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition-ghost FAILED (audition)\n");
 		return false;
 	}
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	if (_engine_snap.midi_audition_pitch != (int)pitch) {
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-midi-audition-ghost FAILED (snap=%d want=%u)
-",
+		              "airdour_win_shell: smoke-midi-audition-ghost FAILED (snap=%d want=%u)\n",
 		              _engine_snap.midi_audition_pitch, (unsigned)pitch);
 		_engine.silence_midi_audition ();
 		return false;
@@ -6596,8 +6585,7 @@ ShellWindow::smoke_midi_audition_ghost ()
 	if (y0 < piano.top - 1.f || y1 > piano.bottom + 1.f) {
 		std::fprintf (stderr,
 		              "airdour_win_shell: smoke-midi-audition-ghost FAILED "
-		              "(row y=[%.1f..%.1f] piano=[%.1f..%.1f])
-",
+		              "(row y=[%.1f..%.1f] piano=[%.1f..%.1f])\n",
 		              y0, y1, piano.top, piano.bottom);
 		_engine.silence_midi_audition ();
 		return false;
@@ -6606,14 +6594,12 @@ ShellWindow::smoke_midi_audition_ghost ()
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	if (_engine_snap.midi_audition_pitch >= 0) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition-ghost FAILED (still live)
-");
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-audition-ghost FAILED (still live)\n");
 		return false;
 	}
 	std::fprintf (stderr,
 	              "airdour_win_shell: smoke-midi-audition-ghost ok "
-	              "(pitch=%u row y=[%.1f..%.1f])
-",
+	              "(pitch=%u row y=[%.1f..%.1f])\n",
 	              (unsigned)pitch, y0, y1);
 	return true;
 }

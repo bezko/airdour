@@ -234,7 +234,7 @@ struct EngineSnapshot {
 	float        gain = 0.85f; /* track 0 stub/session gain */
 	float        meter_peak[kMeters] = {}; /* linear 0..1 */
 	bool         meter_clip[kMeters] = {}; /* ≥0 dBFS / PeakMeter MeterMaxPeak */
-	int          track_meter_point[kMeters] = {2, 2, 2, 2, 2, 2}; /* 0=In 1=Pre 2=Post 3=Out (skip Custom) */
+	int          track_meter_point[kMeters] = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2}; /* 0=In 1=Pre 2=Post 3=Out (skip Custom) */
 	int          track_meter_type[kMeters] = {}; /* 0=Peak 1=K14 */
 	bool         track_has_regions[kMeters] = {};
 	bool         track_armed[kMeters] = {};
@@ -250,25 +250,25 @@ struct EngineSnapshot {
 	static constexpr int kCommentLen = 40;
 	wchar_t      track_comment[kMeters][kCommentLen] = {}; /* Route::comment() */
 	bool         track_phase_invert[kMeters] = {}; /* PhaseControl any channel inverted */
-	float        track_trim[kMeters] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f}; /* TrimAutomation linear coeff (−20..+20 dB) */
-	float        track_trim_norm[kMeters] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}; /* UI 0..1 (0.5 = unity / 0 dB) */
+	float        track_trim[kMeters] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f}; /* TrimAutomation linear coeff (−20..+20 dB) */
+	float        track_trim_norm[kMeters] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}; /* UI 0..1 (0.5 = unity / 0 dB) */
 	/** MonitorChoice: 0=Auto 1=Input 2=Disk (MonitorCue unused in shell). */
 	int          track_monitor_choice[kMeters] = {};
 	bool         track_stereo[kMeters] = {}; /* ≥2 audio inputs (Equal-Power width capable) */
-	bool         track_active[kMeters] = {true, true, true, true, true, true}; /* Route::active() — DSP path on */
+	bool         track_active[kMeters] = {true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true}; /* Route::active() — DSP path on */
 	/** Peers sharing same Mon choice via RouteGroup (0 = alone / no share). */
 	int          track_monitor_peer_count[kMeters] = {};
-	float        track_pan[kMeters] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}; /* pan azimuth 0=L … 0.5=C … 1=R */
+	float        track_pan[kMeters] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}; /* pan azimuth 0=L … 0.5=C … 1=R */
 	/** Pan AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
 	int          track_pan_auto_state[kMeters] = {};
-	float        track_pan_width[kMeters] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f}; /* stereo width −1..+1 (1=full) */
+	float        track_pan_width[kMeters] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f}; /* stereo width −1..+1 (1=full) */
 	bool         track_pan_width_ok[kMeters] = {}; /* pan_width_control present */
 	float        track_send[kMeters] = {}; /* aux send gain coeff 0..1 → Aux bus */
 	bool         track_send_ok[kMeters] = {}; /* InternalSend present on track */
 	/** Send AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
 	int          track_send_auto_state[kMeters] = {};
 	bool         track_send_muted[kMeters] = {}; /* Send Processor !active() */
-	float        track_send_pan[kMeters] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}; /* send pan azimuth 0=L … 0.5=C … 1=R */
+	float        track_send_pan[kMeters] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}; /* send pan azimuth 0=L … 0.5=C … 1=R */
 	bool         track_send_pan_ok[kMeters] = {}; /* send pan_azimuth_control present */
 	bool         aux_bus_ok = false; /* Session Aux audio bus exists */
 	float        aux_return = 1.f; /* Aux bus fader gain coeff 0..1 (unity=1) */
@@ -384,7 +384,7 @@ struct EngineSnapshot {
 	wchar_t      recent_label[kMaxRecent][kRecentLabelLen] = {}; /* folder basename */
 	wchar_t      recent_path[kMaxRecent][kRecentPathLen] = {}; /* truncated display path */
 	std::wstring detail;
-	static_assert (kMeters == 6, "per-meter defaults are listed for six lanes");
+	static_assert (kMeters == 16, "per-meter defaults are listed for sixteen lanes");
 };
 
 static_assert (sizeof (EngineSnapshot) < 256 * 1024,
