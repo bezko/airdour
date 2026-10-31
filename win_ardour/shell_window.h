@@ -173,6 +173,7 @@ private:
 		MidiVelocity, /* drag velocity lane → set selected/all note velocity */
 		MidiTrimStart, /* drag note left edge → trim start */
 		MidiTrimEnd, /* drag note right edge → trim end */
+		MidiMove, /* drag note body → relocate in time + pitch */
 		TrackReorderPending, /* mixer label click; may become reorder drag */
 		TrackReorder, /* drag mixer strip label to reorder */
 		RulerScrub, /* drag editor ruler → continuous locate */
@@ -550,6 +551,10 @@ void do_toggle_selection_muted ();
 	int     _midi_vel_drag; /* live preview 1..127 while MidiVelocity drag */
 	float   _midi_trim_start_sec; /* live preview while MidiTrim* drag */
 	float   _midi_trim_end_sec;
+	float   _midi_move_origin_sec; /* note start at MidiMove grab */
+	int     _midi_move_origin_pitch; /* note pitch at MidiMove grab */
+	float   _midi_move_preview_sec; /* live preview start */
+	int     _midi_move_preview_pitch; /* live preview pitch */
 	bool    _step_piano_held[128]; /* multi-key latch while step-record on */
 	int     _step_piano_held_count;
 
