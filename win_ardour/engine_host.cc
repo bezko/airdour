@@ -31703,10 +31703,12 @@ void
 EngineHost::silence_midi_audition ()
 {
 	if (_audition_pitch < 0) {
+		_snap.midi_audition_pitch = -1;
 		return;
 	}
 	midi_immediate_note (0x80, (uint8_t)_audition_pitch, 0);
 	_audition_pitch = -1;
+	_snap.midi_audition_pitch = -1;
 }
 
 bool
@@ -31725,6 +31727,7 @@ EngineHost::audition_midi_note (uint8_t pitch, uint8_t velocity)
 		return false;
 	}
 	_audition_pitch = (int)pitch;
+	_snap.midi_audition_pitch = (int)pitch;
 	_audition_off_at = std::chrono::steady_clock::now () + std::chrono::milliseconds (180);
 	_snap.detail = L"MIDI note audition";
 	return true;
@@ -37259,6 +37262,7 @@ void
 EngineHost::silence_midi_audition ()
 {
 	_audition_pitch = -1;
+	_snap.midi_audition_pitch = -1;
 }
 
 bool

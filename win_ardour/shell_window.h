@@ -351,6 +351,8 @@ private:
 	float editor_content_bottom () const;
 	/** Punch wash + grid lines reach MIDI/CC; layout bottoms non-empty. */
 	bool smoke_midi_punch_grid ();
+	/** Audition a pitch → assert snap + piano row geometry for ghost wash. */
+	bool smoke_midi_audition_ghost ();
 	void do_toggle_group_relative ();
 	void do_cycle_group_color ();
 	void do_toggle_focused_track_active ();
