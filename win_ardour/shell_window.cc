@@ -1942,6 +1942,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "count-in", [this]() { return _engine.smoke_count_in (); });
 	run_smoke_check (ok, "click-toggle", [this]() { return _engine.smoke_click (); });
 	run_smoke_check (ok, "punch-toggle", [this]() { return _engine.smoke_punch (); });
+	run_smoke_check (ok, "midi-punch-grid", [this]() { return smoke_midi_punch_grid (); });
 	run_smoke_check (ok, "midi-note-pressure", [this]() {
 		if (!_engine.smoke_midi_note_pressure ()) {
 			return false;
@@ -11290,6 +11291,83 @@ ShellWindow::smoke_punch_inactive_hatch ()
 	return true;
 }
 
+float
+ShellWindow::editor_content_bottom () const
+{
+	float bot = _lanes[kTracks - 1].bounds.bottom;
+	if (_auto_lane_bounds.bottom > bot) {
+		bot = _auto_lane_bounds.bottom;
+	}
+	if (_midi_lane.bottom > bot) {
+		bot = _midi_lane.bottom;
+	}
+	if (_midi_cc_lane_bounds.bottom > bot) {
+		bot = _midi_cc_lane_bounds.bottom;
+	}
+	return bot;
+}
+
+bool
+ShellWindow::smoke_midi_punch_grid ()
+{
+	if (!_engine.is_linked () || !_engine.snapshot ().session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-punch-grid FAILED (no session)\n");
+		return false;
+	}
+	layout_panes ();
+	if (_midi_lane.bottom <= _midi_lane.top + 8.f
+	    || _midi_cc_lane_bounds.bottom <= _midi_cc_lane_bounds.top + 4.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-punch-grid FAILED "
+		              "(midi=[%.1f..%.1f] cc=[%.1f..%.1f])\n",
+		              _midi_lane.top, _midi_lane.bottom,
+		              _midi_cc_lane_bounds.top, _midi_cc_lane_bounds.bottom);
+		return false;
+	}
+	float bot = editor_content_bottom ();
+	if (bot < _midi_cc_lane_bounds.bottom - 0.5f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-punch-grid FAILED "
+		              "(content_bot=%.1f cc_bot=%.1f)\n",
+		              bot, _midi_cc_lane_bounds.bottom);
+		return false;
+	}
+	if (!_engine.set_punch_range (0.5f, 2.5f) || !_engine.set_punch_enabled (true)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-punch-grid FAILED (punch)\n");
+		return false;
+	}
+	if (!_engine.set_loop_start (1.0f) || !_engine.set_loop_end (3.0f)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-punch-grid FAILED (loop)\n");
+		return false;
+	}
+	_engine.set_snap_enabled (true);
+	_engine.refresh_grid_lines (_lanes[0].strip.view_start_sec (),
+	                            _lanes[0].strip.view_span_sec ());
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	if (!_engine_snap.punch_range_ok || !_engine_snap.punch_enabled
+	    || !_engine_snap.loop_active || !_engine_snap.snap_enabled) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-punch-grid FAILED "
+		              "(punch=%d en=%d loop=%d snap=%d)\n",
+		              _engine_snap.punch_range_ok ? 1 : 0,
+		              _engine_snap.punch_enabled ? 1 : 0,
+		              _engine_snap.loop_active ? 1 : 0,
+		              _engine_snap.snap_enabled ? 1 : 0);
+		return false;
+	}
+	if (_engine_snap.grid_line_count <= 0) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-punch-grid FAILED (no grid)\n");
+		return false;
+	}
+	/* Overlay draw path is paint-time; geometry coverage is what we can assert. */
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-midi-punch-grid ok "
+	              "(content_bot=%.1f midi+cc covered, punch+loop+grid live)\n",
+	              bot);
+	return true;
+}
+
 void
 ShellWindow::draw_loop_overlay ()
 {
@@ -11327,6 +11405,47 @@ ShellWindow::draw_loop_overlay ()
 				_rt->FillRectangle (D2D1::RectF (x, lb.top, x + stripe, bot), _brush_loop);
 			}
 			_brush_loop->SetOpacity (kLoopLaneTintIdle);
+		}
+	}
+	/* Soft loop wash on MIDI + CC (audio strips already covered above). */
+	float left = _lanes[0].bounds.left;
+	float right = _lanes[0].bounds.right;
+	float w = right - left;
+	if (w >= 4.f) {
+		float x0 = left + n0 * w;
+		float x1 = left + n1 * w;
+		if (_midi_lane.bottom > _midi_lane.top + 2.f) {
+			_rt->FillRectangle (
+				D2D1::RectF (x0, _midi_lane.top, x1, _midi_lane.bottom),
+				_brush_loop);
+			if (!playing) {
+				_brush_loop->SetOpacity (kLoopInactiveHatchOp);
+				float step = std::max (3.f, kLoopInactiveHatchPx * _dpi_scale);
+				float stripe = std::max (1.f, 1.2f * _dpi_scale);
+				for (float x = x0; x < x1 - stripe; x += step) {
+					_rt->FillRectangle (
+						D2D1::RectF (x, _midi_lane.top, x + stripe, _midi_lane.bottom),
+						_brush_loop);
+				}
+				_brush_loop->SetOpacity (playing ? kLoopLaneTintOp : kLoopLaneTintIdle);
+			}
+		}
+		if (_midi_cc_lane_bounds.bottom > _midi_cc_lane_bounds.top + 2.f) {
+			_rt->FillRectangle (
+				D2D1::RectF (x0, _midi_cc_lane_bounds.top, x1, _midi_cc_lane_bounds.bottom),
+				_brush_loop);
+			if (!playing) {
+				_brush_loop->SetOpacity (kLoopInactiveHatchOp);
+				float step = std::max (3.f, kLoopInactiveHatchPx * _dpi_scale);
+				float stripe = std::max (1.f, 1.2f * _dpi_scale);
+				for (float x = x0; x < x1 - stripe; x += step) {
+					_rt->FillRectangle (
+						D2D1::RectF (x, _midi_cc_lane_bounds.top, x + stripe,
+						             _midi_cc_lane_bounds.bottom),
+						_brush_loop);
+				}
+				_brush_loop->SetOpacity (playing ? kLoopLaneTintOp : kLoopLaneTintIdle);
+			}
 		}
 	}
 	_brush_loop->SetOpacity (1.f);
@@ -11372,6 +11491,47 @@ ShellWindow::draw_punch_overlay ()
 			_brush_punch->SetOpacity (kPunchLaneTintOff);
 		}
 	}
+	/* Extend punch wash through piano-roll + CC lane. */
+	float left = _lanes[0].bounds.left;
+	float right = _lanes[0].bounds.right;
+	float w = right - left;
+	if (w >= 4.f) {
+		float x0 = left + n0 * w;
+		float x1 = left + n1 * w;
+		if (_midi_lane.bottom > _midi_lane.top + 2.f) {
+			_rt->FillRectangle (
+				D2D1::RectF (x0, _midi_lane.top, x1, _midi_lane.bottom),
+				_brush_punch);
+			if (!armed) {
+				_brush_punch->SetOpacity (kPunchInactiveHatchOp);
+				float step = std::max (3.f, kPunchInactiveHatchPx * _dpi_scale);
+				float stripe = std::max (1.f, 1.2f * _dpi_scale);
+				for (float x = x0; x < x1 - stripe; x += step) {
+					_rt->FillRectangle (
+						D2D1::RectF (x, _midi_lane.top, x + stripe, _midi_lane.bottom),
+						_brush_punch);
+				}
+				_brush_punch->SetOpacity (kPunchLaneTintOff);
+			}
+		}
+		if (_midi_cc_lane_bounds.bottom > _midi_cc_lane_bounds.top + 2.f) {
+			_rt->FillRectangle (
+				D2D1::RectF (x0, _midi_cc_lane_bounds.top, x1, _midi_cc_lane_bounds.bottom),
+				_brush_punch);
+			if (!armed) {
+				_brush_punch->SetOpacity (kPunchInactiveHatchOp);
+				float step = std::max (3.f, kPunchInactiveHatchPx * _dpi_scale);
+				float stripe = std::max (1.f, 1.2f * _dpi_scale);
+				for (float x = x0; x < x1 - stripe; x += step) {
+					_rt->FillRectangle (
+						D2D1::RectF (x, _midi_cc_lane_bounds.top, x + stripe,
+						             _midi_cc_lane_bounds.bottom),
+						_brush_punch);
+				}
+				_brush_punch->SetOpacity (kPunchLaneTintOff);
+			}
+		}
+	}
 	_brush_punch->SetOpacity (1.f);
 }
 
@@ -11383,15 +11543,9 @@ ShellWindow::draw_editor_grid ()
 	}
 	float view0 = _lanes[0].strip.view_start_sec ();
 	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
-	/* Vertical span: ruler through Audio lanes (+ automation under Audio 1). */
+	/* Vertical span: ruler through Audio + MIDI + CC. */
 	float top = _editor_ruler.top;
-	float bot = _lanes[kTracks - 1].bounds.bottom;
-	if (_auto_lane_bounds.bottom > bot) {
-		bot = _auto_lane_bounds.bottom;
-	}
-	if (_midi_lane.bottom > bot) {
-		bot = _midi_lane.bottom;
-	}
+	float bot = editor_content_bottom ();
 	float left = _lanes[0].bounds.left;
 	float right = _lanes[0].bounds.right;
 	float w = right - left;
