@@ -19,6 +19,7 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
+#include "engine_host.h"
 #include "level_meter.h"
 
 class MixerStrip
@@ -34,7 +35,6 @@ public:
 	void set_fx_label (const wchar_t* label);
 	void set_fx_bypassed (bool bypassed);
 	void set_fx_param (float value_0_1);
-	/** FX param track count: 1=Reverb, 2=Comp, 3=EQ. Extra tracks reserved in layout. */
 	void set_fx_param_count (int count_1_to_3);
 	void set_fx_param2 (float value_0_1);
 	void set_fx_param3 (float value_0_1);
@@ -147,15 +147,8 @@ public:
 	bool hit_fx_unload (float x, float y) const;
 	/** B chip left of × when set_fx_can_unload(true) — VST3 Audio 2 bypass. */
 	bool hit_fx_bypass (float x, float y) const;
-	/** "1" chip — reset VST3 param1 (between B and ×). */
-	bool hit_fx_param_reset1 (float x, float y) const;
-	/** "2" chip — reset VST3 param2 (between B and ×). */
-	bool hit_fx_param_reset2 (float x, float y) const;
-	/** "3" chip — reset VST3 param3 (between B and ×). */
-	bool hit_fx_param_reset3 (float x, float y) const;
-	/** "4" chip — reset VST3 param4 (between B and ×). */
-	bool hit_fx_param_reset4 (float x, float y) const;
-	void set_fx_can_unload (bool on) { _fx_can_unload = on; }
+	int hit_fx_param_reset (float x, float y) const;
+	void set_fx_can_unload (bool on);
 	bool fx_can_unload () const { return _fx_can_unload; }
 	bool hit_fx_param (float x, float y) const;
 	bool hit_fx_param2 (float x, float y) const;
@@ -215,10 +208,7 @@ private:
 	D2D1_RECT_F _send_track;
 	D2D1_RECT_F _fx_btn;
 	D2D1_RECT_F _fx_bypass_btn;
-	D2D1_RECT_F _fx_param_reset1_btn;
-	D2D1_RECT_F _fx_param_reset2_btn;
-	D2D1_RECT_F _fx_param_reset3_btn;
-	D2D1_RECT_F _fx_param_reset4_btn;
+	D2D1_RECT_F _fx_param_reset_btn[EngineSnapshot::kMaxVst3Params];
 	D2D1_RECT_F _fx_unload_btn;
 	D2D1_RECT_F _fx_param_track;
 	D2D1_RECT_F _fx_param_track2;
@@ -253,11 +243,13 @@ private:
 	bool        _route_active;
 	bool        _fx_bypassed;
 	bool        _fx_can_unload;
-	int         _fx_param_count; /* 1..3 */
+	int         _fx_param_count; /* 0..kMaxVst3Params */
 	bool        _midi_strip;
 	bool        _narrow;
 	bool        _in_group;
 	bool        _group_picked;
 	uint32_t    _group_rgba;
 	bool        _selected;
+
+	void place_fx_param_resets ();
 };

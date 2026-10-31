@@ -20,6 +20,8 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
+#include "engine_host.h"
+
 enum class PrefsHit {
 	None,
 	Close,
@@ -32,11 +34,6 @@ enum class PrefsHit {
 	SnapToggle,
 	Vst3Rescan,
 	Vst3Bypass,
-	Vst3ParamReset,
-	Vst3ParamReset1,
-	Vst3ParamReset2,
-	Vst3ParamReset3,
-	Vst3ParamReset4,
 	Vst3Unload,
 	Save
 };
@@ -68,21 +65,14 @@ public:
 	void set_vst3_loaded_name (const wchar_t* name);
 	void set_vst3_bypassed (bool on) { _vst3_bypassed = on; }
 	void set_vst3_ok (bool on) { _vst3_ok = on; }
+	void set_vst3_param_count (int n);
 	void set_status (const wchar_t* text);
 
 	PrefsHit hit_test (float x, float y) const;
 	/** Center of Bypass button after layout (for smoke). */
 	bool vst3_bypass_btn_center (float* out_x, float* out_y) const;
-	/** Center of Reset (param0) button after layout when vst3_ok (for smoke). */
-	bool vst3_param_reset_btn_center (float* out_x, float* out_y) const;
-	/** Center of Reset-1 (param1) button after layout when vst3_ok (for smoke). */
-	bool vst3_param_reset1_btn_center (float* out_x, float* out_y) const;
-	/** Center of Reset-2 (param2) button after layout when vst3_ok (for smoke). */
-	bool vst3_param_reset2_btn_center (float* out_x, float* out_y) const;
-	/** Center of Reset-3 (param3) button after layout when vst3_ok (for smoke). */
-	bool vst3_param_reset3_btn_center (float* out_x, float* out_y) const;
-	/** Center of Reset-4 (param4) button after layout when vst3_ok (for smoke). */
-	bool vst3_param_reset4_btn_center (float* out_x, float* out_y) const;
+	int hit_vst3_param_reset (float x, float y) const;
+	bool vst3_param_reset_btn_center (int index, float* out_x, float* out_y) const;
 	/** Center of Unload button after layout when vst3_ok (for smoke). */
 	bool vst3_unload_btn_center (float* out_x, float* out_y) const;
 	/** Catalog name row under (x,y), or −1. Rows laid out even when empty. */
@@ -114,11 +104,7 @@ private:
 	D2D1_RECT_F _snap_btn;
 	D2D1_RECT_F _vst3_rescan_btn;
 	D2D1_RECT_F _vst3_bypass_btn;
-	D2D1_RECT_F _vst3_param_reset_btn;
-	D2D1_RECT_F _vst3_param_reset1_btn;
-	D2D1_RECT_F _vst3_param_reset2_btn;
-	D2D1_RECT_F _vst3_param_reset3_btn;
-	D2D1_RECT_F _vst3_param_reset4_btn;
+	D2D1_RECT_F _vst3_param_reset_btn[EngineSnapshot::kMaxVst3Params];
 	D2D1_RECT_F _vst3_unload_btn;
 	D2D1_RECT_F _vst3_catalog_row[kMaxCatalog];
 	D2D1_RECT_F _save_btn;
@@ -126,6 +112,7 @@ private:
 	bool        _click_on;
 	bool        _snap_on;
 	bool        _vst3_ok;
+	int         _vst3_param_count;
 	bool        _vst3_bypassed;
 	uint32_t    _cur_period;
 	uint32_t    _cur_sr;
