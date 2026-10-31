@@ -681,25 +681,23 @@ MixerStrip::drag_to (float y)
 }
 
 void
-MixerStrip::draw (ID2D1RenderTarget* rt,
-                  ID2D1SolidColorBrush* brand,
-                  ID2D1SolidColorBrush* body,
-                  ID2D1SolidColorBrush* accent,
-                  ID2D1SolidColorBrush* pane,
-                  ID2D1SolidColorBrush* edge,
-                  ID2D1SolidColorBrush* meter_hot,
-                  IDWriteTextFormat* fmt_title,
-                  IDWriteTextFormat* fmt_meta,
-                  float dpi_scale) const
+MixerStrip::draw (UiDraw& ui) const
 {
+	ID2D1RenderTarget* rt = ui.rt ();
 	if (!rt) {
 		return;
 	}
+	const float s = ui.dpi_scale ();
+	const float hair = std::max (1.f, s);
 
-	rt->FillRectangle (_strip, pane);
-	rt->DrawRectangle (_strip, edge, 1.f);
+	ui.fill_round (_strip, 6.f, ui::ColorToken::Card);
+	ui.stroke_round (_strip, 6.f, ui::ColorToken::Border, 1.f, 0.9f);
+
+	/* Route colour strip along the left edge. */
 	{
-		ID2D1SolidColorBrush* bar = (!_route_active || _muted) ? body : accent;
+		ID2D1SolidColorBrush* bar = (!_route_active || _muted)
+			? ui.brush (ui::ColorToken::TextDisabled)
+			: ui.brush (ui::ColorToken::Accent);
 		ID2D1SolidColorBrush* owned = nullptr;
 		if (_route_active && !_muted && _color_rgba != 0) {
 			float r = (float)((_color_rgba >> 24) & 0xff) / 255.f;
@@ -711,18 +709,25 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 				bar = owned;
 			}
 		}
-		rt->FillRectangle (
-			D2D1::RectF (_strip.left, _strip.top, _strip.left + 3.f * dpi_scale, _strip.bottom),
-			bar);
+		if (bar) {
+			const float bar_w = 3.f * s;
+			rt->FillRoundedRectangle (
+				D2D1::RoundedRect (
+					D2D1::RectF (_strip.left + 1.f * s, _strip.top + 8.f * s,
+					             _strip.left + 1.f * s + bar_w, _strip.bottom - 8.f * s),
+					bar_w * 0.5f, bar_w * 0.5f),
+				bar);
+		}
 		if (owned) {
 			owned->Release ();
 		}
 	}
 
-	/* Group indicator: top accent bar + "G"; pick shows a second edge wash.
-	 * When RouteGroup shares color, bar uses group RRGGBBAA. */
+	/* Group indicator: top accent pill + "G"; pick shows a quieter bar.
+	 * When RouteGroup shares color, the bar uses group RRGGBBAA. */
 	if (_in_group || _group_picked) {
-		ID2D1SolidColorBrush* bar = _in_group ? accent : edge;
+		ID2D1SolidColorBrush* bar = _in_group ? ui.brush (ui::ColorToken::Accent)
+		                                      : ui.brush (ui::ColorToken::BorderStrong);
 		ID2D1SolidColorBrush* owned = nullptr;
 		if (_in_group && _group_rgba != 0) {
 			float cr = ((float)((_group_rgba >> 24) & 0xff)) / 255.f;
@@ -734,18 +739,19 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 				bar = owned;
 			}
 		}
-		rt->FillRectangle (
-			D2D1::RectF (_strip.left + 3.f * dpi_scale, _strip.top,
-			             _strip.right, _strip.top + 3.f * dpi_scale),
-			bar);
+		if (bar) {
+			rt->FillRoundedRectangle (
+				D2D1::RoundedRect (
+					D2D1::RectF (_strip.left + 8.f * s, _strip.top + 2.f * s,
+					             _strip.right - 8.f * s, _strip.top + 5.f * s),
+					1.5f, 1.5f),
+				bar);
+		}
 		if (_in_group) {
-			DWRITE_TEXT_ALIGNMENT ta_g = fmt_meta->GetTextAlignment ();
-			fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_TRAILING);
-			rt->DrawTextW (L"G", 1, fmt_meta,
-			               D2D1::RectF (_strip.right - 18.f * dpi_scale, _strip.top + 2.f * dpi_scale,
-			                            _strip.right - 4.f * dpi_scale, _strip.top + 18.f * dpi_scale),
-			               brand);
-			fmt_meta->SetTextAlignment (ta_g);
+			ui.text_vcenter (L"G", ui::TextRole::Caption, ui::ColorToken::Accent,
+			                 D2D1::RectF (_strip.right - 18.f * s, _strip.top + 2.f * s,
+			                              _strip.right - 5.f * s, _strip.top + 18.f * s),
+			                 DWRITE_TEXT_ALIGNMENT_TRAILING);
 		}
 		if (owned) {
 			owned->Release ();
@@ -753,300 +759,326 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 	}
 	/* Selection wash (group select share lights peers). */
 	if (_selected) {
-		accent->SetOpacity (0.18f);
-		rt->FillRectangle (_strip, accent);
-		accent->SetOpacity (1.f);
+		ui.fill_round (_strip, 6.f, ui::ColorToken::Accent, 0.10f);
 	}
 
-	DWRITE_TEXT_ALIGNMENT ta = fmt_title->GetTextAlignment ();
-	fmt_title->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
 	if (_has_comment && !_midi_strip) {
 		/* Cm badge — Route::comment non-empty. */
 		D2D1_RECT_F badge = D2D1::RectF (
-			_label_rc.right - 20.f * dpi_scale, _label_rc.top + 1.f * dpi_scale,
-			_label_rc.right - 2.f * dpi_scale, _label_rc.top + 15.f * dpi_scale);
-		accent->SetOpacity (0.7f);
-		rt->FillRectangle (badge, accent);
-		accent->SetOpacity (1.f);
-		DWRITE_TEXT_ALIGNMENT ta_b = fmt_meta->GetTextAlignment ();
-		DWRITE_PARAGRAPH_ALIGNMENT pa_b = fmt_meta->GetParagraphAlignment ();
-		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-		fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-		rt->DrawTextW (L"Cm", 2, fmt_meta, badge, brand);
-		fmt_meta->SetTextAlignment (ta_b);
-		fmt_meta->SetParagraphAlignment (pa_b);
+			_label_rc.right - 20.f * s, _label_rc.top + 3.f * s,
+			_label_rc.right - 4.f * s, _label_rc.top + 17.f * s);
+		ui.fill_round (badge, 3.f, ui::ColorToken::Accent, 0.7f);
+		ui.text_vcenter (L"Cm", ui::TextRole::Caption, ui::ColorToken::AccentInk,
+		                 badge, DWRITE_TEXT_ALIGNMENT_CENTER);
 	}
 	if (_phase_inverted && !_midi_strip) {
 		/* Ø badge — polarity inverted (PhaseControl). */
 		D2D1_RECT_F badge = D2D1::RectF (
-			_label_rc.left + 2.f * dpi_scale, _label_rc.top + 1.f * dpi_scale,
-			_label_rc.left + 16.f * dpi_scale, _label_rc.top + 15.f * dpi_scale);
-		accent->SetOpacity (0.75f);
-		rt->FillRectangle (badge, accent);
-		accent->SetOpacity (1.f);
-		DWRITE_TEXT_ALIGNMENT ta_b = fmt_meta->GetTextAlignment ();
-		DWRITE_PARAGRAPH_ALIGNMENT pa_b = fmt_meta->GetParagraphAlignment ();
-		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-		fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-		rt->DrawTextW (L"\x00D8", 1, fmt_meta, badge, brand);
-		fmt_meta->SetTextAlignment (ta_b);
-		fmt_meta->SetParagraphAlignment (pa_b);
+			_label_rc.left + 4.f * s, _label_rc.top + 3.f * s,
+			_label_rc.left + 18.f * s, _label_rc.top + 17.f * s);
+		ui.fill_round (badge, 3.f, ui::ColorToken::Accent, 0.75f);
+		ui.text_vcenter (L"\x00D8", ui::TextRole::Caption,
+		                 ui::ColorToken::AccentInk, badge,
+		                 DWRITE_TEXT_ALIGNMENT_CENTER);
 	}
 	if (_route_active) {
-		rt->DrawTextW (_label, (UINT32)wcslen (_label), fmt_title, _label_rc, brand);
+		ui.text_vcenter (_label, ui::TextRole::Section,
+		                 ui::ColorToken::TextPrimary, _label_rc,
+		                 DWRITE_TEXT_ALIGNMENT_CENTER);
 	} else {
-		wchar_t off_lab[40];
+		wchar_t off_lab[48];
 		_snwprintf_s (off_lab, _TRUNCATE, L"%s · Off", _label);
-		rt->DrawTextW (off_lab, (UINT32)wcslen (off_lab), fmt_title, _label_rc, body);
+		ui.text_vcenter (off_lab, ui::TextRole::Section,
+		                 ui::ColorToken::TextMuted, _label_rc,
+		                 DWRITE_TEXT_ALIGNMENT_CENTER);
 	}
-	fmt_title->SetTextAlignment (ta);
 
-	DWRITE_TEXT_ALIGNMENT ta_m = fmt_meta->GetTextAlignment ();
-	DWRITE_PARAGRAPH_ALIGNMENT pa_m = fmt_meta->GetParagraphAlignment ();
-	fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-	fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+	/* Compact chip button: quiet idle, tinted when latched. */
+	auto chip = [&] (const D2D1_RECT_F& r, const wchar_t* label, bool lit,
+	                 ui::ColorToken tint) {
+		if (r.right <= r.left || r.bottom <= r.top) {
+			return;
+		}
+		if (lit) {
+			ui.fill_round (r, 4.f, tint, 0.92f);
+			ui.text_vcenter (label, ui::TextRole::Caption,
+			                 ui::ColorToken::AccentInk, r,
+			                 DWRITE_TEXT_ALIGNMENT_CENTER);
+		} else {
+			ui.fill_round (r, 4.f, ui::ColorToken::Control, 0.85f);
+			ui.stroke_round (r, 4.f, ui::ColorToken::Border, 1.f, 0.7f);
+			ui.text_vcenter (label, ui::TextRole::Caption,
+			                 ui::ColorToken::TextSecondary, r,
+			                 DWRITE_TEXT_ALIGNMENT_CENTER);
+		}
+	};
 
-	rt->FillRectangle (_arm_btn, _armed ? accent : edge);
+	const bool compact_btns = (_arm_btn.right - _arm_btn.left) < 44.f * s;
+	{
+		const wchar_t* arm_label = compact_btns
+			? (_record_safe ? L"Rs" : L"R")
+			: (_record_safe ? L"R · Rs"
+			                : (_armed ? L"R · armed" : L"R · arm"));
+		chip (_arm_btn, arm_label, _armed || _record_safe,
+		      ui::ColorToken::Record);
+	}
 	if (!_midi_strip) {
-		const wchar_t* arm_label =
-			_record_safe ? L"R · Rs"
-			: (_armed ? L"R · armed" : L"R · arm");
-		rt->DrawTextW (arm_label, (UINT32)wcslen (arm_label), fmt_meta, _arm_btn, brand);
-
 		/* Mon — Auto / In / Disk; ·N peer badge when group shares monitoring. */
 		const bool mon_forced = _monitor_choice != 0 || _monitor_peer_count > 0;
-		rt->FillRectangle (_mon_btn, mon_forced ? accent : edge);
-		wchar_t mon_label[16];
 		const wchar_t* base =
 			(_monitor_choice == 1) ? L"In"
 			: (_monitor_choice == 2) ? L"Disk" : L"Auto";
-		if (_monitor_peer_count > 0) {
-			_snwprintf_s (mon_label, _TRUNCATE, L"%s·%d", base, _monitor_peer_count + 1);
+		wchar_t mon_label[16];
+		if (compact_btns) {
+			_snwprintf_s (mon_label, _TRUNCATE, L"%s",
+			              (_monitor_choice == 1) ? L"I"
+			              : (_monitor_choice == 2) ? L"D" : L"A");
+		} else if (_monitor_peer_count > 0) {
+			_snwprintf_s (mon_label, _TRUNCATE, L"%s·%d", base,
+			              _monitor_peer_count + 1);
 		} else {
 			_snwprintf_s (mon_label, _TRUNCATE, L"%s", base);
 		}
-		rt->DrawTextW (mon_label, (UINT32)wcslen (mon_label), fmt_meta, _mon_btn, brand);
+		chip (_mon_btn, mon_label, mon_forced, ui::ColorToken::Accent);
 	}
 
-	/* Mute — lit body wash when muted; All badge when mute-points=AllPoints. */
+	/* Mute — lit red wash when muted; All badge when mute-points=AllPoints. */
 	{
-		const wchar_t* mlab = (_mute_points != 0) ? L"M·All" : L"M";
-		if (_muted) {
-			body->SetOpacity (0.9f);
-			rt->FillRectangle (_mute_btn, body);
-			body->SetOpacity (1.f);
-			rt->DrawTextW (mlab, (UINT32)wcslen (mlab), fmt_meta, _mute_btn, brand);
-		} else {
-			rt->FillRectangle (_mute_btn, edge);
-			rt->DrawTextW (mlab, (UINT32)wcslen (mlab), fmt_meta, _mute_btn, brand);
-		}
+		const wchar_t* mlab = compact_btns ? L"M"
+		                                    : ((_mute_points != 0) ? L"M·All" : L"M");
+		chip (_mute_btn, mlab, _muted, ui::ColorToken::Mute);
 	}
 
-	/* Solo — accent when self/effective solo; Si when solo-isolated, Ss when safe. */
-	if (_soloed) {
-		accent->SetOpacity (0.85f);
-		rt->FillRectangle (_solo_btn, accent);
-		accent->SetOpacity (1.f);
-	} else if (_solo_isolated || _solo_safe) {
-		body->SetOpacity (0.55f);
-		rt->FillRectangle (_solo_btn, body);
-		body->SetOpacity (1.f);
-	} else {
-		rt->FillRectangle (_solo_btn, edge);
-	}
+	/* Solo — amber when self/effective solo; Si when isolated, Ss when safe. */
 	{
 		const wchar_t* s_lab = _solo_isolated ? L"Si" : (_solo_safe ? L"Ss" : L"S");
 		const wchar_t* solo_glyph = s_lab;
-		if (!_solo_isolated && !_solo_safe) {
+		if (!_solo_isolated && !_solo_safe && !compact_btns) {
 			if (_listen_mode == 1) {
 				solo_glyph = L"P";
 			} else if (_listen_mode == 2) {
 				solo_glyph = L"A";
 			}
 		}
-		rt->DrawTextW (solo_glyph, (UINT32)wcslen (solo_glyph), fmt_meta, _solo_btn, brand);
+		const bool lonely_solo = _solo_isolated || _solo_safe;
+		chip (_solo_btn, solo_glyph, _soloed || lonely_solo,
+		      ui::ColorToken::Solo);
 	}
 
 	if (!_midi_strip) {
 		/* Trim track — −20 · 0 · +20 dB (knob at unity when centered). */
-		rt->FillRectangle (_trim_track, edge);
-		{
-			float tw = _trim_track.right - _trim_track.left;
-			float kn_cx = _trim_track.left + tw * _trim;
-			float kn_w = 7.f * dpi_scale;
-			D2D1_RECT_F kn = D2D1::RectF (
-				kn_cx - kn_w * 0.5f, _trim_track.top,
-				kn_cx + kn_w * 0.5f, _trim_track.bottom);
-			rt->FillRectangle (kn, accent);
-			float mid_x = (_trim_track.left + _trim_track.right) * 0.5f;
-			rt->DrawLine (
-				D2D1::Point2F (mid_x, _trim_track.top),
-				D2D1::Point2F (mid_x, _trim_track.bottom),
-				body, 1.f);
+		if (_trim_track.right > _trim_track.left) {
+			const float th = _trim_track.bottom - _trim_track.top;
+			const float radius = th * 0.5f / s;
+			ui.fill_round (_trim_track, radius, ui::ColorToken::Control);
+			ui.stroke_round (_trim_track, radius, ui::ColorToken::Border, 1.f, 0.7f);
+			const float mid_x = (_trim_track.left + _trim_track.right) * 0.5f;
+			rt->DrawLine (D2D1::Point2F (mid_x, _trim_track.top),
+			              D2D1::Point2F (mid_x, _trim_track.bottom),
+			              ui.brush (ui::ColorToken::BorderStrong), 0.8f);
+			const float tw = _trim_track.right - _trim_track.left;
+			const float kn_cx = _trim_track.left + tw * _trim;
+			const float kn_w = 7.f * s;
+			ui.fill_round (D2D1::RectF (kn_cx - kn_w * 0.5f, _trim_track.top - s,
+			                             kn_cx + kn_w * 0.5f, _trim_track.bottom + s),
+			               2.f, ui::ColorToken::Accent);
 		}
 
 		if (!_narrow) {
 			/* Pan azimuth track — L · C · R; stereo width band when available. */
-		rt->FillRectangle (_pan_track, edge);
-		float pw = _pan_track.right - _pan_track.left;
-		float kn_cx = _pan_track.left + pw * _pan;
-		if (_pan_width_ok) {
-			float half = std::fabs (_pan_width) * 0.5f * pw;
-			float band_l = std::max (_pan_track.left, kn_cx - half);
-			float band_r = std::min (_pan_track.right, kn_cx + half);
-			accent->SetOpacity (0.35f);
-			rt->FillRectangle (
-				D2D1::RectF (band_l, _pan_track.top, band_r, _pan_track.bottom),
-				accent);
-			accent->SetOpacity (1.f);
-		}
-		float kn_w = 8.f * dpi_scale;
-		D2D1_RECT_F kn = D2D1::RectF (
-			kn_cx - kn_w * 0.5f, _pan_track.top,
-			kn_cx + kn_w * 0.5f, _pan_track.bottom);
-		rt->FillRectangle (kn, accent);
-		/* Center tick */
-		float mid_x = (_pan_track.left + _pan_track.right) * 0.5f;
-		rt->DrawLine (
-			D2D1::Point2F (mid_x, _pan_track.top),
-			D2D1::Point2F (mid_x, _pan_track.bottom),
-			body, 1.f);
-		if (_pan_width_ok) {
-			/* Thin W badge — Shift+drag pan adjusts stereo width. */
-			DWRITE_TEXT_ALIGNMENT ta_w = fmt_meta->GetTextAlignment ();
-			fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_TRAILING);
-			rt->DrawTextW (
-				L"W", 1, fmt_meta,
-				D2D1::RectF (_pan_track.right - 14.f * dpi_scale,
-				             _pan_track.top - 1.f * dpi_scale,
-				             _pan_track.right + 2.f * dpi_scale,
-				             _pan_track.bottom + 1.f * dpi_scale),
-				body);
-			fmt_meta->SetTextAlignment (ta_w);
-		}
-
-		/* Aux send level → Aux bus; pan knob when send panner present. */
-		rt->FillRectangle (_send_track, edge);
-		{
-			float sw = _send_track.right - _send_track.left;
-			float fill_r = _send_track.left + sw * _send;
-			accent->SetOpacity (_send_muted ? 0.22f : 0.65f);
-			rt->FillRectangle (
-				D2D1::RectF (_send_track.left, _send_track.top, fill_r, _send_track.bottom),
-				accent);
-			accent->SetOpacity (1.f);
-			if (_send_muted) {
-				rt->DrawTextW (L"Sm", 2, fmt_meta, _send_track, body);
-			}
-			if (_send_pan_ok) {
-				float kn_cx = _send_track.left + sw * _send_pan;
-				float kn_w = 6.f * dpi_scale;
-				rt->FillRectangle (
-					D2D1::RectF (kn_cx - kn_w * 0.5f, _send_track.top,
-					             kn_cx + kn_w * 0.5f, _send_track.bottom),
-					body);
-				DWRITE_TEXT_ALIGNMENT ta_p = fmt_meta->GetTextAlignment ();
-				fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_TRAILING);
-				rt->DrawTextW (
-					L"P", 1, fmt_meta,
-					D2D1::RectF (_send_track.right - 12.f * dpi_scale,
-					             _send_track.top - 1.f * dpi_scale,
-					             _send_track.right + 2.f * dpi_scale,
-					             _send_track.bottom + 1.f * dpi_scale),
-					body);
-				fmt_meta->SetTextAlignment (ta_p);
-			}
-		}
-
-		const bool fx_on = _fx_label[0] != L'\0';
-		rt->FillRectangle (_fx_btn, edge);
-		D2D1_RECT_F fx_label_rc = _fx_btn;
-		if (fx_on && _fx_can_unload) {
-			fx_label_rc.right = _fx_can_unload ? _fx_bypass_btn.left : fx_label_rc.right;
-		}
-		if (fx_on) {
-			if (_fx_bypassed) {
-				edge->SetOpacity (0.85f);
-				rt->FillRectangle (_fx_btn, edge);
-				edge->SetOpacity (1.f);
-				wchar_t byp[48];
-				_snwprintf_s (byp, _TRUNCATE, L"BYP %s", _fx_label);
-				rt->DrawTextW (byp, (UINT32)wcslen (byp), fmt_meta, fx_label_rc, body);
-			} else {
-				accent->SetOpacity (0.55f);
-				rt->FillRectangle (_fx_btn, accent);
-				accent->SetOpacity (1.f);
-				rt->DrawTextW (_fx_label, (UINT32)wcslen (_fx_label), fmt_meta, fx_label_rc, brand);
-			}
-			if (_fx_can_unload) {
-				if (_fx_bypass_btn.right > _fx_bypass_btn.left) {
-					if (_fx_bypassed && accent) {
-						accent->SetOpacity (0.45f);
-						rt->FillRectangle (_fx_bypass_btn, accent);
-						accent->SetOpacity (1.f);
-					}
-					rt->DrawTextW (L"B", 1, fmt_meta, _fx_bypass_btn, brand);
+			if (_pan_track.right > _pan_track.left) {
+				const float ph = _pan_track.bottom - _pan_track.top;
+				const float radius = ph * 0.5f / s;
+				ui.fill_round (_pan_track, radius, ui::ColorToken::Control);
+				ui.stroke_round (_pan_track, radius, ui::ColorToken::Border, 1.f, 0.7f);
+				const float pw = _pan_track.right - _pan_track.left;
+				const float kn_cx = _pan_track.left + pw * _pan;
+				if (_pan_width_ok) {
+					float half = std::fabs (_pan_width) * 0.5f * pw;
+					float band_l = std::max (_pan_track.left, kn_cx - half);
+					float band_r = std::min (_pan_track.right, kn_cx + half);
+					ui.fill_round (D2D1::RectF (band_l, _pan_track.top,
+					                             band_r, _pan_track.bottom),
+					               radius, ui::ColorToken::Accent, 0.28f);
 				}
-				for (int i = 0; i < EngineSnapshot::kMaxVst3Params; ++i) {
-					const D2D1_RECT_F& r = _fx_param_reset_btn[i];
-					if (r.right > r.left) {
-						const wchar_t lab[2] = { (wchar_t)(L'1' + i), L'\0' };
-						rt->DrawTextW (lab, 1, fmt_meta, r, brand);
-					}
+				const float mid_x = (_pan_track.left + _pan_track.right) * 0.5f;
+				rt->DrawLine (D2D1::Point2F (mid_x, _pan_track.top),
+				              D2D1::Point2F (mid_x, _pan_track.bottom),
+				              ui.brush (ui::ColorToken::BorderStrong), 0.8f);
+				const float kn_w = 8.f * s;
+				ui.fill_round (D2D1::RectF (kn_cx - kn_w * 0.5f, _pan_track.top - s,
+				                             kn_cx + kn_w * 0.5f, _pan_track.bottom + s),
+				               2.f, ui::ColorToken::Accent);
+				if (_pan_width_ok) {
+					/* Thin W badge — Shift+drag pan adjusts stereo width. */
+					ui.text_vcenter (L"W", ui::TextRole::Caption,
+					                 ui::ColorToken::TextMuted,
+					                 D2D1::RectF (_pan_track.right - 14.f * s,
+					                              _pan_track.top - 2.f * s,
+					                              _pan_track.right + 2.f * s,
+					                              _pan_track.bottom + 2.f * s),
+					                 DWRITE_TEXT_ALIGNMENT_TRAILING);
 				}
-				rt->DrawTextW (L"×", 1, fmt_meta, _fx_unload_btn, brand);
 			}
-		} else {
-			rt->DrawTextW (L"+ FX", 4, fmt_meta, _fx_btn, brand);
+
+			/* Aux send level → Aux bus; pan knob when send panner present. */
+			if (_send_track.right > _send_track.left) {
+				const float sh = _send_track.bottom - _send_track.top;
+				const float radius = sh * 0.5f / s;
+				ui.fill_round (_send_track, radius, ui::ColorToken::Control);
+				ui.stroke_round (_send_track, radius, ui::ColorToken::Border, 1.f, 0.7f);
+				const float sw = _send_track.right - _send_track.left;
+				const float fill_r = _send_track.left + sw * _send;
+				if (fill_r > _send_track.left + 1.f) {
+					ui.fill_round (D2D1::RectF (_send_track.left, _send_track.top,
+					                             fill_r, _send_track.bottom),
+					               radius, ui::ColorToken::Accent,
+					               _send_muted ? 0.22f : 0.55f);
+				}
+				if (_send_muted) {
+					ui.text_vcenter (L"Sm", ui::TextRole::Caption,
+					                 ui::ColorToken::TextPrimary, _send_track,
+					                 DWRITE_TEXT_ALIGNMENT_CENTER);
+				}
+				if (_send_pan_ok) {
+					const float kn_cx = _send_track.left + sw * _send_pan;
+					const float kn_w = 6.f * s;
+					ui.fill_round (D2D1::RectF (kn_cx - kn_w * 0.5f, _send_track.top - s,
+					                             kn_cx + kn_w * 0.5f, _send_track.bottom + s),
+					               2.f, ui::ColorToken::TextPrimary, 0.85f);
+					ui.text_vcenter (L"P", ui::TextRole::Caption,
+					                 ui::ColorToken::TextMuted,
+					                 D2D1::RectF (_send_track.right - 12.f * s,
+					                              _send_track.top - 2.f * s,
+					                              _send_track.right + 2.f * s,
+					                              _send_track.bottom + 2.f * s),
+					                 DWRITE_TEXT_ALIGNMENT_TRAILING);
+				}
+			}
+
+			const bool fx_on = _fx_label[0] != L'\0';
+			if (_fx_btn.right > _fx_btn.left) {
+				D2D1_RECT_F fx_label_rc = _fx_btn;
+				if (fx_on && _fx_can_unload && _fx_bypass_btn.right > _fx_bypass_btn.left) {
+					fx_label_rc.right = _fx_bypass_btn.left;
+				}
+				if (fx_on) {
+					if (_fx_bypassed) {
+						ui.fill_round (_fx_btn, 4.f, ui::ColorToken::Punch, 0.18f);
+						ui.stroke_round (_fx_btn, 4.f, ui::ColorToken::Punch, 1.f, 0.55f);
+						wchar_t byp[48];
+						_snwprintf_s (byp, _TRUNCATE, L"BYP %s", _fx_label);
+						ui.text_vcenter (byp, ui::TextRole::Caption,
+						                 ui::ColorToken::TextSecondary, fx_label_rc,
+						                 DWRITE_TEXT_ALIGNMENT_CENTER);
+					} else {
+						ui.fill_round (_fx_btn, 4.f, ui::ColorToken::Accent, 0.16f);
+						ui.stroke_round (_fx_btn, 4.f, ui::ColorToken::Accent, 1.f, 0.6f);
+						ui.text_vcenter (_fx_label, ui::TextRole::Caption,
+						                 ui::ColorToken::Accent, fx_label_rc,
+						                 DWRITE_TEXT_ALIGNMENT_CENTER);
+					}
+					if (_fx_can_unload) {
+						if (_fx_bypass_btn.right > _fx_bypass_btn.left) {
+							if (_fx_bypassed) {
+								ui.fill_round (_fx_bypass_btn, 3.f, ui::ColorToken::Accent, 0.35f);
+							} else {
+								ui.fill_round (_fx_bypass_btn, 3.f, ui::ColorToken::Control, 0.7f);
+							}
+							ui.text_vcenter (L"B", ui::TextRole::Caption,
+							                 ui::ColorToken::Accent, _fx_bypass_btn,
+							                 DWRITE_TEXT_ALIGNMENT_CENTER);
+						}
+						for (int i = 0; i < EngineSnapshot::kMaxVst3Params; ++i) {
+							const D2D1_RECT_F& r = _fx_param_reset_btn[i];
+							if (r.right > r.left) {
+								const wchar_t lab[2] = { (wchar_t)(L'1' + i), L'\0' };
+								ui.fill_round (r, 3.f, ui::ColorToken::Control, 0.7f);
+								ui.text_vcenter (lab, ui::TextRole::Caption,
+								                 ui::ColorToken::Accent, r,
+								                 DWRITE_TEXT_ALIGNMENT_CENTER);
+							}
+						}
+						if (_fx_unload_btn.right > _fx_unload_btn.left) {
+							ui.fill_round (_fx_unload_btn, 3.f, ui::ColorToken::Control, 0.7f);
+							ui.text_vcenter (L"×", ui::TextRole::Caption,
+							                 ui::ColorToken::Accent, _fx_unload_btn,
+							                 DWRITE_TEXT_ALIGNMENT_CENTER);
+						}
+					}
+				} else {
+					ui.fill_round (_fx_btn, 4.f, ui::ColorToken::Control, 0.55f);
+					ui.stroke_round (_fx_btn, 4.f, ui::ColorToken::Border, 1.f, 0.7f);
+					ui.text_vcenter (L"+ FX", ui::TextRole::Caption,
+					                 ui::ColorToken::TextMuted, _fx_btn,
+					                 DWRITE_TEXT_ALIGNMENT_CENTER);
+				}
+			}
+
+			if (fx_on) {
+				auto draw_param = [&] (const D2D1_RECT_F& track, float value, float opac) {
+					if (track.right <= track.left) {
+						return;
+					}
+					const float radius = (track.bottom - track.top) * 0.5f / s;
+					ui.fill_round (track, radius, ui::ColorToken::Control, 0.8f);
+					const float pw = track.right - track.left;
+					const float fill_r = track.left + pw * value;
+					if (fill_r > track.left + 0.5f) {
+						ui.fill_round (D2D1::RectF (track.left, track.top,
+						                             fill_r, track.bottom),
+						               radius,
+						               _fx_bypassed ? ui::ColorToken::TextMuted
+						                            : ui::ColorToken::Accent,
+						               _fx_bypassed ? 0.35f : opac);
+					}
+				};
+				draw_param (_fx_param_track, _fx_param, 0.7f);
+				if (_fx_param_count >= 2) {
+					draw_param (_fx_param_track2, _fx_param2, 0.55f);
+				}
+				if (_fx_param_count >= 3) {
+					draw_param (_fx_param_track3, _fx_param3, 0.45f);
+				}
+			}
 		}
+	}
 
-		if (fx_on) {
-			auto draw_param = [&] (const D2D1_RECT_F& track, float value, float opac) {
-				rt->FillRectangle (track, edge);
-				float pw = track.right - track.left;
-				float fill_r = track.left + pw * value;
-				ID2D1SolidColorBrush* fill = _fx_bypassed ? body : accent;
-				fill->SetOpacity (_fx_bypassed ? 0.35f : opac);
-				rt->FillRectangle (
-					D2D1::RectF (track.left, track.top, fill_r, track.bottom), fill);
-				fill->SetOpacity (1.f);
-			};
-			draw_param (_fx_param_track, _fx_param, 0.7f);
-			if (_fx_param_count >= 2) {
-				draw_param (_fx_param_track2, _fx_param2, 0.55f);
-			}
-			if (_fx_param_count >= 3) {
-				draw_param (_fx_param_track3, _fx_param3, 0.45f);
-			}
+	/* Fader track + accent fill + chunky knob. */
+	{
+		const float tw = _track.right - _track.left;
+		const float radius = tw * 0.5f / s;
+		ui.fill_round (_track, radius, ui::ColorToken::Control);
+		ui.stroke_round (_track, radius, ui::ColorToken::Border, 1.f, 0.7f);
+
+		float h = _track.bottom - _track.top;
+		float knob_y = _track.bottom - _gain * h;
+		float knob_h = 12.f * s;
+		float knob_w = 26.f * s;
+		float cx = (_track.left + _track.right) * 0.5f;
+		D2D1_RECT_F knob = D2D1::RectF (
+			cx - knob_w * 0.5f,
+			knob_y - knob_h * 0.5f,
+			cx + knob_w * 0.5f,
+			knob_y + knob_h * 0.5f);
+
+		if (_gain > 0.001f) {
+			ui.fill_round (D2D1::RectF (_track.left, knob_y,
+			                             _track.right, _track.bottom),
+			               radius,
+			               _muted ? ui::ColorToken::TextMuted
+			                      : ui::ColorToken::Accent,
+			               0.30f);
 		}
-	}
-	}
-
-	fmt_meta->SetTextAlignment (ta_m);
-	fmt_meta->SetParagraphAlignment (pa_m);
-
-	rt->FillRectangle (_track, edge);
-
-	float h = _track.bottom - _track.top;
-	float knob_y = _track.bottom - _gain * h;
-	float knob_h = 12.f * dpi_scale;
-	float knob_w = 26.f * dpi_scale;
-	float cx = (_track.left + _track.right) * 0.5f;
-	D2D1_RECT_F knob = D2D1::RectF (
-		cx - knob_w * 0.5f,
-		knob_y - knob_h * 0.5f,
-		cx + knob_w * 0.5f,
-		knob_y + knob_h * 0.5f);
-	rt->FillRectangle (knob, _muted ? body : accent);
-
-	if (_gain > 0.001f) {
-		ID2D1SolidColorBrush* fill = _muted ? body : accent;
-		fill->SetOpacity (0.35f);
-		rt->FillRectangle (D2D1::RectF (_track.left, knob_y, _track.right, _track.bottom), fill);
-		fill->SetOpacity (1.f);
+		ui.fill_round (knob, 4.f,
+		               _muted ? ui::ColorToken::TextMuted
+		                      : ui::ColorToken::Accent);
+		ui.fill_round (D2D1::RectF (knob.left + 4.f * s, knob_y - s,
+		                             knob.right - 4.f * s, knob_y + s),
+		               1.f, ui::ColorToken::AccentInk, 0.55f);
 	}
 
-	_meter.draw (rt, accent, edge, meter_hot, dpi_scale);
+	_meter.draw (ui);
 	if (!_midi_strip) {
 		const wchar_t* mp = L"Pst";
 		switch (_meter_point) {
@@ -1056,62 +1088,38 @@ MixerStrip::draw (ID2D1RenderTarget* rt,
 		default: mp = L"Pst"; break;
 		}
 		const D2D1_RECT_F& mb = _meter.bounds ();
-		DWRITE_TEXT_ALIGNMENT ta_mp = fmt_meta->GetTextAlignment ();
-		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-		rt->DrawTextW (mp, (UINT32)wcslen (mp), fmt_meta,
-		               D2D1::RectF (mb.left - 2.f * dpi_scale, mb.top - 14.f * dpi_scale,
-		                            mb.right + 2.f * dpi_scale, mb.top - 1.f * dpi_scale),
-		               body);
-		fmt_meta->SetTextAlignment (ta_mp);
+		ui.text_vcenter (mp, ui::TextRole::Caption, ui::ColorToken::TextMuted,
+		                 D2D1::RectF (mb.left - 6.f * s, mb.top - 14.f * s,
+		                              mb.right + 6.f * s, mb.top - 1.f * s),
+		                 DWRITE_TEXT_ALIGNMENT_CENTER);
 		const wchar_t* mt = (_meter_type == 1) ? L"K14" : L"Pk";
 		const D2D1_RECT_F& mb2 = _meter.bounds ();
-		DWRITE_TEXT_ALIGNMENT ta_mt = fmt_meta->GetTextAlignment ();
-		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-		rt->DrawTextW (mt, (UINT32)wcslen (mt), fmt_meta,
-		               D2D1::RectF (mb2.left - 4.f * dpi_scale, mb2.bottom + 1.f * dpi_scale,
-		                            mb2.right + 4.f * dpi_scale, mb2.bottom + 14.f * dpi_scale),
-		               body);
-		fmt_meta->SetTextAlignment (ta_mt);
+		ui.text_vcenter (mt, ui::TextRole::Caption, ui::ColorToken::TextMuted,
+		                 D2D1::RectF (mb2.left - 6.f * s, mb2.bottom + 1.f * s,
+		                              mb2.right + 6.f * s, mb2.bottom + 14.f * s),
+		                 DWRITE_TEXT_ALIGNMENT_CENTER);
 	}
 
 	wchar_t db[48];
 	float db_v = (_gain <= 0.0001f) ? -96.f : (20.f * log10f (_gain));
 	if (_narrow && !_midi_strip) {
 		_snwprintf_s (db, _TRUNCATE, L"%.0f", db_v);
-	} else if (!_midi_strip) {
-		const wchar_t* pan_txt = L"C";
-		if (_pan < 0.45f) {
-			pan_txt = L"L";
-		} else if (_pan > 0.55f) {
-			pan_txt = L"R";
-		}
-		if (!_route_active) {
-			_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  %s  ·  OFF", db_v, pan_txt);
-		} else if (_fx_label[0] != L'\0') {
-			_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  %s  ·  Snd %.0f%%",
-			              db_v, pan_txt, _send * 100.f);
-		} else if (_muted) {
-			_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  %s  ·  MUTE", db_v, pan_txt);
-		} else if (_soloed) {
-			_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  %s  ·  SOLO", db_v, pan_txt);
-		} else {
-			_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  %s  ·  Snd %.0f%%",
-			              db_v, pan_txt, _send * 100.f);
-		}
 	} else if (_muted && _soloed) {
-		_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  M+S", db_v);
+		_snwprintf_s (db, _TRUNCATE, L"%.1f dB · M+S", db_v);
 	} else if (_muted) {
-		_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  MUTE", db_v);
+		_snwprintf_s (db, _TRUNCATE, L"%.1f dB · MUTE", db_v);
 	} else if (_soloed) {
-		_snwprintf_s (db, _TRUNCATE, L"%.1f dB  ·  SOLO", db_v);
+		_snwprintf_s (db, _TRUNCATE, L"%.1f dB · SOLO", db_v);
+	} else if (!_route_active) {
+		_snwprintf_s (db, _TRUNCATE, L"%.1f dB · OFF", db_v);
 	} else {
 		_snwprintf_s (db, _TRUNCATE, L"%.1f dB", db_v);
 	}
-	DWRITE_TEXT_ALIGNMENT ta2 = fmt_meta->GetTextAlignment ();
-	fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-	rt->DrawTextW (db, (UINT32)wcslen (db), fmt_meta,
-	               D2D1::RectF (_strip.left, _strip.bottom - 28.f * dpi_scale,
-	                            _strip.right, _strip.bottom - 6.f * dpi_scale),
-	               body);
-	fmt_meta->SetTextAlignment (ta2);
+	ui.text_vcenter (db, ui::TextRole::Caption,
+	                 _muted ? ui::ColorToken::Mute
+	                 : (_soloed ? ui::ColorToken::Solo
+	                            : ui::ColorToken::TextSecondary),
+	                 D2D1::RectF (_strip.left, _strip.bottom - 28.f * s,
+	                              _strip.right, _strip.bottom - 6.f * s),
+	                 DWRITE_TEXT_ALIGNMENT_CENTER);
 }

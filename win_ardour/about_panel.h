@@ -17,6 +17,8 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
+#include "ui_draw.h"
+
 class AboutPanel
 {
 public:
@@ -35,15 +37,7 @@ public:
 	/** True if click should dismiss About (close or outside card). */
 	bool hit_dismiss_about (float x, float y) const;
 
-	void draw_about (ID2D1RenderTarget* rt,
-	                 ID2D1SolidColorBrush* brand,
-	                 ID2D1SolidColorBrush* body,
-	                 ID2D1SolidColorBrush* accent,
-	                 ID2D1SolidColorBrush* pane,
-	                 ID2D1SolidColorBrush* edge,
-	                 IDWriteTextFormat* fmt_title,
-	                 IDWriteTextFormat* fmt_meta,
-	                 float dpi_scale) const;
+	void draw_about (UiDraw& ui) const;
 
 	void draw_splash (ID2D1RenderTarget* rt,
 	                  ID2D1SolidColorBrush* brand,

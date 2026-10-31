@@ -27,6 +27,7 @@
 #include "automation_lane.h"
 #include "engine_host.h"
 #include "history_panel.h"
+#include "menu_bar.h"
 #include "mixer_strip.h"
 #include "prefs_panel.h"
 #include "recent_panel.h"
@@ -36,6 +37,7 @@
 #include "loudness_panel.h"
 #include "spectrum_panel.h"
 #include "transport_bar.h"
+#include "ui_draw.h"
 #include "wave_strip.h"
 
 #pragma comment(lib, "d2d1.lib")
@@ -48,8 +50,9 @@
 class ShellWindow
 {
 public:
-	static constexpr int kTracksMax = 6; /* matches EngineSnapshot::kMeters */
-	static constexpr int kMixerStripsMax = 7; /* up to 6 audio + 1 MIDI */
+	static constexpr int kTracksMax = EngineSnapshot::kMeters;
+	static constexpr int kMixerStripsMax = kTracksMax + 1;
+	/* Legacy aliases used by older loops — prefer n_audio_lanes(). */
 	static constexpr int kTracks = kTracksMax;
 	static constexpr int kMixerStrips = kMixerStripsMax;
 
@@ -145,6 +148,9 @@ public:
 
 	HWND hwnd () const { return _hwnd; }
 
+	/** Create a named session at a full folder path. For --new-session. */
+	void new_session_at_path (const std::string& path);
+
 private:
 	enum class DragMode {
 		None,
@@ -177,7 +183,8 @@ private:
 		TrackReorderPending, /* mixer label click; may become reorder drag */
 		TrackReorder, /* drag mixer strip label to reorder */
 		RulerScrub, /* drag editor ruler → continuous locate */
-		Shuttle /* drag transport Scrub strip → varispeed */
+		Shuttle, /* drag transport Scrub strip → varispeed */
+		EditorScroll /* drag editor lane scrollbar thumb */
 	};
 
 	static constexpr uint8_t kMidiPitchLo = 48; /* C3 */
@@ -212,6 +219,7 @@ private:
 	void layout_panes ();
 	void draw_editor_pane ();
 	void draw_automation_lane ();
+	void draw_editor_scrollbar ();
 	void cycle_auto_lane_kind ();
 	int  auto_lane_track () const;
 	void refresh_automation_lane ();
@@ -238,7 +246,11 @@ private:
 	void transport_toggle ();
 	void transport_toggle_record ();
 	void prompt_import_audio ();
+	int  import_target_track () const;
 	void do_save_session ();
+	void do_new_session ();
+	void do_save_session_as ();
+	void do_open_session_folder ();
 	void prompt_open_session ();
 	void toggle_recent_menu ();
 	void sync_recent_from_engine ();
@@ -525,8 +537,13 @@ void do_toggle_selection_muted ();
 	void client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const;
 	bool on_mouse_wheel (WPARAM wparam, LPARAM lparam);
 	bool on_mouse_down (LPARAM lparam);
+	bool on_mouse_down_right (LPARAM lparam);
 	bool on_mouse_move (LPARAM lparam);
 	void on_mouse_up ();
+	void apply_menu_command (MenuCommand cmd);
+	bool smoke_ui_layout ();
+	/** Grow to EngineSnapshot::kMeters, verify lane scroll, shrink back. */
+	bool smoke_track_capacity ();
 	float stub_meter_peak (int track, float dt) const;
 	void tick_smoke_record (DWORD now);
 
@@ -535,6 +552,9 @@ void do_toggle_selection_muted ();
 	UINT _height;
 	UINT _dpi;
 	float _dpi_scale;
+	float _mouse_x;
+	float _mouse_y;
+	bool _mouse_tracking;
 	bool _running;
 	DWORD _start_tick;
 	unsigned _timeout_secs;
@@ -543,6 +563,7 @@ void do_toggle_selection_muted ();
 	int _focus_audio_track; /* last mixer/editor label click for rename/reorder */
 	bool _group_pick[kTracksMax]; /* Shift+click candidates for Grp */
 	float _pan_last_x;
+	float _pan_last_y;
 	float _pan_down_x;
 	float _pan_down_y;
 	float _region_move_grab_offset_sec; /* pointer time − region start at grab */
@@ -566,6 +587,8 @@ void do_toggle_selection_muted ();
 	DWORD            _smoke_record_start_ms;
 	bool             _smoke_failed; /* any --smoke-* reported FAILED */
 	bool             _help_visible;
+	int              _help_scroll;
+	int              _help_scroll_max;
 	bool             _prefs_visible;
 	DWORD            _splash_shown_ms; /* 0 = no auto-dismiss timer */
 
@@ -576,6 +599,14 @@ void do_toggle_selection_muted ();
 	D2D1_RECT_F _midi_lane;
 	D2D1_RECT_F _auto_lane_bounds;
 	D2D1_RECT_F _midi_cc_lane_bounds;
+	/* Editor lane scrolling: lanes keep a minimum height and scroll vertically. */
+	float       _editor_scroll_y;
+	float       _editor_scroll_max;
+	float       _editor_lanes_top;
+	float       _editor_lanes_bot;
+	int         _editor_scroll_focus; /* last focused lane auto-scrolled to */
+	D2D1_RECT_F _editor_scrollbar;
+	int         _auto_lane_track; /* focused audio track owning the auto lane */
 	D2D1_RECT_F _mixer_pane;
 	D2D1_RECT_F _mixer_strips_clip; /* strips area left of History (for scroll clip) */
 	float       _mixer_scroll_x; /* px; strips content offset */
@@ -609,11 +640,14 @@ void do_toggle_selection_muted ();
 	IDWriteTextFormat*        _fmt_body;
 	IDWriteTextFormat*        _fmt_meta;
 	IDWriteTextFormat*        _fmt_pane;
+	UiDraw                    _ui;
 
 	float _pulse;
 	EngineHost     _engine;
 	EngineSnapshot _engine_snap;
 	TransportBar   _transport;
+	MenuBar        _menu_bar;
+	D2D1_RECT_F    _menu_bar_bounds;
 	EditorLane     _lanes[kTracks];
 	AutomationLane _auto_lane;
 	AutomationLane _midi_cc_lane;

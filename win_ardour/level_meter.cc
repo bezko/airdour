@@ -105,47 +105,44 @@ LevelMeter::hit_clip_led (float x, float y) const
 }
 
 void
-LevelMeter::draw (ID2D1RenderTarget* rt,
-                  ID2D1SolidColorBrush* fill,
-                  ID2D1SolidColorBrush* edge,
-                  ID2D1SolidColorBrush* hot,
-                  float dpi_scale) const
+LevelMeter::draw (UiDraw& ui) const
 {
-	if (!rt) {
-		return;
-	}
+	const D2D1_RECT_F& b = _bounds;
+	ui.fill_round (b, 2.f, ui::ColorToken::Control);
+	ui.stroke_round (b, 2.f, ui::ColorToken::Border, 1.f, 0.8f);
 
-	rt->FillRectangle (_bounds, edge);
-	rt->DrawRectangle (_bounds, edge, 1.f);
-
-	float h = _bounds.bottom - _bounds.top;
+	float h = b.bottom - b.top - ui.dp (2.f);
 	if (h < 2.f) {
 		return;
 	}
+	const float x0 = b.left + ui.dp (1.f);
+	const float x1 = b.right - ui.dp (1.f);
+	const float bot = b.bottom - ui.dp (1.f);
 
-	float y_level = _bounds.bottom - _level * h;
+	float y_level = bot - _level * h;
 	if (_level > 0.001f) {
-		ID2D1SolidColorBrush* brush = (_level > 0.85f) ? hot : fill;
-		rt->FillRectangle (D2D1::RectF (_bounds.left + 1.f, y_level,
-		                                _bounds.right - 1.f, _bounds.bottom),
-		                   brush);
+		ui.fill_round (D2D1::RectF (x0, y_level, x1, bot), 1.5f,
+		               _level > 0.85f ? ui::ColorToken::MeterHot
+		                              : ui::ColorToken::Peak,
+		               0.95f);
 	}
 
 	/* Peak hold tick — brief latch, distinct from clip LED. */
 	if (_hold > 0.01f) {
-		float y_hold = _bounds.bottom - _hold * h;
-		float thick = std::max (1.5f, 2.f * dpi_scale);
-		ID2D1SolidColorBrush* hold_brush = (_hold >= kClipLinear && hot) ? hot : fill;
-		rt->FillRectangle (D2D1::RectF (_bounds.left, y_hold - thick * 0.5f,
-		                                _bounds.right, y_hold + thick * 0.5f),
-		                   hold_brush ? hold_brush : fill);
+		float y_hold = bot - _hold * h;
+		float thick = std::max (1.5f, 2.f * ui.dpi_scale ());
+		ui.fill_round (D2D1::RectF (x0, y_hold - thick * 0.5f,
+		                             x1, y_hold + thick * 0.5f),
+		               1.f,
+		               _hold >= kClipLinear ? ui::ColorToken::MeterHot
+		                                    : ui::ColorToken::MeterHold,
+		               0.9f);
 	}
 
 	/* Clip LED at meter top when ≥0 dBFS (or PeakMeter max-peak). */
-	if (_clipped && hot) {
-		float led_h = (_led_h > 0.f) ? _led_h : std::max (3.f, 4.f * dpi_scale);
-		rt->FillRectangle (D2D1::RectF (_bounds.left, _bounds.top,
-		                                _bounds.right, _bounds.top + led_h),
-		                   hot);
+	if (_clipped) {
+		float led_h = (_led_h > 0.f) ? _led_h : std::max (3.f, 4.f * ui.dpi_scale ());
+		ui.fill_round (D2D1::RectF (b.left, b.top, b.right, b.top + led_h),
+		               2.f, ui::ColorToken::Clip);
 	}
 }

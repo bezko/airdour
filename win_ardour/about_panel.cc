@@ -53,77 +53,66 @@ AboutPanel::hit_dismiss_about (float x, float y) const
 }
 
 void
-AboutPanel::draw_about (ID2D1RenderTarget* rt,
-                        ID2D1SolidColorBrush* brand,
-                        ID2D1SolidColorBrush* body,
-                        ID2D1SolidColorBrush* accent,
-                        ID2D1SolidColorBrush* pane,
-                        ID2D1SolidColorBrush* edge,
-                        IDWriteTextFormat* fmt_title,
-                        IDWriteTextFormat* fmt_meta,
-                        float dpi_scale) const
+AboutPanel::draw_about (UiDraw& ui) const
 {
-	if (!rt || !_about_visible) {
+	if (!ui.ready () || !_about_visible) {
 		return;
 	}
 
-	pane->SetOpacity (0.78f);
-	D2D1_SIZE_F sz = rt->GetSize ();
-	rt->FillRectangle (D2D1::RectF (0, 0, sz.width, sz.height), pane);
-	pane->SetOpacity (1.f);
+	const float s = ui.dpi_scale ();
+	const D2D1_SIZE_F sz = ui.rt ()->GetSize ();
+	ui.modal_scrim (D2D1::RectF (0.f, 0.f, sz.width, sz.height), 0.62f);
 
-	rt->FillRectangle (_card, pane);
-	rt->DrawRectangle (_card, accent, 1.5f * dpi_scale);
+	const float radius = ui::theme ().metrics.radius_lg;
+	ui.shadow (_card, radius + 2.f);
+	ui.fill_round (_card, radius, ui::ColorToken::Card);
+	ui.stroke_round (_card, radius, ui::ColorToken::BorderStrong, 1.f);
 
-	DWRITE_TEXT_ALIGNMENT ta = fmt_title->GetTextAlignment ();
-	fmt_title->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
-	rt->DrawTextW (L"Airdour", 7, fmt_title,
-	               D2D1::RectF (_card.left + 16.f * dpi_scale, _card.top + 10.f * dpi_scale,
-	                            _close_btn.left - 8.f * dpi_scale, _card.top + 36.f * dpi_scale),
-	               brand);
-	fmt_title->SetTextAlignment (ta);
+	/* Accent tab + wordmark. */
+	const float inset = 18.f * s;
+	ui.fill_round (D2D1::RectF (_card.left + inset, _card.top + 13.f * s,
+	                             _card.left + inset + 3.f * s, _card.top + 33.f * s),
+	                1.5f, ui::ColorToken::Accent);
+	ui.text_vcenter (L"Airdour", ui::TextRole::Title, ui::ColorToken::TextPrimary,
+	                 D2D1::RectF (_card.left + inset + 12.f * s, _card.top,
+	                              _close_btn.left - 8.f * s, _card.top + 44.f * s));
+	ui.divider (D2D1::RectF (_card.left + inset, _card.top + 44.f * s,
+	                          _card.right - inset, _card.top + 44.f * s + std::max (1.f, s)));
 
-	auto draw_btn = [&] (const D2D1_RECT_F& r, const wchar_t* label) {
-		rt->FillRectangle (r, edge);
-		DWRITE_TEXT_ALIGNMENT t = fmt_meta->GetTextAlignment ();
-		DWRITE_PARAGRAPH_ALIGNMENT p = fmt_meta->GetParagraphAlignment ();
-		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-		fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-		rt->DrawTextW (label, (UINT32)wcslen (label), fmt_meta, r, brand);
-		fmt_meta->SetTextAlignment (t);
-		fmt_meta->SetParagraphAlignment (p);
-	};
-	draw_btn (_close_btn, L"Close");
+	UiDraw::ButtonStyle close_st;
+	close_st.label = L"Close";
+	ui.button (_close_btn, close_st);
 
 	wchar_t line[128];
-	float y = _card.top + 48.f * dpi_scale;
-	float x0 = _card.left + 18.f * dpi_scale;
-	float x1 = _card.right - 18.f * dpi_scale;
-	float row = 22.f * dpi_scale;
+	const float row = 21.f * s;
+	const float x0 = _card.left + inset;
+	const float x1 = _card.right - inset;
+	float y = _card.top + 54.f * s;
 
 	_snwprintf_s (line, _TRUNCATE, L"Version  %s", kVersion);
-	rt->DrawTextW (line, (UINT32)wcslen (line), fmt_meta,
-	               D2D1::RectF (x0, y, x1, y + row), body);
+	ui.text_vcenter (line, ui::TextRole::Body, ui::ColorToken::TextSecondary,
+	                 D2D1::RectF (x0, y, x1, y + row));
 	y += row;
 
-	rt->DrawTextW (L"Windows-native shell", 20, fmt_meta,
-	               D2D1::RectF (x0, y, x1, y + row), body);
+	ui.text_vcenter (L"Windows-native shell", ui::TextRole::Body,
+	                 ui::ColorToken::TextSecondary, D2D1::RectF (x0, y, x1, y + row));
 	y += row;
 
-	rt->DrawTextW (L"Audio  ·  WASAPI shared (Dummy for headless)", 44, fmt_meta,
-	               D2D1::RectF (x0, y, x1, y + row), body);
+	ui.text_vcenter (L"Audio  ·  WASAPI shared (Dummy for headless)", ui::TextRole::Body,
+	                 ui::ColorToken::TextSecondary, D2D1::RectF (x0, y, x1, y + row));
 	y += row;
 
-	rt->DrawTextW (L"UI  ·  Win32 + Direct2D / DirectWrite", 37, fmt_meta,
-	               D2D1::RectF (x0, y, x1, y + row), body);
+	ui.text_vcenter (L"UI  ·  Win32 + Direct2D / DirectWrite", ui::TextRole::Body,
+	                 ui::ColorToken::TextSecondary, D2D1::RectF (x0, y, x1, y + row));
 	y += row;
 
-	rt->DrawTextW (L"No GTK", 6, fmt_meta,
-	               D2D1::RectF (x0, y, x1, y + row), accent);
-	y += row * 1.4f;
+	ui.text_vcenter (L"No GTK", ui::TextRole::Body, ui::ColorToken::Accent,
+	                 D2D1::RectF (x0, y, x1, y + row));
+	y += row * 1.45f;
 
-	rt->DrawTextW (L"Brand first. Session on the UI thread; audio on RT.", 50, fmt_meta,
-	               D2D1::RectF (x0, y, x1, y + row), body);
+	ui.text_vcenter (L"Brand first. Session on the UI thread; audio on RT.",
+	                 ui::TextRole::Caption, ui::ColorToken::TextMuted,
+	                 D2D1::RectF (x0, y, x1, y + row));
 }
 
 void

@@ -12,27 +12,32 @@
 #include <cstring>
 #include <string>
 #include <commdlg.h>
+#include <objbase.h>
+#include <shlobj.h>
+#include <shobjidl.h>
+
+#pragma comment(lib, "shell32.lib")
 
 namespace {
 
 constexpr wchar_t kClassName[] = L"AirdourWinShell";
 constexpr wchar_t kWindowTitle[] = L"Airdour";
 
-/* Modern D2D palette — cool slate + mint accent (no purple chrome). */
-constexpr D2D1_COLOR_F kBgTop      = { 0.042f, 0.052f, 0.062f, 1.f };
-constexpr D2D1_COLOR_F kBgBottom   = { 0.072f, 0.095f, 0.112f, 1.f };
-constexpr D2D1_COLOR_F kBrand      = { 0.960f, 0.975f, 0.985f, 1.f };
-constexpr D2D1_COLOR_F kBody       = { 0.720f, 0.800f, 0.840f, 1.f };
-constexpr D2D1_COLOR_F kAccent     = { 0.120f, 0.860f, 0.740f, 1.f };
-constexpr D2D1_COLOR_F kPaneFill   = { 0.058f, 0.078f, 0.092f, 0.94f };
-constexpr D2D1_COLOR_F kPaneEdge   = { 0.140f, 0.190f, 0.220f, 1.f };
-constexpr D2D1_COLOR_F kPeak       = { 0.200f, 0.940f, 0.820f, 1.f };
-constexpr D2D1_COLOR_F kRms        = { 0.100f, 0.380f, 0.360f, 0.88f };
-constexpr D2D1_COLOR_F kPlayhead   = { 0.990f, 0.820f, 0.280f, 1.f };
-constexpr D2D1_COLOR_F kSelection  = { 0.220f, 0.820f, 0.960f, 1.f }; /* brighter cyan marquee */
-constexpr D2D1_COLOR_F kLoop       = { 0.940f, 0.640f, 0.200f, 1.f };
-constexpr D2D1_COLOR_F kPunch      = { 0.920f, 0.340f, 0.280f, 1.f };
-/* Amber vs crimson — high contrast on dark pane (was closer oranges). */
+/* Legacy brush palette — mirrors ui_theme tokens so unconverted panels
+ * inherit the refined-dark-studio colors. */
+const D2D1_COLOR_F kBgTop      = ui::rgb (0x0a0d12);
+const D2D1_COLOR_F kBgBottom   = ui::rgb (0x121821);
+const D2D1_COLOR_F kBrand      = ui::rgb (0xedf3f8);
+const D2D1_COLOR_F kBody       = ui::rgb (0xa7b8c5);
+const D2D1_COLOR_F kAccent     = ui::rgb (0x25d9bc);
+const D2D1_COLOR_F kPaneFill   = ui::rgb (0x11161d, 0.94f);
+const D2D1_COLOR_F kPaneEdge   = ui::rgb (0x27323f);
+const D2D1_COLOR_F kPeak       = ui::rgb (0x35e6c8);
+const D2D1_COLOR_F kRms        = ui::rgb (0x1c7a6e, 0.88f);
+const D2D1_COLOR_F kPlayhead   = ui::rgb (0xffd24a);
+const D2D1_COLOR_F kSelection  = ui::rgb (0x3fc3e8);
+const D2D1_COLOR_F kLoop       = ui::rgb (0xf0a93b);
+const D2D1_COLOR_F kPunch      = ui::rgb (0xe8574a);
 /* Ruler / lane wash opacities (smoke-punch-loop-tint asserts these). */
 constexpr float kLoopRulerTintOp   = 0.52f; /* was 0.35 */
 constexpr float kPunchRulerTintOn  = 0.72f; /* was 0.55 */
@@ -45,9 +50,9 @@ constexpr float kPunchLaneTintOn   = 0.34f; /* was 0.22 */
 constexpr float kPunchLaneTintOff  = 0.12f; /* was 0.16 — idle + hatch */
 constexpr float kPunchInactiveHatchOp = 0.32f; /* soft hatch when disarmed */
 constexpr float kPunchInactiveHatchPx = 6.f;
-constexpr D2D1_COLOR_F kMarker     = { 0.820f, 0.880f, 0.420f, 1.f };
-constexpr D2D1_COLOR_F kMidi       = { 0.320f, 0.780f, 0.920f, 1.f }; /* cyan, not purple */
-constexpr D2D1_COLOR_F kMeterHot   = { 0.96f, 0.38f, 0.24f, 1.f };
+const D2D1_COLOR_F kMarker     = ui::rgb (0xd6e36b);
+const D2D1_COLOR_F kMidi       = ui::rgb (0x46c2e8); /* cyan, not purple */
+const D2D1_COLOR_F kMeterHot   = ui::rgb (0xf26b3a);
 
 #ifndef WM_DPICHANGED
 #define WM_DPICHANGED 0x02E0
@@ -100,7 +105,10 @@ enable_dpi_awareness ()
 	}
 }
 
-bool run_rename_dialog (HWND parent, wchar_t* name, size_t name_chars);
+bool run_text_prompt (HWND parent, const wchar_t* title, wchar_t* name, size_t name_chars);
+bool pick_folder (HWND owner, const wchar_t* title, std::wstring* out);
+std::wstring utf8_to_wstring (const std::string& s);
+std::string wstring_to_utf8 (const std::wstring& s);
 
 } // namespace
 
@@ -110,6 +118,9 @@ ShellWindow::ShellWindow ()
 	, _height (760)
 	, _dpi (96)
 	, _dpi_scale (1.f)
+	, _mouse_x (0.f)
+	, _mouse_y (0.f)
+	, _mouse_tracking (false)
 	, _running (false)
 	, _start_tick (0)
 	, _timeout_secs (0)
@@ -137,6 +148,8 @@ ShellWindow::ShellWindow ()
 	, _smoke_record_start_ms (0)
 	, _smoke_failed (false)
 	, _help_visible (false)
+	, _help_scroll (0)
+	, _help_scroll_max (0)
 	, _prefs_visible (false)
 	, _splash_shown_ms (0)
 	, _brand_bar ()
@@ -146,6 +159,13 @@ ShellWindow::ShellWindow ()
 	, _midi_lane ()
 	, _auto_lane_bounds ()
 	, _midi_cc_lane_bounds ()
+	, _editor_scroll_y (0.f)
+	, _editor_scroll_max (0.f)
+	, _editor_lanes_top (0.f)
+	, _editor_lanes_bot (0.f)
+	, _editor_scroll_focus (-1)
+	, _editor_scrollbar ()
+	, _auto_lane_track (0)
 	, _mixer_pane ()
 	, _mixer_strips_clip ()
 	, _mixer_scroll_x (0.f)
@@ -180,6 +200,7 @@ ShellWindow::ShellWindow ()
 	, _fmt_pane (nullptr)
 	, _pulse (0.f)
 	, _engine_snap ()
+	, _menu_bar_bounds ()
 	, _auto_last_write_sec (-1.f)
 	, _midi_cc_last_write_sec (-1.f)
 	, _auto_lane_kind (0)
@@ -2028,6 +2049,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		}
 		return CairoWaveBlit::smoke_offline ();
 	});
+	run_smoke_check (ok, "new-session", [this]() { return _engine.smoke_new_session (); });
+	run_smoke_check (ok, "save-as", [this]() { return _engine.smoke_save_as (); });
+	run_smoke_check (ok, "open-session", [this]() { return _engine.smoke_open_session (); });
 
 	if (ok && smoke_zoom && engine_session_ok ()) {
 		if (!_engine.smoke_zoom ()) {
@@ -2117,6 +2141,40 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	} else if (smoke_recovery) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-recovery FAILED (no session)\n");
 		_smoke_failed = true;
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("ui-layout")) {
+		if (!smoke_ui_layout ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("track-capacity")) {
+		if (!smoke_track_capacity ()) {
+			_smoke_failed = true;
+		}
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("device")) {
+		if (!_engine.smoke_device ()) {
+			_smoke_failed = true;
+		}
+		_engine.poll ();
+		refresh_engine_snap ();
+		sync_prefs_from_engine ();
+		std::fflush (stderr);
+	}
+
+	if (ok && has_smoke ("latency")) {
+		if (!_engine.smoke_latency ()) {
+			_smoke_failed = true;
+		}
+		_engine.poll ();
+		refresh_engine_snap ();
+		sync_prefs_from_engine ();
 		std::fflush (stderr);
 	}
 
@@ -2525,13 +2583,13 @@ ShellWindow::do_cycle_auto_state ()
 	}
 	switch (_auto_lane_kind) {
 	case 1:
-		_engine.cycle_track_pan_auto_state (0);
+		_engine.cycle_track_pan_auto_state (auto_lane_track ());
 		break;
 	case 2:
-		_engine.cycle_track_send_auto_state (0);
+		_engine.cycle_track_send_auto_state (auto_lane_track ());
 		break;
 	default:
-		_engine.cycle_track_gain_auto_state (0);
+		_engine.cycle_track_gain_auto_state (auto_lane_track ());
 		break;
 	}
 	_engine.poll ();
@@ -2615,7 +2673,7 @@ ShellWindow::write_automation_at (float x, float y)
 		return;
 	}
 	const int track = auto_lane_track ();
-	float time_sec = _lanes[0].strip.time_at_x (_auto_lane_bounds, x);
+	float time_sec = _lanes[track].strip.time_at_x (_auto_lane_bounds, x);
 	float value = _auto_lane.value_at_y (_auto_lane_bounds, y);
 	/* Thin writes while dragging — skip near-duplicate times. */
 	if (_drag == DragMode::AutoWrite && _auto_last_write_sec >= 0.f
@@ -2639,11 +2697,37 @@ ShellWindow::write_automation_at (float x, float y)
 }
 
 void
+ShellWindow::draw_editor_scrollbar ()
+{
+	if (_editor_scrollbar.right <= _editor_scrollbar.left || _editor_scroll_max <= 0.5f) {
+		return;
+	}
+	const float w = _editor_scrollbar.right - _editor_scrollbar.left;
+	const float rad = w * 0.5f / std::max (0.01f, _dpi_scale);
+	_ui.fill_round (_editor_scrollbar, rad, ui::ColorToken::Control, 0.45f);
+	const float view = std::max (1.f, _editor_lanes_bot - _editor_lanes_top);
+	const float content = view + _editor_scroll_max;
+	float thumb_h = view * (view / content);
+	thumb_h = std::max (thumb_h, 24.f * _dpi_scale);
+	if (thumb_h > _editor_scrollbar.bottom - _editor_scrollbar.top) {
+		thumb_h = _editor_scrollbar.bottom - _editor_scrollbar.top;
+	}
+	const float travel = (_editor_scrollbar.bottom - _editor_scrollbar.top) - thumb_h;
+	const float pos = std::max (0.f, std::min (1.f, _editor_scroll_y / _editor_scroll_max));
+	const float top = _editor_scrollbar.top + travel * pos;
+	_ui.fill_round (D2D1::RectF (_editor_scrollbar.left, top,
+	                             _editor_scrollbar.right, top + thumb_h),
+	                rad, ui::ColorToken::Accent, 0.65f);
+}
+
+void
 ShellWindow::draw_automation_lane ()
 {
 	if (_auto_lane_bounds.right <= _auto_lane_bounds.left) {
 		return;
 	}
+	_ui.fill_round (_auto_lane_bounds, 3.f, ui::ColorToken::Surface, 0.42f);
+	_ui.stroke_round (_auto_lane_bounds, 3.f, ui::ColorToken::Border, 1.f, 0.55f);
 	_auto_lane.draw (_rt, _auto_lane_bounds, _brush_accent, _brush_body,
 	                 _brush_pane_edge, _brush_playhead, _fmt_meta, _dpi_scale);
 }
@@ -2794,6 +2878,15 @@ ShellWindow::draw_midi_cc_lane ()
 	if (_midi_cc_lane_bounds.right <= _midi_cc_lane_bounds.left) {
 		return;
 	}
+	_ui.fill_round (_midi_cc_lane_bounds, 3.f, ui::ColorToken::Surface, 0.42f);
+	_ui.stroke_round (_midi_cc_lane_bounds, 3.f, ui::ColorToken::Border, 1.f, 0.55f);
+	const float inset = 12.f * _dpi_scale;
+	_ui.text_vcenter (midi_cc_label (), ui::TextRole::Caption,
+	                  ui::ColorToken::TextSecondary,
+	                  D2D1::RectF (_editor_pane.left + inset, _midi_cc_lane_bounds.top,
+	                               _midi_cc_lane_bounds.left - 4.f * _dpi_scale,
+	                               _midi_cc_lane_bounds.bottom),
+	                  DWRITE_TEXT_ALIGNMENT_TRAILING);
 	_midi_cc_lane.draw (_rt, _midi_cc_lane_bounds, _brush_midi, _brush_body,
 	                    _brush_pane_edge, _brush_playhead, _fmt_meta, _dpi_scale);
 }
@@ -2950,6 +3043,160 @@ ShellWindow::do_save_session ()
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::new_session_at_path (const std::string& path)
+{
+	if (!_engine.is_linked () || path.empty ()) {
+		return;
+	}
+	std::string p = path;
+	while (!p.empty () && (p.back () == '\\' || p.back () == '/')) {
+		p.pop_back ();
+	}
+	const size_t sep = p.find_last_of ("\\/");
+	const std::string parent = (sep == std::string::npos)
+	                           ? std::string (".") : p.substr (0, sep);
+	const std::string name = (sep == std::string::npos) ? p : p.substr (sep + 1);
+
+	const bool ok = _engine.new_session (parent, name);
+	std::fprintf (stderr, "airdour_win_shell: --new-session %s (%s)\n",
+	              ok ? "ok" : "FAILED", path.c_str ());
+	std::fflush (stderr);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_arm_from_engine ();
+	sync_track_labels_from_engine ();
+	sync_recent_from_engine ();
+	layout_panes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::do_new_session ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+
+	std::wstring folder;
+	if (!pick_folder (_hwnd, L"Airdour — choose a folder for the new session", &folder)) {
+		return;
+	}
+	wchar_t name[128] = L"Untitled";
+	if (!run_text_prompt (_hwnd, L"New session — name", name, 128)) {
+		return;
+	}
+
+	const bool ok = _engine.new_session (wstring_to_utf8 (folder),
+	                                     wstring_to_utf8 (std::wstring (name)));
+	std::fprintf (stderr, "airdour_win_shell: new session %s\n", ok ? "ok" : "FAILED");
+	std::fflush (stderr);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_arm_from_engine ();
+	sync_track_labels_from_engine ();
+	sync_recent_from_engine ();
+	layout_panes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+	if (!ok) {
+		MessageBoxW (_hwnd, L"Could not create the session.\n"
+		             L"The session folder must not already exist.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+}
+
+void
+ShellWindow::do_save_session_as ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+	if (!_engine_snap.session_ok) {
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+	}
+	if (!_engine_snap.session_ok) {
+		return;
+	}
+
+	std::wstring folder;
+	if (!pick_folder (_hwnd, L"Save session as — choose a folder", &folder)) {
+		return;
+	}
+
+	wchar_t name[128] = L"Untitled";
+	if (!_engine_snap.session_path.empty ()) {
+		size_t slash = _engine_snap.session_path.find_last_of (L"\\/");
+		std::wstring base = (slash == std::wstring::npos)
+		                    ? _engine_snap.session_path
+		                    : _engine_snap.session_path.substr (slash + 1);
+		wcsncpy_s (name, base.c_str (), _TRUNCATE);
+	}
+	if (!run_text_prompt (_hwnd, L"Save session as — name", name, 128)) {
+		return;
+	}
+
+	const bool ok = _engine.save_session_as (wstring_to_utf8 (folder),
+	                                         wstring_to_utf8 (std::wstring (name)));
+	std::fprintf (stderr, "airdour_win_shell: save as %s\n", ok ? "ok" : "FAILED");
+	std::fflush (stderr);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_arm_from_engine ();
+	sync_track_labels_from_engine ();
+	sync_recent_from_engine ();
+	layout_panes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+	if (!ok) {
+		MessageBoxW (_hwnd, L"Could not save a copy of the session.\n"
+		             L"The destination folder must not already exist.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
+}
+
+void
+ShellWindow::do_open_session_folder ()
+{
+	if (!_engine.is_linked ()) {
+		return;
+	}
+	if (!_engine.start ()) {
+		_engine_snap = _engine.snapshot ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	}
+
+	std::wstring folder;
+	if (!pick_folder (_hwnd, L"Airdour — open session folder", &folder)) {
+		return;
+	}
+
+	const bool ok = _engine.open_session (wstring_to_utf8 (folder));
+	std::fprintf (stderr, "airdour_win_shell: open session folder %s\n", ok ? "ok" : "FAILED");
+	std::fflush (stderr);
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_mixer_arm_from_engine ();
+	sync_track_labels_from_engine ();
+	sync_recent_from_engine ();
+	layout_panes ();
+	InvalidateRect (_hwnd, nullptr, FALSE);
+	if (!ok) {
+		MessageBoxW (_hwnd, L"Could not open that folder as an Airdour session.",
+		             L"Airdour", MB_OK | MB_ICONWARNING);
+	}
 }
 
 void
@@ -3167,10 +3414,23 @@ ShellWindow::apply_recovery_hit (RecoveryHit hit)
 	}
 }
 
+int
+ShellWindow::import_target_track () const
+{
+	/* Import lands on the selected region's track, else the focused lane. */
+	int target = _engine_snap.selection_track;
+	if (target < 0 || target >= n_audio_lanes ()) {
+		target = _focus_audio_track;
+	}
+	if (target < 0 || target >= n_audio_lanes ()) {
+		target = 0;
+	}
+	return target;
+}
+
 void
 ShellWindow::prompt_import_audio ()
-{
-	if (!_engine.is_linked ()) {
+{	if (!_engine.is_linked ()) {
 		return;
 	}
 	if (!_engine.start ()) {
@@ -3194,14 +3454,17 @@ ShellWindow::prompt_import_audio ()
 
 	char utf8[MAX_PATH * 4];
 	WideCharToMultiByte (CP_UTF8, 0, path, -1, utf8, sizeof (utf8), nullptr, nullptr);
-	if (_engine.import_audio_file (0, utf8)) {
-		std::fprintf (stderr, "airdour_win_shell: import dialog ok\n");
+	const int target = import_target_track ();
+	if (_engine.import_audio_file (target, utf8)) {
+		std::fprintf (stderr, "airdour_win_shell: import dialog ok (track %d)\n", target);
 	} else {
 		std::fprintf (stderr, "airdour_win_shell: import dialog failed\n");
 	}
 	std::fflush (stderr);
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
+	apply_region_selection_to_lanes ();
+	refresh_automation_lane ();
 	InvalidateRect (_hwnd, nullptr, FALSE);
 }
 
@@ -3444,7 +3707,7 @@ ShellWindow::do_rename_marker_at_playhead ()
 			break;
 		}
 	}
-	if (!run_rename_dialog (_hwnd, name, 32)) {
+	if (!run_text_prompt (_hwnd, L"Rename marker — Airdour", name, 32)) {
 		return;
 	}
 	char utf8[128];
@@ -3595,7 +3858,7 @@ ShellWindow::do_rename_section_at_playhead ()
 			break;
 		}
 	}
-	if (!run_rename_dialog (_hwnd, name, 32)) {
+	if (!run_text_prompt (_hwnd, L"Rename section — Airdour", name, 32)) {
 		return;
 	}
 	char utf8[128];
@@ -4511,7 +4774,7 @@ ShellWindow::prompt_rename_selected_region ()
 	} else {
 		wcsncpy_s (name, L"Region", _TRUNCATE);
 	}
-	if (!run_rename_dialog (_hwnd, name, EngineSnapshot::kRegionNameLen)) {
+	if (!run_text_prompt (_hwnd, L"Rename region — Airdour", name, EngineSnapshot::kRegionNameLen)) {
 		return;
 	}
 	char utf8[128];
@@ -4836,7 +5099,7 @@ namespace {
 
 struct RenameDlgCtx {
 	HWND    edit;
-	wchar_t name[32];
+	wchar_t name[128];
 	bool    done;
 	bool    ok;
 };
@@ -4869,7 +5132,7 @@ rename_wnd_proc (HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 	}
 	case WM_COMMAND:
 		if (LOWORD (wparam) == IDOK && ctx) {
-			GetWindowTextW (ctx->edit, ctx->name, 32);
+			GetWindowTextW (ctx->edit, ctx->name, 128);
 			ctx->ok = (ctx->name[0] != L'\0');
 			ctx->done = true;
 			DestroyWindow (hwnd);
@@ -4896,7 +5159,7 @@ rename_wnd_proc (HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 }
 
 bool
-run_rename_dialog (HWND parent, wchar_t* name, size_t name_chars)
+run_text_prompt (HWND parent, const wchar_t* title, wchar_t* name, size_t name_chars)
 {
 	if (!name || name_chars < 2) {
 		return false;
@@ -4930,7 +5193,7 @@ run_rename_dialog (HWND parent, wchar_t* name, size_t name_chars)
 	int wx = pr.left + 80;
 	int wy = pr.top + 120;
 	HWND dlg = CreateWindowExW (
-		WS_EX_DLGMODALFRAME, kCls, L"Rename track — Airdour",
+		WS_EX_DLGMODALFRAME, kCls, title ? title : L"Airdour",
 		WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
 		wx, wy, 300, 120, parent, nullptr, inst, &ctx);
 	if (!dlg) {
@@ -4955,6 +5218,85 @@ run_rename_dialog (HWND parent, wchar_t* name, size_t name_chars)
 	}
 	wcsncpy_s (name, name_chars, ctx.name, _TRUNCATE);
 	return name[0] != L'\0';
+}
+
+/* Folder picker: modern IFileOpenDialog, classic SHBrowseForFolder fallback. */
+bool
+pick_folder (HWND owner, const wchar_t* title, std::wstring* out)
+{
+	if (!out) {
+		return false;
+	}
+	IFileOpenDialog* dlg = nullptr;
+	HRESULT hr = CoCreateInstance (CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
+	                               IID_PPV_ARGS (&dlg));
+	if (FAILED (hr) || !dlg) {
+		BROWSEINFOW bi = {};
+		bi.hwndOwner = owner;
+		bi.lpszTitle = title;
+		bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+		LPITEMIDLIST pidl = SHBrowseForFolderW (&bi);
+		if (!pidl) {
+			return false;
+		}
+		wchar_t path[MAX_PATH] = {};
+		const bool ok = SHGetPathFromIDListW (pidl, path) != FALSE;
+		CoTaskMemFree (pidl);
+		if (ok) {
+			*out = path;
+		}
+		return ok;
+	}
+
+	DWORD opts = 0;
+	dlg->GetOptions (&opts);
+	dlg->SetOptions (opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+	dlg->SetTitle (title);
+	bool ok = false;
+	if (SUCCEEDED (dlg->Show (owner))) {
+		IShellItem* item = nullptr;
+		if (SUCCEEDED (dlg->GetResult (&item)) && item) {
+			PWSTR psz = nullptr;
+			if (SUCCEEDED (item->GetDisplayName (SIGDN_FILESYSPATH, &psz)) && psz) {
+				*out = psz;
+				CoTaskMemFree (psz);
+				ok = true;
+			}
+			item->Release ();
+		}
+	}
+	dlg->Release ();
+	return ok;
+}
+
+std::wstring
+utf8_to_wstring (const std::string& s)
+{
+	if (s.empty ()) {
+		return std::wstring ();
+	}
+	const int n = MultiByteToWideChar (CP_UTF8, 0, s.c_str (), (int)s.size (), nullptr, 0);
+	if (n <= 0) {
+		return std::wstring ();
+	}
+	std::wstring out ((size_t)n, L'\0');
+	MultiByteToWideChar (CP_UTF8, 0, s.c_str (), (int)s.size (), &out[0], n);
+	return out;
+}
+
+std::string
+wstring_to_utf8 (const std::wstring& s)
+{
+	if (s.empty ()) {
+		return std::string ();
+	}
+	const int n = WideCharToMultiByte (CP_UTF8, 0, s.c_str (), (int)s.size (), nullptr, 0, nullptr, nullptr);
+	if (n <= 0) {
+		return std::string ();
+	}
+	std::string out ((size_t)n, '\0');
+	WideCharToMultiByte (CP_UTF8, 0, s.c_str (), (int)s.size (), &out[0], n, nullptr, nullptr);
+	return out;
 }
 
 } // namespace
@@ -4982,7 +5324,7 @@ ShellWindow::prompt_rename_track (int audio_index, bool midi)
 			_snwprintf_s (name, _TRUNCATE, L"Audio %d", audio_index + 1);
 		}
 	}
-	if (!run_rename_dialog (_hwnd, name, 32)) {
+	if (!run_text_prompt (_hwnd, L"Rename track — Airdour", name, 32)) {
 		return;
 	}
 	char utf8[128];
@@ -7095,6 +7437,7 @@ ShellWindow::init_d2d ()
 void
 ShellWindow::discard_device_resources ()
 {
+	_ui.detach ();
 	if (_brush_bg) { _brush_bg->Release (); _brush_bg = nullptr; }
 	if (_brush_meter_hot) { _brush_meter_hot->Release (); _brush_meter_hot = nullptr; }
 	if (_brush_midi) { _brush_midi->Release (); _brush_midi = nullptr; }
@@ -7139,6 +7482,12 @@ ShellWindow::ensure_device_resources ()
 		return false;
 	}
 
+	if (!_ui.attach (_rt, _dwrite_factory, _dpi_scale)) {
+		_rt->Release ();
+		_rt = nullptr;
+		return false;
+	}
+
 	_rt->CreateSolidColorBrush (kBrand, &_brush_brand);
 	_rt->CreateSolidColorBrush (kBody, &_brush_body);
 	_rt->CreateSolidColorBrush (kAccent, &_brush_accent);
@@ -7180,18 +7529,23 @@ ShellWindow::layout_panes ()
 {
 	const float w = (float)_width;
 	const float h = (float)_height;
-	const float pad = 16.f * _dpi_scale;
-	const float brand_h = 60.f * _dpi_scale;
-	const float transport_h = 48.f * _dpi_scale;
-	const float status_h = 36.f * _dpi_scale;
-	const float gap = 14.f * _dpi_scale;
+	const ui::Theme& th = ui::theme ();
+	const float pad = 20.f * _dpi_scale;
+	const float brand_h = th.metrics.brand_h * _dpi_scale;
+	const float menu_h = 30.f * _dpi_scale;
+	const float transport_h = th.metrics.transport_h * _dpi_scale;
+	const float status_h = th.metrics.status_h * _dpi_scale;
+	const float gap = 16.f * _dpi_scale;
 
 	_brand_bar = D2D1::RectF (0, 0, w, brand_h);
-	_transport_bounds = D2D1::RectF (0, brand_h, w, brand_h + transport_h);
-	_transport.layout (_transport_bounds, _dpi_scale);
+	_menu_bar_bounds = D2D1::RectF (0, brand_h, w, brand_h + menu_h);
+	_menu_bar.layout (_menu_bar_bounds, _dpi_scale);
+	_transport_bounds = D2D1::RectF (0, _menu_bar_bounds.bottom, w,
+	                                 _menu_bar_bounds.bottom + transport_h);
+	_transport.layout (_transport_bounds, _dpi_scale, (float)_height);
 	_status_bar = D2D1::RectF (0, h - status_h, w, h);
 
-	float body_top = brand_h + transport_h + pad;
+	float body_top = _menu_bar_bounds.bottom + transport_h + pad;
 	float body_bot = h - status_h - pad;
 	float left = pad;
 	float right = w - pad;
@@ -7221,24 +7575,55 @@ ShellWindow::layout_panes ()
 	                  - midi_cc_h - lane_gap
 	                  - (meter_h > 0.f ? (meter_h + lane_gap) : 0.f);
 	const int n_lanes = std::max (1, n_audio_lanes ());
-	float lane_h = (lanes_bot - lanes_top - lane_gap * (float)(n_lanes - 1)) / (float)n_lanes;
+	const float avail_h = std::max (1.f, lanes_bot - lanes_top);
+	/* Lane height: stretch to fill the viewport up to 76dp. When there are
+	 * more lanes than ~8 fit, hold a readable floor and scroll instead.
+	 * The floor is capped so the default 6-track view still fits at 720p. */
+	const float min_lane_h = std::max (28.f * _dpi_scale,
+	                                   std::min (76.f * _dpi_scale, avail_h / 9.f));
+	_editor_lanes_top = lanes_top;
+	_editor_lanes_bot = lanes_top + avail_h;
+	const float fit_lane_h = (avail_h - lane_gap * (float)(n_lanes - 1)) / (float)n_lanes;
+	const float lane_h = std::max (min_lane_h, fit_lane_h);
+	const float content_h = lane_h * (float)n_lanes + lane_gap * (float)(n_lanes - 1);
+	_editor_scroll_max = std::max (0.f, content_h - avail_h);
+	_auto_lane_track = auto_lane_track ();
+	if (_editor_scroll_focus != _focus_audio_track) {
+		/* Focus changed (click / add / move): bring that lane into view. */
+		_editor_scroll_focus = _focus_audio_track;
+		const float ft = (float)std::max (0, std::min (_focus_audio_track, n_lanes - 1))
+		                 * (lane_h + lane_gap);
+		if (ft < _editor_scroll_y) {
+			_editor_scroll_y = ft;
+		} else if (ft + lane_h > _editor_scroll_y + avail_h) {
+			_editor_scroll_y = ft + lane_h - avail_h;
+		}
+	}
+	_editor_scroll_y = std::max (0.f, std::min (_editor_scroll_max, _editor_scroll_y));
+	_editor_scrollbar = D2D1::RectF ();
+	if (_editor_scroll_max > 0.5f) {
+		_editor_scrollbar = D2D1::RectF (_editor_pane.right - 9.f * _dpi_scale, lanes_top,
+		                                 _editor_pane.right - 4.f * _dpi_scale,
+		                                 _editor_lanes_bot);
+	}
 
 	for (int i = 0; i < kTracksMax; ++i) {
 		_lanes[i].bounds = D2D1::RectF ();
 	}
 	_auto_lane_bounds = D2D1::RectF ();
 	_midi_cc_lane_bounds = D2D1::RectF ();
+	const float lanes_y0 = lanes_top - _editor_scroll_y;
 	for (int i = 0; i < n_lanes; ++i) {
-		float y0 = lanes_top + (float)i * (lane_h + lane_gap);
-		if (i == 0) {
-			/* Split Audio 1: waveform on top, gain automation underneath. */
-			float auto_h = std::max (36.f * _dpi_scale, lane_h * 0.32f);
+		float y0 = lanes_y0 + (float)i * (lane_h + lane_gap);
+		if (i == _auto_lane_track) {
+			/* Focused lane: waveform on top, gain/pan/send automation underneath. */
+			float auto_h = std::max (30.f * _dpi_scale, lane_h * 0.30f);
 			float wave_h = lane_h - auto_h - 3.f * _dpi_scale;
 			if (wave_h < 28.f * _dpi_scale) {
-				wave_h = lane_h * 0.62f;
+				wave_h = lane_h * 0.64f;
 				auto_h = lane_h - wave_h - 3.f * _dpi_scale;
 			}
-			_lanes[0].bounds = D2D1::RectF (wave_left, y0, wave_right, y0 + wave_h);
+			_lanes[i].bounds = D2D1::RectF (wave_left, y0, wave_right, y0 + wave_h);
 			_auto_lane_bounds = D2D1::RectF (
 				wave_left, y0 + wave_h + 3.f * _dpi_scale, wave_right, y0 + lane_h);
 		} else {
@@ -7454,8 +7839,50 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_cycle_vst3_insert (wparam == VK_OEM_PERIOD ? 1 : -1);
 			return 0;
 		}
+		if (_help_visible) {
+			if (wparam == VK_ESCAPE || wparam == VK_F1 || wparam == VK_RETURN
+			    || ((wparam == VK_OEM_2) && (GetKeyState (VK_SHIFT) & 0x8000))) {
+				_help_visible = false;
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return 0;
+			}
+			const int page = 10;
+			int target = _help_scroll;
+			bool nav = true;
+			switch (wparam) {
+			case VK_PRIOR: case VK_UP:   target -= page; break;
+			case VK_NEXT:  case VK_DOWN: target += page; break;
+			case VK_HOME:  target = 0; break;
+			case VK_END:   target = _help_scroll_max; break;
+			default: nav = false; break;
+			}
+			if (nav && _help_scroll_max > 0) {
+				_help_scroll = std::max (0, std::min (_help_scroll_max, target));
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return 0;
+			}
+		}
+		/* File lifecycle shortcuts run before the long feature chain. */
+		if ((GetKeyState (VK_CONTROL) & 0x8000) && !(GetKeyState (VK_MENU) & 0x8000)) {
+			const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
+			if (!shift && (wparam == 'N' || wparam == 'n')) {
+				do_new_session ();
+				return 0;
+			}
+			if (shift && (wparam == 'S' || wparam == 's')) {
+				do_save_session_as ();
+				return 0;
+			}
+			if (!shift && (wparam == 'O' || wparam == 'o')) {
+				do_open_session_folder ();
+				return 0;
+			}
+		}
 		if (wparam == VK_ESCAPE) {
-			if (_engine_snap.has_selection) {
+			if (_transport.overflow_open ()) {
+				_transport.set_overflow_open (false);
+				InvalidateRect (_hwnd, nullptr, FALSE);
+			} else if (_engine_snap.has_selection) {
 				/* Esc = clear region selection (quit via second Esc). */
 				do_clear_selection ();
 			} else if (_recent.visible ()) {
@@ -7472,7 +7899,7 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				_help_visible = false;
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			} else {
-				PostQuitMessage (0);
+				/* Esc no longer quits — Alt+F4 / the close button do. */
 			}
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
 		           && (wparam == 'O' || wparam == 'o')
@@ -8149,7 +8576,7 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			do_nudge_tempo (1.f);
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'O' || wparam == 'o')
 		           && !(GetKeyState (VK_SHIFT) & 0x8000)) {
-			prompt_open_session (); /* Ctrl+O browse; Ctrl+Shift+O = recent menu */
+			do_open_session_folder (); /* Ctrl+O folder; Ctrl+Shift+O = recent menu */
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000) && (wparam == 'E' || wparam == 'e')) {
 			prompt_export_wav ();
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
@@ -8330,6 +8757,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			return 0;
 		}
 		break;
+	case WM_RBUTTONDOWN:
+		if (on_mouse_down_right (lparam)) {
+			return 0;
+		}
+		break;
 	case WM_LBUTTONDBLCLK: {
 		float x, y;
 		client_from_lparam (lparam, &x, &y);
@@ -8464,6 +8896,12 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			return 0;
 		}
 		break;
+	case WM_MOUSELEAVE:
+		_mouse_tracking = false;
+		if (_transport.clear_hover ()) {
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+		return 0;
 	case WM_LBUTTONUP:
 	case WM_CAPTURECHANGED:
 		on_mouse_up ();
@@ -8632,6 +9070,9 @@ ShellWindow::midi_time_at_x (float x) const
 int
 ShellWindow::hit_editor_lane (float x, float y) const
 {
+	if (y < _editor_lanes_top || y > _editor_lanes_bot) {
+		return -1;
+	}
 	const int n = n_audio_lanes ();
 	for (int i = 0; i < n; ++i) {
 		const D2D1_RECT_F& r = _lanes[i].bounds;
@@ -8765,6 +9206,9 @@ ShellWindow::hit_mixer_label (float x, float y) const
 int
 ShellWindow::hit_editor_lane_label (float x, float y) const
 {
+	if (y < _editor_lanes_top || y > _editor_lanes_bot) {
+		return -1;
+	}
 	const int n = n_audio_lanes ();
 	float inset = 12.f * _dpi_scale;
 	for (int i = 0; i < n; ++i) {
@@ -8773,7 +9217,7 @@ ShellWindow::hit_editor_lane_label (float x, float y) const
 			continue;
 		}
 		float label_bot = lb.bottom;
-		if (i == 0 && _auto_lane_bounds.bottom > label_bot) {
+		if (i == _auto_lane_track && _auto_lane_bounds.bottom > label_bot) {
 			label_bot = _auto_lane_bounds.bottom;
 		}
 		D2D1_RECT_F label_rc = D2D1::RectF (
@@ -8843,6 +9287,17 @@ ShellWindow::on_mouse_wheel (WPARAM wparam, LPARAM lparam)
 	ScreenToClient (_hwnd, &pt);
 	float x = (float)pt.x;
 	float y = (float)pt.y;
+	/* Modal help owns the wheel while open (never zoom the hidden editor). */
+	if (_help_visible) {
+		const int delta = GET_WHEEL_DELTA_WPARAM (wparam);
+		if (delta != 0 && _help_scroll_max > 0) {
+			const int step = (GetKeyState (VK_SHIFT) & 0x8000) ? 9 : 3;
+			_help_scroll += (delta > 0) ? -step : step;
+			_help_scroll = std::max (0, std::min (_help_scroll_max, _help_scroll));
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+		return true;
+	}
 	/* Wheel over mixer strip area → horizontal strip scroll when overflowing. */
 	if (x >= _mixer_strips_clip.left && x <= _mixer_strips_clip.right
 	    && y >= _mixer_strips_clip.top && y <= _mixer_strips_clip.bottom
@@ -8855,6 +9310,25 @@ ShellWindow::on_mouse_wheel (WPARAM wparam, LPARAM lparam)
 		do_scroll_mixer ((delta > 0) ? -step : step);
 		return true;
 	}
+	int delta = GET_WHEEL_DELTA_WPARAM (wparam);
+	/* Wheel over the lane scrollbar → vertical scroll (no Alt needed). The
+	 * scrollbar sits outside the waveform, so it must be tested before the
+	 * editor hit-test gate below. */
+	if (_editor_scroll_max > 0.5f
+	    && y >= _editor_lanes_top && y <= _editor_lanes_bot
+	    && x >= _editor_scrollbar.left - _ui.dp (4.f)
+	    && x <= _editor_scrollbar.right + _ui.dp (4.f)) {
+		float step = 48.f * _dpi_scale;
+		if (GetKeyState (VK_CONTROL) & 0x8000) {
+			step *= 2.f;
+		}
+		_editor_scroll_y += (delta > 0) ? -step : step;
+		_editor_scroll_y = std::max (0.f, std::min (_editor_scroll_max, _editor_scroll_y));
+		_editor_scroll_focus = _focus_audio_track;
+		layout_panes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
 	int lane = hit_editor_lane (x, y);
 	bool over_editor = (lane >= 0) || hit_editor_ruler (x, y) || hit_midi_lane (x, y)
 	                   || _midi_cc_lane.hit (_midi_cc_lane_bounds, x, y);
@@ -8865,7 +9339,19 @@ ShellWindow::on_mouse_wheel (WPARAM wparam, LPARAM lparam)
 		lane = 0;
 	}
 
-	int delta = GET_WHEEL_DELTA_WPARAM (wparam);
+	/* Alt+wheel → vertical lane scroll. */
+	if (_editor_scroll_max > 0.5f && (GetKeyState (VK_MENU) & 0x8000)) {
+		float step = 48.f * _dpi_scale;
+		if (GetKeyState (VK_CONTROL) & 0x8000) {
+			step *= 2.f;
+		}
+		_editor_scroll_y += (delta > 0) ? -step : step;
+		_editor_scroll_y = std::max (0.f, std::min (_editor_scroll_max, _editor_scroll_y));
+		_editor_scroll_focus = _focus_audio_track;
+		layout_panes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
 	/* Shift+wheel → horizontal scroll (keep zoom / snap / playhead). */
 	if (GetKeyState (VK_SHIFT) & 0x8000) {
 		float widths = (delta > 0) ? -0.12f : 0.12f;
@@ -8940,6 +9426,40 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		return true;
 	}
 
+	if (_menu_bar.open ()) {
+		const MenuCommand mc = _menu_bar.item_at (x, y);
+		const int over_title = _menu_bar.menu_at (x, y);
+		if (mc != MenuCommand::None) {
+			_menu_bar.close ();
+			apply_menu_command (mc);
+		} else if (over_title >= 0) {
+			if (over_title == 5) {
+				_menu_bar.close ();
+				toggle_help ();
+			} else {
+				_menu_bar.toggle_menu (over_title);
+			}
+		} else if (_menu_bar.overlay_contains (x, y)) {
+			/* Separator or padding: consume without an action. */
+			_menu_bar.close ();
+		} else {
+			_menu_bar.close ();
+		}
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+	{
+		const int mi = _menu_bar.menu_at (x, y);
+		if (mi >= 0) {
+			if (mi == 5) {
+				toggle_help ();
+			} else {
+				_menu_bar.toggle_menu (mi);
+			}
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
+	}
 	if (hit_status_vst3_bypass (x, y)) {
 		if (_engine.is_linked ()) {
 			(void)_engine.toggle_vst3_bypass ();
@@ -8982,6 +9502,25 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	}
 
 	TransportHit th = _transport.hit_test (x, y);
+	if (_transport.overflow_open ()) {
+		if (th == TransportHit::Overflow) {
+			_transport.set_overflow_open (false);
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
+		_transport.set_overflow_open (false);
+		if (th == TransportHit::None) {
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
+	} else if (th == TransportHit::Overflow) {
+		_transport.set_overflow_open (true);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+	if (th != TransportHit::None) {
+		_transport.set_pressed (th);
+	}
 	if (th == TransportHit::Help) {
 		toggle_help ();
 		return true;
@@ -9352,6 +9891,31 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	if (mh == MonitorHit::MasterLim) {
 		do_toggle_master_fx ();
+		return true;
+	}
+
+	if (_editor_scroll_max > 0.5f
+	    && x >= _editor_scrollbar.left - _ui.dp (3.f)
+	    && x <= _editor_scrollbar.right + _ui.dp (3.f)
+	    && y >= _editor_scrollbar.top && y <= _editor_scrollbar.bottom) {
+		const float track_h = _editor_scrollbar.bottom - _editor_scrollbar.top;
+		const float view = std::max (1.f, _editor_lanes_bot - _editor_lanes_top);
+		float thumb_h = std::max (24.f * _dpi_scale,
+		                          view * (view / (view + _editor_scroll_max)));
+		thumb_h = std::min (thumb_h, track_h);
+		const float travel = std::max (1.f, track_h - thumb_h);
+		const float norm = std::max (0.f, std::min (1.f,
+		                          (y - _editor_scrollbar.top - thumb_h * 0.5f) / travel));
+		_editor_scroll_y = norm * _editor_scroll_max;
+		_editor_scroll_focus = _focus_audio_track;
+		_drag = DragMode::EditorScroll;
+		_drag_index = -1;
+		_pan_down_y = y;
+		_pan_last_y = y;
+		SetCapture (_hwnd);
+		SetCursor (LoadCursorW (nullptr, IDC_SIZENS));
+		layout_panes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
 		return true;
 	}
 
@@ -10042,14 +10606,14 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			return true;
 		}
 		_drag = DragMode::AutoWrite;
-		_drag_index = 0;
+		_drag_index = auto_lane_track ();
 		_auto_last_write_sec = -1.f;
 		if (_auto_lane_kind == 1) {
-			_engine.ensure_track_pan_automation (0);
+			_engine.ensure_track_pan_automation (_drag_index);
 		} else if (_auto_lane_kind == 2) {
-			_engine.ensure_track_send_automation (0);
+			_engine.ensure_track_send_automation (_drag_index);
 		} else {
-			_engine.ensure_track_gain_automation (0);
+			_engine.ensure_track_gain_automation (_drag_index);
 		}
 		write_automation_at (x, y);
 		SetCapture (_hwnd);
@@ -10171,11 +10735,50 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 bool
 ShellWindow::on_mouse_move (LPARAM lparam)
 {
+	float x, y;
+	client_from_lparam (lparam, &x, &y);
+	_mouse_x = x;
+	_mouse_y = y;
+	if (!_mouse_tracking) {
+		TRACKMOUSEEVENT tme = { sizeof (TRACKMOUSEEVENT), TME_LEAVE, _hwnd, 0 };
+		if (TrackMouseEvent (&tme)) {
+			_mouse_tracking = true;
+		}
+	}
+	if (_transport.update_hover (x, y)) {
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+
+	if (_menu_bar.open ()) {
+		_menu_bar.set_hover (x, y);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+	if (y < _menu_bar_bounds.bottom && _menu_bar.menu_at (x, y) >= 0) {
+		_menu_bar.set_hover (x, y);
+		InvalidateRect (_hwnd, nullptr, FALSE);
+	}
+
 	if (_drag == DragMode::None) {
 		return false;
 	}
-	float x, y;
-	client_from_lparam (lparam, &x, &y);
+
+	if (_drag == DragMode::EditorScroll) {
+		const float track_h = _editor_scrollbar.bottom - _editor_scrollbar.top;
+		const float view = std::max (1.f, _editor_lanes_bot - _editor_lanes_top);
+		float thumb_h = std::max (24.f * _dpi_scale,
+		                          view * (view / (view + _editor_scroll_max)));
+		thumb_h = std::min (thumb_h, track_h);
+		const float travel = std::max (1.f, track_h - thumb_h);
+		const float dy = y - _pan_last_y;
+		_editor_scroll_y += dy * (_editor_scroll_max / travel);
+		_editor_scroll_y = std::max (0.f, std::min (_editor_scroll_max, _editor_scroll_y));
+		_editor_scroll_focus = _focus_audio_track;
+		_pan_last_y = y;
+		layout_panes ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
 
 	if (_drag == DragMode::Fader && _drag_index >= 0 && _drag_index < n_mixer_strips ()) {
 		if (_mixers[_drag_index].drag_to (y)) {
@@ -10554,6 +11157,7 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 void
 ShellWindow::on_mouse_up ()
 {
+	_transport.clear_pressed ();
 	if (_drag == DragMode::MidiDraw && _engine.is_linked () && _engine_snap.session_ok) {
 		float end_sec = midi_time_at_x (_pan_last_x);
 		float start = _midi_draw_start_sec;
@@ -10696,6 +11300,7 @@ ShellWindow::on_dpi_changed (UINT dpi, const RECT* suggested)
 {
 	_dpi = dpi ? dpi : 96;
 	_dpi_scale = (float)_dpi / 96.f;
+	_ui.rebuild_text_formats (_dpi_scale);
 	if (suggested) {
 		SetWindowPos (_hwnd, nullptr,
 		              suggested->left, suggested->top,
@@ -10903,96 +11508,141 @@ ShellWindow::draw_editor_ruler ()
 	if (rr.right <= rr.left) {
 		return;
 	}
-	_rt->FillRectangle (rr, _brush_pane_edge);
-	_rt->DrawRectangle (rr, _brush_body, 1.f);
+	_ui.fill_round (rr, 4.f, ui::ColorToken::Control, 0.34f);
 
 	float view0 = _lanes[0].strip.view_start_sec ();
 	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
 	float w = rr.right - rr.left;
+	const float hair = std::max (1.f, _dpi_scale);
 
-	if (_engine_snap.loop_active && _brush_loop) {
-		float n0 = (_engine_snap.loop_start_sec - view0) / span;
-		float n1 = (_engine_snap.loop_end_sec - view0) / span;
-		n0 = std::max (0.f, std::min (1.f, n0));
-		n1 = std::max (0.f, std::min (1.f, n1));
-		if (n1 > n0) {
-			_brush_loop->SetOpacity (kLoopRulerTintOp);
-			_rt->FillRectangle (
-				D2D1::RectF (rr.left + n0 * w, rr.top, rr.left + n1 * w, rr.bottom),
-				_brush_loop);
-			_brush_loop->SetOpacity (1.f);
+	auto nx = [&] (float t) {
+		return rr.left + std::max (0.f, std::min (1.f, (t - view0) / span)) * w;
+	};
+	auto in_view = [&] (float t) {
+		return t >= view0 && t <= view0 + span;
+	};
+
+	/* Loop / punch range ribbons. */
+	if (_engine_snap.loop_active) {
+		float x0 = nx (_engine_snap.loop_start_sec);
+		float x1 = nx (_engine_snap.loop_end_sec);
+		if (x1 > x0) {
+			_ui.fill_round (D2D1::RectF (x0, rr.top + 2.f * _dpi_scale,
+			                             x1, rr.bottom - 1.f * _dpi_scale),
+			                2.f, ui::ColorToken::Loop, kLoopRulerTintOp);
+			_ui.fill_round (D2D1::RectF (x0, rr.top + 2.f * _dpi_scale,
+			                             x1, rr.top + 2.f * _dpi_scale + hair),
+			                0.f, ui::ColorToken::Loop, 0.85f);
 		}
 	}
-
-	if (_engine_snap.punch_range_ok && _brush_punch) {
-		float n0 = (_engine_snap.punch_start_sec - view0) / span;
-		float n1 = (_engine_snap.punch_end_sec - view0) / span;
-		n0 = std::max (0.f, std::min (1.f, n0));
-		n1 = std::max (0.f, std::min (1.f, n1));
-		if (n1 > n0) {
+	if (_engine_snap.punch_range_ok) {
+		float x0 = nx (_engine_snap.punch_start_sec);
+		float x1 = nx (_engine_snap.punch_end_sec);
+		if (x1 > x0) {
 			float op = _engine_snap.punch_enabled ? kPunchRulerTintOn : kPunchRulerTintOff;
-			_brush_punch->SetOpacity (op);
-			_rt->FillRectangle (
-				D2D1::RectF (rr.left + n0 * w, rr.top, rr.left + n1 * w, rr.bottom),
-				_brush_punch);
-			_brush_punch->SetOpacity (1.f);
+			_ui.fill_round (D2D1::RectF (x0, rr.top + 2.f * _dpi_scale,
+			                             x1, rr.bottom - 1.f * _dpi_scale),
+			                2.f, ui::ColorToken::Punch, op);
+			_ui.fill_round (D2D1::RectF (x0, rr.bottom - 1.f * _dpi_scale - hair,
+			                             x1, rr.bottom - 1.f * _dpi_scale),
+			                0.f, ui::ColorToken::Punch, 0.85f);
 		}
 	}
 
 	/* Edge tick caps + In/Out captions so washes are scannable. */
 	{
 		D2D1_RECT_F tr;
-		if (loop_punch_edge_tick_rect (true, true, &tr) && _brush_loop) {
-			_rt->FillRectangle (tr, _brush_loop);
+		if (loop_punch_edge_tick_rect (true, true, &tr)) {
+			_ui.fill_round (tr, 0.f, ui::ColorToken::Loop, 0.95f);
 		}
-		if (loop_punch_edge_tick_rect (true, false, &tr) && _brush_loop) {
-			_rt->FillRectangle (tr, _brush_loop);
+		if (loop_punch_edge_tick_rect (true, false, &tr)) {
+			_ui.fill_round (tr, 0.f, ui::ColorToken::Loop, 0.95f);
 		}
-		if (loop_punch_edge_tick_rect (false, true, &tr) && _brush_punch) {
-			_rt->FillRectangle (tr, _brush_punch);
+		if (loop_punch_edge_tick_rect (false, true, &tr)) {
+			_ui.fill_round (tr, 0.f, ui::ColorToken::Punch, 0.95f);
 		}
-		if (loop_punch_edge_tick_rect (false, false, &tr) && _brush_punch) {
-			_rt->FillRectangle (tr, _brush_punch);
+		if (loop_punch_edge_tick_rect (false, false, &tr)) {
+			_ui.fill_round (tr, 0.f, ui::ColorToken::Punch, 0.95f);
 		}
 		D2D1_RECT_F lr;
-		if (loop_punch_edge_label_rect (true, true, &lr) && _brush_loop && _fmt_meta) {
-			_rt->DrawTextW (L"In", 2, _fmt_meta, lr, _brush_loop);
+		if (loop_punch_edge_label_rect (true, true, &lr)) {
+			_ui.text_vcenter (L"In", ui::TextRole::Caption, ui::ColorToken::Loop, lr);
 		}
-		if (loop_punch_edge_label_rect (true, false, &lr) && _brush_loop && _fmt_meta) {
-			_rt->DrawTextW (L"Out", 3, _fmt_meta, lr, _brush_loop);
+		if (loop_punch_edge_label_rect (true, false, &lr)) {
+			_ui.text_vcenter (L"Out", ui::TextRole::Caption, ui::ColorToken::Loop, lr);
 		}
-		if (loop_punch_edge_label_rect (false, true, &lr) && _brush_punch && _fmt_meta) {
-			_rt->DrawTextW (L"In", 2, _fmt_meta, lr, _brush_punch);
+		if (loop_punch_edge_label_rect (false, true, &lr)) {
+			_ui.text_vcenter (L"In", ui::TextRole::Caption, ui::ColorToken::Punch, lr);
 		}
-		if (loop_punch_edge_label_rect (false, false, &lr) && _brush_punch && _fmt_meta) {
-			_rt->DrawTextW (L"Out", 3, _fmt_meta, lr, _brush_punch);
+		if (loop_punch_edge_label_rect (false, false, &lr)) {
+			_ui.text_vcenter (L"Out", ui::TextRole::Caption, ui::ColorToken::Punch, lr);
 		}
 	}
 
-	for (int i = 0; i < _engine_snap.marker_count; ++i) {
-		float n = (_engine_snap.markers[i].sec - view0) / span;
-		if (n < 0.f || n > 1.f) {
+	/* Adaptive time ticks: pick the first step that leaves room for labels. */
+	static const float kSteps[] = { 0.25f, 0.5f, 1.f, 2.f, 5.f, 10.f, 15.f,
+	                                30.f, 60.f, 120.f, 300.f, 600.f };
+	const float ppsec = w / span;
+	float step = 600.f;
+	for (float s : kSteps) {
+		if (s * ppsec >= 62.f * _dpi_scale) {
+			step = s;
+			break;
+		}
+	}
+	const float t_end = view0 + span;
+	float t = std::floor (view0 / step) * step;
+	for (; t <= t_end + step * 0.5f; t += step) {
+		if (!in_view (t)) {
 			continue;
 		}
-		float px = rr.left + n * w;
-		float thick = std::max (1.5f, 2.f * _dpi_scale);
-		_rt->FillRectangle (
-			D2D1::RectF (px - thick * 0.5f, rr.top, px + thick * 0.5f, rr.bottom),
-			_brush_marker);
+		float px = nx (t);
+		bool whole_min = std::fabs (t - std::floor (t / 60.f + 0.5f) * 60.f) < 0.001f;
+		_ui.fill_round (D2D1::RectF (px, rr.bottom - (whole_min ? 6.f : 4.f) * _dpi_scale,
+		                             px + hair, rr.bottom - 1.f * _dpi_scale),
+		                0.f, ui::ColorToken::GridBar, whole_min ? 0.55f : 0.32f);
+		int m = (int)(t / 60.f);
+		float s = t - 60.f * (float)m;
+		if (s < 0.f) {
+			s = 0.f;
+		}
+		wchar_t lab[24];
+		_snwprintf_s (lab, _TRUNCATE, L"%d:%04.1f", m, s);
+		_ui.text_vcenter (lab, ui::TextRole::Caption, ui::ColorToken::TextMuted,
+		                  D2D1::RectF (px + 3.f * _dpi_scale, rr.top,
+		                               px + 50.f * _dpi_scale,
+		                               rr.bottom - 3.f * _dpi_scale));
+	}
+	_ui.fill_round (D2D1::RectF (rr.left, rr.bottom - hair, rr.right, rr.bottom),
+	                0.f, ui::ColorToken::Divider, 0.9f);
+
+	/* Markers: stem + flag. */
+	for (int i = 0; i < _engine_snap.marker_count; ++i) {
+		float tm = _engine_snap.markers[i].sec;
+		if (!in_view (tm)) {
+			continue;
+		}
+		float px = nx (tm);
+		_ui.fill_round (D2D1::RectF (px, rr.top + 2.f * _dpi_scale,
+		                             px + std::max (1.5f, 1.5f * _dpi_scale),
+		                             rr.bottom - hair),
+		                1.f, ui::ColorToken::Marker, 0.9f);
+		_ui.fill_round (D2D1::RectF (px + 1.5f * _dpi_scale, rr.top + 2.f * _dpi_scale,
+		                             px + 8.f * _dpi_scale, rr.top + 6.f * _dpi_scale),
+		                1.f, ui::ColorToken::Marker, 0.85f);
 		const wchar_t* name = _engine_snap.markers[i].name;
 		if (name[0]) {
 			wchar_t label[32];
 			format_marker_ruler_label (name, label, 32, 8);
-			_rt->DrawTextW (label, (UINT32)wcslen (label), _fmt_meta,
-			                D2D1::RectF (px + 2.f * _dpi_scale, rr.top,
-			                             px + 48.f * _dpi_scale, rr.bottom),
-			                _brush_marker);
+			_ui.text_vcenter_n (label, (UINT32)wcslen (label),
+			                    ui::TextRole::Caption, ui::ColorToken::Marker,
+			                    D2D1::RectF (px + 10.f * _dpi_scale, rr.top,
+			                                 px + 72.f * _dpi_scale, rr.bottom - 3.f * _dpi_scale));
 		}
 	}
 
 	/* Snap-density ruler ticks (bar = full accent; subdiv = short body). */
-	if (_engine_snap.snap_enabled && _engine_snap.grid_line_count > 0
-	    && _brush_body && _brush_accent) {
+	if (_engine_snap.snap_enabled && _engine_snap.grid_line_count > 0) {
 		float rh = rr.bottom - rr.top;
 		for (int i = 0; i < _engine_snap.grid_line_count; ++i) {
 			float n = (_engine_snap.grid_line_sec[i] - view0) / span;
@@ -11004,28 +11654,37 @@ ShellWindow::draw_editor_ruler ()
 			float thick = is_bar ? std::max (1.5f, 2.f * _dpi_scale)
 			                     : std::max (1.f, 1.f * _dpi_scale);
 			float tick_top = is_bar ? rr.top : (rr.top + rh * 0.45f);
-			ID2D1SolidColorBrush* br = is_bar ? _brush_accent : _brush_body;
 			float op = is_bar ? 0.85f : 0.40f;
-			/* Fine densities: mild accent wash on every other subdiv. */
 			if (!is_bar && _engine_snap.snap_density >= 2 && (i % 2) == 0) {
 				op = 0.55f;
 			}
-			br->SetOpacity (op);
-			_rt->FillRectangle (
-				D2D1::RectF (px - thick * 0.5f, tick_top, px + thick * 0.5f, rr.bottom),
-				br);
-			br->SetOpacity (1.f);
+			_ui.fill_round (D2D1::RectF (px - thick * 0.5f, tick_top,
+			                             px + thick * 0.5f, rr.bottom),
+			                0.f,
+			                is_bar ? ui::ColorToken::Accent : ui::ColorToken::TextSecondary,
+			                op);
 		}
 	}
 
-	/* Playhead tick on ruler. */
-	float ph = (_playhead_sec - view0) / span;
-	if (ph >= 0.f && ph <= 1.f) {
-		float px = rr.left + ph * w;
-		float thick = std::max (1.5f, 2.f * _dpi_scale);
-		_rt->FillRectangle (
-			D2D1::RectF (px - thick * 0.5f, rr.top, px + thick * 0.5f, rr.bottom),
-			_brush_playhead);
+	/* Playhead tick + head. */
+	if (in_view (_playhead_sec)) {
+		float px = nx (_playhead_sec);
+		_ui.fill_round (D2D1::RectF (px, rr.top, px + std::max (1.5f, 1.5f * _dpi_scale),
+		                             rr.bottom),
+		                0.f, ui::ColorToken::Playhead, 0.95f);
+		_ui.fill_round (D2D1::RectF (px - 3.f * _dpi_scale, rr.top,
+		                             px + 3.f * _dpi_scale, rr.top + 5.f * _dpi_scale),
+		                1.5f, ui::ColorToken::Playhead);
+	}
+
+	/* Left gutter caption. */
+	const D2D1_RECT_F& pane = _editor_pane;
+	float gutter_l = pane.left + 12.f * _dpi_scale;
+	if (rr.left - gutter_l > 16.f * _dpi_scale) {
+		_ui.text_vcenter (L"Time", ui::TextRole::Caption, ui::ColorToken::TextMuted,
+		                  D2D1::RectF (gutter_l, rr.top, rr.left - 8.f * _dpi_scale,
+		                               rr.bottom),
+		                  DWRITE_TEXT_ALIGNMENT_TRAILING);
 	}
 }
 
@@ -11606,13 +12265,19 @@ ShellWindow::draw_punch_overlay ()
 	const bool armed = _engine_snap.punch_enabled;
 	float op = armed ? kPunchLaneTintOn : kPunchLaneTintOff;
 	_brush_punch->SetOpacity (op);
+	if (_rt) {
+		_rt->PushAxisAlignedClip (
+		    D2D1::RectF (_editor_pane.left, _editor_lanes_top,
+		                 _editor_pane.right, _editor_lanes_bot),
+		    D2D1_ANTIALIAS_MODE_ALIASED);
+	}
 	for (int i = 0; i < kTracks; ++i) {
 		const D2D1_RECT_F& lb = _lanes[i].bounds;
 		float w = lb.right - lb.left;
 		if (w < 4.f) {
 			continue;
 		}
-		float bot = (i == 0 && _auto_lane_bounds.bottom > lb.bottom)
+		float bot = (i == _auto_lane_track && _auto_lane_bounds.bottom > lb.bottom)
 		            ? _auto_lane_bounds.bottom : lb.bottom;
 		float x0 = lb.left + n0 * w;
 		float x1 = lb.left + n1 * w;
@@ -11669,13 +12334,16 @@ ShellWindow::draw_punch_overlay ()
 			}
 		}
 	}
+	if (_rt) {
+		_rt->PopAxisAlignedClip ();
+	}
 	_brush_punch->SetOpacity (1.f);
 }
 
 void
 ShellWindow::draw_editor_grid ()
 {
-	if (!_engine_snap.snap_enabled || _engine_snap.grid_line_count <= 0 || !_brush_body) {
+	if (!_engine_snap.snap_enabled || _engine_snap.grid_line_count <= 0) {
 		return;
 	}
 	float view0 = _lanes[0].strip.view_start_sec ();
@@ -11697,38 +12365,39 @@ ShellWindow::draw_editor_grid ()
 		}
 		float px = left + n * w;
 		bool is_bar = _engine_snap.grid_line_bar[i];
-		float thick = is_bar ? std::max (1.25f, 1.5f * _dpi_scale)
+		float thick = is_bar ? std::max (1.f, 1.25f * _dpi_scale)
 		                     : std::max (1.f, 1.f * _dpi_scale);
 		/* Density-aware: bars strongest; even subdivs slightly stronger at 1/2·1/4. */
-		float op = is_bar ? 0.32f : 0.12f;
+		float op = is_bar ? 0.22f : 0.11f;
 		if (!is_bar && _engine_snap.snap_density >= 2 && (i % 2) == 0) {
-			op = 0.20f;
+			op = 0.18f;
 		}
-		_brush_body->SetOpacity (op);
-		_rt->FillRectangle (
-			D2D1::RectF (px - thick * 0.5f, top, px + thick * 0.5f, bot),
-			_brush_body);
+		_ui.fill_round (D2D1::RectF (px, top, px + thick, bot), 0.f,
+		                is_bar ? ui::ColorToken::GridBar : ui::ColorToken::GridBeat,
+		                op);
 	}
-	_brush_body->SetOpacity (1.f);
 }
 
 void
 ShellWindow::draw_editor_pane ()
 {
 	const D2D1_RECT_F& r = _editor_pane;
-	_rt->FillRectangle (r, _brush_pane);
-	_rt->DrawRectangle (r, _brush_pane_edge, 1.f);
-	_rt->FillRectangle (D2D1::RectF (r.left, r.top, r.left + 3.f * _dpi_scale, r.bottom), _brush_accent);
+	_ui.panel (r, 10.f, false);
 
-	float inset = 12.f * _dpi_scale;
-	_rt->DrawTextW (L"Editor", 6, _fmt_pane,
-	                D2D1::RectF (r.left + inset, r.top + 4.f * _dpi_scale,
-	                             r.left + inset + 80.f * _dpi_scale, r.top + 26.f * _dpi_scale),
-	                _brush_brand);
+	const float inset = 12.f * _dpi_scale;
+	const float header_h = 32.f * _dpi_scale;
+	_ui.fill_round (D2D1::RectF (r.left + 16.f * _dpi_scale, r.top + 11.f * _dpi_scale,
+	                             r.left + 19.f * _dpi_scale, r.top + 27.f * _dpi_scale),
+	                1.5f, ui::ColorToken::Accent);
+	_ui.text_vcenter (L"Editor", ui::TextRole::Section,
+	                  ui::ColorToken::TextPrimary,
+	                  D2D1::RectF (r.left + 26.f * _dpi_scale, r.top,
+	                               r.left + 100.f * _dpi_scale, r.top + header_h));
 
 	wchar_t caption[180];
 	int with_audio = 0;
-	for (int i = 0; i < kTracks; ++i) {
+	const int n_lanes_ui = n_audio_lanes ();
+	for (int i = 0; i < n_lanes_ui; ++i) {
 		if (_lanes[i].strip.has_regions ()) {
 			++with_audio;
 		}
@@ -11749,52 +12418,77 @@ ShellWindow::draw_editor_pane ()
 		} else if (with_audio > 0) {
 			_snwprintf_s (caption, _TRUNCATE,
 			              L"%d tracks  ·  %d with audio  ·  G=snap%s  ·  marks %d",
-			              kTracks, with_audio,
+			              n_lanes_ui, with_audio,
 			              snap_caption_suffix (),
 			              _engine_snap.marker_count);
 		} else {
 			_snwprintf_s (caption, _TRUNCATE,
 			              L"%d tracks  ·  empty  ·  [ ]=loop  M=mark  L=loop play",
-			              kTracks);
+			              n_lanes_ui);
 		}
 	} else if (_lanes[0].strip.interacting ()) {
 		_snwprintf_s (caption, _TRUNCATE,
 		              L"%d tracks  ·  zoom %.2fx  ·  Home follows transport",
-		              kTracks, _lanes[0].strip.zoom ());
+		              n_lanes_ui, _lanes[0].strip.zoom ());
 	} else {
 		_snwprintf_s (caption, _TRUNCATE,
 		              L"%d tracks  ·  empty lanes (no Session)",
-		              kTracks);
+		              n_lanes_ui);
 	}
-	_rt->DrawTextW (caption, (UINT32)wcslen (caption), _fmt_meta,
-	                D2D1::RectF (r.left + inset + 90.f * _dpi_scale, r.top + 6.f * _dpi_scale,
-	                             r.right - inset, r.top + 26.f * _dpi_scale),
-	                _brush_body);
+	_ui.text_vcenter (caption, ui::TextRole::Caption,
+	                  ui::ColorToken::TextMuted,
+	                  D2D1::RectF (r.left + 102.f * _dpi_scale, r.top,
+	                               r.right - inset, r.top + header_h));
+
+	_ui.divider (D2D1::RectF (r.left + 12.f * _dpi_scale, r.top + header_h,
+	                          r.right - 12.f * _dpi_scale,
+	                          r.top + header_h + std::max (1.f, _dpi_scale)));
 
 	draw_editor_ruler ();
+
+	/* Clip audio lanes to the scroll viewport: lanes may extend past it. */
+	if (_rt) {
+		_rt->PushAxisAlignedClip (
+		    D2D1::RectF (r.left, _editor_lanes_top, r.right, _editor_lanes_bot),
+		    D2D1_ANTIALIAS_MODE_ALIASED);
+	}
 
 	float label_w = 64.f * _dpi_scale;
 	float view0 = _lanes[0].strip.view_start_sec ();
 	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
-	for (int i = 0; i < kTracks; ++i) {
+	const int n_lanes_draw = n_audio_lanes ();
+	for (int i = 0; i < n_lanes_draw; ++i) {
 		const D2D1_RECT_F& lb = _lanes[i].bounds;
 		float label_bot = lb.bottom;
-		if (i == 0 && _auto_lane_bounds.bottom > label_bot) {
+		if (i == _auto_lane_track && _auto_lane_bounds.bottom > label_bot) {
 			label_bot = _auto_lane_bounds.bottom;
 		}
 		D2D1_RECT_F label_rc = D2D1::RectF (
 			r.left + inset, lb.top, lb.left - 4.f * _dpi_scale, label_bot);
 		(void)label_w;
-		_rt->DrawTextW (_lanes[i].label, (UINT32)wcslen (_lanes[i].label), _fmt_meta,
-		                label_rc, _brush_body);
+		const bool focused = (i == _focus_audio_track);
+		_ui.text_vcenter (_lanes[i].label, ui::TextRole::Section,
+		                  focused ? ui::ColorToken::TextPrimary
+		                          : ui::ColorToken::TextSecondary,
+		                  label_rc);
 
-		_rt->FillRectangle (lb, _brush_pane_edge);
+		_ui.fill_round (lb, 4.f, ui::ColorToken::Control, 0.24f);
+		_ui.stroke_round (lb, 4.f, focused ? ui::ColorToken::BorderStrong
+		                                   : ui::ColorToken::Border,
+		                  1.f, 0.9f);
+		if (focused) {
+			_ui.fill_round (D2D1::RectF (lb.left, lb.top + 4.f * _dpi_scale,
+			                             lb.left + 2.f * _dpi_scale,
+			                             lb.bottom - 4.f * _dpi_scale),
+			                1.f, ui::ColorToken::Accent, 0.8f);
+		}
+
 		_lanes[i].strip.draw (_rt, lb, _brush_peak, _brush_rms, _brush_body,
 		                      _brush_playhead, _brush_selection, _dpi_scale);
 
 		/* Marker hairlines across lanes. */
 		float lane_w = lb.right - lb.left;
-		float mark_bot = (i == 0) ? _auto_lane_bounds.bottom : lb.bottom;
+		float mark_bot = (i == _auto_lane_track) ? _auto_lane_bounds.bottom : lb.bottom;
 		for (int m = 0; m < _engine_snap.marker_count; ++m) {
 			float n = (_engine_snap.markers[m].sec - view0) / span;
 			if (n < 0.f || n > 1.f) {
@@ -11810,6 +12504,10 @@ ShellWindow::draw_editor_pane ()
 
 	draw_region_envelope ();
 	draw_automation_lane ();
+	if (_rt) {
+		_rt->PopAxisAlignedClip ();
+	}
+	draw_editor_scrollbar ();
 	draw_midi_lane ();
 	draw_midi_cc_lane ();
 	draw_midi_marker_overlay ();
@@ -11939,10 +12637,13 @@ ShellWindow::draw_midi_lane ()
 		_editor_pane.left + inset, r.top, r.left - 4.f * _dpi_scale, r.bottom);
 	const wchar_t* midi_lab = (_engine_snap.midi_track_name[0] != L'\0')
 		? _engine_snap.midi_track_name : L"MIDI 1";
-	_rt->DrawTextW (midi_lab, (UINT32)wcslen (midi_lab), _fmt_meta, label_rc, _brush_midi);
+	_ui.text_vcenter (midi_lab, ui::TextRole::Section,
+	                  _engine_snap.midi_track_ok ? ui::ColorToken::TextPrimary
+	                                             : ui::ColorToken::TextMuted,
+	                  label_rc);
 
-	_rt->FillRectangle (r, _brush_pane_edge);
-	_rt->DrawRectangle (r, _brush_midi, 1.f);
+	_ui.fill_round (r, 4.f, ui::ColorToken::Control, 0.16f);
+	_ui.stroke_round (r, 4.f, ui::ColorToken::Border, 1.f, 0.8f);
 
 	const int keys = kMidiPitchRows;
 	float h = piano.bottom - piano.top;
@@ -11953,30 +12654,28 @@ ShellWindow::draw_midi_lane ()
 		uint8_t pitch = (uint8_t)(kMidiPitchHi - k);
 		int pc = pitch % 12;
 		bool black = (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10);
-		_brush_body->SetOpacity (black ? 0.18f : 0.08f);
-		_rt->FillRectangle (D2D1::RectF (piano.left, y0, piano.right, y0 + row_h - 0.5f), _brush_body);
-		_brush_body->SetOpacity (1.f);
+		if (black) {
+			_ui.fill_round (D2D1::RectF (piano.left, y0, piano.right, y0 + row_h),
+			                0.f, ui::ColorToken::Surface, 0.55f);
+		} else if (pc == 0) {
+			_ui.fill_round (D2D1::RectF (piano.left, y0, piano.right,
+			                             y0 + std::max (1.f, _dpi_scale)),
+			                0.f, ui::ColorToken::GridBar, 0.14f);
+		}
 		/* Step-record held computer-key → accent wash on that pitch row. */
-		if (step_on && pitch < 128 && _step_piano_held[pitch] && _brush_accent) {
-			_brush_accent->SetOpacity (0.32f);
-			_rt->FillRectangle (
-				D2D1::RectF (piano.left, y0, piano.right, y0 + row_h - 0.5f),
-				_brush_accent);
-			_brush_accent->SetOpacity (1.f);
+		if (step_on && pitch < 128 && _step_piano_held[pitch]) {
+			_ui.fill_round (D2D1::RectF (piano.left, y0, piano.right, y0 + row_h - 0.5f),
+			                0.f, ui::ColorToken::Accent, 0.32f);
 		}
 	}
 
 	/* Audition ghost — full-width wash on the sounding pitch row. */
 	if (_engine_snap.midi_audition_pitch >= kMidiPitchLo
-	    && _engine_snap.midi_audition_pitch <= kMidiPitchHi
-	    && _brush_accent) {
+	    && _engine_snap.midi_audition_pitch <= kMidiPitchHi) {
 		int arow = (int)(kMidiPitchHi - _engine_snap.midi_audition_pitch);
 		float ay0 = piano.top + (float)arow * row_h;
-		_brush_accent->SetOpacity (0.28f);
-		_rt->FillRectangle (
-			D2D1::RectF (piano.left, ay0, piano.right, ay0 + row_h - 0.5f),
-			_brush_accent);
-		_brush_accent->SetOpacity (1.f);
+		_ui.fill_round (D2D1::RectF (piano.left, ay0, piano.right, ay0 + row_h - 0.5f),
+		                0.f, ui::ColorToken::Accent, 0.28f);
 	}
 
 	/* Session MIDI notes — height scales with velocity (bottom-aligned in row). */
@@ -12008,28 +12707,23 @@ ShellWindow::draw_midi_lane ()
 		float vh = vmin + (full - vmin) * ((float)n.velocity / 127.f);
 		float y1 = row_bot;
 		float y0 = y1 - vh;
-		ID2D1SolidColorBrush* brush = n.selected ? _brush_accent : _brush_midi;
-		if (!brush) {
-			continue;
-		}
-		brush->SetOpacity (n.selected ? 0.95f : 0.7f);
-		_rt->FillRectangle (D2D1::RectF (x0, y0, x1, y1), brush);
-		brush->SetOpacity (1.f);
-		if (n.selected && _brush_playhead) {
-			_rt->DrawRectangle (D2D1::RectF (x0, y0, x1, y1), _brush_playhead, 1.2f);
+		const ui::ColorToken tone = n.selected ? ui::ColorToken::Accent
+		                                       : ui::ColorToken::Midi;
+		_ui.fill_round (D2D1::RectF (x0, y0, x1, y1), 2.f, tone,
+		                n.selected ? 0.95f : 0.66f);
+		if (n.selected) {
+			_ui.stroke_round (D2D1::RectF (x0, y0, x1, y1), 2.f,
+			                  ui::ColorToken::Playhead, 1.f, 0.9f);
 		}
 	}
 
 	/* Velocity lane under piano-roll. */
 	if (vel.bottom > vel.top + 2.f) {
-		_rt->FillRectangle (vel, _brush_pane);
-		_rt->DrawRectangle (vel, _brush_pane_edge, 1.f);
-		if (_fmt_meta && _brush_body) {
-			_rt->DrawTextW (L"Vel", 3, _fmt_meta,
-			                D2D1::RectF (vel.left + 4.f * _dpi_scale, vel.top,
-			                             vel.left + 36.f * _dpi_scale, vel.bottom),
-			                _brush_body);
-		}
+		_ui.fill_round (vel, 3.f, ui::ColorToken::Surface, 0.55f);
+		_ui.stroke_round (vel, 3.f, ui::ColorToken::Border, 1.f, 0.7f);
+		_ui.text_vcenter (L"Vel", ui::TextRole::Caption, ui::ColorToken::TextMuted,
+		                  D2D1::RectF (vel.left + 5.f * _dpi_scale, vel.top,
+		                               vel.left + 34.f * _dpi_scale, vel.bottom));
 		float vh = vel.bottom - vel.top;
 		for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
 			const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
@@ -12060,26 +12754,24 @@ ShellWindow::draw_midi_lane ()
 			if (bar_h < 1.f * _dpi_scale && show_v > 0) {
 				bar_h = 1.f * _dpi_scale;
 			}
-			ID2D1SolidColorBrush* brush = n.selected ? _brush_accent : _brush_midi;
-			if (!brush) {
-				continue;
-			}
-			brush->SetOpacity (n.selected ? 0.9f : 0.55f);
-			_rt->FillRectangle (D2D1::RectF (x0, vel.bottom - bar_h, x1, vel.bottom), brush);
-			brush->SetOpacity (1.f);
+			const ui::ColorToken tone = n.selected ? ui::ColorToken::Accent
+			                                       : ui::ColorToken::Midi;
+			_ui.fill_round (D2D1::RectF (x0, vel.bottom - bar_h, x1, vel.bottom - 1.f),
+			                1.f, tone, n.selected ? 0.9f : 0.5f);
 		}
-		if (_drag == DragMode::MidiVelocity && _fmt_meta && _brush_brand) {
+		if (_drag == DragMode::MidiVelocity) {
 			wchar_t vlab[24];
 			_snwprintf_s (vlab, _TRUNCATE, L"v=%d", _midi_vel_drag);
-			_rt->DrawTextW (vlab, (UINT32)wcslen (vlab), _fmt_meta,
-			                D2D1::RectF (vel.right - 48.f * _dpi_scale, vel.top,
-			                             vel.right - 4.f * _dpi_scale, vel.bottom),
-			                _brush_brand);
+			_ui.text_vcenter (vlab, ui::TextRole::Caption,
+			                  ui::ColorToken::Accent,
+			                  D2D1::RectF (vel.right - 52.f * _dpi_scale, vel.top,
+			                               vel.right - 5.f * _dpi_scale, vel.bottom),
+			                  DWRITE_TEXT_ALIGNMENT_TRAILING);
 		}
 	}
 
 	/* In-progress draw rubber-band. */
-	if (_drag == DragMode::MidiDraw && _brush_midi) {
+	if (_drag == DragMode::MidiDraw) {
 		float t0 = _midi_draw_start_sec;
 		float t1 = midi_time_at_x (_pan_last_x);
 		if (t1 < t0) {
@@ -12095,9 +12787,9 @@ ShellWindow::draw_midi_lane ()
 		int row = (int)(kMidiPitchHi - _midi_draw_pitch);
 		float y0 = piano.top + (float)row * row_h + 1.f;
 		float y1 = y0 + row_h - 2.f;
-		_brush_midi->SetOpacity (0.55f);
-		_rt->FillRectangle (D2D1::RectF (x0, y0, x1, y1), _brush_midi);
-		_brush_midi->SetOpacity (1.f);
+		const D2D1_RECT_F nr = D2D1::RectF (x0, y0, x1, y1);
+		_ui.fill_round (nr, 2.f, ui::ColorToken::Midi, 0.45f);
+		_ui.stroke_round (nr, 2.f, ui::ColorToken::Midi, 1.f, 0.85f);
 	}
 
 	/* Playhead through piano-roll + velocity (matches audio/CC lanes). */
@@ -12127,10 +12819,11 @@ ShellWindow::draw_midi_lane ()
 	} else {
 		_snwprintf_s (midicap, _TRUNCATE, L"no MIDI track");
 	}
-	_rt->DrawTextW (midicap, (UINT32)wcslen (midicap), _fmt_meta,
-	                D2D1::RectF (piano.left + 6.f * _dpi_scale, piano.top,
-	                             piano.right - 4.f * _dpi_scale, piano.top + 14.f * _dpi_scale),
-	                _brush_brand);
+	_ui.text_vcenter_n (midicap, (UINT32)wcslen (midicap),
+	                   ui::TextRole::Caption, ui::ColorToken::TextSecondary,
+	                   D2D1::RectF (piano.left + 6.f * _dpi_scale, piano.top,
+	                                piano.right - 4.f * _dpi_scale,
+	                                piano.top + 14.f * _dpi_scale));
 }
 
 void
@@ -12189,8 +12882,471 @@ ShellWindow::toggle_help ()
 	if (_about.about_visible ()) {
 		_about.set_about_visible (false);
 	}
+	_menu_bar.close ();
 	_help_visible = !_help_visible;
+	if (_help_visible) {
+		_help_scroll = 0;
+	}
 	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+void
+ShellWindow::apply_menu_command (MenuCommand cmd)
+{
+	switch (cmd) {
+	case MenuCommand::FileNew:
+		do_new_session ();
+		break;
+	case MenuCommand::FileOpen:
+		prompt_open_session ();
+		break;
+	case MenuCommand::FileSave:
+		do_save_session ();
+		break;
+	case MenuCommand::FileSaveAs:
+		do_save_session_as ();
+		break;
+	case MenuCommand::FileImport:
+		prompt_import_audio ();
+		break;
+	case MenuCommand::FileExportMix:
+		prompt_export_wav ();
+		break;
+	case MenuCommand::FileExportStems:
+		do_export_stems ();
+		break;
+	case MenuCommand::FileRecent:
+		toggle_recent_menu ();
+		break;
+	case MenuCommand::EditUndo:
+		do_undo ();
+		break;
+	case MenuCommand::EditRedo:
+		do_redo ();
+		break;
+	case MenuCommand::EditDelete:
+		do_delete_selection ();
+		break;
+	case MenuCommand::EditSplit:
+		do_split_at_playhead ();
+		break;
+	case MenuCommand::EditCrossfade:
+		do_apply_crossfade ();
+		break;
+	case MenuCommand::EditConsolidate:
+		do_consolidate_selection ();
+		break;
+	case MenuCommand::EditSnap:
+		do_toggle_snap ();
+		break;
+	case MenuCommand::TrackAddAudio:
+		do_add_audio_track ();
+		break;
+	case MenuCommand::TrackAddMidi:
+		do_add_midi_track ();
+		break;
+	case MenuCommand::TrackRemove:
+		do_remove_track ();
+		break;
+	case MenuCommand::TrackLeft:
+		do_move_audio_track (-1);
+		break;
+	case MenuCommand::TrackRight:
+		do_move_audio_track (1);
+		break;
+	case MenuCommand::TrackRename:
+		do_rename_focused_track ();
+		break;
+	case MenuCommand::TrackMute:
+		if (_engine.is_linked ()) {
+			_engine.toggle_track_muted (_focus_audio_track);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_mute_solo_from_engine ();
+		}
+		break;
+	case MenuCommand::TrackSolo:
+		if (_engine.is_linked ()) {
+			_engine.toggle_track_soloed (_focus_audio_track);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_mute_solo_from_engine ();
+		}
+		break;
+	case MenuCommand::TrackArm:
+		if (_engine.is_linked ()) {
+			const int t = _focus_audio_track;
+			bool armed = (t >= 0 && t < EngineSnapshot::kMeters) ? _engine_snap.track_armed[t] : false;
+			_engine.set_track_armed (t, !armed);
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_arm_from_engine ();
+		}
+		break;
+	case MenuCommand::TrackFx: {
+		const int t = _focus_audio_track;
+		if (_engine.is_linked () && t >= 0 && t < n_audio_lanes ()) {
+			if (_mixers[t].has_fx ()) {
+				_engine.toggle_track_fx_bypass (t);
+			} else {
+				_engine.insert_track_fx (t);
+			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_fx_from_engine ();
+		}
+		break;
+	}
+	case MenuCommand::ViewZoomSession:
+		do_zoom_to_session ();
+		break;
+	case MenuCommand::ViewFitRegions:
+		do_fit_all_regions ();
+		break;
+	case MenuCommand::ViewHelp:
+		toggle_help ();
+		break;
+	case MenuCommand::ViewPrefs:
+		toggle_prefs ();
+		break;
+	case MenuCommand::ViewAbout:
+		toggle_about ();
+		break;
+	case MenuCommand::PluginReverb:
+	case MenuCommand::PluginComp:
+	case MenuCommand::PluginEq:
+	case MenuCommand::PluginDelay:
+	case MenuCommand::PluginLimiter:
+	case MenuCommand::PluginGate:
+		if (_engine.is_linked ()) {
+			const int t = std::max (0, std::min (_focus_audio_track, n_audio_lanes () - 1));
+			switch (cmd) {
+			case MenuCommand::PluginReverb:  _engine.insert_track_fx (t); break;
+			case MenuCommand::PluginComp:    _engine.insert_track_comp (t); break;
+			case MenuCommand::PluginEq:      _engine.insert_track_eq (t); break;
+			case MenuCommand::PluginDelay:   _engine.insert_track_delay (t); break;
+			case MenuCommand::PluginLimiter: _engine.insert_track_limiter (t); break;
+			case MenuCommand::PluginGate:    _engine.insert_track_gate (t); break;
+			default: break;
+			}
+			_engine.poll ();
+			_engine_snap = _engine.snapshot ();
+			sync_mixer_fx_from_engine ();
+		}
+		break;
+	case MenuCommand::None:
+		break;
+	}
+	InvalidateRect (_hwnd, nullptr, FALSE);
+}
+
+bool
+ShellWindow::on_mouse_down_right (LPARAM lparam)
+{
+	float x, y;
+	client_from_lparam (lparam, &x, &y);
+
+	if (_help_visible || _prefs_visible || _about.about_visible ()
+	    || _recent.visible () || _recovery.visible () || _about.splash_visible ()) {
+		return false;
+	}
+	_menu_bar.close ();
+
+	static const MenuCommand lane_cmds[] = {
+		MenuCommand::EditSplit, MenuCommand::EditCrossfade,
+		MenuCommand::EditDelete, MenuCommand::EditConsolidate,
+	};
+	static const MenuCommand mix_cmds[] = {
+		MenuCommand::TrackMute, MenuCommand::TrackSolo,
+		MenuCommand::TrackArm, MenuCommand::TrackFx,
+	};
+
+	if (hit_editor_lane (x, y) >= 0) {
+		_menu_bar.open_context (x, y, lane_cmds, (int)(sizeof (lane_cmds) / sizeof (lane_cmds[0])));
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return true;
+	}
+	const int strips = n_mixer_strips ();
+	for (int i = 0; i < strips; ++i) {
+		const D2D1_RECT_F& r = _mixers[i].bounds ();
+		if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+			_focus_audio_track = std::min (i, n_audio_lanes () - 1);
+			_menu_bar.open_context (x, y, mix_cmds, (int)(sizeof (mix_cmds) / sizeof (mix_cmds[0])));
+			InvalidateRect (_hwnd, nullptr, FALSE);
+			return true;
+		}
+	}
+	return false;
+}
+
+bool
+ShellWindow::smoke_ui_layout ()
+{
+	const UINT want_w = 1280;
+	const UINT want_h = 720;
+	RECT wr = { 0, 0, (LONG)want_w, (LONG)want_h };
+	AdjustWindowRect (&wr, WS_OVERLAPPEDWINDOW, FALSE);
+	SetWindowPos (_hwnd, nullptr, 0, 0,
+	              wr.right - wr.left, wr.bottom - wr.top,
+	              SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+	/* SetWindowPos delivers WM_SIZE synchronously; on_resize (re)lays out. */
+	layout_panes ();
+
+	const int rows = _transport.rows ();
+	if (rows != 2) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-ui-layout FAILED (transport rows=%d at %ux%u)\n",
+		              rows, (unsigned)_width, (unsigned)_height);
+		std::fflush (stderr);
+		return false;
+	}
+	const size_t nf = _transport.file_button_count ();
+	if (nf < 4) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-ui-layout FAILED (file buttons=%u)\n",
+		              (unsigned)nf);
+		std::fflush (stderr);
+		return false;
+	}
+	const float w = (float)_width;
+	const float h = (float)_height;
+	for (size_t i = 0; i < nf; ++i) {
+		D2D1_RECT_F r;
+		if (!_transport.file_button_rect (i, &r)) {
+			continue;
+		}
+		if (r.left < 0.f || r.top < 0.f || r.right > w || r.bottom > h) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-ui-layout FAILED (file %u rect %.0f,%.0f-%.0f,%.0f outside %.0fx%.0f)\n",
+			              (unsigned)i, r.left, r.top, r.right, r.bottom, w, h);
+			std::fflush (stderr);
+			return false;
+		}
+	}
+	if (_menu_bar.bounds ().bottom <= _menu_bar.bounds ().top
+	    || _menu_bar.bounds ().right > w) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-ui-layout FAILED (menu bar bounds)\n");
+		std::fflush (stderr);
+		return false;
+	}
+
+	/* Dropdown hit testing: File title opens a popup whose first row maps to
+	 * FileNew. Exercises menu_at/item_at without posting synthetic clicks. */
+	const D2D1_RECT_F mb = _menu_bar.bounds ();
+	const float title_y = (mb.top + mb.bottom) * 0.5f;
+	if (_menu_bar.menu_at (mb.left + 20.f * _dpi_scale, title_y) != 0) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-ui-layout FAILED (File title hit test)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	D2D1_RECT_F file_rect;
+	_menu_bar.menu_title_rect (0, &file_rect);
+	_menu_bar.toggle_menu (0);
+	if (!_menu_bar.open ()
+	    || _menu_bar.item_at (file_rect.left + _ui.dp (12.f), mb.bottom + _ui.dp (13.f))
+	       != MenuCommand::FileNew) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-ui-layout FAILED (File popup row hit test)\n");
+		_menu_bar.close ();
+		std::fflush (stderr);
+		return false;
+	}
+	_menu_bar.close ();
+
+	/* Context popup path used by lane / mixer right-clicks. */
+	const MenuCommand ctx[] = { MenuCommand::TrackMute, MenuCommand::TrackSolo };
+	_menu_bar.open_context (200.f, 300.f, ctx, 2);
+	if (!_menu_bar.overlay_contains (210.f, 313.f)
+	    || _menu_bar.item_at (210.f, 313.f) != MenuCommand::TrackMute) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-ui-layout FAILED (context menu hit test)\n");
+		_menu_bar.close ();
+		std::fflush (stderr);
+		return false;
+	}
+	_menu_bar.close ();
+
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-ui-layout ok (transport rows=%d, %u file buttons inside %ux%u, menus ok)\n",
+	              rows, (unsigned)nf, (unsigned)_width, (unsigned)_height);
+	std::fflush (stderr);
+	return true;
+}
+
+bool
+ShellWindow::smoke_track_capacity ()
+{
+	if (!_engine.is_linked ()) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-capacity FAILED (no engine)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	_engine.poll ();
+	refresh_engine_snap ();
+	if (!_engine_snap.session_ok) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-capacity FAILED (no session)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	const int n0 = _engine_snap.audio_track_count;
+	const int cap = EngineSnapshot::kMeters;
+	int guard = 0;
+	while (_engine_snap.audio_track_count < cap && guard++ < cap + 8) {
+		if (!_engine.add_audio_track ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-track-capacity FAILED (add at %d)\n",
+			              _engine_snap.audio_track_count);
+			std::fflush (stderr);
+			return false;
+		}
+		_engine.poll ();
+		refresh_engine_snap ();
+	}
+	if (_engine_snap.audio_track_count != cap) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-capacity FAILED (count=%d, want %d)\n",
+		              _engine_snap.audio_track_count, cap);
+		std::fflush (stderr);
+		return false;
+	}
+
+	_focus_audio_track = cap - 1;
+	_editor_scroll_focus = -1;
+	sync_track_labels_from_engine ();
+	layout_panes ();
+	const float cap_scroll = _editor_scroll_max;
+	if (cap_scroll <= 0.f) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-capacity FAILED (no scroll at %d lanes)\n",
+		              cap);
+		std::fflush (stderr);
+		return false;
+	}
+	const D2D1_RECT_F& last = _lanes[cap - 1].bounds;
+	if (last.bottom > _editor_lanes_bot + 1.f || last.top < _editor_lanes_top - 1.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-track-capacity FAILED (focused lane %.0f..%.0f not in view %.0f..%.0f)\n",
+		              last.top, last.bottom, _editor_lanes_top, _editor_lanes_bot);
+		std::fflush (stderr);
+		return false;
+	}
+	if (_auto_lane_track != cap - 1
+	    || _auto_lane_bounds.bottom <= _auto_lane_bounds.top) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-track-capacity FAILED (auto lane target %d)\n",
+		              _auto_lane_track);
+		std::fflush (stderr);
+		return false;
+	}
+
+	/* Automation lane must follow the focused track, not lane 0. */
+	_focus_audio_track = cap - 8;
+	_editor_scroll_focus = -1;
+	layout_panes ();
+	const int want = _focus_audio_track;
+	const D2D1_RECT_F& wl = _lanes[want].bounds;
+	if (_auto_lane_track != want
+	    || std::fabs (_auto_lane_bounds.left - wl.left) > 1.f
+	    || std::fabs (_auto_lane_bounds.right - wl.right) > 1.f
+	    || _auto_lane_bounds.top < wl.bottom - 1.f
+	    || _auto_lane_bounds.bottom > _editor_lanes_bot + 1.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-track-capacity FAILED (auto lane for focus %d: target %d lane %.0f..%.0f auto %.0f..%.0f)\n",
+		              want, _auto_lane_track, wl.left, wl.right,
+		              _auto_lane_bounds.top, _auto_lane_bounds.bottom);
+		std::fflush (stderr);
+		return false;
+	}
+	if (hit_editor_lane ((wl.left + wl.right) * 0.5f, (wl.top + wl.bottom) * 0.5f) != want
+	    || hit_editor_lane (wl.left + 2.f, _editor_lanes_top - 4.f) >= 0
+	    || hit_editor_lane (wl.left + 2.f, _editor_lanes_bot + 4.f) >= 0) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-track-capacity FAILED (lane hit-test focus %d)\n",
+		              want);
+		std::fflush (stderr);
+		return false;
+	}
+
+	/* Real input path: wheel over the scrollbar scrolls the lane viewport. */
+	_focus_audio_track = cap - 1;
+	_editor_scroll_focus = -1;
+	layout_panes ();
+	const float before_y = _editor_scroll_y;
+	POINT sp;
+	sp.x = (LONG)((_editor_scrollbar.left + _editor_scrollbar.right) * 0.5f);
+	sp.y = (LONG)((_editor_lanes_top + _editor_lanes_bot) * 0.5f);
+	ClientToScreen (_hwnd, &sp);
+	if (before_y <= 1.f
+	    || !on_mouse_wheel (MAKEWPARAM (0, WHEEL_DELTA), MAKELPARAM (sp.x, sp.y))
+	    || _editor_scroll_y >= before_y - 1.f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-track-capacity FAILED (wheel scroll %.1f→%.1f)\n",
+		              before_y, _editor_scroll_y);
+		std::fflush (stderr);
+		return false;
+	}
+
+	/* Import target: selection wins, else focus; lands on that track only. */
+	_engine_snap.selection_track = 3;
+	_engine_snap.has_selection = true;
+	const bool sel_ok = (import_target_track () == 3);
+	_engine_snap.selection_track = -1;
+	_engine_snap.has_selection = false;
+	_focus_audio_track = 9;
+	const bool focus_ok = (import_target_track () == 9);
+	if (!sel_ok || !focus_ok) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-track-capacity FAILED (import target sel=%d focus=%d)\n",
+		              sel_ok, focus_ok);
+		std::fflush (stderr);
+		return false;
+	}
+	if (!_engine.import_test_tone (9, 330.f, 1.f)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-capacity FAILED (import tone)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	refresh_engine_snap ();
+	if (!_engine_snap.track_has_regions[9] || _engine_snap.track_has_regions[8]) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-track-capacity FAILED (import landed on wrong track)\n");
+		std::fflush (stderr);
+		return false;
+	}
+
+	guard = 0;
+	while (_engine_snap.audio_track_count > n0 && guard++ < cap + 8) {
+		const int last_i = _engine_snap.audio_track_count - 1;
+		if (!_engine.remove_audio_track (last_i, false)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-track-capacity FAILED (remove at %d)\n",
+			              last_i);
+			std::fflush (stderr);
+			return false;
+		}
+		_engine.poll ();
+		refresh_engine_snap ();
+	}
+	if (_engine_snap.audio_track_count != n0) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-track-capacity FAILED (shrink → %d, want %d)\n",
+		              _engine_snap.audio_track_count, n0);
+		std::fflush (stderr);
+		return false;
+	}
+	_focus_audio_track = 0;
+	_editor_scroll_focus = -1;
+	sync_track_labels_from_engine ();
+	sync_mixer_gains_from_engine ();
+	sync_mixer_arm_from_engine ();
+	sync_mixer_mute_solo_from_engine ();
+	sync_mixer_pan_from_engine ();
+	sync_mixer_send_from_engine ();
+	layout_panes ();
+	if (n0 <= 8 && _editor_scroll_max > 0.5f) {
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-track-capacity FAILED (%d lanes should fit, scroll %.1f)\n",
+		              n0, _editor_scroll_max);
+		std::fflush (stderr);
+		return false;
+	}
+
+	std::fprintf (stderr,
+	              "airdour_win_shell: smoke-track-capacity ok (%d → %d → %d, scroll %.0f px at %d lanes, import→Audio %d)\n",
+	              n0, cap, _engine_snap.audio_track_count, cap_scroll, cap, 10);
+	std::fflush (stderr);
+	return true;
 }
 
 void
@@ -12200,6 +13356,10 @@ ShellWindow::sync_prefs_from_engine ()
 	_prefs.set_pref_backend (_engine_snap.pref_backend.c_str ());
 	_prefs.set_current_period (_engine_snap.period_frames, _engine_snap.sample_rate);
 	_prefs.set_pref_period (_engine_snap.pref_period_frames);
+	_prefs.set_current_devices (_engine_snap.audio_in_name.c_str (), _engine_snap.audio_out_name.c_str ());
+	_prefs.set_pref_devices (_engine_snap.pref_in_device.c_str (), _engine_snap.pref_out_device.c_str ());
+	_prefs.set_systemic_latency (_engine_snap.systemic_in_frames, _engine_snap.systemic_out_frames);
+	_prefs.set_separate_devices (_engine_snap.separate_io_devices);
 	_prefs.set_click_default (_engine_snap.pref_click_default);
 	_prefs.set_snap_default (_engine_snap.pref_snap_default);
 	_prefs.set_vst3_hint (_engine_snap.vst3_path_hint);
@@ -13211,9 +14371,11 @@ ShellWindow::apply_prefs_hit (PrefsHit hit)
 		return;
 	case PrefsHit::BackendDummy:
 		_engine.set_pref_backend ("Dummy");
+		_prefs.set_status (L"Backend change applies on relaunch");
 		break;
 	case PrefsHit::BackendWasapi:
 		_engine.set_pref_backend ("WASAPI");
+		_prefs.set_status (L"Backend change applies on relaunch");
 		break;
 	case PrefsHit::PeriodAuto:
 		_engine.set_pref_period_frames (0);
@@ -13268,6 +14430,25 @@ ShellWindow::apply_prefs_hit (PrefsHit hit)
 		sync_prefs_from_engine ();
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return;
+	case PrefsHit::OutDevicePrev:
+		_engine.cycle_audio_device (true, -1);
+		break;
+	case PrefsHit::OutDeviceNext:
+		_engine.cycle_audio_device (true, +1);
+		break;
+	case PrefsHit::InDevicePrev:
+		_engine.cycle_audio_device (false, -1);
+		break;
+	case PrefsHit::InDeviceNext:
+		_engine.cycle_audio_device (false, +1);
+		break;
+	case PrefsHit::RestartAudio:
+		if (_engine.restart_audio ()) {
+			_prefs.set_status (L"Audio restarted");
+		} else {
+			_prefs.set_status (L"Restart failed");
+		}
+		break;
 	case PrefsHit::Save:
 		if (_engine.save_shell_prefs ()) {
 			_prefs.set_status (L"Saved");
@@ -13291,53 +14472,57 @@ ShellWindow::apply_prefs_hit (PrefsHit hit)
 void
 ShellWindow::draw_help_overlay ()
 {
-	if (!_rt) {
+	if (!_rt || !_ui.ready ()) {
 		return;
 	}
 
-	/* Dim the shell; card lists bindings the shell actually handles. */
-	_brush_pane->SetOpacity (0.78f);
-	_rt->FillRectangle (D2D1::RectF (0, 0, (float)_width, (float)_height), _brush_pane);
-	_brush_pane->SetOpacity (1.f);
-
-	float pad = 28.f * _dpi_scale;
-	float card_w = std::min ((float)_width - pad * 2.f, 720.f * _dpi_scale);
-	float card_h = std::min ((float)_height - pad * 2.f, 520.f * _dpi_scale);
-	float cx = ((float)_width - card_w) * 0.5f;
-	float cy = ((float)_height - card_h) * 0.5f;
-	D2D1_RECT_F card = D2D1::RectF (cx, cy, cx + card_w, cy + card_h);
-	_rt->FillRectangle (card, _brush_pane);
-	_rt->DrawRectangle (card, _brush_accent, 1.5f * _dpi_scale);
-
-	DWRITE_TEXT_ALIGNMENT ta = _fmt_pane->GetTextAlignment ();
-	_fmt_pane->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
-	_rt->DrawTextW (L"Airdour — shortcuts", 20, _fmt_pane,
-	                D2D1::RectF (card.left + 16.f * _dpi_scale, card.top + 10.f * _dpi_scale,
-	                             card.right - 16.f * _dpi_scale, card.top + 34.f * _dpi_scale),
-	                _brush_brand);
-	_fmt_pane->SetTextAlignment (ta);
-
 	struct Row { const wchar_t* key; const wchar_t* action; };
 	static const Row kRows[] = {
+		{ nullptr, L"SESSION" },
 		{ L"Space", L"Play / Stop" },
-		{ L"Esc", L"Close help · quit app" },
+		{ L"Esc", L"Close help / panel · clear selection" },
 		{ L"F1  /  ?", L"Toggle this help" },
 		{ L"F3", L"About Airdour" },
 		{ L"Ctrl+,", L"Preferences" },
 		{ L"Ctrl+Z / Y", L"Undo / Redo" },
-		{ L"Ctrl+S / O / E", L"Save / Open browse / Export" },
-		{ L"Ctrl+Shift+O", L"Recent sessions menu" },
-		{ L"MLim (Monitor)", L"Master ACE Limiter bypass toggle" },
+		{ L"Ctrl+N", L"New session (folder + name)" },
+		{ L"Ctrl+S / Shift+S", L"Save / Save As (copy media)" },
+		{ L"Ctrl+O / Ctrl+Shift+O", L"Open folder / Recent sessions menu" },
+		{ L"Ctrl+E", L"Export master WAV" },
+		{ L"Alt+Shift+E", L"Export per-track stem WAV files" },
+		{ L"Alt+E", L"Export selection time range WAV" },
+		{ L"C / K", L"Count-in · Click (metronome)" },
+		{ L"− / +", L"Tempo −1 / +1 BPM" },
+		{ L"G / Shift+G", L"Snap on/off · cycle density" },
+		{ L"Home / 0", L"Follow transport (reset view)" },
+		{ L"Shift+Home / End", L"Locate to selection start / end" },
+		{ L"Ctrl+Home / End", L"Locate session start / end" },
+		{ nullptr, L"EDITING" },
 		{ L"S / F / Del", L"Split · Fade · Delete selection" },
+		{ L"Tab / Shift+Tab", L"Cycle region selection" },
+		{ L"Shift+F2", L"Rename selected region" },
+		{ L"F2", L"Rename focused track" },
+		{ L"Ctrl+D", L"Duplicate selected region after itself" },
+		{ L"Ctrl+←/→", L"Nudge selected region (snap unit; Shift=4×)" },
+		{ L"Ctrl+] / [", L"Raise / lower region · Shift = top/bottom" },
+		{ L"Ctrl+Alt+Shift+]", L"Cycle region layer top↔bottom" },
+		{ L"Ctrl+L", L"Lock / unlock selected region (blocks move/trim)" },
+		{ L"Ctrl+Alt+L", L"Position-lock selected region (blocks move)" },
+		{ L"Ctrl+M", L"Mute / unmute selected region" },
+		{ L"Ctrl+Shift+↑/↓", L"Region gain ±1 dB" },
+		{ L"Alt+O", L"Toggle region opaque / transparent" },
+		{ L"Alt+[ / ]", L"Fade-in ±10ms · Alt+Shift = fade-out" },
+		{ L"Shift+F", L"Cycle fade shapes (Linear/Power/Fast/Slow/Sym)" },
+		{ L"Ctrl+F", L"Toggle fade in/out active" },
+		{ L"Shift+E", L"Region gain envelope (unity→dip→unity)" },
+		{ L"Ctrl+Alt+↑/↓", L"Nudge region envelope mid gain" },
+		{ nullptr, L"AUDIO TOOLS" },
 		{ L"T / Shift+T", L"Stretch 1.5× · compress 0.75× (RubberBand)" },
-		{ L"Alt+Shift+T / dbl-click trim", L"Reset strip preamp trim to 0 dB" },
 		{ L"R / Shift+R", L"Pitch +1 / −1 semitone (duration held)" },
+		{ L"Alt+Shift+T / dbl-click trim", L"Reset strip preamp trim to 0 dB" },
 		{ L"Alt+Shift+R / Alt+dbl-click strip", L"Reset strip fader·pan·send" },
 		{ L"V", L"Reverse selected audio region" },
 		{ L"N", L"Normalize selection to −1 dBFS" },
-		{ L"Alt+Shift+N / Alt+Shift+click label", L"Toggle track comment (Cm)" },
-		{ L"Alt+Shift+W", L"Toggle narrow mixer strips" },
-		{ L"Alt+Shift+D / Shift+click Dim", L"Cycle monitor dim −20/−12/−6 dB" },
 		{ L"I", L"Strip silence (−40 dBFS threshold)" },
 		{ L"Alt+Shift+I / Alt+click label", L"Toggle strip polarity invert (Ø)" },
 		{ L"B", L"Consolidate / bounce selection in place" },
@@ -13346,6 +14531,40 @@ ShellWindow::draw_help_overlay ()
 		{ L"Z", L"Freeze / unfreeze focused audio track" },
 		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"Status snap chip", L"Show density · click to cycle" },
+		{ nullptr, L"MARKERS & RANGES" },
+		{ L"M / Shift+M", L"Add / remove marker" },
+		{ L"Ctrl+Alt+←/→", L"Previous / next marker" },
+		{ L"Ctrl+Alt+,/.", L"Previous / next cue marker" },
+		{ L"Ctrl+Shift+M", L"Lock / unlock marker at playhead" },
+		{ L"Ctrl+Alt+M", L"Toggle CD flag on marker at playhead" },
+		{ L"Alt+Shift+S", L"Rename nearest section marker" },
+		{ L"Ctrl+Shift+R", L"Range marker ← selection" },
+		{ L"Ctrl+Alt+Y", L"Region sync at playhead (Shift=clear)" },
+		{ L"Ctrl+Alt+Shift+C", L"Cycle scene marker MIDI channel 0..15" },
+		{ L"Ctrl+Shift+P", L"Punch range ← selection" },
+		{ L"Ctrl+Shift+L", L"Loop range ← selection" },
+		{ L"Ctrl+Shift+K", L"Skip range ← selection" },
+		{ L"L / P", L"Loop · Punch" },
+		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
+		{ L"Ctrl+[ / ]", L"Locate loop start / end" },
+		{ L"Ctrl+Alt+[ / ]", L"Locate punch in / out" },
+		{ L"Alt+, / .", L"Nudge playhead by snap unit" },
+		{ nullptr, L"VIEW & ZOOM" },
+		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
+		{ L"Ctrl+Alt+P", L"Zoom editor to punch range" },
+		{ L"Ctrl+Alt+L", L"Zoom editor to loop range" },
+		{ L"Ctrl+Alt+E", L"Zoom editor to selection" },
+		{ L"Ctrl+Alt+Home", L"Zoom editor to session extent" },
+		{ L"Ctrl+Alt+A", L"Zoom editor to all regions" },
+		{ L"Ctrl+Alt+0", L"Center view on playhead (keep zoom)" },
+		{ L"Ctrl+Shift+0", L"Scroll playhead into view (keep zoom)" },
+		{ L"Ctrl+Alt+±", L"Zoom around playhead" },
+		{ L"Ctrl+±", L"Zoom in / out (center)" },
+		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
+		{ L"← →  Shift+←→", L"Scroll editor · larger step" },
+		{ L"Alt+Shift+W", L"Toggle narrow mixer strips" },
+		{ L"Alt+C", L"Cycle focused track color" },
+		{ nullptr, L"MIDI" },
 		{ L"Q / Qnt", L"Quantize MIDI notes to snap grid" },
 		{ L"Ctrl+Alt+Q", L"Legato MIDI notes (abut ends)" },
 		{ L"Shift+Q", L"Force MIDI note length to snap unit" },
@@ -13358,147 +14577,231 @@ ShellWindow::draw_help_overlay ()
 		{ L"F5 / Chd", L"MIDI chord Off→Maj→Min · multi-key latch" },
 		{ L"F6 / Arp", L"MIDI arp on/off · Shift=Up/Dn/UD · grid rate" },
 		{ L"F7 / Scl", L"Scale lock · Shift=maj/min · Ctrl=root" },
-		{ L"F8", L"MIDI auto lane · CC7→1→11→64→Bend→Pressure→PolyAT" },
+		{ L"F8", L"MIDI auto lane · CC7·1·11·64·Bend·Press·PolyAT" },
 		{ L"F9 / Panic", L"MIDI panic · kill hanging notes + reset controllers" },
 		{ L"P+ / P−  B+ / B−", L"MIDI Program Change ± · Bank Select ±" },
+		{ nullptr, L"MIXER" },
 		{ L"Alt+Shift+M / U", L"Mute / Solo all audio tracks + MIDI" },
-		{ L"Alt+Shift+E", L"Export per-track stem WAV files" },
+		{ L"Alt+M", L"Clear all mutes (audio + MIDI)" },
+		{ L"Alt+U", L"Clear all solos (audio + MIDI)" },
 		{ L"Alt+Shift+A / Shift+click auto", L"Cycle Gain→Pan→Send automation lane" },
 		{ L"Alt+Shift+Y", L"Cycle auto Off→Play→Write→Touch (current lane)" },
-		{ L"L / P", L"Loop · Punch" },
 		{ L"Alt+Shift+L", L"Cycle Solo → PFL → AFL (listen mode)" },
-		{ L"[ ]  Shift+[ ]", L"Loop start/end · Punch start/end" },
-		{ L"M / Shift+M", L"Add / remove marker" },
-		{ L"Ctrl+Alt+←/→", L"Previous / next marker" },
-		{ L"Ctrl+Shift+M", L"Lock / unlock marker at playhead" },
-		{ L"Ctrl+Alt+M", L"Toggle CD flag on marker at playhead" },
-		{ L"Ctrl+Shift+R", L"Range marker ← selection" },
-		{ L"Ctrl+Alt+Y", L"Region sync at playhead (Shift=clear)" },
-		{ L"Ctrl+Alt+Shift+C", L"Cycle scene marker MIDI channel 0..15" },
-		{ L"Ctrl+Alt+,/.", L"Previous / next cue marker" },
+		{ L"Mon / Alt+Shift+O", L"Cycle monitor Auto → In → Disk" },
 		{ L"Ctrl+Alt+Shift+,/.", L"Cycle VST3 catalog insert on Audio 2" },
-		{ L"Alt+Shift+S", L"Rename nearest section marker" },
-		{ L"Ctrl+Alt+[ / ]", L"Locate punch in / out" },
-		{ L"Ctrl+[ / ]", L"Locate loop start / end" },
-		{ L"Ctrl+Home / End", L"Locate session start / end" },
-		{ L"Alt+, / .", L"Nudge playhead by snap unit" },
-		{ L"Ctrl+Alt+P", L"Zoom editor to punch range" },
-		{ L"Ctrl+Alt+L", L"Zoom editor to loop range" },
-		{ L"Ctrl+Alt+E", L"Zoom editor to selection" },
-		{ L"Ctrl+Alt+Home", L"Zoom editor to session extent" },
-		{ L"Ctrl+Alt+A", L"Zoom editor to all regions" },
-		{ L"Ctrl+Alt+0", L"Center view on playhead (keep zoom)" },
-		{ L"Ctrl+Shift+0", L"Scroll playhead into view (keep zoom)" },
-		{ L"Ctrl+M", L"Mute / unmute selected region" },
-		{ L"Ctrl+Shift+↑/↓", L"Region gain ±1 dB" },
-		{ L"Ctrl+L", L"Lock / unlock selected region (blocks move/trim)" },
-		{ L"Ctrl+Alt+L", L"Position-lock selected region (blocks move)" },
-		{ L"Alt+[ / ]", L"Fade-in ±10ms · Alt+Shift = fade-out" },
-		{ L"Ctrl+D", L"Duplicate selected region after itself" },
-		{ L"Ctrl+←/→", L"Nudge selected region (snap unit; Shift=4×)" },
-		{ L"Ctrl+] / [", L"Raise / lower region · Shift = top/bottom" },
-		{ L"Ctrl+Alt+Shift+]", L"Cycle region layer top↔bottom" },
-		{ L"Alt+O", L"Toggle region opaque / transparent" },
 		{ L"Alt+E", L"Export selection time range WAV" },
-		{ L"Ctrl+Shift+P", L"Punch range ← selection" },
-		{ L"Ctrl+Shift+L", L"Loop range ← selection" },
-		{ L"Ctrl+Shift+K", L"Skip range ← selection" },
-		{ L"Shift+F2", L"Rename selected region" },
-		{ L"Shift+F", L"Cycle fade shapes (Linear/Power/Fast/Slow/Sym)" },
-		{ L"Ctrl+F", L"Toggle fade in/out active" },
-		{ L"Shift+E", L"Region gain envelope (unity→dip→unity)" },
-		{ L"Ctrl+Alt+↑/↓", L"Nudge region envelope mid gain" },
-		{ L"Tab / Shift+Tab", L"Cycle region selection" },
-		{ L"Ctrl+Alt+±", L"Zoom around playhead" },
-		{ L"Alt+M", L"Clear all mutes (audio + MIDI)" },
-		{ L"Ctrl+Alt+H", L"Toggle Comp sidechain (Audio 1→2)" },
 		{ L"C / K", L"Count-in · Click (metronome)" },
 		{ L"Alt+Shift+K / Boost", L"Cycle monitor solo boost 0/+3/+6 dB" },
+		{ L"Alt+Shift+D / Shift+click Dim", L"Cycle monitor dim −20/−12/−6 dB" },
 		{ L"Alt+Shift+H / Shift+click Click", L"Cycle click gain −12/−6/0/+6 dB" },
-		{ L"Alt+C", L"Cycle focused track color" },
-		{ L"− / +", L"Tempo −1 / +1 BPM" },
+		{ L"Alt+Shift+N / Alt+Shift+click label", L"Toggle track comment (Cm)" },
+		{ L"MLim (Monitor)", L"Master ACE Limiter bypass toggle" },
 		{ L"+A / Shift+click +A", L"Add mono audio · stereo Equal-Power" },
-		{ L"A / Shift+A / E", L"Fit all regions · Fit session · Fit selection" },
 		{ L"Home / 0", L"Follow transport (reset view)" },
-		{ L"Shift+Home / End", L"Locate to selection start / end" },
-		{ L"← →  Shift+←→", L"Scroll editor · larger step" },
-		{ L"Wheel / Shift+Wheel", L"Zoom · horizontal scroll" },
-		{ L"Ctrl+±", L"Zoom in / out (center)" },
-		{ L"F2", L"Rename focused track" },
 		{ L"Dbl-click FX param", L"Reset FX/VST3 knob to insert default" },
-		{ L"Dbl-click fader/pan", L"Reset fader → unity · pan → center" },
-		{ L"Dbl-click send", L"Reset aux send → 0 (off)" },
 		{ L"Alt+↑ / Alt+↓", L"Reorder audio track" },
-		{ L"Alt+Shift+click Arm", L"Arm all audio tracks" },
-		{ L"U", L"Apply / clear track group" },
+		{ L"Alt+Shift+E", L"Toggle track active (group shares)" },
+		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·arm)" },
+		{ L"Alt+Shift+G / Alt+Grp", L"Toggle group relative gain" },
+		{ L"Alt+Shift+C", L"Cycle track group color (G bar)" },
+		{ L"Alt+Shift+←/→ · wheel", L"Scroll mixer strips when overflowing" },
+		{ L"Ctrl+Alt+H", L"Toggle Comp sidechain (Audio 1→2)" },
+		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
+		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
+		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
+		{ L"Alt+Shift+V", L"VCA assign Audio 1 (status line)" },
+		{ nullptr, L"MOUSE" },
+		{ L"Click track label", L"Focus track · gain auto lane follows" },
 		{ L"Shift+click Solo", L"Toggle solo-isolate (Si)" },
 		{ L"Ctrl+click Solo", L"Toggle solo-safe (Ss)" },
+		{ L"Alt+click Solo", L"Exclusive solo (clear other solos)" },
 		{ L"Alt+click pan", L"Center all track pans" },
 		{ L"Alt+click send", L"Zero all aux sends" },
 		{ L"Alt+click fader", L"Reset all faders to unity" },
 		{ L"Alt+click Arm", L"Disarm all audio tracks" },
-		{ L"Alt+U", L"Clear all solos (audio + MIDI)" },
+		{ L"Alt+Shift+click Arm", L"Arm all audio tracks" },
 		{ L"Alt+click meter", L"Clear all PeakMeter clip latches" },
-		{ L"Alt+click Solo", L"Exclusive solo (clear other solos)" },
-		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·arm)" },
-		{ L"Click track label", L"Focus track · gain auto lane follows" },
-		{ L"U / Shift+U", L"Apply / clear track group" },
-		{ L"Alt+Shift+G / Alt+Grp", L"Toggle group relative gain" },
-		{ L"Alt+Shift+←/→ · wheel", L"Scroll mixer strips when overflowing" },
-		{ L"Alt+Shift+C", L"Cycle track group color (G bar)" },
-		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·active)" },
-		{ L"Alt+Shift+E", L"Toggle track active (group shares)" },
-		{ L"U / Shift+U", L"Apply / clear track group (mute·solo·gain·select)" },
-		{ L"Mon / Alt+Shift+O", L"Cycle monitor Auto → In → Disk" },
-		{ L"Alt+Shift+V", L"VCA assign Audio 1 (status line)" },
-		{ L"Y / Shift+Y", L"Spectrum on/off · Master mix" },
-		{ L"X / Shift+X", L"Phase corr / gonio · Master L/R" },
-		{ L"J / Shift+J", L"LUFS ≈ on/off · Master mix" },
-		{ L"Ctrl+click Send", L"Mute / unmute Aux send (Sm)" },
 		{ L"Shift+click meter", L"Cycle meter tap In/Pre/Post/Out" },
 		{ L"Ctrl+click meter", L"Cycle meter type Peak↔K14" },
+		{ L"Ctrl+click Send", L"Mute / unmute Aux send (Sm)" },
+		{ L"Dbl-click FX param", L"Reset FX knob to insert default" },
+		{ L"Dbl-click fader/pan", L"Reset fader → unity · pan → center" },
+		{ L"Dbl-click send", L"Reset aux send → 0 (off)" },
 	};
 
-	float y = card.top + 40.f * _dpi_scale;
-	float row_h = 20.f * _dpi_scale;
-	float col0 = card.left + 18.f * _dpi_scale;
-	float col1 = card.left + 190.f * _dpi_scale;
-	float bot = card.bottom - 28.f * _dpi_scale;
-	DWRITE_TEXT_ALIGNMENT ta_m = _fmt_meta->GetTextAlignment ();
-	_fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
-	for (size_t i = 0; i < sizeof (kRows) / sizeof (kRows[0]); ++i) {
-		if (y + row_h > bot) {
-			break;
+	const float s = _dpi_scale;
+	const size_t total = sizeof (kRows) / sizeof (kRows[0]);
+	int n_bindings = 0;
+	for (size_t i = 0; i < total; ++i) {
+		if (kRows[i].key) {
+			++n_bindings;
 		}
-		_rt->DrawTextW (kRows[i].key, (UINT32)wcslen (kRows[i].key), _fmt_meta,
-		                D2D1::RectF (col0, y, col1 - 8.f * _dpi_scale, y + row_h),
-		                _brush_accent);
-		_rt->DrawTextW (kRows[i].action, (UINT32)wcslen (kRows[i].action), _fmt_meta,
-		                D2D1::RectF (col1, y, card.right - 16.f * _dpi_scale, y + row_h),
-		                _brush_body);
-		y += row_h;
 	}
-	_fmt_meta->SetTextAlignment (ta_m);
 
-	_rt->DrawTextW (L"Click anywhere or Esc to close", 30, _fmt_meta,
-	                D2D1::RectF (card.left + 16.f * _dpi_scale, card.bottom - 24.f * _dpi_scale,
-	                             card.right - 16.f * _dpi_scale, card.bottom - 6.f * _dpi_scale),
-	                _brush_body);
+	/* Dim the shell; the card lists bindings the shell actually handles. */
+	_ui.modal_scrim (D2D1::RectF (0.f, 0.f, (float)_width, (float)_height), 0.66f);
+
+	const float pad = 20.f * s;
+	const float card_w = std::min ((float)_width - pad * 2.f, 1120.f * s);
+	const float card_h = std::min ((float)_height - pad * 2.f, 720.f * s);
+	const float cx = ((float)_width - card_w) * 0.5f;
+	const float cy = ((float)_height - card_h) * 0.5f;
+	const D2D1_RECT_F card = D2D1::RectF (cx, cy, cx + card_w, cy + card_h);
+	const float radius = ui::theme ().metrics.radius_lg;
+	_ui.shadow (card, radius + 2.f);
+	_ui.fill_round (card, radius, ui::ColorToken::Card);
+	_ui.stroke_round (card, radius, ui::ColorToken::BorderStrong, 1.f);
+
+	/* Header: accent tab, section title, binding count. */
+	const float inset = 18.f * s;
+	const float header_h = 46.f * s;
+	const float tab_w = 3.f * s;
+	const float tab_h = 18.f * s;
+	_ui.fill_round (D2D1::RectF (card.left + inset, card.top + (header_h - tab_h) * 0.5f,
+	                             card.left + inset + tab_w, card.top + (header_h + tab_h) * 0.5f),
+	                1.5f, ui::ColorToken::Accent);
+	_ui.text_vcenter (L"Shortcuts", ui::TextRole::Section, ui::ColorToken::TextPrimary,
+	                  D2D1::RectF (card.left + inset + _ui.dp (12.f), card.top,
+	                               card.right - inset, card.top + header_h));
+	wchar_t meta[64];
+	_snwprintf_s (meta, _TRUNCATE, L"%d bindings", n_bindings);
+	_ui.text_vcenter (meta, ui::TextRole::Caption, ui::ColorToken::TextMuted,
+	                  D2D1::RectF (card.left + inset, card.top, card.right - inset,
+	                               card.top + header_h),
+	                  DWRITE_TEXT_ALIGNMENT_TRAILING);
+	_ui.divider (D2D1::RectF (card.left + inset, card.top + header_h,
+	                          card.right - inset, card.top + header_h + std::max (1.f, s)));
+
+	const float footer_h = 30.f * s;
+	const float wall_top = card.top + header_h;
+	const float wall_bot = card.bottom - footer_h;
+
+	/* Two key/action columns when wide; one column on small windows. */
+	const float inner_l = card.left + inset;
+	const float inner_r = card.right - inset - 6.f * s;
+	const int n_cols = (inner_r - inner_l) >= 860.f * s ? 2 : 1;
+	const float col_gap = 26.f * s;
+	const float col_w = ((inner_r - inner_l) - col_gap * (n_cols - 1)) / (float)n_cols;
+	const float key_w = std::min (246.f * s, col_w * 0.55f);
+	const float row_h = 18.f * s;
+	const float sec_h = 25.f * s;
+
+	auto flow = [&] (int start, bool draw) -> int {
+		int idx = start;
+		for (int c = 0; c < n_cols && idx < (int)total; ++c) {
+			const float x = inner_l + c * (col_w + col_gap);
+			float y = wall_top + 3.f * s;
+			while (idx < (int)total) {
+				const bool is_sec = (kRows[idx].key == nullptr);
+				const float h = is_sec ? sec_h : row_h;
+				if (y + h > wall_bot - 2.f * s) {
+					break;
+				}
+				/* Never orphan a section header at a column foot. */
+				if (is_sec && y + sec_h + row_h > wall_bot - 2.f * s) {
+					break;
+				}
+				if (draw) {
+					if (is_sec) {
+						const float my = y + sec_h * 0.5f;
+						_ui.fill_round (D2D1::RectF (x, my - 1.f * s, x + 9.f * s, my + 1.f * s),
+						                1.f, ui::ColorToken::Accent, 0.75f);
+						_ui.text_vcenter (kRows[idx].action, ui::TextRole::Caption,
+						                  ui::ColorToken::TextMuted,
+						                  D2D1::RectF (x + _ui.dp (14.f), y, x + col_w, y + sec_h));
+					} else {
+						_ui.text_vcenter (kRows[idx].key, ui::TextRole::Mono,
+						                  ui::ColorToken::TextPrimary,
+						                  D2D1::RectF (x, y, x + key_w - 6.f * s, y + row_h));
+						_ui.text_vcenter (kRows[idx].action, ui::TextRole::Caption,
+						                  ui::ColorToken::TextSecondary,
+						                  D2D1::RectF (x + key_w, y, x + col_w, y + row_h));
+					}
+				}
+				y += h;
+				++idx;
+			}
+			if (draw && c + 1 < n_cols) {
+				const float dx = x + col_w + col_gap * 0.5f;
+				_ui.divider (D2D1::RectF (dx, wall_top + 6.f * s, dx + std::max (1.f, s),
+				                          wall_bot - 6.f * s));
+			}
+		}
+		return idx;
+	};
+
+	/* Largest start offset whose rows still fit all columns. */
+	int scroll_max = 0;
+	{
+		int lo = 0;
+		int hi = (int)total;
+		while (lo < hi) {
+			const int mid = (lo + hi) / 2;
+			if (flow (mid, false) >= (int)total) {
+				hi = mid;
+			} else {
+				lo = mid + 1;
+			}
+		}
+		scroll_max = lo;
+	}
+	_help_scroll_max = scroll_max;
+	_help_scroll = std::max (0, std::min (scroll_max, _help_scroll));
+
+	_rt->PushAxisAlignedClip (D2D1::RectF (card.left, wall_top, card.right, wall_bot),
+	                          D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+	flow (_help_scroll, true);
+	_rt->PopAxisAlignedClip ();
+
+	/* Thin scroll indicator when the table continues past this page. */
+	if (scroll_max > 0) {
+		const float bar_x = card.right - inset + 1.f * s;
+		const float bar_w = 3.f * s;
+		const float track_top = wall_top + 6.f * s;
+		const float track_bot = wall_bot - 6.f * s;
+		const float track_h = std::max (1.f, track_bot - track_top);
+		const float page_rows = (float)(flow (0, false) - 0);
+		const float thumb_h = std::min (track_h,
+		                                std::max (22.f * s,
+		                                          track_h * page_rows / (float)total));
+		const float t = (float)_help_scroll / (float)scroll_max;
+		const float thumb_y = track_top + (track_h - thumb_h) * t;
+		_ui.fill_round (D2D1::RectF (bar_x, track_top, bar_x + bar_w, track_bot),
+		                1.5f, ui::ColorToken::Control, 0.9f);
+		_ui.fill_round (D2D1::RectF (bar_x, thumb_y, bar_x + bar_w, thumb_y + thumb_h),
+		                1.5f, ui::ColorToken::BorderStrong);
+	}
+
+	_ui.divider (D2D1::RectF (card.left + inset, wall_bot, card.right - inset,
+	                          wall_bot + std::max (1.f, s)));
+	const wchar_t* foot = (scroll_max > 0)
+	                      ? L"Click anywhere or Esc to close  ·  scroll for more"
+	                      : L"Click anywhere or Esc to close";
+	_ui.text_vcenter (foot, ui::TextRole::Caption, ui::ColorToken::TextMuted,
+	                  D2D1::RectF (inner_l, wall_bot, card.right - inset, card.bottom));
+	if (scroll_max > 0) {
+		_ui.text_vcenter (L"wheel  ·  PgUp / PgDn", ui::TextRole::Caption,
+		                  ui::ColorToken::TextSecondary,
+		                  D2D1::RectF (inner_l, wall_bot, card.right - inset, card.bottom),
+		                  DWRITE_TEXT_ALIGNMENT_TRAILING);
+	}
 }
 
 void
 ShellWindow::draw_mixer_pane ()
 {
 	const D2D1_RECT_F& r = _mixer_pane;
-	_rt->FillRectangle (r, _brush_pane);
-	_rt->DrawRectangle (r, _brush_pane_edge, 1.f);
-	_rt->FillRectangle (D2D1::RectF (r.left, r.top, r.left + 3.f * _dpi_scale, r.bottom), _brush_accent);
+	_ui.panel (r, 10.f, false);
 
-	float inset = 12.f * _dpi_scale;
-	_rt->DrawTextW (L"Mixer", 5, _fmt_pane,
-	                D2D1::RectF (r.left + inset, r.top + 8.f * _dpi_scale,
-	                             r.left + inset + 70.f * _dpi_scale, r.top + 30.f * _dpi_scale),
-	                _brush_brand);
+	const float inset = 12.f * _dpi_scale;
+	const float header_h = 32.f * _dpi_scale;
+	_ui.fill_round (D2D1::RectF (r.left + 16.f * _dpi_scale, r.top + 11.f * _dpi_scale,
+	                             r.left + 19.f * _dpi_scale, r.top + 27.f * _dpi_scale),
+	                1.5f, ui::ColorToken::Accent);
+	_ui.text_vcenter (L"Mixer", ui::TextRole::Section,
+	                  ui::ColorToken::TextPrimary,
+	                  D2D1::RectF (r.left + 26.f * _dpi_scale, r.top,
+	                               r.left + 96.f * _dpi_scale, r.top + header_h));
 
 	wchar_t hint[160];
 	if (_engine_snap.track_eq_ok && !_engine_snap.track_eq_name.empty ()) {
@@ -13519,33 +14822,30 @@ ShellWindow::draw_mixer_pane ()
 	} else {
 		wcsncpy_s (hint, L"M/S · faders  ·  idle until Play", _TRUNCATE);
 	}
-	_rt->DrawTextW (hint, (UINT32)wcslen (hint), _fmt_meta,
-	                D2D1::RectF (r.left + inset + 70.f * _dpi_scale, r.top + 10.f * _dpi_scale,
-	                             r.right - inset, r.top + 30.f * _dpi_scale),
-	                _brush_body);
+	const float scroll_w = (_mixer_scroll_max > 1.f) ? 66.f * _dpi_scale : 0.f;
+	_ui.text_vcenter (hint, ui::TextRole::Caption, ui::ColorToken::TextMuted,
+	                  D2D1::RectF (r.left + 98.f * _dpi_scale, r.top,
+	                               r.right - inset - scroll_w, r.top + header_h));
+	if (_mixer_scroll_max > 1.f) {
+		wchar_t scr[32];
+		_snwprintf_s (scr, _TRUNCATE, L"◀ ▶ %.0f", _mixer_scroll_x);
+		_ui.text_vcenter (scr, ui::TextRole::Caption, ui::ColorToken::TextSecondary,
+		                  D2D1::RectF (r.right - inset - scroll_w, r.top,
+		                               r.right - inset, r.top + header_h),
+		                  DWRITE_TEXT_ALIGNMENT_TRAILING);
+	}
+	_ui.divider (D2D1::RectF (r.left + 12.f * _dpi_scale, r.top + header_h,
+	                          r.right - 12.f * _dpi_scale,
+	                          r.top + header_h + std::max (1.f, _dpi_scale)));
 
 	const int n_mix = n_mixer_strips ();
 	_rt->PushAxisAlignedClip (_mixer_strips_clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 	for (int i = 0; i < n_mix; ++i) {
-		_mixers[i].draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
-		                 _brush_pane_edge, _brush_meter_hot, _fmt_pane, _fmt_meta, _dpi_scale);
+		_mixers[i].draw (_ui);
 	}
 	_rt->PopAxisAlignedClip ();
-	/* Scroll hint when strips overflow. */
-	if (_mixer_scroll_max > 1.f) {
-		wchar_t scr[32];
-		_snwprintf_s (scr, _TRUNCATE, L"◀ ▶ %.0f", _mixer_scroll_x);
-		_rt->DrawTextW (scr, (UINT32)wcslen (scr), _fmt_meta,
-		                D2D1::RectF (_mixer_strips_clip.right - 72.f * _dpi_scale,
-		                             r.top + 10.f * _dpi_scale,
-		                             _mixer_strips_clip.right - 4.f * _dpi_scale,
-		                             r.top + 30.f * _dpi_scale),
-		                _brush_body);
-	}
-	_history.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
-	               _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
-	_monitor.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
-	               _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
+	_history.draw (_ui);
+	_monitor.draw (_ui);
 }
 
 void
@@ -13561,23 +14861,50 @@ ShellWindow::on_paint ()
 	D2D1_SIZE_F sz = _rt->GetSize ();
 	_rt->FillRectangle (D2D1::RectF (0, 0, sz.width, sz.height), _brush_bg);
 
-	_brush_brand->SetOpacity (0.96f + 0.04f * _pulse);
-	_rt->DrawTextW (L"Airdour", 7, _fmt_brand,
-	                D2D1::RectF (_brand_bar.left + 28.f * _dpi_scale, _brand_bar.top,
-	                             _brand_bar.right - 28.f * _dpi_scale, _brand_bar.bottom),
-	                _brush_brand);
-	_brush_brand->SetOpacity (1.f);
+	/* Brand bar: translucent studio chrome, wordmark and live state chip. */
+	const float brand_pad = 24.f * _dpi_scale;
+	_ui.fill_round (_brand_bar, 0.f, ui::ColorToken::Surface, 0.62f);
+	_ui.divider (D2D1::RectF (_brand_bar.left, _brand_bar.bottom - _ui.dp (1.f),
+	                          _brand_bar.right, _brand_bar.bottom));
 
-	/* Accent rule under brand — presence, not noise. */
-	float rule_y = _brand_bar.bottom - 6.f * _dpi_scale;
-	float rule_w = (120.f + 28.f * _pulse) * _dpi_scale;
-	_rt->FillRectangle (D2D1::RectF (28.f * _dpi_scale, rule_y,
-	                                 28.f * _dpi_scale + rule_w, rule_y + 2.5f * _dpi_scale),
-	                    _brush_accent);
+	const float post_h = 22.f * _dpi_scale;
+	const float post_y = (_brand_bar.top + _brand_bar.bottom - post_h) * 0.5f;
+	_ui.fill_round (D2D1::RectF (brand_pad, post_y,
+	                             brand_pad + _ui.dp (4.f), post_y + post_h),
+	                2.f, ui::ColorToken::Accent, 0.96f + 0.04f * _pulse);
+	_ui.text_vcenter (L"Airdour", ui::TextRole::Brand, ui::ColorToken::TextPrimary,
+	                  D2D1::RectF (brand_pad + _ui.dp (14.f), _brand_bar.top,
+	                               _brand_bar.right - _ui.dp (130.f), _brand_bar.bottom));
+
+	{
+		const wchar_t* state_label = _transport.recording () ? L"REC"
+		                            : (_transport_playing ? L"PLAY" : L"STOP");
+		const ui::ColorToken state_color = _transport.recording () ? ui::ColorToken::Record
+		                                 : (_transport_playing ? ui::ColorToken::Accent
+		                                                       : ui::ColorToken::TextMuted);
+		const float pill_w = 78.f * _dpi_scale;
+		const float pill_h = 22.f * _dpi_scale;
+		const float pill_x = _brand_bar.right - brand_pad - pill_w;
+		const float pill_y = (_brand_bar.top + _brand_bar.bottom - pill_h) * 0.5f;
+		const D2D1_RECT_F pill = D2D1::RectF (pill_x, pill_y,
+		                                      pill_x + pill_w, pill_y + pill_h);
+		const float pill_rad = pill_h * 0.5f / _dpi_scale;
+		_ui.fill_round (pill, pill_rad, ui::ColorToken::Control, 0.85f);
+		_ui.stroke_round (pill, pill_rad, ui::ColorToken::Border, 1.f);
+		const float dot = 6.f * _dpi_scale;
+		const float dot_x = pill_x + 12.f * _dpi_scale;
+		_ui.fill_round (D2D1::RectF (dot_x, pill_y + (pill_h - dot) * 0.5f,
+		                             dot_x + dot, pill_y + (pill_h + dot) * 0.5f),
+		                dot * 0.5f / _dpi_scale, state_color);
+		_ui.text_vcenter (state_label, ui::TextRole::Caption,
+		                  ui::ColorToken::TextSecondary,
+		                  D2D1::RectF (dot_x + dot + _ui.dp (7.f), pill_y,
+		                               pill.right - _ui.dp (6.f), pill.bottom));
+	}
 
 	sync_transport_clock_from_engine ();
-	_transport.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
-	                 _brush_pane_edge, _fmt_pane, _playhead_sec, _dpi_scale);
+	_menu_bar.draw (_ui);
+	_transport.draw (_ui, _playhead_sec);
 
 	draw_editor_pane ();
 	draw_mixer_pane ();
@@ -13610,23 +14937,19 @@ ShellWindow::on_paint ()
 	}
 	if (_about.about_visible ()) {
 		_about.layout ((float)_width, (float)_height, _dpi_scale);
-		_about.draw_about (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
-		                   _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
+		_about.draw_about (_ui);
 	}
 	if (_prefs_visible) {
 		_prefs.layout ((float)_width, (float)_height, _dpi_scale);
-		_prefs.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
-		             _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
+		_prefs.draw (_ui);
 	}
 	if (_recent.visible ()) {
 		_recent.layout_under (_transport.open_btn (), (float)_width, (float)_height, _dpi_scale);
-		_recent.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
-		              _brush_pane_edge, _fmt_meta, _dpi_scale);
+		_recent.draw (_ui);
 	}
 	if (_recovery.visible ()) {
 		_recovery.layout ((float)_width, (float)_height, _dpi_scale);
-		_recovery.draw (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
-		                _brush_pane_edge, _fmt_pane, _fmt_meta, _dpi_scale);
+		_recovery.draw (_ui);
 	}
 	if (_about.splash_visible ()) {
 		_about.draw_splash (_rt, _brush_brand, _brush_body, _brush_accent, _brush_pane,
@@ -13661,9 +14984,36 @@ ShellWindow::on_paint ()
 			              _engine_snap.vst3_bypassed ? L" BYP" : L"");
 		}
 	}
+	wchar_t sess_frag[192] = L"";
+	if (_engine_snap.session_ok) {
+		std::wstring base = _engine_snap.session_path;
+		const size_t slash = base.find_last_of (L"\\/");
+		if (slash != std::wstring::npos) {
+			base = base.substr (slash + 1);
+		}
+		_snwprintf_s (sess_frag, _TRUNCATE, L"  ·  %s (%d tracks)",
+		              base.c_str (), _engine_snap.audio_track_count);
+	}
+	wchar_t dev_frag[192] = L"";
+	if (_engine_snap.running && !_engine_snap.audio_out_name.empty ()) {
+		const double out_ms = _engine_snap.sample_rate
+		                      ? (1000.0 * (double)_engine_snap.systemic_out_frames
+		                         / (double)_engine_snap.sample_rate)
+		                      : 0.0;
+		_snwprintf_s (dev_frag, _TRUNCATE, L"  ·  %s  ·  out %.1f ms",
+		              _engine_snap.audio_out_name.c_str (), out_ms);
+	}
+	wchar_t hist_frag[192] = L"";
+	if (_engine_snap.undo_depth || _engine_snap.redo_depth) {
+		_snwprintf_s (hist_frag, _TRUNCATE, L"  ·  undo %s (%u)  ·  redo %s (%u)",
+		              _engine_snap.next_undo_name[0] ? _engine_snap.next_undo_name : L"—",
+		              _engine_snap.undo_depth,
+		              _engine_snap.next_redo_name[0] ? _engine_snap.next_redo_name : L"—",
+		              _engine_snap.redo_depth);
+	}
 	if (_engine_snap.running) {
 		_snwprintf_s (status, _TRUNCATE,
-		              L"Engine  %s  ·  %u Hz  ·  period %u  ·  DSP %.1f%%  ·  cb %lluµs avg  ·  xruns %llu%s%s  ·  %s",
+		              L"Engine  %s  ·  %u Hz  ·  period %u  ·  DSP %.1f%%  ·  cb %lluµs avg  ·  xruns %llu%s%s%s%s%s  ·  %s",
 		              _engine_snap.backend.c_str (),
 		              _engine_snap.sample_rate,
 		              _engine_snap.period_frames,
@@ -13672,18 +15022,33 @@ ShellWindow::on_paint ()
 		              (unsigned long long)_engine_snap.xrun_count,
 		              vca_frag,
 		              vst_frag,
+		              sess_frag,
+		              dev_frag,
+		              hist_frag,
 		              _engine_snap.detail.c_str ());
 	} else if (_engine_snap.available) {
 		_snwprintf_s (status, _TRUNCATE,
-		              L"Engine idle  ·  DSP %.1f%%  ·  %d tracks%s%s  ·  %s",
-		              dsp, kTracks, vca_frag, vst_frag, _engine_snap.detail.c_str ());
+		              L"Engine idle  ·  DSP %.1f%%  ·  %d tracks%s%s%s%s  ·  %s",
+		              dsp, n_audio_lanes (), vca_frag, vst_frag, sess_frag, hist_frag,
+		              _engine_snap.detail.c_str ());
 	} else {
 		_snwprintf_s (status, _TRUNCATE,
 		              L"UI shell  ·  %d tracks%s%s  ·  %s",
-		              kTracks, vca_frag, vst_frag, _engine_snap.detail.c_str ());
+		              n_audio_lanes (), vca_frag, vst_frag, _engine_snap.detail.c_str ());
 	}
 
-	const float meter_w = 96.f * _dpi_scale;
+	/* Status bar: muted telemetry strip with a compact DSP load meter. */
+	const float status_pad = 20.f * _dpi_scale;
+	_ui.fill_round (_status_bar, 0.f, ui::ColorToken::Surface, 0.72f);
+	_ui.divider (D2D1::RectF (_status_bar.left, _status_bar.top,
+	                          _status_bar.right, _status_bar.top + _ui.dp (1.f)));
+
+	const float meter_total = 156.f * _dpi_scale;
+	const float label_w = 58.f * _dpi_scale;
+	const float meter_gap = _ui.dp (8.f);
+	const float track_w = meter_total - label_w - meter_gap;
+	const float track_right = _status_bar.right - status_pad;
+	const float track_left = track_right - track_w;
 	const float unload_w = 18.f * _dpi_scale;
 	const float bypass_w = 28.f * _dpi_scale;
 	const float reset_w = 28.f * _dpi_scale;
@@ -13691,14 +15056,14 @@ ShellWindow::on_paint ()
 	const float unload_gap = 6.f * _dpi_scale;
 	const float gap = 8.f * _dpi_scale;
 	float mid_y = (_status_bar.top + _status_bar.bottom) * 0.5f;
-	float text_right = _status_bar.right - 20.f * _dpi_scale - meter_w - 12.f * _dpi_scale;
+	float text_right = track_left - _ui.dp (18.f);
 	_status_vst3_bypass_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
 	for (int i = 0; i < EngineSnapshot::kMaxVst3Params; ++i) {
 		_status_vst3_param_reset_btn[i] = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
 	}
 	_status_vst3_unload_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
 	_status_snap_btn = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
-	float right_cursor = _status_bar.right - 20.f * _dpi_scale - meter_w - gap;
+	float right_cursor = track_left - gap;
 	if (_engine_snap.vst3_ok) {
 		float bh = 16.f * _dpi_scale;
 		_status_vst3_unload_btn = D2D1::RectF (right_cursor - unload_w, mid_y - bh * 0.5f,
@@ -13712,9 +15077,9 @@ ShellWindow::on_paint ()
 		}
 		float edge = _status_vst3_unload_btn.left;
 		for (int i = n - 1; i >= 0; --i) {
-			const float w = (i == 0) ? reset_w : reset_n_w;
+			const float ww = (i == 0) ? reset_w : reset_n_w;
 			_status_vst3_param_reset_btn[i] = D2D1::RectF (
-				edge - unload_gap - w,
+				edge - unload_gap - ww,
 				mid_y - bh * 0.5f,
 				edge - unload_gap,
 				mid_y + bh * 0.5f);
@@ -13735,83 +15100,91 @@ ShellWindow::on_paint ()
 		                               right_cursor, mid_y + bh * 0.5f);
 		text_right = _status_snap_btn.left - gap;
 	}
-	_rt->DrawTextW (status, (UINT32)wcslen (status), _fmt_meta,
-	                D2D1::RectF (_status_bar.left + 20.f * _dpi_scale, _status_bar.top,
-	                             text_right, _status_bar.bottom),
-	                _brush_body);
 
-	if (_brush_accent && _fmt_meta) {
-		DWRITE_TEXT_ALIGNMENT ta = _fmt_meta->GetTextAlignment ();
-		DWRITE_PARAGRAPH_ALIGNMENT pa = _fmt_meta->GetParagraphAlignment ();
-		_fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-		_fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-		if (_engine_snap.vst3_ok
-		    && _status_vst3_unload_btn.right > _status_vst3_unload_btn.left) {
-			if (_status_vst3_bypass_btn.right > _status_vst3_bypass_btn.left) {
-				if (_engine_snap.vst3_bypassed) {
-					_brush_accent->SetOpacity (0.45f);
-					_rt->FillRectangle (_status_vst3_bypass_btn, _brush_accent);
-					_brush_accent->SetOpacity (1.f);
-				} else {
-					_rt->FillRectangle (_status_vst3_bypass_btn, _brush_pane_edge);
-				}
-				_rt->DrawRectangle (_status_vst3_bypass_btn, _brush_accent,
-				                    std::max (1.f, 1.f * _dpi_scale));
-				_rt->DrawTextW (L"BYP", 3, _fmt_meta, _status_vst3_bypass_btn, _brush_brand);
+	_ui.text_vcenter_n (status, (UINT32)wcslen (status), ui::TextRole::Mono,
+	                    ui::ColorToken::TextSecondary,
+	                    D2D1::RectF (_status_bar.left + status_pad, _status_bar.top,
+	                                 text_right, _status_bar.bottom));
+
+	if (_engine_snap.vst3_ok
+	    && _status_vst3_unload_btn.right > _status_vst3_unload_btn.left) {
+		if (_status_vst3_bypass_btn.right > _status_vst3_bypass_btn.left) {
+			if (_engine_snap.vst3_bypassed) {
+				_ui.fill_round (_status_vst3_bypass_btn, 3.f, ui::ColorToken::Accent, 0.45f);
+			} else {
+				_ui.fill_round (_status_vst3_bypass_btn, 3.f, ui::ColorToken::Control, 0.8f);
 			}
-			for (int i = 0; i < EngineSnapshot::kMaxVst3Params; ++i) {
-				const D2D1_RECT_F& r = _status_vst3_param_reset_btn[i];
-				if (r.right <= r.left) {
-					continue;
-				}
-				_rt->FillRectangle (r, _brush_pane_edge);
-				_rt->DrawRectangle (r, _brush_accent,
-				                    std::max (1.f, 1.f * _dpi_scale));
-				if (i == 0) {
-					_rt->DrawTextW (L"RST", 3, _fmt_meta, r, _brush_brand);
-				} else {
-					const wchar_t lab[2] = { (wchar_t)(L'0' + i), L'\0' };
-					_rt->DrawTextW (lab, 1, _fmt_meta, r, _brush_brand);
-				}
+			_ui.stroke_round (_status_vst3_bypass_btn, 3.f, ui::ColorToken::Accent, 1.f);
+			_ui.text_vcenter (L"BYP", ui::TextRole::Caption, ui::ColorToken::AccentInk,
+			                  _status_vst3_bypass_btn, DWRITE_TEXT_ALIGNMENT_CENTER);
+		}
+		for (int i = 0; i < EngineSnapshot::kMaxVst3Params; ++i) {
+			const D2D1_RECT_F& r = _status_vst3_param_reset_btn[i];
+			if (r.right <= r.left) {
+				continue;
 			}
-			_rt->FillRectangle (_status_vst3_unload_btn, _brush_pane_edge);
-			_rt->DrawRectangle (_status_vst3_unload_btn, _brush_accent,
-			                    std::max (1.f, 1.f * _dpi_scale));
-			_rt->DrawTextW (L" D7", 1, _fmt_meta, _status_vst3_unload_btn, _brush_brand);
+			_ui.fill_round (r, 3.f, ui::ColorToken::Control, 0.8f);
+			_ui.stroke_round (r, 3.f, ui::ColorToken::Accent, 1.f);
+			if (i == 0) {
+				_ui.text_vcenter (L"RST", ui::TextRole::Caption, ui::ColorToken::AccentInk,
+				                  r, DWRITE_TEXT_ALIGNMENT_CENTER);
+			} else {
+				const wchar_t lab[2] = { (wchar_t)(L'0' + i), L'\0' };
+				_ui.text_vcenter (lab, ui::TextRole::Caption, ui::ColorToken::AccentInk,
+				                  r, DWRITE_TEXT_ALIGNMENT_CENTER);
+			}
 		}
-		if (_status_snap_btn.right > _status_snap_btn.left) {
-			_rt->FillRectangle (_status_snap_btn, _brush_pane_edge);
-			_rt->DrawRectangle (_status_snap_btn, _brush_accent, 1.f * _dpi_scale);
-			const wchar_t* lab = _transport.snap_btn_label ();
-			_rt->DrawTextW (lab, (UINT32)wcslen (lab), _fmt_meta, _status_snap_btn, _brush_brand);
-		}
-		_fmt_meta->SetTextAlignment (ta);
-		_fmt_meta->SetParagraphAlignment (pa);
+		_ui.fill_round (_status_vst3_unload_btn, 3.f, ui::ColorToken::Control, 0.8f);
+		_ui.stroke_round (_status_vst3_unload_btn, 3.f, ui::ColorToken::Accent, 1.f);
+		_ui.text_vcenter (L"\u00d7", ui::TextRole::Caption, ui::ColorToken::AccentInk,
+		                  _status_vst3_unload_btn, DWRITE_TEXT_ALIGNMENT_CENTER);
+	}
+	if (_status_snap_btn.right > _status_snap_btn.left) {
+		_ui.fill_round (_status_snap_btn, 3.f, ui::ColorToken::Control, 0.8f);
+		_ui.stroke_round (_status_snap_btn, 3.f, ui::ColorToken::Accent, 1.f);
+		const wchar_t* lab = _transport.snap_btn_label ();
+		_ui.text_vcenter (lab, ui::TextRole::Caption, ui::ColorToken::AccentInk,
+		                  _status_snap_btn, DWRITE_TEXT_ALIGNMENT_CENTER);
 	}
 
-	/* Status-bar DSP meter (same load % as transport; UI-rate from poll). */
 	if (_engine_snap.available) {
-		float bh = 12.f * _dpi_scale;
-		D2D1_RECT_F track = D2D1::RectF (_status_bar.right - 20.f * _dpi_scale - meter_w,
-		                                 mid_y - bh * 0.5f,
-		                                 _status_bar.right - 20.f * _dpi_scale,
-		                                 mid_y + bh * 0.5f);
-		_rt->FillRectangle (track, _brush_pane_edge);
-		float fill_w = meter_w * (dsp / 100.f);
-		if (fill_w > 1.f) {
-			D2D1_RECT_F fill = D2D1::RectF (track.left, track.top,
-			                                track.left + fill_w, track.bottom);
-			_rt->FillRectangle (fill, dsp >= 85.f ? _brush_accent : _brush_brand);
+		const float bar_h = 6.f * _dpi_scale;
+		const float bar_rad = bar_h * 0.5f / _dpi_scale;
+		const D2D1_RECT_F track = D2D1::RectF (track_left, mid_y - bar_h * 0.5f,
+		                                       track_right, mid_y + bar_h * 0.5f);
+		_ui.fill_round (track, bar_rad, ui::ColorToken::Control);
+		_ui.stroke_round (track, bar_rad, ui::ColorToken::Border, 1.f, 0.8f);
+		const float fill_right = track.left + (track.right - track.left) * (dsp / 100.f);
+		if (fill_right > track.left + 1.f) {
+			_ui.fill_round (D2D1::RectF (track.left, track.top,
+			                             fill_right, track.bottom),
+			                bar_rad,
+			                dsp >= 85.f ? ui::ColorToken::MeterHot : ui::ColorToken::Accent,
+			                0.95f);
 		}
 		wchar_t dsp_lab[24];
 		_snwprintf_s (dsp_lab, _TRUNCATE, L"DSP %.0f%%", dsp);
-		DWRITE_TEXT_ALIGNMENT ta = _fmt_meta->GetTextAlignment ();
-		DWRITE_PARAGRAPH_ALIGNMENT pa = _fmt_meta->GetParagraphAlignment ();
-		_fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-		_fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-		_rt->DrawTextW (dsp_lab, (UINT32)wcslen (dsp_lab), _fmt_meta, track, _brush_body);
-		_fmt_meta->SetTextAlignment (ta);
-		_fmt_meta->SetParagraphAlignment (pa);
+		_ui.text_vcenter (dsp_lab, ui::TextRole::Caption,
+		                  dsp >= 85.f ? ui::ColorToken::MeterHot
+		                              : ui::ColorToken::TextMuted,
+		                  D2D1::RectF (track_left - meter_gap - label_w,
+		                               _status_bar.top, track_left - meter_gap,
+		                               _status_bar.bottom),
+		                  DWRITE_TEXT_ALIGNMENT_TRAILING);
+	}
+
+	_transport.draw_overlay (_ui);
+	_menu_bar.draw_overlay (_ui);
+
+	if (_drag == DragMode::None && !_help_visible && !_prefs_visible
+	    && !_menu_bar.open ()
+	    && !_about.about_visible () && !_recent.visible ()
+	    && !_recovery.visible () && !_about.splash_visible ()) {
+		wchar_t tip[96];
+		if (_transport.hover_tooltip (tip, 96)) {
+			_ui.tooltip (tip, D2D1::Point2F (_mouse_x, _mouse_y),
+			             D2D1::RectF (0.f, 0.f, (float)_width, (float)_height));
+		}
 	}
 
 	HRESULT hr = _rt->EndDraw ();

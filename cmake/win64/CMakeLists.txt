@@ -61,11 +61,13 @@ set(AIRDOUR_WAF_BUILD_DIR "${AIRDOUR_SRC_ROOT}/build" CACHE PATH "waf build dir 
 if(AIRDOUR_BUILD_WIN_SHELL)
   add_executable(airdour_win_shell
     "${AIRDOUR_SRC_ROOT}/win_ardour/main.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/ui_draw.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/shell_window.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/engine_host.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/wave_strip.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/cairo_wave_blit.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/transport_bar.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/menu_bar.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/mixer_strip.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/monitor_strip.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/history_panel.cc"
@@ -172,6 +174,7 @@ if(AIRDOUR_BUILD_WIN_SHELL)
       glibmm-2.4
       sigc-2.0
       libxml2
+      sndfile
       "$<$<CONFIG:Debug>:pthreadVC3d>"
       "$<$<NOT:$<CONFIG:Debug>>:pthreadVC3>"
     )

@@ -33,7 +33,12 @@
  *                         [--smoke-comp-sc-hotkey]
  *                         [--smoke-limiter] [--smoke-gate] [--smoke-spectrum]
  *                         [--smoke-correlation] [--smoke-loudness]
+ *                         [--smoke-new-session] [--smoke-save-as]
+ *                         [--smoke-open-session] [--smoke-device]
+ *                         [--smoke-latency] [--smoke-ui-layout]
+ *                         [--smoke-track-capacity]
  *                         [--no-splash] [--period N] [--session DIR]
+ *                         [--new-session PATH]
  */
 
 #include "shell_window.h"
@@ -85,6 +90,20 @@ parse_session_path (int argc, wchar_t** argv)
 {
 	for (int i = 1; i < argc; ++i) {
 		if (wcscmp (argv[i], L"--session") == 0 && i + 1 < argc) {
+			char buf[MAX_PATH * 4];
+			WideCharToMultiByte (CP_UTF8, 0, argv[i + 1], -1, buf, sizeof (buf), nullptr, nullptr);
+			return std::string (buf);
+		}
+	}
+	return std::string ();
+}
+
+/* Full target folder path for --new-session (parent + name derived from it). */
+static std::string
+parse_new_session_path (int argc, wchar_t** argv)
+{
+	for (int i = 1; i < argc; ++i) {
+		if (wcscmp (argv[i], L"--new-session") == 0 && i + 1 < argc) {
 			char buf[MAX_PATH * 4];
 			WideCharToMultiByte (CP_UTF8, 0, argv[i + 1], -1, buf, sizeof (buf), nullptr, nullptr);
 			return std::string (buf);
@@ -208,6 +227,7 @@ wmain (int argc, wchar_t** argv)
 	bool smoke_perf = parse_flag (argc, argv, L"--smoke-perf");
 	bool no_splash = parse_flag (argc, argv, L"--no-splash");
 	std::string session_path = parse_session_path (argc, argv);
+	std::string new_session_path = parse_new_session_path (argc, argv);
 	/* --smoke-perf uses --timeout as the sample window (default 5s). */
 	if (smoke_perf && timeout == 0) {
 		timeout = 5;
@@ -275,6 +295,10 @@ wmain (int argc, wchar_t** argv)
 		}
 	} else {
 		std::fwprintf (stderr, L"airdour_win_shell: --no-engine\n");
+	}
+
+	if (!no_engine && !new_session_path.empty ()) {
+		shell.new_session_at_path (new_session_path);
 	}
 
 	/* Perf sampling already ran inside attach_engine; exit the UI promptly. */

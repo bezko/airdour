@@ -53,8 +53,27 @@ struct EngineMidiNoteSnap {
 	bool    selected = false;
 };
 
+struct EnginePluginSnap {
+	wchar_t name[48];
+	wchar_t unique_id[72];
+	bool    is_instrument;
+};
+
+struct EnginePluginSlotSnap {
+	wchar_t name[48];
+	wchar_t unique_id[72];
+	bool    active;
+};
+
+struct EnginePluginParamSnap {
+	wchar_t name[32];
+	float   value; /* plugin units */
+	float   norm; /* 0..1 UI */
+	bool    toggled;
+};
+
 struct EngineSnapshot {
-	static constexpr int kMeters = 6; /* max audio tracks (Editor lanes / meters) */
+	static constexpr int kMeters = 16; /* max audio tracks (Editor lanes / meters) */
 	static constexpr int kMaxMarkers = 8;
 	static constexpr int kMaxMidiDevices = 16;
 	static constexpr int kMaxMidiNotes = 96;
@@ -347,6 +366,15 @@ struct EngineSnapshot {
 	wchar_t      vst3_param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
 	float        vst3_param_norm[kMaxVst3Params] = {}; /* 0..1 interface */
 	uint32_t     vst3_param_port[kMaxVst3Params] = {};
+	/* Audio devices + measured systemic latency. */
+	std::wstring audio_in_name; /* current backend device ("Default" when unset) */
+	std::wstring audio_out_name;
+	std::wstring pref_in_device; /* persisted WinShellPrefs input-device */
+	std::wstring pref_out_device;
+	bool         separate_io_devices = false; /* backend uses separate in/out names */
+	uint32_t     systemic_in_frames = 0; /* backend-reported, excludes one period */
+	uint32_t     systemic_out_frames = 0;
+	std::wstring capture_disabled_reason; /* empty unless capture is expected */
 	/* Recent sessions (WinShellRecent instant.xml, beside WinShellPrefs). */
 	static constexpr int kMaxRecent = 8;
 	static constexpr int kRecentLabelLen = 48;
@@ -357,6 +385,9 @@ struct EngineSnapshot {
 	std::wstring detail;
 	static_assert (kMeters == 6, "per-meter defaults are listed for six lanes");
 };
+
+static_assert (sizeof (EngineSnapshot) < 256 * 1024,
+               "EngineSnapshot must stay small enough to copy per UI tick");
 
 class EngineHost
 {
@@ -388,6 +419,28 @@ public:
 	 * For --smoke-prefs.
 	 */
 	bool smoke_prefs ();
+
+	/* Audio device selection (generic AudioBackend API, no WASAPI headers). */
+	std::vector<std::string> input_devices () const;
+	std::vector<std::string> output_devices () const;
+	bool backend_uses_separate_devices () const;
+	std::string current_input_device () const;
+	std::string current_output_device () const;
+	/**
+	 * Stop transport + engine, apply device names, restart, verify readback.
+	 * Empty names leave the device unchanged. Not running applies at next start.
+	 */
+	bool set_audio_devices (const std::string& in, const std::string& out);
+	/** Cycle the persisted device name by delta (output preferred). */
+	bool cycle_audio_device (bool output, int delta);
+	/** Restart audio with the persisted device prefs (prefs panel Apply). */
+	bool restart_audio ();
+	void set_pref_input_device (const std::string& name);
+	void set_pref_output_device (const std::string& name);
+	/** Enumerate → select → restart → verify → restore. For --smoke-device. */
+	bool smoke_device ();
+	/** Assert measured latency (non-zero on WASAPI, zero on Dummy). For --smoke-latency. */
+	bool smoke_latency ();
 
 	/** Load WinShellRecent (sibling of WinShellPrefs in instant.xml). */
 	void load_recent_sessions ();
@@ -956,12 +1009,32 @@ public:
 
 	/**
 	 * Close current Session (leak until process exit) and open an existing
-	 * session folder. snapshot_name defaults to "win_shell".
+	 * session folder. An empty snapshot_name discovers the first *.ardour file.
 	 */
-	bool open_session (const std::string& session_dir, const std::string& snapshot_name = "win_shell");
+	bool open_session (const std::string& session_dir, const std::string& snapshot_name = std::string ());
 
 	/** Save then reopen the current session path (smoke / Ctrl+S round-trip). */
 	bool reload_session ();
+
+	/**
+	 * Create a new named session under parent_dir/name (the session folder must
+	 * not exist yet). Replaces the current Session, saves immediately and
+	 * records the path in recents.
+	 */
+	bool new_session (const std::string& parent_dir, const std::string& name);
+
+	/**
+	 * Save the current session as parent_dir/name, copying media, then switch
+	 * to the new copy.
+	 */
+	bool save_session_as (const std::string& parent_dir, const std::string& name);
+
+	/** New → verify snapshot on disk → reopen. For --smoke-new-session. */
+	bool smoke_new_session ();
+	/** New source → Save As copy → verify copy + switch. For --smoke-save-as. */
+	bool smoke_save_as ();
+	/** New + region → save → destroy → reopen. For --smoke-open-session. */
+	bool smoke_open_session ();
 
 	/**
 	 * Bounce session (master bus) to a WAV file for [start,end] samples.
@@ -2221,6 +2294,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 private:
 	void refresh_snapshot ();
 	bool ensure_session ();
+	/** Build a fresh unnamed Session at dir/snapshot (dir must not exist). */
+	bool create_session_at (const std::string& dir, const std::string& snapshot);
 	void destroy_session ();
 	void read_meters ();
 	void refresh_region_flags ();
@@ -2284,6 +2359,8 @@ private:
 	uint32_t    _pref_period_frames;
 	bool        _pref_snap_default;
 	bool        _pref_click_default;
+	std::string _pref_input_device; /* persisted WinShellPrefs device names */
+	std::string _pref_output_device;
 	struct RecentEntry {
 		std::string path;
 		std::string snapshot;

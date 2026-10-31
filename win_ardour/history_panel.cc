@@ -4,6 +4,7 @@
 
 #include "history_panel.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -40,7 +41,7 @@ HistoryPanel::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 {
 	_panel = bounds;
 	float pad = 6.f * dpi_scale;
-	float y = _panel.top + 26.f * dpi_scale;
+	float y = _panel.top + 32.f * dpi_scale;
 	float btn_h = 22.f * dpi_scale;
 	float gap = 4.f * dpi_scale;
 	float half = (_panel.right - _panel.left - pad * 3.f) * 0.5f;
@@ -118,96 +119,83 @@ HistoryPanel::hit_test (float x, float y, int* out_row) const
 }
 
 void
-HistoryPanel::draw (ID2D1RenderTarget* rt,
-                    ID2D1SolidColorBrush* brand,
-                    ID2D1SolidColorBrush* body,
-                    ID2D1SolidColorBrush* accent,
-                    ID2D1SolidColorBrush* pane,
-                    ID2D1SolidColorBrush* edge,
-                    IDWriteTextFormat* fmt_title,
-                    IDWriteTextFormat* fmt_meta,
-                    float dpi_scale) const
+HistoryPanel::draw (UiDraw& ui) const
 {
-	if (!rt) {
-		return;
-	}
+	const D2D1_RECT_F& p = _panel;
+	const float s = ui.dpi_scale ();
+	const float hair = std::max (1.f, s);
 
-	rt->FillRectangle (_panel, pane);
-	rt->DrawRectangle (_panel, edge, 1.f);
-	rt->FillRectangle (
-		D2D1::RectF (_panel.left, _panel.top, _panel.left + 3.f * dpi_scale, _panel.bottom),
-		accent);
+	ui.card (p);
 
-	DWRITE_TEXT_ALIGNMENT ta = fmt_title->GetTextAlignment ();
-	fmt_title->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-	rt->DrawTextW (L"History", 7, fmt_title,
-	               D2D1::RectF (_panel.left, _panel.top + 3.f * dpi_scale,
-	                            _panel.right, _panel.top + 24.f * dpi_scale),
-	               brand);
-	fmt_title->SetTextAlignment (ta);
+	const float header_h = 26.f * s;
+	const D2D1_RECT_F title_rc = D2D1::RectF (p.left + 12.f * s, p.top,
+	                                          p.right - 12.f * s, p.top + header_h);
+	ui.text_vcenter (L"History", ui::TextRole::Section,
+	                 _available ? ui::ColorToken::TextPrimary
+	                            : ui::ColorToken::TextMuted,
+	                 title_rc);
+	wchar_t meta[64];
+	_snwprintf_s (meta, _TRUNCATE, L"%u · %u",
+	              (unsigned)_undo_depth, (unsigned)_redo_depth);
+	ui.text_vcenter (meta, ui::TextRole::Caption, ui::ColorToken::TextMuted,
+	                 title_rc, DWRITE_TEXT_ALIGNMENT_TRAILING);
+	ui.divider (D2D1::RectF (p.left + 8.f * s, p.top + header_h,
+	                         p.right - 8.f * s, p.top + header_h + hair));
 
-	DWRITE_TEXT_ALIGNMENT ta_m = fmt_meta->GetTextAlignment ();
-	DWRITE_PARAGRAPH_ALIGNMENT pa_m = fmt_meta->GetParagraphAlignment ();
-	fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-	fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-
-	auto draw_btn = [&] (const D2D1_RECT_F& r, const wchar_t* label, bool enabled) {
-		rt->FillRectangle (r, enabled ? accent : edge);
-		rt->DrawTextW (label, (UINT32)wcslen (label), fmt_meta, r, brand);
+	auto draw_btn = [&] (const D2D1_RECT_F& r, const wchar_t* label,
+	                     bool enabled, bool latched) {
+		if (enabled) {
+			UiDraw::ButtonStyle st;
+			st.label = label;
+			st.latched = latched;
+			ui.button (r, st);
+		} else {
+			ui.fill_round (r, 4.f, ui::ColorToken::Control, 0.4f);
+			ui.stroke_round (r, 4.f, ui::ColorToken::Border, 1.f, 0.6f);
+			ui.text_vcenter (label, ui::TextRole::Body,
+			                 ui::ColorToken::TextDisabled, r,
+			                 DWRITE_TEXT_ALIGNMENT_CENTER);
+		}
 	};
 
-	if (!_available) {
-		rt->FillRectangle (_undo_btn, edge);
-		rt->DrawTextW (L"—", 1, fmt_meta, _undo_btn, body);
-		fmt_meta->SetTextAlignment (ta_m);
-		fmt_meta->SetParagraphAlignment (pa_m);
-		return;
-	}
-
-	draw_btn (_undo_btn, L"Undo", _undo_depth > 0);
-	draw_btn (_redo_btn, L"Redo", _redo_depth > 0);
-
-	fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
-	fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-
-	wchar_t meta[64];
-	_snwprintf_s (meta, _TRUNCATE, L"U %u · R %u", (unsigned)_undo_depth, (unsigned)_redo_depth);
-	/* Depths drawn under buttons inside first row margin if empty. */
+	draw_btn (_undo_btn, L"Undo", _undo_depth > 0, false);
+	draw_btn (_redo_btn, L"Redo", _redo_depth > 0, false);
 
 	for (int i = 0; i < _row_count; ++i) {
-		bool top = (i == 0);
-		rt->FillRectangle (_undo_rows[i], top ? accent : edge);
+		const bool top = (i == 0);
 		if (top) {
-			accent->SetOpacity (0.35f);
-			rt->FillRectangle (_undo_rows[i], accent);
-			accent->SetOpacity (1.f);
+			ui.fill_round (_undo_rows[i], 3.f, ui::ColorToken::Control, 0.85f);
+			ui.fill_round (D2D1::RectF (_undo_rows[i].left, _undo_rows[i].top + 2.f * s,
+			                             _undo_rows[i].left + 2.f * s,
+			                             _undo_rows[i].bottom - 2.f * s),
+			                1.f, ui::ColorToken::Accent, 0.9f);
 		}
-		wchar_t line[48];
+		wchar_t line[56];
 		_snwprintf_s (line, _TRUNCATE, L"%d  %s", i + 1, _row_name[i]);
-		rt->DrawTextW (line, (UINT32)wcslen (line), fmt_meta,
-		               D2D1::RectF (_undo_rows[i].left + 4.f * dpi_scale, _undo_rows[i].top,
-		                            _undo_rows[i].right - 2.f * dpi_scale, _undo_rows[i].bottom),
-		               brand);
+		ui.text_vcenter (line, ui::TextRole::Body,
+		                 top ? ui::ColorToken::TextPrimary
+		                     : ui::ColorToken::TextSecondary,
+		                 D2D1::RectF (_undo_rows[i].left + 8.f * s, _undo_rows[i].top,
+		                              _undo_rows[i].right - 2.f * s, _undo_rows[i].bottom));
 	}
 
 	if (_row_count == 0) {
-		rt->DrawTextW (meta, (UINT32)wcslen (meta), fmt_meta, _undo_rows[0], body);
+		ui.text_vcenter (meta, ui::TextRole::Caption, ui::ColorToken::TextMuted,
+		                 _undo_rows[0]);
 	}
 
 	if (_redo_depth > 0) {
-		rt->FillRectangle (_redo_next_row, edge);
-		wchar_t rline[56];
+		ui.fill_round (_redo_next_row, 3.f, ui::ColorToken::Control, 0.32f);
+		wchar_t rline[64];
 		if (_next_redo[0]) {
 			_snwprintf_s (rline, _TRUNCATE, L"↷ %s", _next_redo);
 		} else {
 			_snwprintf_s (rline, _TRUNCATE, L"↷ redo ×%u", (unsigned)_redo_depth);
 		}
-		rt->DrawTextW (rline, (UINT32)wcslen (rline), fmt_meta,
-		               D2D1::RectF (_redo_next_row.left + 4.f * dpi_scale, _redo_next_row.top,
-		                            _redo_next_row.right - 2.f * dpi_scale, _redo_next_row.bottom),
-		               brand);
+		ui.text_vcenter (rline, ui::TextRole::Caption,
+		                 ui::ColorToken::TextSecondary,
+		                 D2D1::RectF (_redo_next_row.left + 8.f * s, _redo_next_row.top,
+		                              _redo_next_row.right - 2.f * s,
+		                              _redo_next_row.bottom));
 	}
-
-	fmt_meta->SetTextAlignment (ta_m);
-	fmt_meta->SetParagraphAlignment (pa_m);
 }
