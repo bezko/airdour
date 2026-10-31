@@ -23,7 +23,6 @@ def build(bld):
         obj.chmod = Utils.O644
         obj.LIB_EXT = module_ext
 
-    # DSP-only (no Cairo). Matches a-reverb / a-comp / a-eq / a-delay.
     obj = bld(features     = 'c cshlib',
               source       = 'a-limiter.c',
               name         = 'a-limiter',

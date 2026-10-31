@@ -24,7 +24,7 @@ build-win64\artifacts\Release\airdour_win_shell.exe --timeout 3
 
 Produces `airdour_wasapi_io.lib` (WasapiIO + Windows SDK) and `airdour_win_shell.exe` (Win32+D2D+DirectWrite, no GTK).
 
-## Headless C deps (next slice on laptop)
+## Headless C deps
 
 ```bat
 powershell -ExecutionPolicy Bypass -File tools\win-native\Install-HeadlessDeps.ps1 -VcpkgRoot C:\vcpkg
@@ -63,7 +63,6 @@ Default backends: **dummy** + **wasapi**. Needs MSVC deps above **plus** the gli
 | `GITHUB_TOKEN` | Auto | Release publish on tags |
 | `VCPKG_BINARY_SOURCES` | No (future) | Binary cache when vcpkg job is enabled |
 | Code signing | No | Not wired |
-| GTK2 MSVC prefix | Blocked | Main GUI release blocker |
 
 Manifest: `tools/win-native/vcpkg.json` (core headless deps; **no GTK2 chrome**).  
 Optional MSVC **GTK3/Cairo libs** (not product UI): `-WithGtkLibs` → feature `gtk-libs`.  
@@ -91,4 +90,4 @@ Optional MSVC **GTK3/Cairo libs** (not product UI): `-WithGtkLibs` → feature `
 ## Success for this phase
 
 - Shared-mode device I/O through `ARDOUR::AudioBackend` on win64
-- CI publishes reproducible win64 smoke/release zips without claiming a full GUI app
+- CI publishes reproducible win64 smoke/release zips
