@@ -19,6 +19,7 @@ LevelMeter::LevelMeter ()
 	, _hold_age (0.f)
 	, _clipped (false)
 	, _clip_age (0.f)
+	, _led_h (0.f)
 {
 }
 
@@ -89,6 +90,21 @@ LevelMeter::hit (float x, float y) const
 }
 
 void
+LevelMeter::set_clip_led_height (float h_px)
+{
+	_led_h = std::max (0.f, h_px);
+}
+
+bool
+LevelMeter::hit_clip_led (float x, float y) const
+{
+	float h = _bounds.bottom - _bounds.top;
+	float led = (_led_h > 0.f) ? _led_h : std::max (3.f, h * 0.08f);
+	return x >= _bounds.left && x <= _bounds.right
+	    && y >= _bounds.top && y <= _bounds.top + led;
+}
+
+void
 LevelMeter::draw (ID2D1RenderTarget* rt,
                   ID2D1SolidColorBrush* fill,
                   ID2D1SolidColorBrush* edge,
@@ -127,7 +143,7 @@ LevelMeter::draw (ID2D1RenderTarget* rt,
 
 	/* Clip LED at meter top when ≥0 dBFS (or PeakMeter max-peak). */
 	if (_clipped && hot) {
-		float led_h = std::max (3.f, 4.f * dpi_scale);
+		float led_h = (_led_h > 0.f) ? _led_h : std::max (3.f, 4.f * dpi_scale);
 		rt->FillRectangle (D2D1::RectF (_bounds.left, _bounds.top,
 		                                _bounds.right, _bounds.top + led_h),
 		                   hot);

@@ -163,6 +163,8 @@ public:
 	void        clear_meter_clip ();
 	bool        meter_clipped () const { return _meter.clipped (); }
 	bool        hit_meter (float x, float y) const;
+	/** True only over the top clip LED (not the full meter body). */
+	bool        hit_meter_clip_led (float x, float y) const;
 	LevelMeter& meter () { return _meter; }
 	/** 0=In 1=Pre 2=Post 3=Out — badge near meter. */
 	void set_meter_point (int point_0_3);

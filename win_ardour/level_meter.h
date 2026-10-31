@@ -37,6 +37,9 @@ public:
 	bool  clipped () const { return _clipped; }
 
 	bool hit (float x, float y) const;
+	/** Top clip-LED band only (not full meter body). */
+	bool hit_clip_led (float x, float y) const;
+	void set_clip_led_height (float h_px);
 
 	void draw (ID2D1RenderTarget* rt,
 	           ID2D1SolidColorBrush* fill,
@@ -53,4 +56,5 @@ private:
 	float       _hold_age;
 	bool        _clipped;
 	float       _clip_age;
+	float       _led_h; /* px; 0 → fraction of meter height */
 };

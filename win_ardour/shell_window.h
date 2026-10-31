@@ -345,6 +345,7 @@ private:
 	bool status_vst3_param_reset_center (int index, float* out_x, float* out_y) const;
 	void do_cycle_vst3_insert (int dir);
 	bool smoke_midi_step_piano_highlight ();
+	bool smoke_meter_clip_led ();
 	void do_toggle_group_relative ();
 	void do_cycle_group_color ();
 	void do_toggle_focused_track_active ();

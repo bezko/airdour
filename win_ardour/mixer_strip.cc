@@ -295,6 +295,7 @@ MixerStrip::layout (const D2D1_RECT_F& strip_bounds, float dpi_scale)
 
 	float meter_x = _strip.right - pad - meter_w;
 	_meter.layout (D2D1::RectF (meter_x, top, meter_x + meter_w, bot));
+	_meter.set_clip_led_height (std::max (3.f, 4.f * dpi_scale));
 }
 
 void
@@ -328,6 +329,12 @@ bool
 MixerStrip::hit_meter (float x, float y) const
 {
 	return _meter.hit (x, y);
+}
+
+bool
+MixerStrip::hit_meter_clip_led (float x, float y) const
+{
+	return _meter.hit_clip_led (x, y);
 }
 
 void
