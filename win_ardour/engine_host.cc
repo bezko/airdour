@@ -29640,6 +29640,112 @@ EngineHost::nudge_midi_length (float delta_sec)
 }
 
 bool
+EngineHost::force_midi_note_length_to_grid ()
+{
+	if (!_impl || !_impl->session) {
+		_snap.detail = L"force-length: no Session";
+		return false;
+	}
+	if (!ensure_midi_region (32.f) || !_impl->midi_region) {
+		_snap.detail = L"force-length: no MIDI region";
+		return false;
+	}
+	try {
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count <= 0) {
+			_snap.detail = L"force-length: no notes";
+			return false;
+		}
+
+		bool have_sel = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			if (_snap.midi_notes[i].selected) {
+				have_sel = true;
+				break;
+			}
+		}
+
+		float unit = snap_unit_sec ();
+		if (unit < kMidiMinLengthSec) {
+			unit = kMidiMinLengthSec;
+		}
+
+		struct Kept {
+			uint8_t pitch;
+			uint8_t velocity;
+			float   start_sec;
+			float   length_sec;
+		};
+		std::vector<Kept> keep;
+		keep.reserve ((size_t)_snap.midi_note_count);
+		int moved = 0;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			Kept k;
+			k.pitch = n.pitch;
+			k.velocity = n.velocity;
+			k.start_sec = n.start_sec;
+			const bool do_l = !have_sel || n.selected;
+			if (do_l) {
+				if (std::fabs (unit - n.length_sec) > 1e-4f) {
+					++moved;
+				}
+				k.length_sec = unit;
+			} else {
+				k.length_sec = n.length_sec;
+			}
+			keep.push_back (k);
+		}
+
+		std::shared_ptr<Playlist> playlist = _impl->midi_track
+		                                        ? _impl->midi_track->playlist ()
+		                                        : std::shared_ptr<Playlist> ();
+		if (!playlist) {
+			_snap.detail = L"force-length: no playlist";
+			return false;
+		}
+		_impl->session->begin_reversible_command ("force midi length");
+		playlist->clear_changes ();
+		playlist->clear_owned_changes ();
+		playlist->remove_region (_impl->midi_region);
+		playlist->rdiff_and_add_command (_impl->session);
+		_impl->session->commit_reversible_command ();
+
+		_impl->midi_region.reset ();
+		_impl->selected_midi_note_id = -1;
+		if (!ensure_midi_region (32.f)) {
+			_snap.detail = L"force-length: region rebuild failed";
+			return false;
+		}
+		int added = 0;
+		int32_t first_id = -1;
+		for (size_t i = 0; i < keep.size (); ++i) {
+			if (add_midi_note (keep[i].pitch, keep[i].start_sec,
+			                   keep[i].length_sec, keep[i].velocity)) {
+				++added;
+				if (first_id < 0 && _impl->selected_midi_note_id >= 0) {
+					first_id = _impl->selected_midi_note_id;
+				}
+			}
+		}
+		_impl->selected_midi_note_id = first_id;
+		refresh_midi_notes_snap ();
+		std::fprintf (stderr,
+		              "airdour_win_shell: force-length ok (notes=%d moved=%d unit=%.3f)\n",
+		              _snap.midi_note_count, moved, unit);
+		std::fflush (stderr);
+		_snap.detail = L"MIDI length forced to grid";
+		return added > 0 || keep.empty ();
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: force-length exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
 EngineHost::set_midi_note_start (float start_sec)
 {
 	if (start_sec < 0.f) {
@@ -29961,6 +30067,95 @@ EngineHost::smoke_midi_length ()
 		return true;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-length exception: %s\n", e.what ());
+		std::fflush (stderr);
+		return false;
+	} catch (...) {
+		return false;
+	}
+}
+
+bool
+EngineHost::smoke_midi_force_length ()
+{
+	if (!_impl || !_impl->session || !_impl->engine) {
+		_snap.detail = L"smoke-midi-force-length failed — no Session";
+		return false;
+	}
+	try {
+		if (!ensure_midi_track () || !ensure_midi_region (16.f)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-length FAILED (region)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		refresh_midi_notes_snap ();
+		if (_snap.midi_note_count > 0) {
+			std::shared_ptr<Playlist> playlist = _impl->midi_track
+			                                        ? _impl->midi_track->playlist ()
+			                                        : std::shared_ptr<Playlist> ();
+			if (playlist && _impl->midi_region) {
+				_impl->session->begin_reversible_command ("clear midi for force-length smoke");
+				playlist->clear_changes ();
+				playlist->clear_owned_changes ();
+				playlist->remove_region (_impl->midi_region);
+				playlist->rdiff_and_add_command (_impl->session);
+				_impl->session->commit_reversible_command ();
+				_impl->midi_region.reset ();
+				_impl->selected_midi_note_id = -1;
+				if (!ensure_midi_region (16.f)) {
+					std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-length FAILED (clear)\n");
+					std::fflush (stderr);
+					return false;
+				}
+			}
+		}
+		set_snap_density (1); /* beat */
+		set_snap_enabled (true);
+		const float unit = snap_unit_sec ();
+		if (!add_midi_note (60, 0.0f, 0.7f, 100)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-length FAILED (add)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		clear_midi_note_selection ();
+		if (!force_midi_note_length_to_grid ()) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-length FAILED (force)\n");
+			std::fflush (stderr);
+			return false;
+		}
+		refresh_midi_notes_snap ();
+		bool ok = false;
+		for (int i = 0; i < _snap.midi_note_count; ++i) {
+			const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+			if (n.pitch == 60
+			    && std::fabs (n.start_sec - 0.0f) < 0.06f
+			    && std::fabs (n.length_sec - unit) < 0.06f) {
+				ok = true;
+			}
+		}
+		if (!ok) {
+			std::fprintf (stderr,
+			              "airdour_win_shell: smoke-midi-force-length FAILED "
+			              "(want start=0 len≈%.3f)\n",
+			              unit);
+			for (int i = 0; i < _snap.midi_note_count; ++i) {
+				std::fprintf (stderr, "  note p=%u t=%.3f len=%.3f\n",
+				              (unsigned)_snap.midi_notes[i].pitch,
+				              _snap.midi_notes[i].start_sec,
+				              _snap.midi_notes[i].length_sec);
+			}
+			std::fflush (stderr);
+			return false;
+		}
+		std::fprintf (stderr,
+		              "airdour_win_shell: smoke-midi-force-length ok (unit=%.3f)\n",
+		              unit);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-midi-force-length ok";
+		return true;
+	} catch (std::exception& e) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-force-length exception: %s\n",
+		              e.what ());
 		std::fflush (stderr);
 		return false;
 	} catch (...) {
@@ -36750,6 +36945,12 @@ EngineHost::nudge_midi_length (float delta_sec)
 }
 
 bool
+EngineHost::force_midi_note_length_to_grid ()
+{
+	return false;
+}
+
+bool
 EngineHost::set_midi_note_start (float start_sec)
 {
 	(void)start_sec;
@@ -36771,6 +36972,12 @@ EngineHost::snap_unit_sec () const
 
 bool
 EngineHost::smoke_midi_length ()
+{
+	return false;
+}
+
+bool
+EngineHost::smoke_midi_force_length ()
 {
 	return false;
 }
