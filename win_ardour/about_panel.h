@@ -32,8 +32,6 @@ public:
 	void set_splash_visible (bool on) { _splash_visible = on; }
 	bool splash_visible () const { return _splash_visible; }
 
-	/** True if (x,y) hits the About Close control (About mode only). */
-	bool hit_close (float x, float y) const;
 	/** True if click should dismiss About (close or outside card). */
 	bool hit_dismiss_about (float x, float y) const;
 

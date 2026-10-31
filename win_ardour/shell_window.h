@@ -50,7 +50,6 @@ class ShellWindow
 public:
 	static constexpr int kTracksMax = 6; /* matches EngineSnapshot::kMeters */
 	static constexpr int kMixerStripsMax = 7; /* up to 6 audio + 1 MIDI */
-	/* Legacy aliases used by older loops — prefer n_audio_lanes(). */
 	static constexpr int kTracks = kTracksMax;
 	static constexpr int kMixerStrips = kMixerStripsMax;
 

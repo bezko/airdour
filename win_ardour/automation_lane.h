@@ -32,7 +32,6 @@ public:
 
 	bool  hit (const D2D1_RECT_F& bounds, float x, float y) const;
 	float value_at_y (const D2D1_RECT_F& bounds, float y) const; /* 1=top … 0=bottom */
-	float x_norm_at (const D2D1_RECT_F& bounds, float x) const;
 
 	void draw (ID2D1RenderTarget* rt,
 	           const D2D1_RECT_F& bounds,
