@@ -485,12 +485,6 @@ TransportBar::set_overflow_open (bool on)
 	_overflow_open = on;
 }
 
-bool
-TransportBar::menu_contains (float x, float y) const
-{
-	return _overflow_open && contains (_menu_bounds, x, y);
-}
-
 float
 TransportBar::shuttle_speed_at_x (float x) const
 {

@@ -86,7 +86,6 @@ inline constexpr wchar_t Stop[]    = L"\uE71A";
 inline constexpr wchar_t Record[]  = L"\uE7C8";
 inline constexpr wchar_t Repeat[]  = L"\uE8EE";
 inline constexpr wchar_t Flag[]    = L"\uE7C1";
-inline constexpr wchar_t Cut[]     = L"\uE8C6";
 inline constexpr wchar_t Save[]    = L"\uE74E";
 inline constexpr wchar_t Open[]    = L"\uE8E5";
 inline constexpr wchar_t Import[]  = L"\uE8B5";
@@ -96,23 +95,14 @@ inline constexpr wchar_t Help[]    = L"\uE897";
 inline constexpr wchar_t Info[]    = L"\uE946";
 inline constexpr wchar_t Add[]     = L"\uE710";
 inline constexpr wchar_t Remove[]  = L"\uE738";
-inline constexpr wchar_t Delete[]  = L"\uE74D";
-inline constexpr wchar_t Undo[]    = L"\uE7A7";
-inline constexpr wchar_t Redo[]    = L"\uE7A6";
 inline constexpr wchar_t Up[]      = L"\uE74A";
 inline constexpr wchar_t Down[]    = L"\uE74B";
-inline constexpr wchar_t ChevronDown[] = L"\uE70D";
-inline constexpr wchar_t ChevronUp[]   = L"\uE70E";
 inline constexpr wchar_t More[]    = L"\uE712";
-inline constexpr wchar_t Close[]   = L"\uE711";
 inline constexpr wchar_t Check[]   = L"\uE73E";
 inline constexpr wchar_t ZoomFit[] = L"\uE8A3";
-inline constexpr wchar_t ZoomOut[] = L"\uE71F";
 inline constexpr wchar_t Warning[] = L"\uE7BA";
 inline constexpr wchar_t Volume[]  = L"\uE767";
 inline constexpr wchar_t Clock[]   = L"\uE823";
-inline constexpr wchar_t Previous[] = L"\uE892";
-inline constexpr wchar_t Next[]    = L"\uE893";
 } // namespace glyph
 
 inline D2D1_COLOR_F

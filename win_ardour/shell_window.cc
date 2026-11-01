@@ -39,15 +39,15 @@ const D2D1_COLOR_F kSelection  = ui::rgb (0x3fc3e8);
 const D2D1_COLOR_F kLoop       = ui::rgb (0xf0a93b);
 const D2D1_COLOR_F kPunch      = ui::rgb (0xe8574a);
 /* Ruler / lane wash opacities (smoke-punch-loop-tint asserts these). */
-constexpr float kLoopRulerTintOp   = 0.52f; /* was 0.35 */
-constexpr float kPunchRulerTintOn  = 0.72f; /* was 0.55 */
-constexpr float kPunchRulerTintOff = 0.42f; /* was 0.28 */
+constexpr float kLoopRulerTintOp   = 0.52f;
+constexpr float kPunchRulerTintOn  = 0.72f;
+constexpr float kPunchRulerTintOff = 0.42f;
 constexpr float kLoopLaneTintOp    = 0.18f; /* play-loop on */
 constexpr float kLoopLaneTintIdle  = 0.10f; /* range on, play off */
 constexpr float kLoopInactiveHatchOp = 0.30f; /* soft hatch when idle */
 constexpr float kLoopInactiveHatchPx = 6.f;   /* stripe pitch @ dpi=1 */
-constexpr float kPunchLaneTintOn   = 0.34f; /* was 0.22 */
-constexpr float kPunchLaneTintOff  = 0.12f; /* was 0.16 — idle + hatch */
+constexpr float kPunchLaneTintOn   = 0.34f;
+constexpr float kPunchLaneTintOff  = 0.12f;
 constexpr float kPunchInactiveHatchOp = 0.32f; /* soft hatch when disarmed */
 constexpr float kPunchInactiveHatchPx = 6.f;
 const D2D1_COLOR_F kMarker     = ui::rgb (0xd6e36b);

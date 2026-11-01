@@ -47,14 +47,11 @@ public:
 	bool armed () const { return _armed; }
 	/** Record-safe latch (Rs badge on Arm). */
 	void set_record_safe (bool safe) { _record_safe = safe; }
-	bool record_safe () const { return _record_safe; }
 
 	/** 0=Auto 1=Input 2=Disk — Mon button (audio strips). */
 	void set_monitor_choice (int choice_0_1_2);
-	int  monitor_choice () const { return _monitor_choice; }
 	/** Group monitoring peers sharing this choice (badge shows total ·N). */
 	void set_monitor_peer_count (int peers) { _monitor_peer_count = peers < 0 ? 0 : peers; }
-	int  monitor_peer_count () const { return _monitor_peer_count; }
 
 	void set_muted (bool muted) { _muted = muted; }
 	bool muted () const { return _muted; }
@@ -64,13 +61,10 @@ public:
 	void set_soloed (bool soloed) { _soloed = soloed; }
 	bool soloed () const { return _soloed; }
 	void set_solo_isolated (bool isolated) { _solo_isolated = isolated; }
-	bool solo_isolated () const { return _solo_isolated; }
 	void set_solo_safe (bool safe) { _solo_safe = safe; }
 	bool solo_safe () const { return _solo_safe; }
 	void set_has_comment (bool has) { _has_comment = has; }
-	bool has_comment () const { return _has_comment; }
 	void set_phase_inverted (bool inverted) { _phase_inverted = inverted; }
-	bool phase_inverted () const { return _phase_inverted; }
 
 	/** Preamp trim UI 0..1 (0.5 = unity / 0 dB; audio strips only). */
 	void  set_trim (float trim_0_1);
@@ -82,7 +76,6 @@ public:
 	int  listen_mode () const { return _listen_mode; }
 	/** Route::active — dim strip when false. */
 	void set_route_active (bool active) { _route_active = active; }
-	bool route_active () const { return _route_active; }
 
 	/** Pan azimuth 0=L … 0.5=C … 1=R (audio strips only). */
 	void  set_pan (float pan_0_1);
@@ -104,7 +97,6 @@ public:
 	void  set_send (float send_0_1);
 	float send () const { return _send; }
 	void  set_send_muted (bool muted) { _send_muted = muted; }
-	bool  send_muted () const { return _send_muted; }
 	bool  hit_send (float x, float y) const;
 	bool  drag_send_to (float x);
 
@@ -127,7 +119,6 @@ public:
 	void set_in_group (bool in_group) { _in_group = in_group; }
 	bool in_group () const { return _in_group; }
 	void set_group_picked (bool picked) { _group_picked = picked; }
-	bool group_picked () const { return _group_picked; }
 	/** Group color RRGGBBAA when RouteGroup shares color (0 = use accent). */
 	void set_group_rgba (uint32_t rgba) { _group_rgba = rgba; }
 	uint32_t group_rgba () const { return _group_rgba; }
@@ -137,7 +128,6 @@ public:
 
 	/** True when strip has a non-empty FX label (insert/bypass is live). */
 	bool has_fx () const { return _fx_label[0] != L'\0'; }
-	bool fx_bypassed () const { return _fx_bypassed; }
 	int  fx_param_count () const { return _fx_param_count; }
 	float fx_param () const { return _fx_param; }
 	float fx_param2 () const { return _fx_param2; }

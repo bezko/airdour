@@ -88,7 +88,6 @@ public:
 	void close ();
 	bool open () const { return _open != -1; }
 	bool context_open () const { return _open == kContextMenu; }
-	int open_index () const { return _open; }
 
 	bool overlay_contains (float x, float y) const;
 
