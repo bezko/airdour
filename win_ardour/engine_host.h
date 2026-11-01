@@ -2460,6 +2460,8 @@ private:
 	bool compute_export_range (int64_t* start_sample, int64_t* end_sample) const;
 	bool configure_backend_midi ();
 	void refresh_midi_notes_snap ();
+	template <typename Pred>
+	int select_midi_notes_where (Pred pred);
 	/** Session TempoMap beat↔sec for MIDI notes/CC (falls back to 120 BPM). */
 	double midi_beats_from_sec (float time_sec) const;
 	float midi_sec_from_beats (double beats) const;
