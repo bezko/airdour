@@ -4,7 +4,7 @@
 #   - push tags matching v* (e.g. v0.1.0)
 #   - manual workflow_dispatch (builds a draft/prerelease zip)
 #
-# Publishes (GHA windows-latest — honest UiOnly + scripts):
+# Publishes (GHA windows-2022 — honest UiOnly + scripts):
 #   1) airdour-*-win64-ci.zip — WASAPI I/O smoke lib + sources + BUILD_STATUS
 #   2) airdour-*-win64-shell-ui.zip — portable D2D shell (UiOnly)
 #   3) airdour-*-win64-setup-ui.exe — NSIS installer of the UiOnly shell (per-user)
