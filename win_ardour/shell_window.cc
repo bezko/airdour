@@ -285,75 +285,8 @@ ShellWindow::run_smoke_check (bool ok, const char* name, std::function<bool()> f
 bool
 ShellWindow::attach_engine (const std::string& backend_name,
                             unsigned smoke_timeout_secs,
-                            bool smoke_import,
-                            bool smoke_record,
-                            bool smoke_save_load,
-                            bool smoke_export,
-                            bool smoke_undo,
-                            bool smoke_loop,
-                            bool smoke_midi,
-                            bool smoke_midi_edit,
-                            bool smoke_plugin,
-                            bool smoke_perf,
                             const std::string& open_session_path,
-                            unsigned period_frames,
-                            bool smoke_vst3,
-                            bool smoke_mute_solo,
-                            bool smoke_pan,
-                            bool smoke_send,
-                            bool smoke_automation,
-                            bool smoke_edit,
-                            bool smoke_snap,
-                            bool smoke_punch,
-                            bool smoke_tempo,
-                            bool smoke_click,
-                            bool smoke_tracks,
-                            bool smoke_stereo_track,
-                            bool smoke_rename,
-                            bool smoke_group,
-                            bool smoke_monitor,
-                            bool smoke_locate,
-                            bool smoke_zoom,
-                            bool smoke_history,
-                            bool smoke_prefs,
-                            bool smoke_recent,
-                            bool smoke_recovery,
-                            bool smoke_stretch,
-                            bool smoke_pitch,
-                            bool smoke_reverse,
-                            bool smoke_normalize,
-                            bool smoke_strip_silence,
-                            bool smoke_consolidate,
-                            bool smoke_freeze,
-                            bool smoke_comp,
-                            bool smoke_comp_sc_hotkey,
-                            bool smoke_eq,
-                            bool smoke_delay,
-                            bool smoke_limiter,
-                            bool smoke_gate,
-                            bool smoke_spectrum,
-                            bool smoke_correlation,
-                            bool smoke_loudness,
-                            bool smoke_midi_quantize,
-                            bool smoke_midi_transpose,
-                            bool smoke_midi_velocity,
-                            bool smoke_midi_length,
-                            bool smoke_midi_clipboard,
-                            bool smoke_midi_humanize,
-                            bool smoke_midi_step,
-                            bool smoke_midi_chord,
-                            bool smoke_midi_arp,
-                            bool smoke_midi_scale,
-                            bool smoke_midi_cc,
-                            bool smoke_midi_bend,
-                            bool smoke_midi_pressure,
-                            bool smoke_locate_selection,
-                            bool smoke_pan_automation,
-                            bool smoke_auto_lane_unify,
-                            bool smoke_auto_state,
-                            bool smoke_pan_auto_state,
-                            bool smoke_send_auto_state,
-                            bool smoke_auto_state_unify)
+                            unsigned period_frames)
 {
 	if (!_engine.is_linked ()) {
 		_engine.prepare (backend_name);
@@ -361,7 +294,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		return false;
 	}
 	/* --timeout smokes: autosave off (unless --smoke-recovery). */
-	_engine.set_autosave_enabled (smoke_recovery || smoke_timeout_secs == 0);
+	_engine.set_autosave_enabled (has_smoke ("recovery") || smoke_timeout_secs == 0);
 	if (period_frames > 0) {
 		_engine.set_period_frames (period_frames);
 		std::fprintf (stderr, "airdour_win_shell: --period %u\n", period_frames);
@@ -372,7 +305,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	 * auto-roll — rolling under Debug has intermittent AVs on Dummy/WASAPI
 	 * that prevent ExitProcess(0). Interactive runs still auto-play.
 	 * --smoke-record / --smoke-perf drive their own short roll. */
-	const bool autoplay = ok && (smoke_timeout_secs == 0) && !smoke_record && !smoke_perf;
+	const bool autoplay = ok && (smoke_timeout_secs == 0) && !has_smoke ("record") && !has_smoke ("perf");
 
 	if (ok && !open_session_path.empty ()) {
 		if (_engine.open_session (open_session_path)) {
@@ -384,7 +317,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_import && engine_session_ok ()) {
+	if (ok && has_smoke ("import") && engine_session_ok ()) {
 		if (_engine.import_test_tone (0, 220.f, 2.f)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-import ok (track 0)\n");
 		} else {
@@ -393,7 +326,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_save_load && engine_session_ok ()) {
+	if (ok && has_smoke ("save-load") && engine_session_ok ()) {
 		refresh_engine_snap ();
 		if (!_engine_snap.track_has_regions[0]) {
 			_engine.import_test_tone (0, 330.f, 1.5f);
@@ -410,7 +343,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_export && engine_session_ok ()) {
+	if (ok && has_smoke ("export") && engine_session_ok ()) {
 		std::string exported;
 		if (_engine.smoke_export_wav (&exported)) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-export ok → %s\n", exported.c_str ());
@@ -420,7 +353,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_undo && engine_session_ok ()) {
+	if (ok && has_smoke ("undo") && engine_session_ok ()) {
 		if (_engine.smoke_undo ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-undo ok\n");
 		} else {
@@ -429,7 +362,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_loop && engine_session_ok ()) {
+	if (ok && has_smoke ("loop") && engine_session_ok ()) {
 		if (_engine.smoke_loop_markers ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-loop ok\n");
 		} else {
@@ -438,7 +371,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_midi_edit && engine_session_ok ()) {
+	if (ok && has_smoke ("midi-edit") && engine_session_ok ()) {
 		if (_engine.smoke_midi_edit ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi-edit ok\n");
 		} else {
@@ -446,108 +379,108 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_quantize && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi-quantize") && engine_session_ok ()) {
 		if (!_engine.smoke_midi_quantize ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_midi_quantize) {
+	} else if (has_smoke ("midi-quantize")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-quantize FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_transpose && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi-transpose") && engine_session_ok ()) {
 		if (!_engine.smoke_midi_transpose ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_midi_transpose) {
+	} else if (has_smoke ("midi-transpose")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-transpose FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_velocity && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi-velocity") && engine_session_ok ()) {
 		if (!_engine.smoke_midi_velocity ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_midi_velocity) {
+	} else if (has_smoke ("midi-velocity")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-velocity FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_length && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi-length") && engine_session_ok ()) {
 		if (!_engine.smoke_midi_length ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_midi_length) {
+	} else if (has_smoke ("midi-length")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-length FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_clipboard && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi-clipboard") && engine_session_ok ()) {
 		if (!_engine.smoke_midi_clipboard ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_midi_clipboard) {
+	} else if (has_smoke ("midi-clipboard")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-clipboard FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_humanize && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi-humanize") && engine_session_ok ()) {
 		if (!_engine.smoke_midi_humanize ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_midi_humanize) {
+	} else if (has_smoke ("midi-humanize")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-humanize FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_step && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi-step") && engine_session_ok ()) {
 		if (!_engine.smoke_midi_step ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_midi_step) {
+	} else if (has_smoke ("midi-step")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-step FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_chord && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi-chord") && engine_session_ok ()) {
 		if (!_engine.smoke_midi_chord ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_midi_chord) {
+	} else if (has_smoke ("midi-chord")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-chord FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_arp && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi-arp") && engine_session_ok ()) {
 		if (!_engine.smoke_midi_arp ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_midi_arp) {
+	} else if (has_smoke ("midi-arp")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-arp FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_scale && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi-scale") && engine_session_ok ()) {
 		if (!_engine.smoke_midi_scale ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_midi_scale) {
+	} else if (has_smoke ("midi-scale")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-scale FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_cc && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi-cc") && engine_session_ok ()) {
 		if (!_engine.smoke_midi_cc ()) {
 			_smoke_failed = true;
 		} else {
 			refresh_midi_cc_lane ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_midi_cc) {
+	} else if (has_smoke ("midi-cc")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-cc FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_bend && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi-bend") && engine_session_ok ()) {
 		if (!_engine.smoke_midi_bend ()) {
 			_smoke_failed = true;
 		} else {
@@ -555,11 +488,11 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			refresh_midi_cc_lane ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_midi_bend) {
+	} else if (has_smoke ("midi-bend")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-bend FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi_pressure && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi-pressure") && engine_session_ok ()) {
 		if (!_engine.smoke_midi_pressure ()) {
 			_smoke_failed = true;
 		} else {
@@ -567,7 +500,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			refresh_midi_cc_lane ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_midi_pressure) {
+	} else if (has_smoke ("midi-pressure")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-pressure FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -580,7 +513,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fprintf (stderr, "airdour_win_shell: smoke-master-fx FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
-	} else if (ok && smoke_midi && engine_session_ok ()) {
+	} else if (ok && has_smoke ("midi") && engine_session_ok ()) {
 		if (_engine.smoke_midi ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-midi ok\n");
 		} else {
@@ -727,7 +660,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_plugin && engine_session_ok ()) {
+	if (ok && has_smoke ("plugin") && engine_session_ok ()) {
 		if (_engine.smoke_plugin_insert ()) {
 			std::fprintf (stderr, "airdour_win_shell: smoke-plugin ok\n");
 		} else {
@@ -735,7 +668,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_plugin) {
+	} else if (has_smoke ("plugin")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-plugin FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -754,20 +687,20 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_comp && engine_session_ok ()) {
+	if (ok && has_smoke ("comp") && engine_session_ok ()) {
 		if (!_engine.smoke_comp ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_fx_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_comp) {
+	} else if (has_smoke ("comp")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-comp FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_comp_sc_hotkey && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("comp-sc-hotkey") && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_comp_sc_hotkey ()) {
 			_smoke_failed = true;
 		} else {
@@ -776,117 +709,117 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			sync_mixer_fx_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_comp_sc_hotkey) {
+	} else if (has_smoke ("comp-sc-hotkey")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-comp-sc-hotkey FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
 
-	if (ok && smoke_eq && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("eq") && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_eq ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_fx_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_eq) {
+	} else if (has_smoke ("eq")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-eq FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_delay && engine_session_ok ()) {
+	if (ok && has_smoke ("delay") && engine_session_ok ()) {
 		if (!_engine.smoke_delay ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_fx_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_delay) {
+	} else if (has_smoke ("delay")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-delay FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_limiter && engine_session_ok ()) {
+	if (ok && has_smoke ("limiter") && engine_session_ok ()) {
 		if (!_engine.smoke_limiter ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_fx_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_limiter) {
+	} else if (has_smoke ("limiter")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-limiter FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_gate && engine_session_ok ()) {
+	if (ok && has_smoke ("gate") && engine_session_ok ()) {
 		if (!_engine.smoke_gate ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_fx_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_gate) {
+	} else if (has_smoke ("gate")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-gate FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_spectrum && engine_session_ok ()) {
+	if (ok && has_smoke ("spectrum") && engine_session_ok ()) {
 		if (!_engine.smoke_spectrum ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_spectrum) {
+	} else if (has_smoke ("spectrum")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-spectrum FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_correlation && engine_session_ok ()) {
+	if (ok && has_smoke ("correlation") && engine_session_ok ()) {
 		if (!_engine.smoke_correlation ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_correlation) {
+	} else if (has_smoke ("correlation")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-correlation FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_loudness && engine_session_ok ()) {
+	if (ok && has_smoke ("loudness") && engine_session_ok ()) {
 		if (!_engine.smoke_loudness ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_loudness) {
+	} else if (has_smoke ("loudness")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-loudness FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_vst3 && engine_session_ok ()) {
+	if (ok && has_smoke ("vst3") && engine_session_ok ()) {
 		if (!_engine.smoke_vst3 ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_vst3) {
+	} else if (has_smoke ("vst3")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-vst3 FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_mute_solo && engine_session_ok ()) {
+	if (ok && has_smoke ("mute-solo") && engine_session_ok ()) {
 		if (!_engine.smoke_mute_solo ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_mute_solo_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_mute_solo) {
+	} else if (has_smoke ("mute-solo")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-mute-solo FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -1094,14 +1027,14 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_pan && engine_session_ok ()) {
+	if (ok && has_smoke ("pan") && engine_session_ok ()) {
 		if (!_engine.smoke_pan ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_pan_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_pan) {
+	} else if (has_smoke ("pan")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -1147,14 +1080,14 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_send && engine_session_ok ()) {
+	if (ok && has_smoke ("send") && engine_session_ok ()) {
 		if (!_engine.smoke_send ()) {
 			_smoke_failed = true;
 		} else {
 			sync_mixer_send_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_send) {
+	} else if (has_smoke ("send")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -1229,20 +1162,20 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_automation && engine_session_ok ()) {
+	if (ok && has_smoke ("automation") && engine_session_ok ()) {
 		if (!_engine.smoke_automation ()) {
 			_smoke_failed = true;
 		} else {
 			refresh_automation_lane ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_automation) {
+	} else if (has_smoke ("automation")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-automation FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_pan_automation && engine_session_ok ()) {
+	if (ok && has_smoke ("pan-automation") && engine_session_ok ()) {
 		_auto_lane_kind = 1;
 		if (!_engine.smoke_pan_automation ()) {
 			_smoke_failed = true;
@@ -1250,7 +1183,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			refresh_automation_lane ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_pan_automation) {
+	} else if (has_smoke ("pan-automation")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan-automation FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -1271,7 +1204,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_auto_lane_unify && engine_session_ok ()) {
+	if (ok && has_smoke ("auto-lane-unify") && engine_session_ok ()) {
 		_auto_lane_kind = 0;
 		if (!_engine.smoke_auto_lane_unify ()) {
 			_smoke_failed = true;
@@ -1280,26 +1213,26 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			refresh_automation_lane ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_auto_lane_unify) {
+	} else if (has_smoke ("auto-lane-unify")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-auto-lane-unify FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_auto_state && engine_session_ok ()) {
+	if (ok && has_smoke ("auto-state") && engine_session_ok ()) {
 		if (!_engine.smoke_auto_state ()) {
 			_smoke_failed = true;
 		} else {
 			refresh_automation_lane ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_auto_state) {
+	} else if (has_smoke ("auto-state")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-auto-state FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_pan_auto_state && engine_session_ok ()) {
+	if (ok && has_smoke ("pan-auto-state") && engine_session_ok ()) {
 		if (!_engine.smoke_pan_auto_state ()) {
 			_smoke_failed = true;
 		} else {
@@ -1307,13 +1240,13 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			refresh_automation_lane ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_pan_auto_state) {
+	} else if (has_smoke ("pan-auto-state")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pan-auto-state FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_send_auto_state && engine_session_ok ()) {
+	if (ok && has_smoke ("send-auto-state") && engine_session_ok ()) {
 		if (!_engine.smoke_send_auto_state ()) {
 			_smoke_failed = true;
 		} else {
@@ -1321,13 +1254,13 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			refresh_automation_lane ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_send_auto_state) {
+	} else if (has_smoke ("send-auto-state")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-send-auto-state FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_auto_state_unify && engine_session_ok ()) {
+	if (ok && has_smoke ("auto-state-unify") && engine_session_ok ()) {
 		_auto_lane_kind = 0;
 		if (!_engine.smoke_auto_state_unify ()) {
 			_smoke_failed = true;
@@ -1335,104 +1268,104 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			refresh_automation_lane ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_auto_state_unify) {
+	} else if (has_smoke ("auto-state-unify")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-auto-state-unify FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_edit && engine_session_ok ()) {
+	if (ok && has_smoke ("edit") && engine_session_ok ()) {
 		if (!_engine.smoke_edit ()) {
 			_smoke_failed = true;
 		} else {
 			apply_region_selection_to_lanes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_edit) {
+	} else if (has_smoke ("edit")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-edit FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_stretch && engine_session_ok ()) {
+	if (ok && has_smoke ("stretch") && engine_session_ok ()) {
 		if (!_engine.smoke_stretch ()) {
 			_smoke_failed = true;
 		} else {
 			apply_region_selection_to_lanes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_stretch) {
+	} else if (has_smoke ("stretch")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-stretch FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_pitch && engine_session_ok ()) {
+	if (ok && has_smoke ("pitch") && engine_session_ok ()) {
 		if (!_engine.smoke_pitch ()) {
 			_smoke_failed = true;
 		} else {
 			apply_region_selection_to_lanes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_pitch) {
+	} else if (has_smoke ("pitch")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-pitch FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_reverse && engine_session_ok ()) {
+	if (ok && has_smoke ("reverse") && engine_session_ok ()) {
 		if (!_engine.smoke_reverse ()) {
 			_smoke_failed = true;
 		} else {
 			apply_region_selection_to_lanes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_reverse) {
+	} else if (has_smoke ("reverse")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-reverse FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_normalize && engine_session_ok ()) {
+	if (ok && has_smoke ("normalize") && engine_session_ok ()) {
 		if (!_engine.smoke_normalize ()) {
 			_smoke_failed = true;
 		} else {
 			apply_region_selection_to_lanes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_normalize) {
+	} else if (has_smoke ("normalize")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-normalize FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_strip_silence && engine_session_ok ()) {
+	if (ok && has_smoke ("strip-silence") && engine_session_ok ()) {
 		if (!_engine.smoke_strip_silence ()) {
 			_smoke_failed = true;
 		} else {
 			apply_region_selection_to_lanes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_strip_silence) {
+	} else if (has_smoke ("strip-silence")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-strip-silence FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_consolidate && engine_session_ok ()) {
+	if (ok && has_smoke ("consolidate") && engine_session_ok ()) {
 		if (!_engine.smoke_consolidate ()) {
 			_smoke_failed = true;
 		} else {
 			apply_region_selection_to_lanes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_consolidate) {
+	} else if (has_smoke ("consolidate")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-consolidate FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_freeze && engine_session_ok ()) {
+	if (ok && has_smoke ("freeze") && engine_session_ok ()) {
 		if (!_engine.smoke_freeze ()) {
 			_smoke_failed = true;
 		} else {
@@ -1440,57 +1373,57 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			sync_transport_freeze_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_freeze) {
+	} else if (has_smoke ("freeze")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-freeze FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_snap && engine_session_ok ()) {
+	if (ok && has_smoke ("snap") && engine_session_ok ()) {
 		if (!_engine.smoke_snap ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_snap) {
+	} else if (has_smoke ("snap")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-snap FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_punch && engine_session_ok ()) {
+	if (ok && has_smoke ("punch") && engine_session_ok ()) {
 		if (!_engine.smoke_punch ()) {
 			_smoke_failed = true;
 		} else {
 			sync_transport_punch_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_punch) {
+	} else if (has_smoke ("punch")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-punch FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_tempo && engine_session_ok ()) {
+	if (ok && has_smoke ("tempo") && engine_session_ok ()) {
 		if (!_engine.smoke_tempo ()) {
 			_smoke_failed = true;
 		} else {
 			sync_transport_tempo_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_tempo) {
+	} else if (has_smoke ("tempo")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-tempo FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_click && engine_session_ok ()) {
+	if (ok && has_smoke ("click") && engine_session_ok ()) {
 		if (!_engine.smoke_click ()) {
 			_smoke_failed = true;
 		} else {
 			sync_transport_tempo_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_click) {
+	} else if (has_smoke ("click")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-click FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -1509,7 +1442,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_tracks && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("tracks") && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_tracks ()) {
 			_smoke_failed = true;
 		} else {
@@ -1517,13 +1450,13 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			layout_panes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_tracks) {
+	} else if (has_smoke ("tracks")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-tracks FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_stereo_track && engine_session_ok ()) {
+	if (ok && has_smoke ("stereo-track") && engine_session_ok ()) {
 		if (!_engine.smoke_stereo_track ()) {
 			_smoke_failed = true;
 		} else {
@@ -1534,13 +1467,13 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			layout_panes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_stereo_track) {
+	} else if (has_smoke ("stereo-track")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-stereo-track FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_rename && engine_session_ok ()) {
+	if (ok && has_smoke ("rename") && engine_session_ok ()) {
 		if (!_engine.smoke_rename ()) {
 			_smoke_failed = true;
 		} else {
@@ -1549,13 +1482,13 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			layout_panes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_rename) {
+	} else if (has_smoke ("rename")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-rename FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_group && engine_session_ok ()) {
+	if (ok && has_smoke ("group") && engine_session_ok ()) {
 		if (!_engine.smoke_group ()) {
 			_smoke_failed = true;
 		} else {
@@ -1565,7 +1498,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			layout_panes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_group) {
+	} else if (has_smoke ("group")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-group FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -1676,7 +1609,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_monitor && _engine.snapshot ().session_ok) {
+	if (ok && has_smoke ("monitor") && _engine.snapshot ().session_ok) {
 		if (!_engine.smoke_monitor ()) {
 			_smoke_failed = true;
 		} else {
@@ -1684,7 +1617,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			layout_panes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_monitor) {
+	} else if (has_smoke ("monitor")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-monitor FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -1716,7 +1649,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_locate && engine_session_ok ()) {
+	if (ok && has_smoke ("locate") && engine_session_ok ()) {
 		if (!_engine.smoke_locate ()) {
 			_smoke_failed = true;
 		} else {
@@ -1726,13 +1659,13 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			sync_transport_clock_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_locate) {
+	} else if (has_smoke ("locate")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_locate_selection && engine_session_ok ()) {
+	if (ok && has_smoke ("locate-selection") && engine_session_ok ()) {
 		if (!_engine.smoke_locate_selection ()) {
 			_smoke_failed = true;
 		} else {
@@ -1743,7 +1676,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			apply_region_selection_to_lanes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_locate_selection) {
+	} else if (has_smoke ("locate-selection")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-locate-selection FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -2077,7 +2010,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "save-as", [this]() { return _engine.smoke_save_as (); });
 	run_smoke_check (ok, "open-session", [this]() { return _engine.smoke_open_session (); });
 
-	if (ok && smoke_zoom && engine_session_ok ()) {
+	if (ok && has_smoke ("zoom") && engine_session_ok ()) {
 		if (!_engine.smoke_zoom ()) {
 			_smoke_failed = true;
 		} else {
@@ -2105,13 +2038,13 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			layout_panes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_zoom) {
+	} else if (has_smoke ("zoom")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-zoom FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_history && engine_session_ok ()) {
+	if (ok && has_smoke ("history") && engine_session_ok ()) {
 		if (!_engine.smoke_history ()) {
 			_smoke_failed = true;
 		} else {
@@ -2121,13 +2054,13 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			layout_panes ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_history) {
+	} else if (has_smoke ("history")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-history FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_prefs && engine_session_ok ()) {
+	if (ok && has_smoke ("prefs") && engine_session_ok ()) {
 		if (!_engine.smoke_prefs ()) {
 			_smoke_failed = true;
 		} else {
@@ -2136,13 +2069,13 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			sync_prefs_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_prefs) {
+	} else if (has_smoke ("prefs")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-prefs FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_recent && engine_session_ok ()) {
+	if (ok && has_smoke ("recent") && engine_session_ok ()) {
 		if (!_engine.smoke_recent ()) {
 			_smoke_failed = true;
 		} else {
@@ -2151,18 +2084,18 @@ ShellWindow::attach_engine (const std::string& backend_name,
 			sync_recent_from_engine ();
 		}
 		std::fflush (stderr);
-	} else if (smoke_recent) {
+	} else if (has_smoke ("recent")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-recent FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_recovery && engine_session_ok ()) {
+	if (ok && has_smoke ("recovery") && engine_session_ok ()) {
 		if (!_engine.smoke_recovery ()) {
 			_smoke_failed = true;
 		}
 		std::fflush (stderr);
-	} else if (smoke_recovery) {
+	} else if (has_smoke ("recovery")) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-recovery FAILED (no session)\n");
 		_smoke_failed = true;
 		std::fflush (stderr);
@@ -2202,7 +2135,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_perf) {
+	if (ok && has_smoke ("perf")) {
 		unsigned secs = smoke_timeout_secs > 0 ? smoke_timeout_secs : 4u;
 		if (secs > 12) {
 			secs = 12;
@@ -2213,7 +2146,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		std::fflush (stderr);
 	}
 
-	if (ok && smoke_record && engine_session_ok ()) {
+	if (ok && has_smoke ("record") && engine_session_ok ()) {
 		_smoke_record = SmokeRecordPhase::NeedArm;
 		std::fprintf (stderr, "airdour_win_shell: smoke-record scheduled (arm → ~1.2s take)\n");
 		std::fflush (stderr);
@@ -2252,7 +2185,7 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	layout_panes ();
 	apply_loop_to_lanes ();
 	apply_region_selection_to_lanes ();
-	if (smoke_timeout_secs == 0 && !smoke_recovery) {
+	if (smoke_timeout_secs == 0 && !has_smoke ("recovery")) {
 		maybe_show_recovery_prompt ();
 	}
 	if (autoplay) {
