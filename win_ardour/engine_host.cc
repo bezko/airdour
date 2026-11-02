@@ -836,13 +836,6 @@ EngineHost::refresh_prefs_snap ()
 			_snap.audio_out_name = utf8_to_wide (out.empty () ? "Default" : out);
 			_snap.systemic_in_frames = be->systemic_input_latency ();
 			_snap.systemic_out_frames = be->systemic_output_latency ();
-			/* Capture expected (not "None") but no physical inputs → explain. */
-			_snap.capture_disabled_reason.clear ();
-			if (sep && in != "None" && _impl->engine->running ()
-			    && _impl->engine->n_physical_inputs ().n_audio () == 0) {
-				_snap.capture_disabled_reason =
-					L"capture unavailable — device in use or microphone access denied";
-			}
 		}
 	}
 
@@ -14960,18 +14953,13 @@ EngineHost::refresh_group_flags ()
 	_snap.group_member_count = 0;
 	_snap.group_active = false;
 	_snap.group_relative = false;
-	_snap.group_shares_mute = false;
-	_snap.group_shares_solo = false;
-	_snap.group_shares_gain = false;
 	_snap.group_shares_recenable = false;
 	_snap.group_shares_color = false;
 	_snap.group_rgba = 0;
 	_snap.group_shares_monitoring = false;
 	_snap.group_shares_route_active = false;
 	_snap.group_shares_select = false;
-	_snap.group_shares_monitoring = false;
 	_snap.group_has_vca_master = false;
-	_snap.group_name[0] = L'\0';
 	if (!_impl) {
 		return;
 	}
@@ -14984,19 +14972,14 @@ EngineHost::refresh_group_flags ()
 		if (!rg) {
 			return;
 		}
-		copy_name_to_snap (_snap.group_name, EngineSnapshot::kGroupNameLen, rg->name ());
 		_snap.group_active = rg->is_active ();
 		_snap.group_relative = rg->is_relative ();
-		_snap.group_shares_mute = rg->is_mute ();
-		_snap.group_shares_solo = rg->is_solo ();
-		_snap.group_shares_gain = rg->is_gain ();
 		_snap.group_shares_recenable = rg->is_recenable ();
 		_snap.group_shares_color = rg->is_color ();
 		_snap.group_rgba = rg->rgba ();
 		_snap.group_shares_monitoring = rg->is_monitoring ();
 		_snap.group_shares_route_active = rg->is_route_active ();
 		_snap.group_shares_select = rg->is_select ();
-		_snap.group_shares_monitoring = rg->is_monitoring ();
 		_snap.group_has_vca_master = rg->has_control_master ();
 		int n = 0;
 		for (int i = 0; i < (int)_impl->tracks.size () && i < EngineSnapshot::kMeters; ++i) {
@@ -26711,7 +26694,6 @@ EngineHost::refresh_spectrum_snap ()
 	try {
 		collect_tracks ();
 		if (_snap.spectrum_master) {
-			_snap.spectrum_track = -1;
 			wcsncpy_s (_snap.spectrum_label, L"Master mix", _TRUNCATE);
 			float scale = 1.f;
 			int ntr = (int)_impl->tracks.size ();
@@ -26744,7 +26726,6 @@ EngineHost::refresh_spectrum_snap ()
 			if (tr < 0 || tr >= (int)_impl->tracks.size () || !_impl->tracks[tr]) {
 				tr = 0;
 			}
-			_snap.spectrum_track = tr;
 			if (tr < EngineSnapshot::kMeters && _snap.track_name[tr][0]) {
 				wcsncpy_s (_snap.spectrum_label, _snap.track_name[tr], _TRUNCATE);
 			} else {
@@ -26967,7 +26948,6 @@ EngineHost::refresh_correlation_snap ()
 	try {
 		collect_tracks ();
 		if (_snap.correlation_master) {
-			_snap.correlation_track = -1;
 			wcsncpy_s (_snap.correlation_label, L"Master L/R", _TRUNCATE);
 			float scale = 1.f;
 			int ntr = (int)_impl->tracks.size ();
@@ -27015,7 +26995,6 @@ EngineHost::refresh_correlation_snap ()
 			if (tr < 0 || tr >= (int)_impl->tracks.size () || !_impl->tracks[tr]) {
 				tr = 0;
 			}
-			_snap.correlation_track = tr;
 			if (tr < EngineSnapshot::kMeters && _snap.track_name[tr][0]) {
 				wcsncpy_s (_snap.correlation_label, _snap.track_name[tr], _TRUNCATE);
 			} else {
@@ -27310,7 +27289,6 @@ EngineHost::refresh_loudness_snap ()
 	try {
 		collect_tracks ();
 		if (_snap.loudness_master) {
-			_snap.loudness_track = -1;
 			wcsncpy_s (_snap.loudness_label, L"Master ≈LUFS", _TRUNCATE);
 			float scale = 1.f;
 			int ntr = (int)_impl->tracks.size ();
@@ -27357,7 +27335,6 @@ EngineHost::refresh_loudness_snap ()
 			if (tr < 0 || tr >= (int)_impl->tracks.size () || !_impl->tracks[tr]) {
 				tr = 0;
 			}
-			_snap.loudness_track = tr;
 			if (tr < EngineSnapshot::kMeters && _snap.track_name[tr][0]) {
 				wcsncpy_s (_snap.loudness_label, _snap.track_name[tr], _TRUNCATE);
 			} else {
@@ -27850,13 +27827,11 @@ EngineHost::refresh_vst3_params_snap ()
 {
 	_snap.vst3_ok = false;
 	_snap.vst3_bypassed = false;
-	_snap.vst3_track = 1;
 	_snap.vst3_param_count = 0;
 	_snap.vst3_name[0] = L'\0';
 	for (int i = 0; i < EngineSnapshot::kMaxVst3Params; ++i) {
 		_snap.vst3_param_name[i][0] = L'\0';
 		_snap.vst3_param_norm[i] = 0.f;
-		_snap.vst3_param_port[i] = 0;
 		if (_impl) {
 			_impl->vst3_param_ports[i] = 0;
 		}
@@ -27899,7 +27874,6 @@ EngineHost::refresh_vst3_params_snap ()
 			continue;
 		}
 		_impl->vst3_param_ports[filled] = port;
-		_snap.vst3_param_port[filled] = port;
 		float norm = (float)ac->internal_to_interface (ac->get_value ());
 		if (norm < 0.f) {
 			norm = 0.f;
@@ -36457,7 +36431,6 @@ EngineHost::refresh_prefs_snap ()
 	_snap.separate_io_devices = false;
 	_snap.systemic_in_frames = 0;
 	_snap.systemic_out_frames = 0;
-	_snap.capture_disabled_reason.clear ();
 }
 
 void

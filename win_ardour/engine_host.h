@@ -182,7 +182,6 @@ struct EngineSnapshot {
 	bool         spectrum_enabled = false;
 	bool         spectrum_ok = false; /* last update produced usable bands */
 	bool         spectrum_master = false; /* true = mix Audio 1..N; false = selected/Audio1 */
-	int          spectrum_track = 0; /* source track index, or −1 when master */
 	float        spectrum_band[kSpectrumBands] = {}; /* 0..1 display levels */
 	wchar_t      spectrum_label[32] = {};
 	/* Phase correlation / goniometer (UI-rate L/R window; no RT alloc). */
@@ -190,7 +189,6 @@ struct EngineSnapshot {
 	bool         correlation_enabled = false;
 	bool         correlation_ok = false;
 	bool         correlation_master = false; /* true = mix Audio 1..N L/R; false = selected */
-	int          correlation_track = 0;
 	float        correlation = 0.f; /* −1..+1 Pearson L/R */
 	float        gonio_x[kGonioPts] = {}; /* L (−1..+1) */
 	float        gonio_y[kGonioPts] = {}; /* R (−1..+1) */
@@ -199,7 +197,6 @@ struct EngineSnapshot {
 	bool         loudness_enabled = false;
 	bool         loudness_ok = false;
 	bool         loudness_master = false; /* true = mix Audio 1..N; false = selected */
-	int          loudness_track = 0;
 	float        loudness_momentary = -70.f; /* ≈ LUFS over ~400 ms window */
 	float        loudness_integrated = -70.f; /* ≈ gated running mean */
 	wchar_t      loudness_label[32] = {};
@@ -308,17 +305,12 @@ struct EngineSnapshot {
 	int          group_member_count = 0; /* 0 = no shell group */
 	bool         group_active = false; /* RouteGroup::is_active */
 	bool         group_relative = false; /* RouteGroup::is_relative — proportional gain */
-	bool         group_shares_mute = false;
-	bool         group_shares_solo = false;
-	bool         group_shares_gain = false;
 	bool         group_shares_recenable = false;
 	bool         group_shares_color = false;
 	uint32_t     group_rgba = 0; /* RouteGroup color RRGGBBAA when shares color */
 	bool         group_shares_monitoring = false;
 	bool         group_shares_route_active = false;
 	bool         group_shares_select = false;
-	static constexpr int kGroupNameLen = 32;
-	wchar_t      group_name[kGroupNameLen] = {};
 	bool         mixer_narrow = false; /* shell UI: compact strip width */
 	bool         vca_ok = false; /* Session VCA master exists */
 	int          vca_slave_count = 0; /* tracks assigned to shell VCA */
@@ -361,12 +353,10 @@ struct EngineSnapshot {
 	static constexpr int kVst3ParamNameLen = 24;
 	bool         vst3_ok = false; /* PluginInsert live on Audio 2 */
 	bool         vst3_bypassed = false;
-	int          vst3_track = 1; /* usually 1 = Audio 2 */
 	int          vst3_param_count = 0; /* 0..kMaxVst3Params automatable inputs */
 	wchar_t      vst3_name[kVst3NameLen] = {};
 	wchar_t      vst3_param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
 	float        vst3_param_norm[kMaxVst3Params] = {}; /* 0..1 interface */
-	uint32_t     vst3_param_port[kMaxVst3Params] = {};
 	/* Audio devices + measured systemic latency. */
 	std::wstring audio_in_name; /* current backend device ("Default" when unset) */
 	std::wstring audio_out_name;
@@ -375,7 +365,6 @@ struct EngineSnapshot {
 	bool         separate_io_devices = false; /* backend uses separate in/out names */
 	uint32_t     systemic_in_frames = 0; /* backend-reported, excludes one period */
 	uint32_t     systemic_out_frames = 0;
-	std::wstring capture_disabled_reason; /* empty unless capture is expected */
 	/* Recent sessions (WinShellRecent instant.xml, beside WinShellPrefs). */
 	static constexpr int kMaxRecent = 8;
 	static constexpr int kRecentLabelLen = 48;
@@ -1542,18 +1531,7 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 */
 	bool smoke_rename ();
 
-	/**
-	 * Create/replace the shell Session RouteGroup ("Group 1") from audio
-	 * indices (≥2). Shares mute + solo + gain + rec-enable when active.
-	 * indices (≥2). Shares mute + solo + gain + color when active.
-	 * indices (≥2). Shares mute + solo + gain + monitoring when active.
-	 * indices (≥2). Shares mute + solo + gain + route-active when active.
-	 * indices (≥2). Shares mute + solo + gain + select when active.
-	 * indices (≥2). Shares mute + solo + gain + monitoring when active.
-	 * Honest scope: one group, no VCA/subgroup.
-	 * indices (≥2). Shares mute + solo + gain when active. Honest scope:
-	 * one group, no subgroup. VCA is a separate stub (ensure_vca_master).
-	 */
+	/** Create/replace shell RouteGroup "Group 1" from audio indices (≥2), sharing mute, solo, gain, rec-enable, select, color, monitoring, and route-active. */
 	bool create_route_group (const int* indices, int n);
 	/** Remove shell RouteGroup members (and drop empty group). */
 	bool clear_route_group ();
