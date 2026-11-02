@@ -152,7 +152,7 @@ Located in [`libs/backends/wasapi/`](libs/backends/wasapi/README.md), implementi
 
 The Ardour DAW engine can run fully decoupled from any GUI:
 - **`hardour` CLI**: Command-line headless test harness that executes automated session loading, audio routing, rendering benchmarks, and verification runs without spinning up a window.
-- **`ExportHandler`**: Headless master bus WAV rendering engine supporting stem exports and full-mix bounces (`Ctrl+E` or `--smoke-export`).
+- **`ExportHandler`**: Headless master bus WAV rendering engine supporting stem exports and full-mix bounces (`airdour_win_shell`: `Ctrl+E` or `--smoke-export`).
 
 ### 4. Model Context Protocol (MCP) HTTP Surface
 
@@ -251,7 +251,7 @@ Airdour provides a rapid, single-key workflow designed for efficiency. Press `F1
 | | `Ctrl+Z` / `Ctrl+Y` | Session Undo / Redo |
 | | `Ctrl+,` | Open Preferences dialog |
 | | `F3` | Open About dialog |
-| | `Esc` | Dismiss open overlays / Close dialogs / Quit |
+| | `Esc` | Dismiss open overlays / Close dialogs |
 
 ---
 
@@ -418,10 +418,10 @@ powershell -File tools\win-native\ci\Package-WinShell-Portable.ps1 -RepoRoot $PW
 
 ### 2. NSIS Windows Installer
 [`tools/win-native/installer/airdour.nsi`](tools/win-native/installer/airdour.nsi) is a small [NSIS](https://nsis.sourceforge.io/) script (open source). [`tools/win-native/ci/Package-WinShell-Nsis.ps1`](tools/win-native/ci/Package-WinShell-Nsis.ps1) compiles it into a 64-bit setup executable (`airdour-*-win64-setup.exe`, or `*-setup-ui.exe` for the UI-only shell). The installer copies the portable tree for the current user, adds a Start menu shortcut, and registers an uninstaller. GitHub Actions publishes that setup executable with each tagged Windows release.
-### 2. Inno Setup Windows Installer
+### 3. Inno Setup Windows Installer
 The script [`tools/win-native/ci/Package-WinShell-Installer.ps1`](tools/win-native/ci/Package-WinShell-Installer.ps1) and [`tools/win-native/installer/airdour.iss`](tools/win-native/installer/airdour.iss) produce a single-file, 64-bit Windows setup executable (`airdour-v*-setup.exe`) supporting desktop shortcuts and clean uninstallation.
 
-### 3. GitHub Actions CI Matrix
+### 4. GitHub Actions CI Matrix
 - [`.github/workflows/windows-msvc.yml`](.github/workflows/windows-msvc.yml): Validates MSVC builds on every pull request using `windows-2022`.
 - [`.github/workflows/windows-release.yml`](.github/workflows/windows-release.yml): Triggers automated artifact generation and GitHub Release publication on git tags (`v*`).
 

@@ -35,8 +35,7 @@ $smokeLine
 $guiLine
 GREEN  cmake/win64 spine configured
 GREEN  libs/backends/wasapi sources (shared-mode implementation)
-GREEN  win_ardour minimal shell sources
-GREEN  tools/win-native docs and packaging scripts
+GREEN  tools/win-native/README.md
 
 Dependency expectations (Windows-only product)
 ----------------------------------------------
