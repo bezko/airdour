@@ -101,7 +101,6 @@ public:
 	bool recording () const { return _recording; }
 
 	void set_record_armed (bool armed) { _record_armed = armed; }
-	bool record_armed () const { return _record_armed; }
 
 	void set_loop_playing (bool on) { _loop_playing = on; }
 	bool loop_playing () const { return _loop_playing; }
@@ -144,7 +143,6 @@ public:
 	int  midi_scale_root () const { return _midi_scale_root; }
 
 	void set_freeze_active (bool on) { _freeze_active = on; }
-	bool freeze_active () const { return _freeze_active; }
 
 	void set_count_in_enabled (bool on) { _count_in_enabled = on; }
 	bool count_in_enabled () const { return _count_in_enabled; }
@@ -193,7 +191,6 @@ public:
 
 	/** Shuttle knob visual −1..+1 (0 = stopped / center). */
 	void set_shuttle_norm (float n) { _shuttle_norm = n; }
-	float shuttle_norm () const { return _shuttle_norm; }
 
 	/** Map pointer x on shuttle strip to speed −8..+8 (center deadzone). */
 	float shuttle_speed_at_x (float x) const;
@@ -205,13 +202,11 @@ public:
 	bool clear_hover ();
 	void set_pressed (TransportHit hit) { _pressed = hit; }
 	void clear_pressed () { _pressed = TransportHit::None; }
-	TransportHit hovered_hit () const { return _hover; }
 	bool hover_tooltip (wchar_t* buf, size_t n) const;
 
 	/** Popup overflow menu state (owned by the bar, driven by the shell). */
 	bool overflow_open () const { return _overflow_open; }
 	void set_overflow_open (bool on);
-	bool menu_contains (float x, float y) const;
 
 	void draw (UiDraw& ui, float playhead_sec) const;
 	/** Popup layer; call after the rest of the window so the menu sits on top. */
@@ -220,7 +215,6 @@ public:
 	const D2D1_RECT_F& bounds () const { return _bounds; }
 	const D2D1_RECT_F& shuttle_btn () const { return _shuttle_btn; }
 	const D2D1_RECT_F& open_btn () const { return _open_btn; }
-	const D2D1_RECT_F& overflow_btn () const { return _overflow_btn; }
 
 	/** Number of action rows laid out (2 when the compact edit/MIDI rows fit). */
 	int rows () const { return _rows.empty () ? 1 : 2; }

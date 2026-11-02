@@ -35,7 +35,6 @@ public:
 	void tick (float dt_sec);
 
 	float level () const { return _level; }
-	float peak_hold () const { return _hold; }
 	bool  clipped () const { return _clipped; }
 
 	bool hit (float x, float y) const;

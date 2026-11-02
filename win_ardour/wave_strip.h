@@ -41,14 +41,14 @@ public:
 	/** Screen fraction where playhead sits while following transport. */
 	static constexpr float  kFollowFrac = 0.28f;
 	/* Selection marquee wash/edge opacities (smoke-selection-marquee-tint). */
-	static constexpr float kSelWashOp      = 0.40f; /* was 0.28 */
-	static constexpr float kSelEdgeOp      = 0.95f; /* was 0.85 */
+	static constexpr float kSelWashOp      = 0.40f;
+	static constexpr float kSelEdgeOp      = 0.95f;
 	/* Muted cue: dimmer wash + stronger edge + hatch (smoke-selection-mute-wash). */
-	static constexpr float kSelMutedWashOp   = 0.12f; /* was 0.18 — more dim */
-	static constexpr float kSelMutedEdgeOp   = 0.70f; /* was 0.55 — reads as mute */
+	static constexpr float kSelMutedWashOp   = 0.12f;
+	static constexpr float kSelMutedEdgeOp   = 0.70f;
 	static constexpr float kSelMutedHatchOp  = 0.38f;
 	static constexpr float kSelMutedHatchPx  = 5.f;   /* stripe pitch @ dpi=1 */
-	static constexpr float kSelFadeWashOp    = 0.55f; /* was 0.45 */
+	static constexpr float kSelFadeWashOp    = 0.55f;
 
 	WaveStrip ();
 

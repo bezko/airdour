@@ -42,13 +42,11 @@ public:
 	void set_dim (bool on) { _dim = on; }
 	bool dim () const { return _dim; }
 	void set_dim_db (float db) { _dim_db = db; }
-	float dim_db () const { return _dim_db; }
 	void set_mono (bool on) { _mono = on; }
 	bool mono () const { return _mono; }
 	void set_mute (bool on) { _mute = on; }
 	bool mute () const { return _mute; }
 	void set_solo_boost_db (float db) { _solo_boost_db = db; }
-	float solo_boost_db () const { return _solo_boost_db; }
 
 	/** Aux bus return gain 0..1 (unity=1). Shown when aux_ok. */
 	void  set_aux_ok (bool ok) { _aux_ok = ok; }
@@ -59,9 +57,7 @@ public:
 	bool  hit_aux_return (float x, float y) const;
 
 	void set_master_lim_ok (bool ok) { _master_lim_ok = ok; }
-	bool master_lim_ok () const { return _master_lim_ok; }
 	void set_master_lim_bypassed (bool on) { _master_lim_bypassed = on; }
-	bool master_lim_bypassed () const { return _master_lim_bypassed; }
 
 	MonitorHit hit_test (float x, float y) const;
 

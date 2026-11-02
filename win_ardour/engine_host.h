@@ -455,7 +455,6 @@ public:
 	 * Disabled for --timeout smokes via set_autosave_enabled(false).
 	 */
 	void set_autosave_enabled (bool on);
-	bool autosave_enabled () const { return _autosave_enabled; }
 	/** Periodic tick; saves when interval elapsed (GetTickCount ms). */
 	void autosave_tick (uint32_t now_ms);
 	/** Force Session save + write recovery marker / file copy. */
@@ -1522,8 +1521,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * collect_tracks re-sorts so Editor/Mixer follow Session order.
 	 */
 	bool move_audio_track (int index, int delta);
-	bool move_audio_track_up (int index) { return move_audio_track (index, -1); }
-	bool move_audio_track_down (int index) { return move_audio_track (index, +1); }
 
 	/**
 	 * Rename Audio 0 → Kick; swap 0↔1; verify names/order; restore.
