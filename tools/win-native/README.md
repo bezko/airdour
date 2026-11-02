@@ -13,52 +13,79 @@
 3. vcpkg at a **short path** (recommended `C:\vcpkg`) — see `Install-HeadlessDeps.ps1`
 4. **No** Steinberg ASIO SDK; **no** GTK2 / `libs/tk` / Cairo canvas (GUI is `win_ardour` Direct2D)
 
-## Quick smoke (what CI builds today)
+## Quick smoke (what CI builds)
+
+Run from a VS Developer PowerShell (`ilammy/msvc-dev-cmd` does this in CI):
 
 ```bat
-cmake -S cmake\win64 -B build-win64 -G "Visual Studio 17 2022" -A x64 -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON -DAIRDOUR_BUILD_WIN_SHELL=ON
-cmake --build build-win64 --config Release --target wasapi_io_smoke
-cmake --build build-win64 --config Release --target airdour_win_shell
-build-win64\artifacts\Release\airdour_win_shell.exe --timeout 3
+cd cmake\win64
+cmake --preset ui
+cmake --build --preset ui
+ctest --preset ui
+cd ..\..
+build-ninja-ui\artifacts\airdour_win_shell.exe --timeout 3 --no-engine
 ```
 
-Produces `airdour_wasapi_io.lib` (WasapiIO + Windows SDK) and `airdour_win_shell.exe` (Win32+D2D+DirectWrite, no GTK). Does **not** link libardour into the shell yet.
+Presets live in `cmake\win64\CMakePresets.json` (`ui`, `engine`, `deps`, all Ninja + Release).
+Produces `airdour_wasapi_io.lib` (WasapiIO + Windows SDK) and `airdour_win_shell.exe` (Win32+D2D+DirectWrite, no GTK). The `ui` preset does **not** link libardour.
 
-## Headless C deps (next slice on laptop)
+The MSVC targets get `/utf-8 /Zc:__cplusplus /permissive- /W4`; set
+`-DAIRDOUR_WARNINGS_AS_ERRORS=ON` to add `/WX`.
+
+## Headless C deps
 
 ```bat
 powershell -ExecutionPolicy Bypass -File tools\win-native\Install-HeadlessDeps.ps1 -VcpkgRoot C:\vcpkg
-
-cmake -S cmake\win64 -B build-win64-deps -G "Visual Studio 17 2022" -A x64 ^
-  -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
-  -DVCPKG_MANIFEST_DIR=%CD%/tools/win-native ^
-  -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON ^
-  -DAIRDOUR_BUILD_DEPS_HEADLESS_SMOKE=ON
-
-cmake --build build-win64-deps --config Release --target deps_headless_smoke
+cd cmake\win64
+cmake --preset deps
+cmake --build --preset deps
 ```
 
-`deps_headless_smoke` links **glib / libxml2 / libsndfile / curl / libarchive / pthreads** from the manifest. It does **not** link `libpbd`.
+`deps_headless_smoke` links **glib / libxml2 / libsndfile / curl / libarchive / pthreads** from the manifest. It does **not** link `libpbd`. CMake finds vcpkg via `AIRDOUR_VCPKG_PREFIX`, `VCPKG_INSTALLED_DIR`, or the in-repo `vcpkg_installed/x64-windows` (in that order).
 
 ### Blocker before `libpbd`
 
 Stock vcpkg `glibmm` / `libsigcpp` are **2.68+/3.x**. Ardour needs **glibmm-2.4 + sigc++-2.0** — provided by overlay ports `glibmm24` + `libsigcpp2` (`tools/win-native/overlays/`). Do not enable feature `cxx-glib-modern-incompatible` for product builds.
 
-## Full product (not green in CI yet)
+## Full product (engine-linked shell)
 
 ```bat
-set PKG_CONFIG_PATH=C:\path\to\deps\lib\pkgconfig
-python waf configure --dist-target=msvc --windows-only --prefix=C:\airdour-build
-python waf build -j %NUMBER_OF_PROCESSORS%
+tools\win-native\configure-waf-release.cmd build-rel
+tools\win-native\build-waf-release.cmd build-rel
+cd cmake\win64
+cmake --preset engine
+cmake --build --preset engine
+ctest --preset engine
+cd ..\..
 ```
 
-Default backends: **dummy** + **wasapi**. Needs MSVC deps above **plus** the glibmm-2.4 overlay.
+The scripts derive the repo root from their own location, find VS via `vswhere`,
+honor `VCPKG_INSTALLED_DIR`, and accept an output dir. `engine` refuses to
+configure when `build-rel\libs\ardour\ardour.lib` is missing instead of silently
+building a UI-only exe, and stages the waf DLLs at build time.
+
+Default backends: **dummy** + **wasapi**. Needs the MSVC deps above **plus** the glibmm-2.4 overlay.
+
+Run the suite against any configured tree: `tools\win-native\run-smoke-suite.cmd [build-dir]`.
+Basic install/zip packaging: `cmake --install build-ninja-ui` / `cpack --config build-ninja-ui\CPackConfig.cmake`.
+
+## Formatting
+
+`.clang-format` / `.clang-tidy` target `win_ardour` (upstream `libs/` keeps its own style).
+CI checks only the lines changed in the branch (legacy files are never reformatted wholesale):
+
+```bat
+pwsh tools\win-native\ci\Format-Check.ps1 -BaseRef origin/master
+pwsh tools\win-native\ci\Format-Check.ps1 -BaseRef origin/master -Fix   :: rewrite changed lines
+```
 
 ## GitHub Actions
 
 | Workflow | File | When | Produces |
 |----------|------|------|----------|
-| Windows MSVC CI | `.github/workflows/windows-msvc.yml` | push/PR/`workflow_dispatch` | Artifact: smoke `.lib` + `BUILD_STATUS.txt` |
+| Format check | `.github/workflows/windows-msvc.yml` (`format`) | push/PR | clang-format check on changed `win_ardour` files |
+| Windows MSVC CI | `.github/workflows/windows-msvc.yml` | push/PR/`workflow_dispatch` | CTest smoke suite + artifact `.lib`, `.exe`, `BUILD_STATUS.txt` |
+| Windows Engine | `.github/workflows/windows-engine.yml` | manual + weekly | vcpkg + waf + engine shell + CTest suite |
 | Windows MSVC Release | `.github/workflows/windows-release.yml` | tag `v*` or manual | Zip on Actions; GitHub Release on tags |
 
 ### Secrets / deps

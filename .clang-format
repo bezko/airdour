@@ -1,0 +1,37 @@
+# Airdour C++ style (Ardour tab/space conventions, no column limit).
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++17
+UseTab: ForContinuationAndIndentation
+IndentWidth: 8
+TabWidth: 8
+ContinuationIndentWidth: 8
+ConstructorInitializerIndentWidth: 8
+ColumnLimit: 0
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: true
+  AfterControlStatement: false
+  AfterEnum: false
+  AfterFunction: true
+  AfterNamespace: false
+  AfterStruct: false
+  AfterUnion: false
+  AfterExternBlock: false
+  BeforeCatch: false
+  BeforeElse: false
+AlwaysBreakAfterReturnType: TopLevelDefinitions
+SpaceBeforeParens: Always
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+AccessModifierOffset: -8
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+SortIncludes: Never
+SpaceAfterCStyleCast: false
+SpaceBeforeCpp11BracedList: true
+Cpp11BracedListStyle: false
+PackConstructorInitializers: Never
+BreakConstructorInitializers: BeforeComma

@@ -4,20 +4,20 @@ setlocal
 cd /d "%~dp0\.."
 
 set "ROOT=%CD%"
-set "VCPKG=%ROOT%\tools\win-native\vcpkg_installed\x64-windows"
-set "WAF=%ROOT%\build-rel\libs"
+if not defined VCPKG_INSTALLED_DIR set "VCPKG_INSTALLED_DIR=%ROOT%\tools\win-native\vcpkg_installed"
+set "VCPKG=%VCPKG_INSTALLED_DIR%\x64-windows"
+if not defined AIRDOUR_WAF_BUILD_DIR set "AIRDOUR_WAF_BUILD_DIR=%ROOT%\build-rel"
+set "WAF=%AIRDOUR_WAF_BUILD_DIR%\libs"
 set "EXE=%ROOT%\build-win64-gui-engine-rel\artifacts\Release\airdour_win_shell.exe"
-
-if not exist "%EXE%" (
-  echo Missing %EXE%
-  echo Build: cmake --build build-win64-gui-engine-rel --config Release --target airdour_win_shell
-  exit /b 1
+if not exist "%EXE%" if exist "%ROOT%\build-ninja-engine\artifacts\airdour_win_shell.exe" (
+  set "EXE=%ROOT%\build-ninja-engine\artifacts\airdour_win_shell.exe"
 )
 
-if exist "%ProgramFiles%\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat" (
-  call "%ProgramFiles%\Microsoft Visual Studio\18\Community\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul
-) else if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat" (
-  call "%ProgramFiles(x86)%\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat" -arch=x64 >nul
+if not exist "%EXE%" (
+  echo Missing airdour_win_shell.exe
+  echo Build: cmake --preset engine ^(in cmake\win64^) or
+  echo        cmake --build build-win64-gui-engine-rel --config Release --target airdour_win_shell
+  exit /b 1
 )
 
 set "PATH=%VCPKG%\bin;%WAF%\pbd;%WAF%\temporal;%WAF%\midi++2;%WAF%\evoral;%WAF%\ardour;%WAF%\audiographer;%WAF%\ptformat;%WAF%\lua;%WAF%\libltc;%WAF%\ctrl-interface\control_protocol;%WAF%\backends\dummy;%WAF%\backends\wasapi;%WAF%\ardour\panners;%WAF%\fst;%PATH%"

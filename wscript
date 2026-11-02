@@ -526,7 +526,9 @@ int main() { return 0; }''',
     conf.env['compiler_flags_dict'] = flags_dict
 
     if compiler_name == 'msvc':
-        compiler_flags.extend(['/nologo', '/FS', '/bigobj', '/FC',
+        # /utf-8: BOM-less UTF-8 sources carry wide literals (U+2212, U+266F, …);
+        # without it MSVC reads them as cp1252 and ships mojibake.
+        compiler_flags.extend(['/nologo', '/FS', '/bigobj', '/FC', '/utf-8',
                                '/diagnostics:column', '/Zc:__cplusplus',
                                '/Zc:inline', '/Zc:throwingNew', '/cgthreads8'])
         linker_flags.append('/guard:cf')
