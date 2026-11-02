@@ -29194,6 +29194,28 @@ EngineHost::select_midi_notes_in_rect (float t0, float t1, uint8_t pitch_lo, uin
 	return hit > 0;
 }
 
+template <typename Pred>
+int
+EngineHost::select_midi_notes_where (Pred pred)
+{
+	std::set<Evoral::event_id_t> next;
+	Evoral::event_id_t last = -1;
+	int hit = 0;
+	for (int i = 0; i < _snap.midi_note_count; ++i) {
+		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
+		if (!pred (n)) {
+			continue;
+		}
+		next.insert (n.id);
+		last = n.id;
+		++hit;
+	}
+	_impl->selected_midi_note_ids.swap (next);
+	_impl->selected_midi_note_id = last;
+	refresh_midi_notes_snap ();
+	return hit;
+}
+
 bool
 EngineHost::select_all_midi_notes ()
 {
@@ -29201,14 +29223,9 @@ EngineHost::select_all_midi_notes ()
 	if (!_impl) {
 		return false;
 	}
-	_impl->clear_midi_note_sel ();
-	Evoral::event_id_t last = -1;
-	for (int i = 0; i < _snap.midi_note_count; ++i) {
-		_impl->selected_midi_note_ids.insert (_snap.midi_notes[i].id);
-		last = _snap.midi_notes[i].id;
-	}
-	_impl->selected_midi_note_id = last;
-	refresh_midi_notes_snap ();
+	select_midi_notes_where ([] (const EngineMidiNoteSnap&) {
+		return true;
+	});
 	std::fprintf (stderr, "airdour_win_shell: select_all_midi_notes count=%d\n",
 	              _snap.midi_note_count);
 	std::fflush (stderr);
@@ -29223,18 +29240,9 @@ EngineHost::invert_midi_note_selection ()
 	if (!_impl) {
 		return false;
 	}
-	std::set<Evoral::event_id_t> next;
-	Evoral::event_id_t last = -1;
-	for (int i = 0; i < _snap.midi_note_count; ++i) {
-		const Evoral::event_id_t id = _snap.midi_notes[i].id;
-		if (!_impl->midi_note_sel_has (id)) {
-			next.insert (id);
-			last = id;
-		}
-	}
-	_impl->selected_midi_note_ids.swap (next);
-	_impl->selected_midi_note_id = last;
-	refresh_midi_notes_snap ();
+	select_midi_notes_where ([this] (const EngineMidiNoteSnap& n) {
+		return !_impl->midi_note_sel_has (n.id);
+	});
 	std::fprintf (stderr, "airdour_win_shell: invert_midi_note_selection sel=%d/%d\n",
 	              (int)_impl->selected_midi_note_ids.size (), _snap.midi_note_count);
 	std::fflush (stderr);
@@ -29270,18 +29278,9 @@ EngineHost::select_midi_notes_same_pitch ()
 		_snap.detail = L"MIDI same pitch: none selected";
 		return false;
 	}
-	_impl->clear_midi_note_sel ();
-	Evoral::event_id_t last = -1;
-	int hit = 0;
-	for (int i = 0; i < _snap.midi_note_count; ++i) {
-		if ((int)_snap.midi_notes[i].pitch == pitch) {
-			_impl->selected_midi_note_ids.insert (_snap.midi_notes[i].id);
-			last = _snap.midi_notes[i].id;
-			++hit;
-		}
-	}
-	_impl->selected_midi_note_id = last;
-	refresh_midi_notes_snap ();
+	const int hit = select_midi_notes_where ([pitch] (const EngineMidiNoteSnap& n) {
+		return (int)n.pitch == pitch;
+	});
 	std::fprintf (stderr, "airdour_win_shell: select_midi_notes_same_pitch pitch=%d hit=%d\n",
 	              pitch, hit);
 	std::fflush (stderr);
@@ -29317,18 +29316,9 @@ EngineHost::select_midi_notes_same_velocity ()
 		_snap.detail = L"MIDI same velocity: none selected";
 		return false;
 	}
-	_impl->clear_midi_note_sel ();
-	Evoral::event_id_t last = -1;
-	int hit = 0;
-	for (int i = 0; i < _snap.midi_note_count; ++i) {
-		if ((int)_snap.midi_notes[i].velocity == vel) {
-			_impl->selected_midi_note_ids.insert (_snap.midi_notes[i].id);
-			last = _snap.midi_notes[i].id;
-			++hit;
-		}
-	}
-	_impl->selected_midi_note_id = last;
-	refresh_midi_notes_snap ();
+	const int hit = select_midi_notes_where ([vel] (const EngineMidiNoteSnap& n) {
+		return (int)n.velocity == vel;
+	});
 	std::fprintf (stderr, "airdour_win_shell: select_midi_notes_same_velocity vel=%d hit=%d\n",
 	              vel, hit);
 	std::fflush (stderr);
@@ -29364,18 +29354,9 @@ EngineHost::select_midi_notes_same_pitch_class ()
 		_snap.detail = L"MIDI same pitch-class: none selected";
 		return false;
 	}
-	_impl->clear_midi_note_sel ();
-	Evoral::event_id_t last = -1;
-	int hit = 0;
-	for (int i = 0; i < _snap.midi_note_count; ++i) {
-		if (((int)_snap.midi_notes[i].pitch % 12) == pc) {
-			_impl->selected_midi_note_ids.insert (_snap.midi_notes[i].id);
-			last = _snap.midi_notes[i].id;
-			++hit;
-		}
-	}
-	_impl->selected_midi_note_id = last;
-	refresh_midi_notes_snap ();
+	const int hit = select_midi_notes_where ([pc] (const EngineMidiNoteSnap& n) {
+		return ((int)n.pitch % 12) == pc;
+	});
 	std::fprintf (stderr, "airdour_win_shell: select_midi_notes_same_pitch_class pc=%d hit=%d\n",
 	              pc, hit);
 	std::fflush (stderr);
@@ -29412,18 +29393,9 @@ EngineHost::select_midi_notes_same_length ()
 		return false;
 	}
 	const float kEps = 0.001f; /* 1 ms */
-	_impl->clear_midi_note_sel ();
-	Evoral::event_id_t last = -1;
-	int hit = 0;
-	for (int i = 0; i < _snap.midi_note_count; ++i) {
-		if (std::fabs (_snap.midi_notes[i].length_sec - len) <= kEps) {
-			_impl->selected_midi_note_ids.insert (_snap.midi_notes[i].id);
-			last = _snap.midi_notes[i].id;
-			++hit;
-		}
-	}
-	_impl->selected_midi_note_id = last;
-	refresh_midi_notes_snap ();
+	const int hit = select_midi_notes_where ([len, kEps] (const EngineMidiNoteSnap& n) {
+		return std::fabs (n.length_sec - len) <= kEps;
+	});
 	std::fprintf (stderr, "airdour_win_shell: select_midi_notes_same_length len=%.4f hit=%d\n",
 	              len, hit);
 	std::fflush (stderr);
@@ -29459,18 +29431,9 @@ EngineHost::select_midi_notes_same_channel ()
 		_snap.detail = L"MIDI same channel: none selected";
 		return false;
 	}
-	_impl->clear_midi_note_sel ();
-	Evoral::event_id_t last = -1;
-	int hit = 0;
-	for (int i = 0; i < _snap.midi_note_count; ++i) {
-		if ((int)_snap.midi_notes[i].channel == ch) {
-			_impl->selected_midi_note_ids.insert (_snap.midi_notes[i].id);
-			last = _snap.midi_notes[i].id;
-			++hit;
-		}
-	}
-	_impl->selected_midi_note_id = last;
-	refresh_midi_notes_snap ();
+	const int hit = select_midi_notes_where ([ch] (const EngineMidiNoteSnap& n) {
+		return (int)n.channel == ch;
+	});
 	std::fprintf (stderr, "airdour_win_shell: select_midi_notes_same_channel ch=%d hit=%d\n",
 	              ch, hit);
 	std::fflush (stderr);
@@ -29491,21 +29454,10 @@ EngineHost::select_midi_notes_in_loop ()
 	}
 	const float L0 = _snap.loop_start_sec;
 	const float L1 = _snap.loop_end_sec;
-	_impl->clear_midi_note_sel ();
-	Evoral::event_id_t last = -1;
-	int hit = 0;
-	for (int i = 0; i < _snap.midi_note_count; ++i) {
-		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
-		float n1 = n.start_sec + n.length_sec;
-		/* Intersect half-open [start, start+len) with [L0, L1). */
-		if (n.start_sec < L1 && n1 > L0) {
-			_impl->selected_midi_note_ids.insert (n.id);
-			last = n.id;
-			++hit;
-		}
-	}
-	_impl->selected_midi_note_id = last;
-	refresh_midi_notes_snap ();
+	const int hit = select_midi_notes_where ([L0, L1] (const EngineMidiNoteSnap& n) {
+		const float n1 = n.start_sec + n.length_sec;
+		return n.start_sec < L1 && n1 > L0;
+	});
 	std::fprintf (stderr,
 	              "airdour_win_shell: select_midi_notes_in_loop [%.3f..%.3f] hit=%d\n",
 	              L0, L1, hit);
@@ -29527,21 +29479,10 @@ EngineHost::select_midi_notes_in_punch ()
 	}
 	const float P0 = _snap.punch_start_sec;
 	const float P1 = _snap.punch_end_sec;
-	_impl->clear_midi_note_sel ();
-	Evoral::event_id_t last = -1;
-	int hit = 0;
-	for (int i = 0; i < _snap.midi_note_count; ++i) {
-		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
-		float n1 = n.start_sec + n.length_sec;
-		/* Intersect half-open [start, start+len) with [P0, P1). */
-		if (n.start_sec < P1 && n1 > P0) {
-			_impl->selected_midi_note_ids.insert (n.id);
-			last = n.id;
-			++hit;
-		}
-	}
-	_impl->selected_midi_note_id = last;
-	refresh_midi_notes_snap ();
+	const int hit = select_midi_notes_where ([P0, P1] (const EngineMidiNoteSnap& n) {
+		const float n1 = n.start_sec + n.length_sec;
+		return n.start_sec < P1 && n1 > P0;
+	});
 	std::fprintf (stderr,
 	              "airdour_win_shell: select_midi_notes_in_punch [%.3f..%.3f] hit=%d\n",
 	              P0, P1, hit);
@@ -29569,23 +29510,12 @@ EngineHost::select_midi_notes_in_ranges ()
 	const float L1 = _snap.loop_end_sec;
 	const float P0 = _snap.punch_start_sec;
 	const float P1 = _snap.punch_end_sec;
-	_impl->clear_midi_note_sel ();
-	Evoral::event_id_t last = -1;
-	int hit = 0;
-	for (int i = 0; i < _snap.midi_note_count; ++i) {
-		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
-		float n1 = n.start_sec + n.length_sec;
+	const int hit = select_midi_notes_where ([L0, L1, P0, P1] (const EngineMidiNoteSnap& n) {
+		const float n1 = n.start_sec + n.length_sec;
 		const bool in_loop = (n.start_sec < L1 && n1 > L0);
 		const bool in_punch = (n.start_sec < P1 && n1 > P0);
-		/* Intersection = intersects both loop and punch. */
-		if (in_loop && in_punch) {
-			_impl->selected_midi_note_ids.insert (n.id);
-			last = n.id;
-			++hit;
-		}
-	}
-	_impl->selected_midi_note_id = last;
-	refresh_midi_notes_snap ();
+		return in_loop && in_punch;
+	});
 	std::fprintf (stderr,
 	              "airdour_win_shell: select_midi_notes_in_ranges "
 	              "loop[%.3f..%.3f] punch[%.3f..%.3f] hit=%d\n",
@@ -29608,21 +29538,10 @@ EngineHost::select_midi_notes_outside_loop ()
 	}
 	const float L0 = _snap.loop_start_sec;
 	const float L1 = _snap.loop_end_sec;
-	_impl->clear_midi_note_sel ();
-	Evoral::event_id_t last = -1;
-	int hit = 0;
-	for (int i = 0; i < _snap.midi_note_count; ++i) {
-		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
-		float n1 = n.start_sec + n.length_sec;
-		/* Outside = does not intersect half-open [L0, L1). */
-		if (!(n.start_sec < L1 && n1 > L0)) {
-			_impl->selected_midi_note_ids.insert (n.id);
-			last = n.id;
-			++hit;
-		}
-	}
-	_impl->selected_midi_note_id = last;
-	refresh_midi_notes_snap ();
+	const int hit = select_midi_notes_where ([L0, L1] (const EngineMidiNoteSnap& n) {
+		const float n1 = n.start_sec + n.length_sec;
+		return !(n.start_sec < L1 && n1 > L0);
+	});
 	std::fprintf (stderr,
 	              "airdour_win_shell: select_midi_notes_outside_loop [%.3f..%.3f] hit=%d\n",
 	              L0, L1, hit);
@@ -29644,21 +29563,10 @@ EngineHost::select_midi_notes_outside_punch ()
 	}
 	const float P0 = _snap.punch_start_sec;
 	const float P1 = _snap.punch_end_sec;
-	_impl->clear_midi_note_sel ();
-	Evoral::event_id_t last = -1;
-	int hit = 0;
-	for (int i = 0; i < _snap.midi_note_count; ++i) {
-		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
-		float n1 = n.start_sec + n.length_sec;
-		/* Outside = does not intersect half-open [P0, P1). */
-		if (!(n.start_sec < P1 && n1 > P0)) {
-			_impl->selected_midi_note_ids.insert (n.id);
-			last = n.id;
-			++hit;
-		}
-	}
-	_impl->selected_midi_note_id = last;
-	refresh_midi_notes_snap ();
+	const int hit = select_midi_notes_where ([P0, P1] (const EngineMidiNoteSnap& n) {
+		const float n1 = n.start_sec + n.length_sec;
+		return !(n.start_sec < P1 && n1 > P0);
+	});
 	std::fprintf (stderr,
 	              "airdour_win_shell: select_midi_notes_outside_punch [%.3f..%.3f] hit=%d\n",
 	              P0, P1, hit);
@@ -29686,23 +29594,12 @@ EngineHost::select_midi_notes_outside_ranges ()
 	const float L1 = _snap.loop_end_sec;
 	const float P0 = _snap.punch_start_sec;
 	const float P1 = _snap.punch_end_sec;
-	_impl->clear_midi_note_sel ();
-	Evoral::event_id_t last = -1;
-	int hit = 0;
-	for (int i = 0; i < _snap.midi_note_count; ++i) {
-		const EngineMidiNoteSnap& n = _snap.midi_notes[i];
-		float n1 = n.start_sec + n.length_sec;
+	const int hit = select_midi_notes_where ([L0, L1, P0, P1] (const EngineMidiNoteSnap& n) {
+		const float n1 = n.start_sec + n.length_sec;
 		const bool in_loop = (n.start_sec < L1 && n1 > L0);
 		const bool in_punch = (n.start_sec < P1 && n1 > P0);
-		/* Outside union = intersects neither loop nor punch. */
-		if (!in_loop && !in_punch) {
-			_impl->selected_midi_note_ids.insert (n.id);
-			last = n.id;
-			++hit;
-		}
-	}
-	_impl->selected_midi_note_id = last;
-	refresh_midi_notes_snap ();
+		return !in_loop && !in_punch;
+	});
 	std::fprintf (stderr,
 	              "airdour_win_shell: select_midi_notes_outside_ranges "
 	              "loop[%.3f..%.3f] punch[%.3f..%.3f] hit=%d\n",
