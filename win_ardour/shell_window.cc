@@ -6440,15 +6440,7 @@ ShellWindow::smoke_midi_playhead_draw ()
 	apply_shared_view (0);
 	/* Drive UI playhead into mid-view (draw uses strip norm, same as audio lanes). */
 	_playhead_sec = 4.f;
-	WaveStripParams wp;
-	wp.engine_running = _engine_snap.running;
-	wp.transport_playing = false;
-	wp.sample_rate = _engine_snap.sample_rate ? _engine_snap.sample_rate : 48000;
-	wp.period_frames = _engine_snap.period_frames ? _engine_snap.period_frames : 512;
-	wp.time_sec = 0.f;
-	wp.playhead_sec = _playhead_sec;
-	wp.gain = 1.f;
-	_lanes[0].strip.update_view (wp);
+	_lanes[0].strip.update_view (_playhead_sec);
 
 	float ph = _lanes[0].strip.playhead_norm ();
 	if (ph <= 0.02f || ph >= 0.98f) {
@@ -11659,14 +11651,6 @@ ShellWindow::on_tick ()
 		_playhead_sec += dt; /* UI-only fallback */
 	}
 
-	WaveStripParams wp;
-	wp.engine_running = _engine_snap.running;
-	wp.transport_playing = _transport_playing;
-	wp.sample_rate = _engine_snap.sample_rate;
-	wp.period_frames = _engine_snap.period_frames;
-	wp.time_sec = t;
-	wp.playhead_sec = _playhead_sec;
-
 	float wave_peaks[WaveStrip::kMaxColumns];
 	float wave_rms[WaveStrip::kMaxColumns];
 
@@ -11680,8 +11664,7 @@ ShellWindow::on_tick ()
 
 	const int n_lanes = n_audio_lanes ();
 	for (int i = 0; i < n_lanes; ++i) {
-		wp.gain = _mixers[i].gain ();
-		_lanes[i].strip.update_view (wp);
+		_lanes[i].strip.update_view (_playhead_sec);
 
 		if (refresh_waves) {
 			bool has_regions = false;

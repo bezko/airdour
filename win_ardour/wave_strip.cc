@@ -296,18 +296,18 @@ WaveStrip::x_at_time (const D2D1_RECT_F& bounds, float time_sec) const
 }
 
 void
-WaveStrip::update_view (const WaveStripParams& params)
+WaveStrip::update_view (float playhead_sec)
 {
 	_view_span_sec = kDefaultSpanSec / std::max (0.001f, _zoom);
 
 	if (_user_view) {
 		_view_start_sec = _pan;
 	} else {
-		_view_start_sec = params.playhead_sec - kFollowFrac * _view_span_sec;
+		_view_start_sec = playhead_sec - kFollowFrac * _view_span_sec;
 		_pan = _view_start_sec;
 	}
 
-	_playhead_norm = (params.playhead_sec - _view_start_sec) / std::max (0.001f, _view_span_sec);
+	_playhead_norm = (playhead_sec - _view_start_sec) / std::max (0.001f, _view_span_sec);
 	if (_playhead_norm < -0.05f || _playhead_norm > 1.05f) {
 		_playhead_norm = -1.f;
 	} else {
