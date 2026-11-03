@@ -28,7 +28,6 @@ HistoryPanel::HistoryPanel ()
 	, _redo_depth (0)
 	, _available (false)
 {
-	_next_undo[0] = L'\0';
 	_next_redo[0] = L'\0';
 	for (int i = 0; i < kMaxRows; ++i) {
 		_undo_rows[i] = D2D1::RectF ();
@@ -59,13 +58,8 @@ HistoryPanel::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 }
 
 void
-HistoryPanel::set_next_names (const wchar_t* undo_name, const wchar_t* redo_name)
+HistoryPanel::set_next_names (const wchar_t* redo_name)
 {
-	if (undo_name && undo_name[0]) {
-		wcsncpy_s (_next_undo, kNameLen, undo_name, _TRUNCATE);
-	} else {
-		_next_undo[0] = L'\0';
-	}
 	if (redo_name && redo_name[0]) {
 		wcsncpy_s (_next_redo, kNameLen, redo_name, _TRUNCATE);
 	} else {

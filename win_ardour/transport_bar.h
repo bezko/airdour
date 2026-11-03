@@ -95,7 +95,6 @@ public:
 	             float viewport_bottom = 0.f);
 
 	void set_playing (bool playing) { _playing = playing; }
-	bool playing () const { return _playing; }
 
 	void set_recording (bool recording) { _recording = recording; }
 	bool recording () const { return _recording; }
@@ -103,76 +102,51 @@ public:
 	void set_record_armed (bool armed) { _record_armed = armed; }
 
 	void set_loop_playing (bool on) { _loop_playing = on; }
-	bool loop_playing () const { return _loop_playing; }
 
 	void set_loop_active (bool on) { _loop_active = on; }
-	bool loop_active () const { return _loop_active; }
 
 	void set_punch_enabled (bool on) { _punch_enabled = on; }
-	bool punch_enabled () const { return _punch_enabled; }
 
 	void set_snap_enabled (bool on) { _snap_enabled = on; }
-	bool snap_enabled () const { return _snap_enabled; }
 
 	/** 0=bar 1=beat 2=1/2 3=1/4 — short glyph on Snap btn when enabled. */
 	void set_snap_density (int density_0_to_3);
-	int  snap_density () const { return _snap_density; }
 	/** Button caption: "Snap" when off, else Bar/Beat/1/2/1/4. */
 	const wchar_t* snap_btn_label () const;
 	bool snap_btn_center (float* out_x, float* out_y) const;
 
 	void set_midi_step_enabled (bool on) { _midi_step_enabled = on; }
-	bool midi_step_enabled () const { return _midi_step_enabled; }
 
 	/** 0=off 1=maj 2=min — Chord button label + lit when ≠0. */
 	void set_midi_chord_quality (int q) { _midi_chord_quality = q; }
-	int  midi_chord_quality () const { return _midi_chord_quality; }
 
 	/** Arp: lit when enabled; label Up/Dn/UD from mode. */
 	void set_midi_arp_enabled (bool on) { _midi_arp_enabled = on; }
-	bool midi_arp_enabled () const { return _midi_arp_enabled; }
 	void set_midi_arp_mode (int mode) { _midi_arp_mode = mode; }
-	int  midi_arp_mode () const { return _midi_arp_mode; }
 
 	/** Scale lock: lit when on; label shows root (+m for minor). */
 	void set_midi_scale_lock (bool on) { _midi_scale_lock = on; }
-	bool midi_scale_lock () const { return _midi_scale_lock; }
 	void set_midi_scale_kind (int kind) { _midi_scale_kind = kind; }
-	int  midi_scale_kind () const { return _midi_scale_kind; }
 	void set_midi_scale_root (int root) { _midi_scale_root = root; }
-	int  midi_scale_root () const { return _midi_scale_root; }
 
 	void set_freeze_active (bool on) { _freeze_active = on; }
 
 	void set_count_in_enabled (bool on) { _count_in_enabled = on; }
-	bool count_in_enabled () const { return _count_in_enabled; }
 
 	void set_click_enabled (bool on) { _click_enabled = on; }
-	bool click_enabled () const { return _click_enabled; }
 	/** Linear click gain (1.0 = unity); used for Click button caption. */
 	void set_click_gain (float g) { _click_gain = g; }
-	float click_gain () const { return _click_gain; }
 
 	void set_tempo_bpm (float bpm) { _tempo_bpm = bpm; }
-	float tempo_bpm () const { return _tempo_bpm; }
 
 	void set_group_active (bool on) { _group_active = on; }
-	bool group_active () const { return _group_active; }
 	void set_group_relative (bool on) { _group_relative = on; }
-	bool group_relative () const { return _group_relative; }
 
 	void set_spectrum_enabled (bool on) { _spectrum_enabled = on; }
-	bool spectrum_enabled () const { return _spectrum_enabled; }
 
 	void set_correlation_enabled (bool on) { _correlation_enabled = on; }
-	bool correlation_enabled () const { return _correlation_enabled; }
 
 	void set_loudness_enabled (bool on) { _loudness_enabled = on; }
-	bool loudness_enabled () const { return _loudness_enabled; }
-
-	/** Audio callback DSP load 0..100 (WASAPI / AudioEngine). */
-	void set_dsp_load_pct (float pct) { _dsp_load_pct = pct; }
-	float dsp_load_pct () const { return _dsp_load_pct; }
 
 	void set_clock_bbt (int bars, int beats, int ticks)
 	{
@@ -212,7 +186,6 @@ public:
 	/** Popup layer; call after the rest of the window so the menu sits on top. */
 	void draw_overlay (UiDraw& ui) const;
 
-	const D2D1_RECT_F& bounds () const { return _bounds; }
 	const D2D1_RECT_F& shuttle_btn () const { return _shuttle_btn; }
 	const D2D1_RECT_F& open_btn () const { return _open_btn; }
 
@@ -270,7 +243,6 @@ private:
 
 	D2D1_RECT_F _bounds;
 	D2D1_RECT_F _clock_bounds;
-	D2D1_RECT_F _dsp_bounds;
 	D2D1_RECT_F _shuttle_btn;
 	D2D1_RECT_F _tempo_dn_btn;
 	D2D1_RECT_F _tempo_up_btn;
@@ -314,7 +286,6 @@ private:
 	bool        _spectrum_enabled;
 	bool        _correlation_enabled;
 	bool        _loudness_enabled;
-	float       _dsp_load_pct;
 	float       _tempo_bpm;
 	float       _shuttle_norm;
 	int         _bbt_bars;

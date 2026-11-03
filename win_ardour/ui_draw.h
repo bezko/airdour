@@ -81,8 +81,6 @@ public:
 	void button (const D2D1_RECT_F& r, const ButtonStyle& st);
 	void slider (const D2D1_RECT_F& r, float t01, ui::ColorToken fill,
 	             bool hovered = false);
-	void meter (const D2D1_RECT_F& r, float peak01, float rms01, float hold01,
-	            bool clipped, bool draw_ticks = false);
 
 	/* Overlays */
 	void modal_scrim (const D2D1_RECT_F& view, float opacity = 0.62f);

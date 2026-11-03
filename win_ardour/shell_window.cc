@@ -2180,7 +2180,6 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 	_transport.set_midi_arp_enabled (_engine_snap.midi_arp_enabled);
 	_transport.set_midi_arp_mode (_engine_snap.midi_arp_mode);
-	_transport.set_dsp_load_pct (_engine_snap.dsp_load_pct);
 	sync_scale_to_transport ();
 	layout_panes ();
 	apply_loop_to_lanes ();
@@ -5982,7 +5981,7 @@ ShellWindow::sync_history_from_engine ()
 {
 	_history.set_available (_engine_snap.session_ok);
 	_history.set_depths (_engine_snap.undo_depth, _engine_snap.redo_depth);
-	_history.set_next_names (_engine_snap.next_undo_name, _engine_snap.next_redo_name);
+	_history.set_next_names (_engine_snap.next_redo_name);
 	_history.set_undo_rows (_engine_snap.undo_list_count, _engine_snap.undo_list_name);
 }
 
@@ -8087,7 +8086,6 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				_transport.set_overflow_open (false);
 				InvalidateRect (_hwnd, nullptr, FALSE);
 			} else if (_engine_snap.has_selection) {
-				/* Esc = clear region selection (quit via second Esc). */
 				do_clear_selection ();
 			} else if (_recent.visible ()) {
 				_recent.set_visible (false);
@@ -8102,8 +8100,6 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			} else if (_help_visible) {
 				_help_visible = false;
 				InvalidateRect (_hwnd, nullptr, FALSE);
-			} else {
-				/* Esc no longer quits — Alt+F4 / the close button do. */
 			}
 		} else if ((GetKeyState (VK_CONTROL) & 0x8000)
 		           && (wparam == 'O' || wparam == 'o')
@@ -11641,7 +11637,6 @@ ShellWindow::on_tick ()
 		_transport.set_midi_chord_quality (_engine_snap.midi_chord_quality);
 		_transport.set_midi_arp_enabled (_engine_snap.midi_arp_enabled);
 		_transport.set_midi_arp_mode (_engine_snap.midi_arp_mode);
-		_transport.set_dsp_load_pct (_engine_snap.dsp_load_pct);
 		sync_scale_to_transport ();
 		_transport.set_spectrum_enabled (_engine_snap.spectrum_enabled);
 		_transport.set_correlation_enabled (_engine_snap.correlation_enabled);

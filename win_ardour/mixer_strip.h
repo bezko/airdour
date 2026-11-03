@@ -30,7 +30,6 @@ public:
 	void set_label (const wchar_t* label);
 	/** PresentationInfo RGBA (RRGGBBAA); 0 = use accent for left bar. */
 	void set_color (uint32_t rgba_rrggbbaa);
-	uint32_t color () const { return _color_rgba; }
 	/** Optional processor name shown under the track label (e.g. ACE Reverb). */
 	void set_fx_label (const wchar_t* label);
 	void set_fx_bypassed (bool bypassed);
@@ -44,7 +43,6 @@ public:
 	float gain () const { return _gain; }
 
 	void set_armed (bool armed) { _armed = armed; }
-	bool armed () const { return _armed; }
 	/** Record-safe latch (Rs badge on Arm). */
 	void set_record_safe (bool safe) { _record_safe = safe; }
 
@@ -54,15 +52,11 @@ public:
 	void set_monitor_peer_count (int peers) { _monitor_peer_count = peers < 0 ? 0 : peers; }
 
 	void set_muted (bool muted) { _muted = muted; }
-	bool muted () const { return _muted; }
 	/** 0=Main (Mn) 1=AllPoints (All) — mute points badge. */
 	void set_mute_points (int points_0_1) { _mute_points = (points_0_1 != 0) ? 1 : 0; }
-	int  mute_points () const { return _mute_points; }
 	void set_soloed (bool soloed) { _soloed = soloed; }
-	bool soloed () const { return _soloed; }
 	void set_solo_isolated (bool isolated) { _solo_isolated = isolated; }
 	void set_solo_safe (bool safe) { _solo_safe = safe; }
-	bool solo_safe () const { return _solo_safe; }
 	void set_has_comment (bool has) { _has_comment = has; }
 	void set_phase_inverted (bool inverted) { _phase_inverted = inverted; }
 
@@ -73,7 +67,6 @@ public:
 	bool  drag_trim_to (float x);
 	/** 0=Solo (S), 1=PFL (P), 2=AFL (A) — RC listen mode glyph on Solo button. */
 	void set_listen_mode (int mode_0_1_2) { _listen_mode = mode_0_1_2; }
-	int  listen_mode () const { return _listen_mode; }
 	/** Route::active — dim strip when false. */
 	void set_route_active (bool active) { _route_active = active; }
 
@@ -113,18 +106,14 @@ public:
 
 	/** Compact mixer: hide pan / send / FX (keep Arm + M/S + fader + meter). */
 	void set_narrow (bool narrow) { _narrow = narrow; }
-	bool narrow () const { return _narrow; }
 
 	/** Session RouteGroup membership + Shift-pick for Grp. */
 	void set_in_group (bool in_group) { _in_group = in_group; }
-	bool in_group () const { return _in_group; }
 	void set_group_picked (bool picked) { _group_picked = picked; }
 	/** Group color RRGGBBAA when RouteGroup shares color (0 = use accent). */
 	void set_group_rgba (uint32_t rgba) { _group_rgba = rgba; }
-	uint32_t group_rgba () const { return _group_rgba; }
 	/** CoreSelection selected (group select share may light peers). */
 	void set_selected (bool selected) { _selected = selected; }
-	bool selected () const { return _selected; }
 
 	/** True when strip has a non-empty FX label (insert/bypass is live). */
 	bool has_fx () const { return _fx_label[0] != L'\0'; }
@@ -158,10 +147,8 @@ public:
 	LevelMeter& meter () { return _meter; }
 	/** 0=In 1=Pre 2=Post 3=Out — badge near meter. */
 	void set_meter_point (int point_0_3);
-	int  meter_point () const { return _meter_point; }
 	/** 0=Peak 1=K14 — badge near meter. */
 	void set_meter_type (int type_0_1);
-	int  meter_type () const { return _meter_type; }
 
 	bool hit_fader (float x, float y) const;
 	bool hit_label (float x, float y) const;
