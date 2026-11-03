@@ -11566,11 +11566,15 @@ ShellWindow::on_resize (UINT width, UINT height)
 		D2D1_GRADIENT_STOP gs[2];
 		gs[0].position = 0.f; gs[0].color = kBgTop;
 		gs[1].position = 1.f; gs[1].color = kBgBottom;
-		if (SUCCEEDED (_rt->CreateGradientStopCollection (gs, 2, &stops))) {
-			_rt->CreateLinearGradientBrush (
+		HRESULT hr = _rt->CreateGradientStopCollection (gs, 2, &stops);
+		if (SUCCEEDED (hr)) {
+			hr = _rt->CreateLinearGradientBrush (
 				D2D1::LinearGradientBrushProperties (D2D1::Point2F (0, 0), D2D1::Point2F (0, (float)_height)),
 				stops, &_brush_bg);
 			stops->Release ();
+		}
+		if (FAILED (hr) || !_brush_bg) {
+			discard_device_resources ();
 		}
 	}
 	InvalidateRect (_hwnd, nullptr, FALSE);
