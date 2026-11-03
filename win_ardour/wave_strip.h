@@ -14,21 +14,10 @@
 #define NOMINMAX
 #endif
 
-#include <cstdint>
 #include <vector>
 
 #include <windows.h>
 #include <d2d1.h>
-
-struct WaveStripParams {
-	bool     engine_running;
-	bool     transport_playing;
-	uint32_t sample_rate;
-	uint32_t period_frames;
-	float    time_sec;     /* UI clock */
-	float    playhead_sec; /* transport time */
-	float    gain;         /* 0..1 amplitude scale */
-};
 
 class WaveStrip
 {
@@ -55,7 +44,7 @@ public:
 	void resize_for_width (float width_px);
 
 	/** Update view window + playhead from transport; peaks stay until set_waveform. */
-	void update_view (const WaveStripParams& params);
+	void update_view (float playhead_sec);
 
 	/** Copy Session peak/RMS columns, or clear to empty lane if peaks is null. */
 	void set_waveform (const float* peaks, const float* rms, size_t n, bool has_regions);
