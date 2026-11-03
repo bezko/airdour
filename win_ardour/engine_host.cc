@@ -1080,16 +1080,6 @@ EngineHost::smoke_prefs ()
 	}
 }
 
-bool
-EngineHost::backend_uses_separate_devices () const
-{
-	if (!_impl || !_impl->engine) {
-		return false;
-	}
-	std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ();
-	return be && be->use_separate_input_and_output_devices ();
-}
-
 std::vector<std::string>
 EngineHost::input_devices () const
 {
@@ -16401,11 +16391,11 @@ EngineHost::cycle_monitor_dim_level ()
 	float cur = _snap.monitor_dim_db;
 	float next = -12.f;
 	if (cur > -9.f) {
-		next = -20.f; /* was −6-ish → −20 */
+		next = -20.f;
 	} else if (cur > -16.f) {
-		next = -6.f; /* was −12-ish → −6 */
+		next = -6.f;
 	} else {
-		next = -12.f; /* was −20-ish → −12 */
+		next = -12.f;
 	}
 	return set_monitor_dim_level_db (next);
 }
@@ -24134,7 +24124,6 @@ EngineHost::refresh_track_fx_snap ()
 	_snap.track_fx_bypassed = false;
 	_snap.track_fx_param = _impl ? _impl->track_fx_param : 0.3f;
 	_snap.track_fx_name.clear ();
-	_snap.track_fx_param_name = L"Blend";
 	if (!_impl || _impl->tracks.empty () || !_impl->tracks[0]) {
 		return;
 	}
@@ -24167,7 +24156,6 @@ EngineHost::refresh_track_fx_snap ()
 	_snap.track_fx_bypassed = _impl->track_fx_bypassed;
 	_snap.track_fx_param = _impl->track_fx_param;
 	_snap.track_fx_name = utf8_to_wide (_impl->track_fx_name);
-	_snap.track_fx_param_name = L"Blend";
 }
 
 bool
@@ -26923,11 +26911,9 @@ void
 EngineHost::refresh_correlation_snap ()
 {
 	if (!_snap.correlation_enabled) {
-		_snap.correlation_ok = false;
 		return;
 	}
 	if (!_impl || !_impl->session) {
-		_snap.correlation_ok = false;
 		_snap.correlation *= 0.85f;
 		return;
 	}
@@ -27038,7 +27024,6 @@ EngineHost::refresh_correlation_snap ()
 	}
 	if (!got || energy < 1.0e-5f) {
 		_snap.correlation *= 0.88f;
-		_snap.correlation_ok = got;
 		return;
 	}
 	_snap.correlation = _snap.correlation * 0.55f + r * 0.45f;
@@ -27059,7 +27044,6 @@ EngineHost::refresh_correlation_snap ()
 		_snap.gonio_x[i] = std::max (-1.f, std::min (1.f, left[idx] * inv));
 		_snap.gonio_y[i] = std::max (-1.f, std::min (1.f, right[idx] * inv));
 	}
-	_snap.correlation_ok = true;
 }
 
 bool
@@ -27067,7 +27051,6 @@ EngineHost::set_correlation_enabled (bool on)
 {
 	_snap.correlation_enabled = on;
 	if (!on) {
-		_snap.correlation_ok = false;
 		_snap.correlation = 0.f;
 		_snap.detail = L"phase meter off";
 		return true;
@@ -27235,11 +27218,9 @@ void
 EngineHost::refresh_loudness_snap ()
 {
 	if (!_snap.loudness_enabled) {
-		_snap.loudness_ok = false;
 		return;
 	}
 	if (!_impl || !_impl->session) {
-		_snap.loudness_ok = false;
 		_snap.loudness_momentary = _snap.loudness_momentary * 0.9f - 7.f * 0.1f;
 		return;
 	}
@@ -27374,7 +27355,6 @@ EngineHost::refresh_loudness_snap ()
 	float m = kweight_stereo_lufs (left, right, n);
 	if (!got) {
 		_snap.loudness_momentary = _snap.loudness_momentary * 0.9f - 7.f * 0.1f;
-		_snap.loudness_ok = false;
 		return;
 	}
 	_snap.loudness_momentary = _snap.loudness_momentary * 0.4f + m * 0.6f;
@@ -27408,7 +27388,6 @@ EngineHost::refresh_loudness_snap ()
 			_snap.loudness_integrated = mean_square_to_lufs (sum / (double)used);
 		}
 	}
-	_snap.loudness_ok = true;
 }
 
 bool
@@ -27416,7 +27395,6 @@ EngineHost::set_loudness_enabled (bool on)
 {
 	_snap.loudness_enabled = on;
 	if (!on) {
-		_snap.loudness_ok = false;
 		_snap.loudness_momentary = -70.f;
 		_snap.loudness_integrated = -70.f;
 		_snap.detail = L"loudness off";
@@ -36377,12 +36355,6 @@ EngineHost::set_pref_click_default (bool on)
 
 bool
 EngineHost::smoke_prefs ()
-{
-	return false;
-}
-
-bool
-EngineHost::backend_uses_separate_devices () const
 {
 	return false;
 }

@@ -187,7 +187,6 @@ struct EngineSnapshot {
 	/* Phase correlation / goniometer (UI-rate L/R window; no RT alloc). */
 	static constexpr int kGonioPts = 64;
 	bool         correlation_enabled = false;
-	bool         correlation_ok = false;
 	bool         correlation_master = false; /* true = mix Audio 1..N L/R; false = selected */
 	float        correlation = 0.f; /* −1..+1 Pearson L/R */
 	float        gonio_x[kGonioPts] = {}; /* L (−1..+1) */
@@ -195,7 +194,6 @@ struct EngineSnapshot {
 	wchar_t      correlation_label[32] = {};
 	/* Approximate LUFS (UI-rate K-weight / BS.1770-style; not certified). */
 	bool         loudness_enabled = false;
-	bool         loudness_ok = false;
 	bool         loudness_master = false; /* true = mix Audio 1..N; false = selected */
 	float        loudness_momentary = -70.f; /* ≈ LUFS over ~400 ms window */
 	float        loudness_integrated = -70.f; /* ≈ gated running mean */
@@ -211,7 +209,6 @@ struct EngineSnapshot {
 	std::wstring midi_synth_name; /* e.g. ACE Reasonable Synth */
 	std::wstring midi_out_name; /* connected playback port display name */
 	std::wstring track_fx_name; /* e.g. ACE Reverb on track 0 */
-	std::wstring track_fx_param_name = L"Blend"; /* e.g. Blend */
 	std::wstring track_comp_name; /* e.g. ACE Compressor */
 	std::wstring track_eq_name; /* e.g. ACE EQ */
 	std::wstring track_delay_name; /* e.g. ACE Delay */
@@ -413,7 +410,6 @@ public:
 	/* Audio device selection (generic AudioBackend API, no WASAPI headers). */
 	std::vector<std::string> input_devices () const;
 	std::vector<std::string> output_devices () const;
-	bool backend_uses_separate_devices () const;
 	std::string current_input_device () const;
 	std::string current_output_device () const;
 	/**
