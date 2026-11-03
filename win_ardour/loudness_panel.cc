@@ -73,16 +73,6 @@ LoudnessPanel::set_label (const wchar_t* label)
 	}
 }
 
-bool
-LoudnessPanel::hit (float x, float y) const
-{
-	if (!_visible) {
-		return false;
-	}
-	return x >= _bounds.left && x <= _bounds.right
-	       && y >= _bounds.top && y <= _bounds.bottom;
-}
-
 void
 LoudnessPanel::draw (ID2D1RenderTarget* rt,
                      ID2D1SolidColorBrush* brand,

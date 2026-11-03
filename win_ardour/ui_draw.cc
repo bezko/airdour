@@ -433,67 +433,6 @@ UiDraw::slider (const D2D1_RECT_F& r, float t01, ui::ColorToken fill,
 }
 
 void
-UiDraw::meter (const D2D1_RECT_F& r, float peak01, float rms01, float hold01,
-               bool clipped, bool draw_ticks)
-{
-	if (!_rt || r.right <= r.left || r.bottom <= r.top) {
-		return;
-	}
-	fill_round (r, 2.f, ui::ColorToken::Control);
-	stroke_round (r, 2.f, ui::ColorToken::Border, 1.f, 0.8f);
-	const D2D1_RECT_F in = inset (r, dp (1.f));
-	const float h = in.bottom - in.top;
-	if (h <= 1.f) {
-		return;
-	}
-	const float level = clamp01 (peak01);
-	auto band = [&] (float lo, float hi, ui::ColorToken c) {
-		const float a = std::max (lo, 0.f);
-		const float b = std::min (hi, level);
-		if (b <= a) {
-			return;
-		}
-		D2D1_RECT_F q = in;
-		q.bottom = in.bottom - h * a;
-		q.top = in.bottom - h * b;
-		fill_round (q, 1.5f, c, 0.96f);
-	};
-	band (0.f, 0.75f, ui::ColorToken::Peak);
-	band (0.75f, 0.93f, ui::ColorToken::Solo);
-	band (0.93f, 1.f, ui::ColorToken::Record);
-
-	const float rms = clamp01 (rms01);
-	if (rms > 0.01f) {
-		const float pw = (in.right - in.left) * 0.42f;
-		const float cx = (in.left + in.right) * 0.5f;
-		const D2D1_RECT_F q = D2D1::RectF (cx - pw * 0.5f,
-		                                  in.bottom - h * rms,
-		                                  cx + pw * 0.5f, in.bottom);
-		fill_round (q, 1.f, ui::ColorToken::Rms, 0.9f);
-	}
-	if (draw_ticks) {
-		for (float t : { 0.25f, 0.5f, 0.75f, 0.9f }) {
-			const float y = in.bottom - h * t;
-			_rt->DrawLine (D2D1::Point2F (in.left, y),
-			               D2D1::Point2F (in.right, y),
-			               brush (ui::ColorToken::GridBeat), 1.f);
-		}
-	}
-	const float hold = clamp01 (hold01);
-	if (hold > 0.001f) {
-		const float y = in.bottom - h * hold;
-		_rt->DrawLine (D2D1::Point2F (in.left, y),
-		               D2D1::Point2F (in.right, y),
-		               brush (ui::ColorToken::MeterHold), dp (1.5f));
-	}
-	if (clipped) {
-		fill_round (D2D1::RectF (in.left, in.top, in.right,
-		                         in.top + dp (3.f)),
-		            1.f, ui::ColorToken::Clip);
-	}
-}
-
-void
 UiDraw::modal_scrim (const D2D1_RECT_F& view, float opacity)
 {
 	fill_round (view, 0.f, ui::ColorToken::Shadow, opacity);

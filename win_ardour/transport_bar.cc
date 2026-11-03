@@ -28,7 +28,6 @@ clampf (float v, float lo, float hi)
 TransportBar::TransportBar ()
 	: _bounds ()
 	, _clock_bounds ()
-	, _dsp_bounds ()
 	, _shuttle_btn ()
 	, _tempo_dn_btn ()
 	, _tempo_up_btn ()
@@ -65,7 +64,6 @@ TransportBar::TransportBar ()
 	, _spectrum_enabled (false)
 	, _correlation_enabled (false)
 	, _loudness_enabled (false)
-	, _dsp_load_pct (0.f)
 	, _tempo_bpm (120.f)
 	, _shuttle_norm (0.f)
 	, _bbt_bars (1)
@@ -129,7 +127,6 @@ TransportBar::clear_layout ()
 	_hit_rects.clear ();
 	_menu_rows.clear ();
 	_clock_bounds = D2D1::RectF ();
-	_dsp_bounds = D2D1::RectF ();
 	_shuttle_btn = D2D1::RectF ();
 	_tempo_dn_btn = D2D1::RectF ();
 	_tempo_up_btn = D2D1::RectF ();

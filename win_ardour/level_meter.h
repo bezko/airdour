@@ -34,7 +34,6 @@ public:
 	/** Decay toward silence when idle; age peak-hold / clip hold. */
 	void tick (float dt_sec);
 
-	float level () const { return _level; }
 	bool  clipped () const { return _clipped; }
 
 	bool hit (float x, float y) const;

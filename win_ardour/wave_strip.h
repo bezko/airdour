@@ -112,7 +112,6 @@ public:
 	float x_at_time (const D2D1_RECT_F& bounds, float time_sec) const;
 
 	float  zoom () const { return _zoom; }
-	float  pan () const { return _pan; }
 	float  view_start_sec () const { return _view_start_sec; }
 	float  view_span_sec () const { return _view_span_sec; }
 	bool   interacting () const { return _user_view; }
