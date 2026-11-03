@@ -859,16 +859,6 @@ int main() { return 0; }''',
     conf.env.append_value('CXXFLAGS', cxx_flags)
     conf.env.append_value('LINKFLAGS', linker_flags)
 
-def create_resource_file(name):
-    try:
-        text = 'IDI_ICON1 ICON DISCARDABLE "icons/' + name + '.ico"\n'
-        o = open('gtk2_ardour/windows_icon.rc', 'w')
-        o.write(text)
-        o.close()
-    except IOError:
-        print('Could not open gtk2_ardour/windows_icon.rc for writing\n')
-        sys.exit(-1)
-
 #----------------------------------------------------------------
 
 # Waf stages
@@ -1292,8 +1282,6 @@ int main () { int x = SFC_RF64_AUTO_DOWNGRADE; return 0; }
         conf.env.append_value('LIB', 'intl')
         # TODO this should only be necessary for a debug build
         conf.env.append_value('LIB', 'dbghelp')
-        # No USE_CAIRO_IMAGE_SURFACE: Airdour mingw/msvc is AIRDOUR_WINDOWS_ONLY
-        # (no gtk2_ardour / Cairo canvas). GTK Gdk BitBlt workaround does not apply.
         conf.define ('WINDOWS', 1)
 
         have_ptw_semaphore = conf.check_cc(fragment = '''
@@ -1329,7 +1317,6 @@ int main () { return 0; }
         conf.env.append_value('CXXFLAGS', '-DCOMPILER_MSVC')
         conf.env.append_value('CFLAGS', '-D_USE_MATH_DEFINES')
         conf.env.append_value('CXXFLAGS', '-D_USE_MATH_DEFINES')
-        # No USE_CAIRO_IMAGE_SURFACE on MSVC Windows-only (no GTK/Cairo canvas).
         if conf.env['DEBUG']:
             conf.env.append_value('LIB', 'pthreadVC3d')
         else:
@@ -1657,12 +1644,6 @@ const char* const ardour_config_info = "\\n\\
     config_text.write ('";\n}\n')
     config_text.close ()
     print('')
-
-    # gtk2_ardour/windows_icon.rc is only for the GTK frontend (excluded on
-    # AIRDOUR_WINDOWS_ONLY). win_ardour uses its own Win32 resources if needed.
-    if ((Options.options.dist_target == 'mingw' or Options.options.dist_target == 'msvc')
-            and not conf.is_defined('AIRDOUR_WINDOWS_ONLY')):
-        create_resource_file(Options.options.program_name)
 
 def build(bld):
     if bld.is_install:
