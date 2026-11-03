@@ -52,9 +52,9 @@ if (-not (Test-Path $vcpkgExe)) {
 
 $featureArgs = @()
 if ($WithGtkLibs) {
-  # Feature gtk-libs → gtk3 + cairo + pango (MSVC libs; not product chrome).
+  # Feature gtk-libs → cairo (optional shell wave blit; not product chrome).
   $featureArgs += "--x-feature=gtk-libs"
-  Write-Host "WithGtkLibs: enabling manifest feature gtk-libs (gtk3/cairo/pango)"
+  Write-Host "WithGtkLibs: enabling manifest feature gtk-libs (cairo)"
 }
 
 Write-Host "Installing manifest from $ManifestDir (triplet=$Triplet)"
@@ -159,10 +159,11 @@ Write-Host "Pass -DVCPKG_MANIFEST_DIR=$ManifestDir when configuring cmake/win64.
 Write-Host "waf tip: --boost-include=$installed\include and PKG_CONFIG_PATH=$installed\lib\pkgconfig"
 Write-Host "Overlays: libsigcpp2 + glibmm24 provide sigc++-2.0 / glibmm-2.4 (see overlays/README.md)."
 if ($WithGtkLibs) {
-  $gtkH = Join-Path $installed "include\gtk-3.0\gtk\gtk.h"
-  if (Test-Path $gtkH) {
-    Write-Host "GTK3 libs ready: $gtkH"
+  $cairoH = Join-Path $installed "include\cairo\cairo.h"
+  $cairoLib = Join-Path $installed "lib\cairo.lib"
+  if ((Test-Path $cairoH) -and (Test-Path $cairoLib)) {
+    Write-Host "Cairo ready: $cairoH ; $cairoLib"
   } else {
-    Write-Warning "WithGtkLibs set but gtk/gtk.h missing under $installed"
+    Write-Warning "WithGtkLibs set but include\cairo\cairo.h or lib\cairo.lib missing under $installed"
   }
 }

@@ -46,7 +46,8 @@ Prefer vcpkg (x64-windows) with binary caching:
   pthreads4w (until Win32 thread migration completes)
 Non-UI third-party still linked: fluidsynth, zita-resampler/convolver,
   qm-dsp, vamp-plugins, hidapi, aaf, ptformat, libltc, boost (headers).
-NOT linked: cairo, cairomm, pangocairo, GTK2/ytk, PortAudio (default path).
+Cairo is an optional shell blit (feature gtk-libs / Install-HeadlessDeps -WithGtkLibs).
+NOT linked: cairomm, pangocairo, GTK2/ytk, PortAudio (default path).
 
 Secrets
 -------

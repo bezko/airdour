@@ -225,7 +225,7 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     endforeach()
     message(STATUS "Airdour win64: WaveStrip Cairo→D2D blit enabled (vcpkg cairo)")
   else()
-    message(STATUS "Airdour win64: WaveStrip D2D-only peaks (Install-HeadlessDeps -WithGtkLibs for Cairo)")
+    message(STATUS "Airdour win64: WaveStrip D2D-only peaks (optional Cairo shell blit: Install-HeadlessDeps -WithGtkLibs)")
   endif()
 
   # Console subsystem so --timeout smoke logs are capturable; still creates a HWND.
