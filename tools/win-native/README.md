@@ -65,7 +65,7 @@ Default backends: **dummy** + **wasapi**. Needs MSVC deps above **plus** the gli
 | Code signing | No | Not wired |
 
 Manifest: `tools/win-native/vcpkg.json` (core headless deps; **no GTK2 chrome**).  
-Optional MSVC **GTK3/Cairo libs** (not product UI): `-WithGtkLibs` → feature `gtk-libs`.  
+Optional MSVC **Cairo** shell blit (not product UI): `-WithGtkLibs` → feature `gtk-libs`.  
 
 ### Packaging scripts
 
