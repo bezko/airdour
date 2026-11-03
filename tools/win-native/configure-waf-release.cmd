@@ -7,7 +7,6 @@ for %%I in ("%ROOT%") do set "ROOT=%%~fI"
 
 call "%~dp0msvc-env.cmd" %1
 if errorlevel 1 exit /b %ERRORLEVEL%
-
 cd /d "%ROOT%"
 set "PKG_CONFIG_PATH=%VCPKG%\lib\pkgconfig"
 echo PKG_CONFIG_PATH=%PKG_CONFIG_PATH%

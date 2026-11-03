@@ -19,6 +19,8 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
+#include "ui_draw.h"
+
 enum class RecentHit {
 	None,
 	Outside, /* dismiss menu */
@@ -56,14 +58,7 @@ public:
 	/** Row index 0..count-1 for Row* hits; -1 otherwise. */
 	static int row_index (RecentHit hit);
 
-	void draw (ID2D1RenderTarget* rt,
-	           ID2D1SolidColorBrush* brand,
-	           ID2D1SolidColorBrush* body,
-	           ID2D1SolidColorBrush* accent,
-	           ID2D1SolidColorBrush* pane,
-	           ID2D1SolidColorBrush* edge,
-	           IDWriteTextFormat* fmt_meta,
-	           float dpi_scale) const;
+	void draw (UiDraw& ui) const;
 
 private:
 	D2D1_RECT_F _menu;

@@ -26,7 +26,7 @@ cd ..\..
 build-ninja-ui\artifacts\airdour_win_shell.exe --timeout 3 --no-engine
 ```
 
-Presets live in `cmake\win64\CMakePresets.json` (`ui`, `engine`, `deps`, all Ninja + Release).
+Presets live in `cmake\win64\CMakePresets.json` (`ui`, `engine`, all Ninja + Release).
 Produces `airdour_wasapi_io.lib` (WasapiIO + Windows SDK) and `airdour_win_shell.exe` (Win32+D2D+DirectWrite, no GTK). The `ui` preset does **not** link libardour.
 
 The MSVC targets get `/utf-8 /Zc:__cplusplus /permissive- /W4`; set
@@ -36,12 +36,14 @@ The MSVC targets get `/utf-8 /Zc:__cplusplus /permissive- /W4`; set
 
 ```bat
 powershell -ExecutionPolicy Bypass -File tools\win-native\Install-HeadlessDeps.ps1 -VcpkgRoot C:\vcpkg
-cd cmake\win64
-cmake --preset deps
-cmake --build --preset deps
+
+cmake -S cmake\win64 -B build-win64-deps -G "Visual Studio 17 2022" -A x64 ^
+  -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
+  -DVCPKG_MANIFEST_DIR=%CD%/tools/win-native ^
+  -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON
 ```
 
-`deps_headless_smoke` links **glib / libxml2 / libsndfile / curl / libarchive / pthreads** from the manifest. It does **not** link `libpbd`. CMake finds vcpkg via `AIRDOUR_VCPKG_PREFIX`, `VCPKG_INSTALLED_DIR`, or the in-repo `vcpkg_installed/x64-windows` (in that order).
+CMake finds vcpkg via `AIRDOUR_VCPKG_PREFIX`, `VCPKG_INSTALLED_DIR`, or the in-repo `vcpkg_installed/x64-windows` (in that order).
 
 ### Blocker before `libpbd`
 
@@ -95,23 +97,21 @@ pwsh tools\win-native\ci\Format-Check.ps1 -BaseRef origin/master -Fix   :: rewri
 | `GITHUB_TOKEN` | Auto | Release publish on tags |
 | `VCPKG_BINARY_SOURCES` | No (future) | Binary cache when vcpkg job is enabled |
 | Code signing | No | Not wired |
-| GTK2 MSVC prefix | Blocked | Main GUI release blocker |
 
 Manifest: `tools/win-native/vcpkg.json` (core headless deps; **no GTK2 chrome**).  
-Optional MSVC **GTK3/Cairo libs** (not product UI): `-WithGtkLibs` → feature `gtk-libs`.  
-Probe (no windows): `tools/win-native/gtk-lib-probe/build-and-run.cmd` — see store doc `gtk-native-msvc.md`.  
-cairomm spike (isolated; canvas TU still FAIL): `tools/win-native/canvas-cxx-spike/` — gtkmm2 **not** available via vcpkg.
+Optional MSVC **Cairo** shell blit (not product UI): `-WithGtkLibs` → feature `gtk-libs`.  
 
 ### Packaging scripts
 
 - `tools/win-native/ci/Write-BuildStatus.ps1`
 - `tools/win-native/ci/Package-Release.ps1`
+- `tools/win-native/ci/Package-WinShell-Nsis.ps1` (open-source NSIS installer)
 
 ## Bring-up checklist
 
 1. [x] CI compiles WasapiIO with MSVC (smoke)
-2. [x] Laptop: vcpkg headless C deps + `deps_headless_smoke` target wired
-3. [x] Overlay `glibmm-2.4` + `sigc++-2.0` installed; waf past glibmm; `deps_glibmm_smoke`
+2. [x] Laptop: vcpkg headless C deps
+3. [x] Overlay `glibmm-2.4` + `sigc++-2.0` installed; waf past glibmm
 4. [x] waf Windows-only configure green; MSVC link `libpbd` (`build\libs\pbd\pbd.dll`)
 5. [x] MSVC link `libardour` → `hardour` (dummy + WASAPI) — laptop
 6. [x] hardour engine-only smoke (dummy + WASAPI shared)
@@ -119,9 +119,9 @@ cairomm spike (isolated; canvas TU still FAIL): `tools/win-native/canvas-cxx-spi
 8. [ ] Tune period/CPU on a cheap laptop; measured WasapiIO latency
 9. [x] Port WinMME MIDI; grow `win_ardour` (engine attach, wave strip, FX)
 10. [x] Windows-only cull: waf/cmake never require `libs/tk`, `gtk2_ardour`, Cairo canvas
-11. [ ] Installer (NSIS/MSIX); Engine portable zip already ships via `Package-WinShell-Portable.ps1`
+11. [x] NSIS per-user installer (`tools/win-native/installer/airdour.nsi`); [ ] MSIX. Engine portable zip via `Package-WinShell-Portable.ps1`
 
 ## Success for this phase
 
 - Shared-mode device I/O through `ARDOUR::AudioBackend` on win64
-- CI publishes reproducible win64 smoke/release zips without claiming a full GUI app
+- CI publishes reproducible win64 smoke/release zips

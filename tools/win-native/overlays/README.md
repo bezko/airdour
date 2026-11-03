@@ -49,4 +49,4 @@ Do **not** switch to stock `glibmm`. If meson still fails on removed GLib APIs, 
 
 ## GTK2
 
-Out of scope. GTK2-on-MSVC is a dead end; GUI path is GTK3/gvsbuild or Direct2D later.
+Out of scope. GTK2-on-MSVC is a dead end.

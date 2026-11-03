@@ -35,16 +35,7 @@ $smokeLine
 $guiLine
 GREEN  cmake/win64 spine configured
 GREEN  libs/backends/wasapi sources (shared-mode implementation)
-GREEN  win_ardour minimal shell sources
-GREEN  tools/win-native docs and packaging scripts
-
-What is NOT in this artifact yet
---------------------------------
-STAGED   libpbd / libardour / hardour — laptop-proven; wire into CI next
-STAGED   WinMME MIDI inside wasapi backend
-OUT      gtk2_ardour / libs/tk / libs/canvas / libs/surfaces (GTK) on Windows-only
-OUT      Cairo / cairomm — not required for win_shell or hardour
-BLOCKED  NSIS / MSIX installer (zip only for now)
+GREEN  tools/win-native/README.md
 
 Dependency expectations (Windows-only product)
 ----------------------------------------------
@@ -55,7 +46,8 @@ Prefer vcpkg (x64-windows) with binary caching:
   pthreads4w (until Win32 thread migration completes)
 Non-UI third-party still linked: fluidsynth, zita-resampler/convolver,
   qm-dsp, vamp-plugins, hidapi, aaf, ptformat, libltc, boost (headers).
-NOT linked: cairo, cairomm, pangocairo, GTK2/ytk, PortAudio (default path).
+Cairo is an optional shell blit (feature gtk-libs / Install-HeadlessDeps -WithGtkLibs).
+NOT linked: cairomm, pangocairo, GTK2/ytk, PortAudio (default path).
 
 Secrets
 -------

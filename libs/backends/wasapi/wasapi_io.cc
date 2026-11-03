@@ -549,7 +549,7 @@ WasapiIO::open (const std::string& output_name_or_id,
 
 	const uint32_t ten_ms = (uint32_t)std::lround ((double)_sample_rate * 0.010);
 	const uint32_t q = std::max (1u, _min_period_frames);
-	const bool explicit_period = (frames_per_period != 0 && frames_per_period != 512);
+	const bool explicit_period = (frames_per_period != 0);
 
 	auto snap_period = [q] (uint32_t p) -> uint32_t {
 		if (p == 0) {

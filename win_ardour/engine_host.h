@@ -8,191 +8,207 @@
 #pragma once
 
 #include <cstdint>
+#include <cmath>
 #include <string>
 #include <chrono>
 #include <vector>
 
 struct EngineMarkerSnap {
-	float        sec;
-	wchar_t      name[24];
-	bool         locked; /* Location::locked — blocks move */
-	bool         cd; /* Location::is_cd_marker */
-	bool         scene;
-	int32_t      program;
-	int32_t      bank;
-	int32_t      channel; /* MIDISceneChange channel 0..15, or -1 */
-	bool         cue; /* Location::is_cue_marker */
-	int32_t      cue_id; /* TriggerBox cue slot when cue */
-	bool         section; /* Location::is_section */
+	float        sec = 0.f;
+	wchar_t      name[24] = {};
+	bool         locked = false; /* Location::locked — blocks move */
+	bool         cd = false; /* Location::is_cd_marker */
+	bool         scene = false;
+	int32_t      program = -1;
+	int32_t      bank = -1;
+	int32_t      channel = -1; /* MIDISceneChange channel 0..15, or -1 */
+	bool         cue = false; /* Location::is_cue_marker */
+	int32_t      cue_id = 0; /* TriggerBox cue slot when cue */
+	bool         section = false; /* Location::is_section */
 };
 
 struct EngineRangeSnap {
-	float        start_sec;
-	float        end_sec;
-	wchar_t      name[24];
+	float        start_sec = 0.f;
+	float        end_sec = 0.f;
+	wchar_t      name[24] = {};
 };
 
 struct EngineSkipSnap {
-	float        start_sec;
-	float        end_sec;
-	wchar_t      name[24];
+	float        start_sec = 0.f;
+	float        end_sec = 0.f;
+	wchar_t      name[24] = {};
 };
 
 struct EngineMidiDeviceSnap {
-	wchar_t name[64];
-	bool    input; /* true = capture / in; false = playback / out (best-effort) */
+	wchar_t name[64] = {};
+	bool    input = false; /* true = capture / in; false = playback / out (best-effort) */
 };
 
 struct EngineMidiNoteSnap {
-	int32_t id;
-	float   start_sec;
-	float   length_sec;
-	uint8_t pitch;
-	uint8_t velocity;
-	bool    selected;
+	int32_t id = -1;
+	float   start_sec = 0.f;
+	float   length_sec = 0.f;
+	uint8_t pitch = 0;
+	uint8_t velocity = 0;
+	uint8_t channel = 0; /* 0..15 */
+	bool    selected = false;
+};
+
+struct EnginePluginSnap {
+	wchar_t name[48];
+	wchar_t unique_id[72];
+	bool    is_instrument;
+};
+
+struct EnginePluginSlotSnap {
+	wchar_t name[48];
+	wchar_t unique_id[72];
+	bool    active;
+};
+
+struct EnginePluginParamSnap {
+	wchar_t name[32];
+	float   value; /* plugin units */
+	float   norm; /* 0..1 UI */
+	bool    toggled;
 };
 
 struct EngineSnapshot {
-	static constexpr int kMeters = 6; /* max audio tracks (Editor lanes / meters) */
+	static constexpr int kMeters = 16; /* max audio tracks (Editor lanes / meters) */
 	static constexpr int kMaxMarkers = 8;
 	static constexpr int kMaxMidiDevices = 16;
 	static constexpr int kMaxMidiNotes = 96;
 
-	bool         available; /* compiled with AIRDOUR_WIN_SHELL_WITH_ENGINE */
-	bool         running;
-	bool         session_ok;
-	bool         transport_rolling;
-	bool         meters_real; /* PeakMeter (not stub) */
-	bool         waves_from_session; /* Editor peaks from playlist (may still be empty) */
-	bool         session_record_armed; /* Session record enable (may not be rolling yet) */
-	bool         session_recording; /* actively capturing */
-	bool         session_saved; /* last save_state succeeded */
-	bool         export_ok; /* last export produced a file */
-	uint32_t     undo_depth;
-	uint32_t     redo_depth;
+	bool         available = false; /* compiled with AIRDOUR_WIN_SHELL_WITH_ENGINE */
+	bool         running = false;
+	bool         session_ok = false;
+	bool         transport_rolling = false;
+	bool         meters_real = false; /* PeakMeter (not stub) */
+	bool         waves_from_session = false; /* Editor peaks from playlist (may still be empty) */
+	bool         session_record_armed = false; /* Session record enable (may not be rolling yet) */
+	bool         session_recording = false; /* actively capturing */
+	bool         session_saved = false; /* last save_state succeeded */
+	bool         export_ok = false; /* last export produced a file */
+	uint32_t     undo_depth = 0;
+	uint32_t     redo_depth = 0;
 	static constexpr int kMaxHistory = 8;
 	static constexpr int kHistoryNameLen = 40;
-	int          undo_list_count; /* recent undo names, newest first */
-	wchar_t      undo_list_name[kMaxHistory][kHistoryNameLen];
-	wchar_t      next_undo_name[kHistoryNameLen];
-	wchar_t      next_redo_name[kHistoryNameLen];
-	bool         has_selection; /* Editor region selection */
-	int          selection_track; /* 0..kMeters-1, or -1 */
-	float        selection_start_sec;
-	float        selection_end_sec;
-	float        selection_fade_in_sec; /* AudioRegion fade-in length */
-	float        selection_fade_out_sec;
-	bool         selection_sync_marked; /* Region::sync_marked */
-	float        selection_sync_sec; /* absolute session time of sync point */
-	bool         selection_muted; /* Region::muted() */
-	float        selection_gain_db; /* AudioRegion scale_amplitude as dB */
-	bool         selection_locked; /* Region::locked() — blocks move/trim */
-	bool         selection_position_locked; /* Region::position_locked — blocks move */
-	uint32_t     selection_layer; /* Playlist layer (higher = on top) */
-	bool         selection_opaque; /* Region::opaque — false = transparent layering */
+	int          undo_list_count = 0; /* recent undo names, newest first */
+	wchar_t      undo_list_name[kMaxHistory][kHistoryNameLen] = {};
+	wchar_t      next_undo_name[kHistoryNameLen] = {};
+	wchar_t      next_redo_name[kHistoryNameLen] = {};
+	bool         has_selection = false; /* Editor region selection */
+	int          selection_track = -1; /* 0..kMeters-1, or -1 */
+	float        selection_start_sec = 0.f;
+	float        selection_end_sec = 0.f;
+	float        selection_fade_in_sec = 0.f; /* AudioRegion fade-in length */
+	float        selection_fade_out_sec = 0.f;
+	bool         selection_sync_marked = false; /* Region::sync_marked */
+	float        selection_sync_sec = 0.f; /* absolute session time of sync point */
+	bool         selection_muted = false; /* Region::muted() */
+	float        selection_gain_db = 0.f; /* AudioRegion scale_amplitude as dB */
+	bool         selection_locked = false; /* Region::locked() — blocks move/trim */
+	bool         selection_position_locked = false; /* Region::position_locked — blocks move */
+	uint32_t     selection_layer = 0; /* Playlist layer (higher = on top) */
+	bool         selection_opaque = true; /* Region::opaque — false = transparent layering */
 	static constexpr int kRegionNameLen = 32;
-	wchar_t      selection_region_name[kRegionNameLen]; /* selected Region::name */
-	int          selection_fade_shape;
-	bool         selection_fade_in_active;
-	bool         selection_fade_out_active;
-	bool         region_envelope_ok; /* selected AudioRegion envelope_active */
-	int          region_envelope_points; /* AutomationList size on selection */
-	bool         loop_active; /* auto-loop Location exists with positive length */
-	bool         loop_playing; /* Session get_play_loop() */
-	float        loop_start_sec;
-	float        loop_end_sec;
-	bool         punch_range_ok; /* auto-punch Location exists with positive length */
-	bool         punch_enabled; /* Session punch-in and/or punch-out armed */
-	float        punch_start_sec;
-	float        punch_end_sec;
+	wchar_t      selection_region_name[kRegionNameLen] = {}; /* selected Region::name */
+	int          selection_fade_shape = 0;
+	bool         selection_fade_in_active = false;
+	bool         selection_fade_out_active = false;
+	bool         region_envelope_ok = false; /* selected AudioRegion envelope_active */
+	int          region_envelope_points = 0; /* AutomationList size on selection */
+	bool         loop_active = false; /* auto-loop Location exists with positive length */
+	bool         loop_playing = false; /* Session get_play_loop() */
+	float        loop_start_sec = 0.f;
+	float        loop_end_sec = 0.f;
+	bool         punch_range_ok = false; /* auto-punch Location exists with positive length */
+	bool         punch_enabled = false; /* Session punch-in and/or punch-out armed */
+	float        punch_start_sec = 0.f;
+	float        punch_end_sec = 0.f;
 	static constexpr int kMaxRanges = 8;
-	int          range_count; /* IsRangeMarker locations */
-	EngineRangeSnap ranges[kMaxRanges];
+	int          range_count = 0; /* IsRangeMarker locations */
+	EngineRangeSnap ranges[kMaxRanges] = {};
 	static constexpr int kMaxSkips = 8;
-	int          skip_count; /* IsSkip range locations (transport skip) */
-	EngineSkipSnap skips[kMaxSkips];
-	int          marker_count;
-	EngineMarkerSnap markers[kMaxMarkers];
-	bool         midi_ok; /* backend MIDI option active / ports present */
-	bool         midi_track_ok; /* Session has at least one MidiTrack */
-	bool         midi_region_ok; /* playlist has a MidiRegion for editing */
-	bool         midi_synth_ok; /* in-graph soft synth on MIDI track */
-	bool         midi_synth_to_master; /* synth audio routed toward master */
-	bool         midi_out_connected; /* track output → physical MIDI (e.g. GS) */
-	bool         track_fx_ok; /* ACE effect inserted on Audio 1 (track 0) */
-	bool         track_fx_bypassed; /* Processor hard-bypass (inactive) */
-	float        track_fx_param; /* ACE Reverb Blend 0..1 */
-	bool         track_comp_ok; /* ACE Compressor on Audio 2 (track 1) */
-	bool         track_comp_bypassed;
-	float        track_comp_threshold_db; /* −60..0 dBFS */
-	float        track_comp_ratio; /* 1..20 */
-	float        track_comp_threshold_norm; /* 0..1 UI */
-	float        track_comp_ratio_norm; /* 0..1 UI */
-	bool         track_comp_sidechain; /* SC enabled + wired from src */
-	int          track_comp_sidechain_src; /* source track index, or −1 */
-	bool         track_eq_ok; /* ACE EQ on Audio 3 (track 2) */
-	bool         track_eq_bypassed;
-	float        track_eq_gain_l_db; /* Gain L −20..+20 */
-	float        track_eq_gain_m_db; /* Gain 2 −20..+20 */
-	float        track_eq_gain_h_db; /* Gain H −20..+20 */
-	float        track_eq_gain_l_norm; /* 0..1 UI (0.5 = 0 dB) */
-	float        track_eq_gain_m_norm;
-	float        track_eq_gain_h_norm;
-	bool         track_delay_ok; /* ACE Delay on Audio 4 (track 3) */
-	bool         track_delay_bypassed;
-	float        track_delay_time_ms; /* Time 1..8000 ms */
-	float        track_delay_feedback_pct; /* Feedback 0..100 % */
-	float        track_delay_time_norm; /* 0..1 UI (log) */
-	float        track_delay_feedback_norm; /* 0..1 UI */
-	bool         track_limiter_ok; /* ACE Limiter on Audio 5 (track 4) */
-	bool         track_limiter_bypassed;
-	float        track_limiter_ceiling_db; /* Ceiling −20..0 dB */
-	float        track_limiter_release_ms; /* Release 1..2000 ms */
-	float        track_limiter_ceiling_norm; /* 0..1 UI */
-	float        track_limiter_release_norm; /* 0..1 UI */
-	bool         track_gate_ok; /* ACE Gate on Audio 6 (track 5) */
-	bool         track_gate_bypassed;
-	float        track_gate_threshold_db; /* Threshold −60..0 dB */
-	float        track_gate_hold_ms; /* Hold 1..500 ms */
-	float        track_gate_threshold_norm; /* 0..1 UI */
-	float        track_gate_hold_norm; /* 0..1 UI */
+	int          skip_count = 0; /* IsSkip range locations (transport skip) */
+	EngineSkipSnap skips[kMaxSkips] = {};
+	int          marker_count = 0;
+	EngineMarkerSnap markers[kMaxMarkers] = {};
+	bool         midi_ok = false; /* backend MIDI option active / ports present */
+	bool         midi_track_ok = false; /* Session has at least one MidiTrack */
+	bool         midi_region_ok = false; /* playlist has a MidiRegion for editing */
+	bool         midi_synth_ok = false; /* in-graph soft synth on MIDI track */
+	bool         midi_synth_to_master = false; /* synth audio routed toward master */
+	bool         midi_out_connected = false; /* track output → physical MIDI (e.g. GS) */
+	bool         track_fx_ok = false; /* ACE effect inserted on Audio 1 (track 0) */
+	bool         track_fx_bypassed = false; /* Processor hard-bypass (inactive) */
+	float        track_fx_param = 0.3f; /* ACE Reverb Blend 0..1 */
+	bool         track_comp_ok = false; /* ACE Compressor on Audio 2 (track 1) */
+	bool         track_comp_bypassed = false;
+	float        track_comp_threshold_db = 0.f; /* −60..0 dBFS */
+	float        track_comp_ratio = 4.f; /* 1..20 */
+	float        track_comp_threshold_norm = 1.f; /* 0..1 UI */
+	float        track_comp_ratio_norm = (4.f - 1.f) / 19.f; /* 0..1 UI */
+	bool         track_comp_sidechain = false; /* SC enabled + wired from src */
+	int          track_comp_sidechain_src = -1; /* source track index, or −1 */
+	bool         track_eq_ok = false; /* ACE EQ on Audio 3 (track 2) */
+	bool         track_eq_bypassed = false;
+	float        track_eq_gain_l_db = 0.f; /* Gain L −20..+20 */
+	float        track_eq_gain_m_db = 0.f; /* Gain 2 −20..+20 */
+	float        track_eq_gain_h_db = 0.f; /* Gain H −20..+20 */
+	float        track_eq_gain_l_norm = 0.5f; /* 0..1 UI (0.5 = 0 dB) */
+	float        track_eq_gain_m_norm = 0.5f;
+	float        track_eq_gain_h_norm = 0.5f;
+	bool         track_delay_ok = false; /* ACE Delay on Audio 4 (track 3) */
+	bool         track_delay_bypassed = false;
+	float        track_delay_time_ms = 160.f; /* Time 1..8000 ms */
+	float        track_delay_feedback_pct = 20.f; /* Feedback 0..100 % */
+	float        track_delay_time_norm = (std::log) (160.f) / (std::log) (8000.f); /* 0..1 UI (log) */
+	float        track_delay_feedback_norm = 0.2f; /* 0..1 UI */
+	bool         track_limiter_ok = false; /* ACE Limiter on Audio 5 (track 4) */
+	bool         track_limiter_bypassed = false;
+	float        track_limiter_ceiling_db = -0.3f; /* Ceiling −20..0 dB */
+	float        track_limiter_release_ms = 100.f; /* Release 1..2000 ms */
+	float        track_limiter_ceiling_norm = (-0.3f - (-20.f)) / 20.f; /* 0..1 UI */
+	float        track_limiter_release_norm = (100.f - 1.f) / 1999.f; /* 0..1 UI */
+	bool         track_gate_ok = false; /* ACE Gate on Audio 6 (track 5) */
+	bool         track_gate_bypassed = false;
+	float        track_gate_threshold_db = -40.f; /* Threshold −60..0 dB */
+	float        track_gate_hold_ms = 50.f; /* Hold 1..500 ms */
+	float        track_gate_threshold_norm = (-40.f - (-60.f)) / 60.f; /* 0..1 UI */
+	float        track_gate_hold_norm = (50.f - 1.f) / 499.f; /* 0..1 UI */
 	/* Spectrum analyzer (UI-rate Goertzel bars; no RT alloc). */
 	static constexpr int kSpectrumBands = 32;
-	bool         spectrum_enabled;
-	bool         spectrum_ok; /* last update produced usable bands */
-	bool         spectrum_master; /* true = mix Audio 1..N; false = selected/Audio1 */
-	int          spectrum_track; /* source track index, or −1 when master */
-	float        spectrum_band[kSpectrumBands]; /* 0..1 display levels */
-	wchar_t      spectrum_label[32];
+	bool         spectrum_enabled = false;
+	bool         spectrum_ok = false; /* last update produced usable bands */
+	bool         spectrum_master = false; /* true = mix Audio 1..N; false = selected/Audio1 */
+	float        spectrum_band[kSpectrumBands] = {}; /* 0..1 display levels */
+	wchar_t      spectrum_label[32] = {};
 	/* Phase correlation / goniometer (UI-rate L/R window; no RT alloc). */
 	static constexpr int kGonioPts = 64;
-	bool         correlation_enabled;
-	bool         correlation_ok;
-	bool         correlation_master; /* true = mix Audio 1..N L/R; false = selected */
-	int          correlation_track;
-	float        correlation; /* −1..+1 Pearson L/R */
-	float        gonio_x[kGonioPts]; /* L (−1..+1) */
-	float        gonio_y[kGonioPts]; /* R (−1..+1) */
-	wchar_t      correlation_label[32];
+	bool         correlation_enabled = false;
+	bool         correlation_master = false; /* true = mix Audio 1..N L/R; false = selected */
+	float        correlation = 0.f; /* −1..+1 Pearson L/R */
+	float        gonio_x[kGonioPts] = {}; /* L (−1..+1) */
+	float        gonio_y[kGonioPts] = {}; /* R (−1..+1) */
+	wchar_t      correlation_label[32] = {};
 	/* Approximate LUFS (UI-rate K-weight / BS.1770-style; not certified). */
-	bool         loudness_enabled;
-	bool         loudness_ok;
-	bool         loudness_master; /* true = mix Audio 1..N; false = selected */
-	int          loudness_track;
-	float        loudness_momentary; /* ≈ LUFS over ~400 ms window */
-	float        loudness_integrated; /* ≈ gated running mean */
-	wchar_t      loudness_label[32];
-	float        midi_activity; /* 0..1 decaying activity indicator */
-	int          midi_device_count;
-	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices];
-	int          midi_note_count;
-	EngineMidiNoteSnap midi_notes[kMaxMidiNotes];
-	int32_t      midi_selected_note_id; /* Evoral id, or -1 */
+	bool         loudness_enabled = false;
+	bool         loudness_master = false; /* true = mix Audio 1..N; false = selected */
+	float        loudness_momentary = -70.f; /* ≈ LUFS over ~400 ms window */
+	float        loudness_integrated = -70.f; /* ≈ gated running mean */
+	wchar_t      loudness_label[32] = {};
+	float        midi_activity = 0.f; /* 0..1 decaying activity indicator */
+	int          midi_device_count = 0;
+	EngineMidiDeviceSnap midi_devices[kMaxMidiDevices] = {};
+	int          midi_note_count = 0;
+	EngineMidiNoteSnap midi_notes[kMaxMidiNotes] = {};
+	int32_t      midi_selected_note_id = -1; /* Evoral id, or -1 */
+	int          midi_audition_pitch = -1; /* −1 = silent; live note-on pitch for D2D ghost */
 	std::wstring midi_option; /* e.g. WinMME / Dummy loopback */
 	std::wstring midi_synth_name; /* e.g. ACE Reasonable Synth */
 	std::wstring midi_out_name; /* connected playback port display name */
 	std::wstring track_fx_name; /* e.g. ACE Reverb on track 0 */
-	std::wstring track_fx_param_name; /* e.g. Blend */
 	std::wstring track_comp_name; /* e.g. ACE Compressor */
 	std::wstring track_eq_name; /* e.g. ACE EQ */
 	std::wstring track_delay_name; /* e.g. ACE Delay */
@@ -201,159 +217,164 @@ struct EngineSnapshot {
 	std::wstring backend;
 	std::wstring session_path; /* current session folder */
 	std::wstring export_path; /* last exported WAV (UTF-16 display) */
-	uint32_t     sample_rate;
-	uint32_t     period_frames;
-	float        dsp_load_pct; /* 0..100 from AudioEngine */
-	uint64_t     callback_last_us;
-	uint64_t     callback_max_us;
-	uint64_t     callback_avg_us;
-	uint64_t     callback_count;
-	uint64_t     xrun_count; /* Session + backend underruns */
-	float        gain; /* track 0 stub/session gain */
-	float        meter_peak[kMeters]; /* linear 0..1 */
-	bool         meter_clip[kMeters]; /* ≥0 dBFS / PeakMeter MeterMaxPeak */
-	int          track_meter_point[kMeters]; /* 0=In 1=Pre 2=Post 3=Out (skip Custom) */
-	int          track_meter_type[kMeters]; /* 0=Peak 1=K14 */
-	bool         track_has_regions[kMeters];
-	bool         track_armed[kMeters];
-	bool         track_record_safe[kMeters]; /* Track::rec_safe_control latch */
-	bool         track_frozen[kMeters]; /* AudioTrack::freeze_state == Frozen */
-	bool         track_muted[kMeters]; /* Route::muted() — includes solo-mute */
-	int          track_mute_points[kMeters]; /* 0=Main 1=AllPoints (MuteMaster bitmask view) */
-	bool         track_soloed[kMeters]; /* Route::soloed() / self_soloed */
+	uint32_t     sample_rate = 0;
+	uint32_t     period_frames = 0;
+	float        dsp_load_pct = 0.f; /* 0..100 from AudioEngine */
+	uint64_t     callback_last_us = 0;
+	uint64_t     callback_max_us = 0;
+	uint64_t     callback_avg_us = 0;
+	uint64_t     callback_count = 0;
+	uint64_t     xrun_count = 0; /* Session + backend underruns */
+	float        gain = 0.85f; /* track 0 stub/session gain */
+	float        meter_peak[kMeters] = {}; /* linear 0..1 */
+	bool         meter_clip[kMeters] = {}; /* ≥0 dBFS / PeakMeter MeterMaxPeak */
+	int          track_meter_point[kMeters] = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2}; /* 0=In 1=Pre 2=Post 3=Out (skip Custom) */
+	int          track_meter_type[kMeters] = {}; /* 0=Peak 1=K14 */
+	bool         track_has_regions[kMeters] = {};
+	bool         track_armed[kMeters] = {};
+	bool         track_record_safe[kMeters] = {}; /* Track::rec_safe_control latch */
+	bool         track_frozen[kMeters] = {}; /* AudioTrack::freeze_state == Frozen */
+	bool         track_muted[kMeters] = {}; /* Route::muted() — includes solo-mute */
+	int          track_mute_points[kMeters] = {}; /* 0=Main 1=AllPoints (MuteMaster bitmask view) */
+	bool         track_soloed[kMeters] = {}; /* Route::soloed() / self_soloed */
 	/** Gain AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
-	int          track_gain_auto_state[kMeters];
-	bool         track_solo_isolated[kMeters]; /* SoloIsolateControl self */
-	bool         track_solo_safe[kMeters]; /* SoloSafeControl — ignore others' solo */
+	int          track_gain_auto_state[kMeters] = {};
+	bool         track_solo_isolated[kMeters] = {}; /* SoloIsolateControl self */
+	bool         track_solo_safe[kMeters] = {}; /* SoloSafeControl — ignore others' solo */
 	static constexpr int kCommentLen = 40;
-	wchar_t      track_comment[kMeters][kCommentLen]; /* Route::comment() */
-	bool         track_phase_invert[kMeters]; /* PhaseControl any channel inverted */
-	float        track_trim[kMeters]; /* TrimAutomation linear coeff (−20..+20 dB) */
-	float        track_trim_norm[kMeters]; /* UI 0..1 (0.5 = unity / 0 dB) */
+	wchar_t      track_comment[kMeters][kCommentLen] = {}; /* Route::comment() */
+	bool         track_phase_invert[kMeters] = {}; /* PhaseControl any channel inverted */
+	float        track_trim[kMeters] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f}; /* TrimAutomation linear coeff (−20..+20 dB) */
+	float        track_trim_norm[kMeters] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}; /* UI 0..1 (0.5 = unity / 0 dB) */
 	/** MonitorChoice: 0=Auto 1=Input 2=Disk (MonitorCue unused in shell). */
-	int          track_monitor_choice[kMeters];
-	bool         track_stereo[kMeters]; /* ≥2 audio inputs (Equal-Power width capable) */
-	bool         track_active[kMeters]; /* Route::active() — DSP path on */
+	int          track_monitor_choice[kMeters] = {};
+	bool         track_stereo[kMeters] = {}; /* ≥2 audio inputs (Equal-Power width capable) */
+	bool         track_active[kMeters] = {true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true}; /* Route::active() — DSP path on */
 	/** Peers sharing same Mon choice via RouteGroup (0 = alone / no share). */
-	int          track_monitor_peer_count[kMeters];
-	float        track_pan[kMeters]; /* pan azimuth 0=L … 0.5=C … 1=R */
+	int          track_monitor_peer_count[kMeters] = {};
+	float        track_pan[kMeters] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}; /* pan azimuth 0=L … 0.5=C … 1=R */
 	/** Pan AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
-	int          track_pan_auto_state[kMeters];
-	float        track_pan_width[kMeters]; /* stereo width −1..+1 (1=full) */
-	bool         track_pan_width_ok[kMeters]; /* pan_width_control present */
-	float        track_send[kMeters]; /* aux send gain coeff 0..1 → Aux bus */
-	bool         track_send_ok[kMeters]; /* InternalSend present on track */
+	int          track_pan_auto_state[kMeters] = {};
+	float        track_pan_width[kMeters] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 1.f}; /* stereo width −1..+1 (1=full) */
+	bool         track_pan_width_ok[kMeters] = {}; /* pan_width_control present */
+	float        track_send[kMeters] = {}; /* aux send gain coeff 0..1 → Aux bus */
+	bool         track_send_ok[kMeters] = {}; /* InternalSend present on track */
 	/** Send AutoState: 0=Off 1=Play 2=Write 3=Touch (Latch unused in shell). */
-	int          track_send_auto_state[kMeters];
-	bool         track_send_muted[kMeters]; /* Send Processor !active() */
-	float        track_send_pan[kMeters]; /* send pan azimuth 0=L … 0.5=C … 1=R */
-	bool         track_send_pan_ok[kMeters]; /* send pan_azimuth_control present */
-	bool         aux_bus_ok; /* Session Aux audio bus exists */
-	float        aux_return; /* Aux bus fader gain coeff 0..1 (unity=1) */
-	bool         midi_muted;
-	bool         midi_soloed;
-	bool         midi_armed; /* MidiTrack rec_enable_control */
-	int          midi_program; /* 0..127 Program Change (shell + immediate) */
-	int          midi_bank; /* 0..127 Bank Select MSB (CC0); LSB forced 0 */
-	bool         snap_enabled; /* Editor snap-to-grid */
-	bool         midi_step_enabled; /* Step-record: keys/click place at playhead */
-	int          midi_chord_quality; /* 0=off 1=maj (R+4+7) 2=min (R+3+7) */
-	bool         midi_arp_enabled; /* live arpeggiator into MidiTrack synth */
-	int          midi_arp_mode; /* 0=up 1=down 2=up-down */
-	int          midi_arp_pitch; /* currently sounding pitch, or −1 */
-	bool         midi_scale_lock; /* constrain step/click roots to scale */
-	int          midi_scale_kind; /* 0=major 1=natural minor */
-	int          midi_scale_root; /* 0=C .. 11=B */
-	int          snap_density; /* 0=bar 1=beat 2=1/2 3=1/4 */
-	int          grid_line_count; /* visible grid lines for Editor draw */
+	int          track_send_auto_state[kMeters] = {};
+	bool         track_send_muted[kMeters] = {}; /* Send Processor !active() */
+	float        track_send_pan[kMeters] = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}; /* send pan azimuth 0=L … 0.5=C … 1=R */
+	bool         track_send_pan_ok[kMeters] = {}; /* send pan_azimuth_control present */
+	bool         aux_bus_ok = false; /* Session Aux audio bus exists */
+	float        aux_return = 1.f; /* Aux bus fader gain coeff 0..1 (unity=1) */
+	bool         midi_muted = false;
+	bool         midi_soloed = false;
+	bool         midi_armed = false; /* MidiTrack rec_enable_control */
+	int          midi_program = 0; /* 0..127 Program Change (shell + immediate) */
+	int          midi_bank = 0; /* 0..127 Bank Select MSB (CC0); LSB forced 0 */
+	bool         snap_enabled = false; /* Editor snap-to-grid */
+	bool         midi_step_enabled = false; /* Step-record: keys/click place at playhead */
+	int          midi_chord_quality = 0; /* 0=off 1=maj (R+4+7) 2=min (R+3+7) */
+	bool         midi_arp_enabled = false; /* live arpeggiator into MidiTrack synth */
+	int          midi_arp_mode = 0; /* 0=up 1=down 2=up-down */
+	int          midi_arp_pitch = -1; /* currently sounding pitch, or −1 */
+	bool         midi_scale_lock = false; /* constrain step/click roots to scale */
+	int          midi_scale_kind = 0; /* 0=major 1=natural minor */
+	int          midi_scale_root = 0; /* 0=C .. 11=B */
+	int          snap_density = 1; /* 0=bar 1=beat 2=1/2 3=1/4 */
+	int          grid_line_count = 0; /* visible grid lines for Editor draw */
 	static constexpr int kMaxGridLines = 96;
-	float        grid_line_sec[kMaxGridLines];
-	bool         grid_line_bar[kMaxGridLines]; /* thicker bar lines */
-	float        tempo_bpm; /* Session TempoMap BPM at t=0 (quarter-note) */
-	bool         count_in_enabled; /* Session config count-in before record roll */
-	bool         click_enabled; /* RC Config clicking — audible metronome */
-	int          listen_mode; /* 0=Solo 1=PFL 2=AFL (RC solo-control-is-listen + listen-position) */
-	float        click_gain; /* Config click_gain linear coeff (1.0 = unity) */
-	int          audio_track_count; /* Session audio tracks (1..kMeters) */
-	int          midi_track_count; /* 0 or 1 in this shell */
+	float        grid_line_sec[kMaxGridLines] = {};
+	bool         grid_line_bar[kMaxGridLines] = {}; /* thicker bar lines */
+	float        tempo_bpm = 120.f; /* Session TempoMap BPM at t=0 (quarter-note) */
+	bool         count_in_enabled = false; /* Session config count-in before record roll */
+	bool         click_enabled = false; /* RC Config clicking — audible metronome */
+	int          listen_mode = 0; /* 0=Solo 1=PFL 2=AFL (RC solo-control-is-listen + listen-position) */
+	float        click_gain = 1.f; /* Config click_gain linear coeff (1.0 = unity) */
+	int          audio_track_count = 0; /* Session audio tracks (1..kMeters) */
+	int          midi_track_count = 0; /* 0 or 1 in this shell */
 	static constexpr int kTrackNameLen = 32;
-	wchar_t      track_name[kMeters][kTrackNameLen]; /* Session Route names */
-	wchar_t      midi_track_name[kTrackNameLen];
-	uint32_t     track_color[kMeters]; /* PresentationInfo RGBA (RRGGBBAA); 0=unset */
-	float        track_gain[kMeters]; /* Route gain_control mirror after reorder */
-	bool         track_in_group[kMeters]; /* member of Session RouteGroup */
-	bool         track_selected[kMeters]; /* CoreSelection selected */
-	int          group_member_count; /* 0 = no shell group */
-	bool         group_active; /* RouteGroup::is_active */
-	bool         group_relative; /* RouteGroup::is_relative — proportional gain */
-	bool         group_shares_mute;
-	bool         group_shares_solo;
-	bool         group_shares_gain;
-	bool         group_shares_recenable;
-	bool         group_shares_color;
-	uint32_t     group_rgba; /* RouteGroup color RRGGBBAA when shares color */
-	bool         group_shares_monitoring;
-	bool         group_shares_route_active;
-	bool         group_shares_select;
-	static constexpr int kGroupNameLen = 32;
-	wchar_t      group_name[kGroupNameLen];
-	bool         mixer_narrow; /* shell UI: compact strip width */
-	bool         vca_ok; /* Session VCA master exists */
-	int          vca_slave_count; /* tracks assigned to shell VCA */
-	float        vca_gain; /* VCA gain_control linear */
-	bool         group_has_vca_master; /* RouteGroup::has_control_master */
-	bool         monitor_ok; /* Session monitor_out + MonitorProcessor */
-	bool         monitor_dim; /* MonitorProcessor::dim_all */
-	float        monitor_dim_db; /* dim_level −20..0 dB (default −12) */
-	bool         monitor_mono;
-	bool         monitor_cut; /* cut_all = monitor mute */
-	float        monitor_solo_boost_db; /* solo_boost_level 0..+10 dB (default 0) */
-	bool         master_fx_ok; /* ACE Limiter on master_out (post-fader) */
-	bool         master_fx_bypassed;
-	float        master_fx_ceiling_db; /* −20..0 */
+	wchar_t      track_name[kMeters][kTrackNameLen] = {}; /* Session Route names */
+	wchar_t      midi_track_name[kTrackNameLen] = {};
+	uint32_t     track_color[kMeters] = {}; /* PresentationInfo RGBA (RRGGBBAA); 0=unset */
+	float        track_gain[kMeters] = {}; /* Route gain_control mirror after reorder */
+	bool         track_in_group[kMeters] = {}; /* member of Session RouteGroup */
+	bool         track_selected[kMeters] = {}; /* CoreSelection selected */
+	int          group_member_count = 0; /* 0 = no shell group */
+	bool         group_active = false; /* RouteGroup::is_active */
+	bool         group_relative = false; /* RouteGroup::is_relative — proportional gain */
+	bool         group_shares_recenable = false;
+	bool         group_shares_color = false;
+	uint32_t     group_rgba = 0; /* RouteGroup color RRGGBBAA when shares color */
+	bool         group_shares_monitoring = false;
+	bool         group_shares_route_active = false;
+	bool         group_shares_select = false;
+	bool         mixer_narrow = false; /* shell UI: compact strip width */
+	bool         vca_ok = false; /* Session VCA master exists */
+	int          vca_slave_count = 0; /* tracks assigned to shell VCA */
+	float        vca_gain = 1.f; /* VCA gain_control linear */
+	bool         group_has_vca_master = false; /* RouteGroup::has_control_master */
+	bool         monitor_ok = false; /* Session monitor_out + MonitorProcessor */
+	bool         monitor_dim = false; /* MonitorProcessor::dim_all */
+	float        monitor_dim_db = -12.f; /* dim_level −20..0 dB (default −12) */
+	bool         monitor_mono = false;
+	bool         monitor_cut = false; /* cut_all = monitor mute */
+	float        monitor_solo_boost_db = 0.f; /* solo_boost_level 0..+10 dB (default 0) */
+	bool         master_fx_ok = false; /* ACE Limiter on master_out (post-fader) */
+	bool         master_fx_bypassed = false;
+	float        master_fx_ceiling_db = -0.3f; /* −20..0 */
 	std::wstring master_fx_name;
-	float        transport_sec;
-	float        transport_speed; /* Session actual_speed (−N..+N); 1 = play */
-	int          bbt_bars; /* TempoMap BBT at playhead (1-based) */
-	int          bbt_beats;
-	int          bbt_ticks;
-	int          tc_hours; /* Session timecode at playhead */
-	int          tc_minutes;
-	int          tc_seconds;
-	int          tc_frames;
+	float        transport_sec = 0.f;
+	float        transport_speed = 0.f; /* Session actual_speed (−N..+N); 1 = play */
+	int          bbt_bars = 1; /* TempoMap BBT at playhead (1-based) */
+	int          bbt_beats = 1;
+	int          bbt_ticks = 0;
+	int          tc_hours = 0; /* Session timecode at playhead */
+	int          tc_minutes = 0;
+	int          tc_seconds = 0;
+	int          tc_frames = 0;
 	/* Preferences (RC Config + WinShellPrefs instant.xml). */
-	std::wstring pref_backend; /* "Dummy" or "WASAPI" */
-	uint32_t     pref_period_frames; /* 0 = Auto */
-	bool         pref_snap_default;
-	bool         pref_click_default; /* mirrors Config clicking when saved */
+	std::wstring pref_backend = L"Dummy"; /* "Dummy" or "WASAPI" */
+	uint32_t     pref_period_frames = 0; /* 0 = Auto */
+	bool         pref_snap_default = false;
+	bool         pref_click_default = true; /* mirrors Config clicking when saved */
 	static constexpr int kPrefsHintLen = 96;
-	wchar_t      vst3_path_hint[kPrefsHintLen];
+	wchar_t      vst3_path_hint[kPrefsHintLen] = {};
 	/* Last VST3 scan catalog (Prefs list; scan-only safe when count=0). */
 	static constexpr int kMaxVst3Catalog = 8;
-	int          vst3_scan_count; /* full PluginManager VST3 list size */
-	int          vst3_catalog_count; /* names stored below (≤kMaxVst3Catalog) */
-	wchar_t      vst3_catalog_name[kMaxVst3Catalog][40];
+	int          vst3_scan_count = 0; /* full PluginManager VST3 list size */
+	int          vst3_catalog_count = 0; /* names stored below (≤kMaxVst3Catalog) */
+	wchar_t      vst3_catalog_name[kMaxVst3Catalog][40] = {};
 	/* VST3 DSP insert on Audio 2 (D2D host params; no GTK editor). */
 	static constexpr int kMaxVst3Params = 3;
 	static constexpr int kVst3NameLen = 40;
 	static constexpr int kVst3ParamNameLen = 24;
-	bool         vst3_ok; /* PluginInsert live on Audio 2 */
-	bool         vst3_bypassed;
-	int          vst3_track; /* usually 1 = Audio 2 */
-	int          vst3_param_count; /* 0..kMaxVst3Params automatable inputs */
-	wchar_t      vst3_name[kVst3NameLen];
-	wchar_t      vst3_param_name[kMaxVst3Params][kVst3ParamNameLen];
-	float        vst3_param_norm[kMaxVst3Params]; /* 0..1 interface */
-	uint32_t     vst3_param_port[kMaxVst3Params];
+	bool         vst3_ok = false; /* PluginInsert live on Audio 2 */
+	bool         vst3_bypassed = false;
+	int          vst3_param_count = 0; /* 0..kMaxVst3Params automatable inputs */
+	wchar_t      vst3_name[kVst3NameLen] = {};
+	wchar_t      vst3_param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
+	float        vst3_param_norm[kMaxVst3Params] = {}; /* 0..1 interface */
+	/* Audio devices + measured systemic latency. */
+	std::wstring audio_in_name; /* current backend device ("Default" when unset) */
+	std::wstring audio_out_name;
+	std::wstring pref_in_device; /* persisted WinShellPrefs input-device */
+	std::wstring pref_out_device;
+	bool         separate_io_devices = false; /* backend uses separate in/out names */
+	uint32_t     systemic_in_frames = 0; /* backend-reported, excludes one period */
+	uint32_t     systemic_out_frames = 0;
 	/* Recent sessions (WinShellRecent instant.xml, beside WinShellPrefs). */
 	static constexpr int kMaxRecent = 8;
 	static constexpr int kRecentLabelLen = 48;
 	static constexpr int kRecentPathLen = 96;
-	int          recent_count;
-	wchar_t      recent_label[kMaxRecent][kRecentLabelLen]; /* folder basename */
-	wchar_t      recent_path[kMaxRecent][kRecentPathLen]; /* truncated display path */
+	int          recent_count = 0;
+	wchar_t      recent_label[kMaxRecent][kRecentLabelLen] = {}; /* folder basename */
+	wchar_t      recent_path[kMaxRecent][kRecentPathLen] = {}; /* truncated display path */
 	std::wstring detail;
+	static_assert (kMeters == 16, "per-meter defaults are listed for sixteen lanes");
 };
+
+static_assert (sizeof (EngineSnapshot) < 256 * 1024,
+               "EngineSnapshot must stay small enough to copy per UI tick");
 
 class EngineHost
 {
@@ -386,6 +407,27 @@ public:
 	 */
 	bool smoke_prefs ();
 
+	/* Audio device selection (generic AudioBackend API, no WASAPI headers). */
+	std::vector<std::string> input_devices () const;
+	std::vector<std::string> output_devices () const;
+	std::string current_input_device () const;
+	std::string current_output_device () const;
+	/**
+	 * Stop transport + engine, apply device names, restart, verify readback.
+	 * Empty names leave the device unchanged. Not running applies at next start.
+	 */
+	bool set_audio_devices (const std::string& in, const std::string& out);
+	/** Cycle the persisted device name by delta (output preferred). */
+	bool cycle_audio_device (bool output, int delta);
+	/** Restart audio with the persisted device prefs (prefs panel Apply). */
+	bool restart_audio ();
+	void set_pref_input_device (const std::string& name);
+	void set_pref_output_device (const std::string& name);
+	/** Enumerate → select → restart → verify → restore. For --smoke-device. */
+	bool smoke_device ();
+	/** Assert measured latency (non-zero on WASAPI, zero on Dummy). For --smoke-latency. */
+	bool smoke_latency ();
+
 	/** Load WinShellRecent (sibling of WinShellPrefs in instant.xml). */
 	void load_recent_sessions ();
 	/** Persist WinShellRecent; does not rewrite WinShellPrefs. */
@@ -395,7 +437,6 @@ public:
 	                              const std::string& snapshot = "win_shell",
 	                              bool persist = true);
 	void clear_recent_sessions (bool persist = true);
-	int  recent_count () const;
 	/** Copy path/snapshot for index; false if out of range. */
 	bool recent_entry (int index, std::string* path, std::string* snapshot) const;
 	/** open_session for a remembered index. */
@@ -410,7 +451,6 @@ public:
 	 * Disabled for --timeout smokes via set_autosave_enabled(false).
 	 */
 	void set_autosave_enabled (bool on);
-	bool autosave_enabled () const { return _autosave_enabled; }
 	/** Periodic tick; saves when interval elapsed (GetTickCount ms). */
 	void autosave_tick (uint32_t now_ms);
 	/** Force Session save + write recovery marker / file copy. */
@@ -514,7 +554,6 @@ public:
 	 */
 	bool set_track_mute_points (int track, int points_0_main_1_all);
 	bool cycle_track_mute_points (int track);
-	int  track_mute_points (int track) const;
 	/** Main → AllPoints → Main. For --smoke-mute-points. */
 	bool smoke_mute_points ();
 	bool set_track_soloed (int track, bool soloed);
@@ -627,15 +666,12 @@ public:
 	 */
 	bool  set_track_trim (int track, float linear);
 	bool  set_track_trim_norm (int track, float norm_0_1);
-	float track_trim (int track) const;
-	float track_trim_norm (int track) const;
 
 	/** Unity → −6 dB → +6 dB → unity on Audio 1. For --smoke-strip-trim. */
 	bool smoke_strip_trim ();
 
 	/** Pan azimuth 0=L … 0.5=C … 1=R via Route::pan_azimuth_control. */
 	bool  set_track_pan (int track, float pan_0_1);
-	float track_pan (int track) const;
 	/**
 	 * Pan AutoState: 0=Off 1=Play 2=Write 3=Touch.
 	 * --smoke-pan-auto-state / Alt+Shift+Y (Pan lane).
@@ -660,7 +696,6 @@ public:
 	 * Shift+drag pan. UI may pass 0..1 iface → mapped as 2v−1.
 	 */
 	bool  set_track_pan_width (int track, float width_m1_to_1);
-	float track_pan_width (int track) const;
 	/** Full → 0 → full. For --smoke-pan-width. */
 	bool smoke_pan_width ();
 
@@ -672,7 +707,6 @@ public:
 
 	/** Aux send level 0..1 (gain coeff) via InternalSend → Aux bus. */
 	bool  set_track_send (int track, float send_0_1);
-	float track_send (int track) const;
 	/**
 	 * Aux-send AutoState: 0=Off 1=Play 2=Write 3=Touch.
 	 * --smoke-send-auto-state / Alt+Shift+Y (Send lane).
@@ -719,7 +753,6 @@ public:
 	 * Shift+drag send.
 	 */
 	bool  set_track_send_pan (int track, float pan_0_1);
-	float track_send_pan (int track) const;
 	/** L → R → C on Audio 1 send. For --smoke-send-pan. */
 	bool smoke_send_pan ();
 
@@ -961,12 +994,32 @@ public:
 
 	/**
 	 * Close current Session (leak until process exit) and open an existing
-	 * session folder. snapshot_name defaults to "win_shell".
+	 * session folder. An empty snapshot_name discovers the first *.ardour file.
 	 */
-	bool open_session (const std::string& session_dir, const std::string& snapshot_name = "win_shell");
+	bool open_session (const std::string& session_dir, const std::string& snapshot_name = std::string ());
 
 	/** Save then reopen the current session path (smoke / Ctrl+S round-trip). */
 	bool reload_session ();
+
+	/**
+	 * Create a new named session under parent_dir/name (the session folder must
+	 * not exist yet). Replaces the current Session, saves immediately and
+	 * records the path in recents.
+	 */
+	bool new_session (const std::string& parent_dir, const std::string& name);
+
+	/**
+	 * Save the current session as parent_dir/name, copying media, then switch
+	 * to the new copy.
+	 */
+	bool save_session_as (const std::string& parent_dir, const std::string& name);
+
+	/** New → verify snapshot on disk → reopen. For --smoke-new-session. */
+	bool smoke_new_session ();
+	/** New source → Save As copy → verify copy + switch. For --smoke-save-as. */
+	bool smoke_save_as ();
+	/** New + region → save → destroy → reopen. For --smoke-open-session. */
+	bool smoke_open_session ();
 
 	/**
 	 * Bounce session (master bus) to a WAV file for [start,end] samples.
@@ -1015,8 +1068,6 @@ public:
 
 	/** Split playlist region(s) at time_sec on track (−1 = selection track or 0). */
 	bool split_at (float time_sec, int track = -1);
-	/** Split at current transport playhead. */
-	bool split_at_playhead (int track = -1);
 
 	/** Set fade-in/out length (seconds) on selected AudioRegion; activates fades. */
 	bool set_selected_fade_in_sec (float sec);
@@ -1320,7 +1371,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool set_selection_opaque (bool opaque);
 	bool set_selection_position_locked (bool locked);
 	bool smoke_clear_selection ();
-	bool smoke_click_toggle ();
 	bool smoke_count_in ();
 	bool smoke_crossfade_handles ();
 	bool smoke_crossfade_shape ();
@@ -1331,7 +1381,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool smoke_grid_lines ();
 	bool smoke_loop_selection ();
 	bool smoke_punch_selection ();
-	bool smoke_punch_toggle ();
 	bool smoke_region_caption ();
 	bool smoke_region_cycle ();
 	bool smoke_region_duplicate ();
@@ -1468,8 +1517,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * collect_tracks re-sorts so Editor/Mixer follow Session order.
 	 */
 	bool move_audio_track (int index, int delta);
-	bool move_audio_track_up (int index) { return move_audio_track (index, -1); }
-	bool move_audio_track_down (int index) { return move_audio_track (index, +1); }
 
 	/**
 	 * Rename Audio 0 → Kick; swap 0↔1; verify names/order; restore.
@@ -1477,23 +1524,10 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 */
 	bool smoke_rename ();
 
-	/**
-	 * Create/replace the shell Session RouteGroup ("Group 1") from audio
-	 * indices (≥2). Shares mute + solo + gain + rec-enable when active.
-	 * indices (≥2). Shares mute + solo + gain + color when active.
-	 * indices (≥2). Shares mute + solo + gain + monitoring when active.
-	 * indices (≥2). Shares mute + solo + gain + route-active when active.
-	 * indices (≥2). Shares mute + solo + gain + select when active.
-	 * indices (≥2). Shares mute + solo + gain + monitoring when active.
-	 * Honest scope: one group, no VCA/subgroup.
-	 * indices (≥2). Shares mute + solo + gain when active. Honest scope:
-	 * one group, no subgroup. VCA is a separate stub (ensure_vca_master).
-	 */
+	/** Create/replace shell RouteGroup "Group 1" from audio indices (≥2), sharing mute, solo, gain, rec-enable, select, color, monitoring, and route-active. */
 	bool create_route_group (const int* indices, int n);
 	/** Remove shell RouteGroup members (and drop empty group). */
 	bool clear_route_group ();
-	bool set_route_group_active (bool enable);
-	bool toggle_route_group_active ();
 	/** Relative (proportional) gain linking. Alt+Shift+G / --smoke-group-relative. */
 	bool set_route_group_relative (bool enable);
 	bool toggle_route_group_relative ();
@@ -1933,10 +1967,41 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Returns false if track/region/model unavailable or overlap policy rejects.
 	 */
 	bool add_midi_note (uint8_t pitch, float start_sec, float length_sec,
-	                    uint8_t velocity = 100);
+	                    uint8_t velocity = 100, uint8_t channel = 0);
 
-	/** Hit-test piano-roll; selects note under (time,pitch) if any. */
-	bool select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop = 0.f);
+	/** Hit-test piano-roll; selects note under (time,pitch) if any.
+	 *  When additive (Shift+click), toggles membership; else replaces. */
+	bool select_midi_note_at (float time_sec, uint8_t pitch, float pitch_slop = 0.f,
+	                          bool additive = false);
+	/** Select notes overlapping time×pitch box (inclusive pitches). */
+	bool select_midi_notes_in_rect (float t0, float t1, uint8_t pitch_lo, uint8_t pitch_hi,
+	                                bool additive = false);
+	/** Select every note in the MIDI region (primary = last id). */
+	bool select_all_midi_notes ();
+	/** Flip selection: unselected notes become selected and vice versa. */
+	bool invert_midi_note_selection ();
+	/** Select every note matching primary selected pitch (no-op if none selected). */
+	bool select_midi_notes_same_pitch ();
+	/** Select every note matching primary selected velocity (no-op if none selected). */
+	bool select_midi_notes_same_velocity ();
+	/** Select every note matching primary pitch class (pitch%12; all octaves). */
+	bool select_midi_notes_same_pitch_class ();
+	/** Select every note matching primary length_sec (±1 ms). */
+	bool select_midi_notes_same_length ();
+	/** Select every note matching primary MIDI channel (0..15). */
+	bool select_midi_notes_same_channel ();
+	/** Select every note intersecting the active loop range. */
+	bool select_midi_notes_in_loop ();
+	/** Select every note intersecting the punch range. */
+	bool select_midi_notes_in_punch ();
+	/** Select notes intersecting both loop and punch (both ranges required). */
+	bool select_midi_notes_in_ranges ();
+	/** Select every note that does not intersect the active loop range. */
+	bool select_midi_notes_outside_loop ();
+	/** Select every note that does not intersect the punch range. */
+	bool select_midi_notes_outside_punch ();
+	/** Select notes outside the union of loop and punch (both ranges required). */
+	bool select_midi_notes_outside_ranges ();
 	void clear_midi_note_selection ();
 	bool delete_selected_midi_note ();
 
@@ -1946,6 +2011,13 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Rebuilds the MIDI region (Windows-safe; no NoteDiff WriterLock).
 	 */
 	bool quantize_midi_notes ();
+
+	/**
+	 * Legato selected MIDI notes (or all if none selected): each note's end
+	 * abuts the next note's start (time order). Last note length unchanged.
+	 * Rebuilds the MIDI region (Windows-safe).
+	 */
+	bool legato_midi_notes ();
 
 	/**
 	 * Transpose selected MIDI notes (or all if none selected) by semitones.
@@ -1960,6 +2032,11 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool nudge_midi_velocity (int delta);
 	/** Set absolute velocity for selected notes (or all if none selected). */
 	bool set_midi_velocity (int velocity);
+	/**
+	 * Add notes @40/@80, select first, set_midi_velocity(100), verify.
+	 * For --smoke-midi-force-velocity.
+	 */
+	bool smoke_midi_force_velocity ();
 
 	/**
 	 * Nudge length of selected notes (or all if none selected) by delta_sec.
@@ -1967,6 +2044,11 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Rebuilds the MIDI region (Windows-safe).
 	 */
 	bool nudge_midi_length (float delta_sec);
+	/**
+	 * Set length of selected notes (or all) to current snap_unit_sec().
+	 * Starts unchanged. Rebuilds the MIDI region (Windows-safe).
+	 */
+	bool force_midi_note_length_to_grid ();
 	/** Trim start of selected note(s); snaps when snap is on. Min length 0.05s. */
 	bool set_midi_note_start (float start_sec);
 	/** Trim end of selected note(s); snaps when snap is on. Min length 0.05s. */
@@ -2060,11 +2142,33 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * For --smoke-midi-quantize.
 	 */
 	bool smoke_midi_quantize ();
+	/** Two short notes with a gap → legato → first end abuts second. --smoke-midi-legato */
+	bool smoke_midi_legato ();
 
 	/**
 	 * Add notes, transpose +1 then −12, verify pitches. For --smoke-midi-transpose.
 	 */
 	bool smoke_midi_transpose ();
+
+	/**
+	 * TempoMap-accurate MIDI BeatTime: set BPM 100, place a note on beat 1,
+	 * verify snap seconds ≈ 0.6 and quantize stays on the grid. Restores 120.
+	 * For --smoke-midi-tempo-map.
+	 */
+	bool smoke_midi_tempo_map ();
+
+	/**
+	 * Move selected MIDI notes by Δtime (sec) and Δpitch (semitones).
+	 * When no selection, moves all notes. Snap applies to new starts when
+	 * Snap is on. Pitch clamped 0..127; starts floored at 0. Rebuilds region.
+	 */
+	bool move_selected_midi_notes (float delta_sec, int delta_semitones);
+
+	/**
+	 * Add note @0.5s pitch 60 → select → move +0.5s/+2 → verify start≈1.0
+	 * pitch 62. For --smoke-midi-move.
+	 */
+	bool smoke_midi_move ();
 
 	/**
 	 * Add note, nudge velocity −20, set 64, verify. For --smoke-midi-velocity.
@@ -2075,6 +2179,98 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * Add fixed-length note, trim end, nudge length, verify. For --smoke-midi-length.
 	 */
 	bool smoke_midi_length ();
+	/** Note len 0.7 → force → length ≈ snap_unit_sec. --smoke-midi-force-length */
+	bool smoke_midi_force_length ();
+
+	/**
+	 * Add two notes, select then Shift+select, verify both .selected, transpose,
+	 * clear. For --smoke-midi-multi-select.
+	 */
+	bool smoke_midi_multi_select ();
+
+	/**
+	 * Add three notes, marquee the first two, transpose, verify third untouched.
+	 * For --smoke-midi-marquee.
+	 */
+	bool smoke_midi_marquee ();
+
+	/**
+	 * Add three notes, select_all, transpose, verify all moved.
+	 * For --smoke-midi-select-all.
+	 */
+	bool smoke_midi_select_all ();
+
+	/**
+	 * Add three notes, select one, invert → two; invert again → one.
+	 * For --smoke-midi-invert-select.
+	 */
+	bool smoke_midi_invert_select ();
+
+	/**
+	 * Add p60×2 + p64, select one p60, same-pitch → both p60; p64 untouched.
+	 * For --smoke-midi-select-same-pitch.
+	 */
+	bool smoke_midi_select_same_pitch ();
+
+	/**
+	 * Add v100×2 + v80, select one v100, same-velocity → both v100.
+	 * For --smoke-midi-select-same-velocity.
+	 */
+	bool smoke_midi_select_same_velocity ();
+
+	/**
+	 * Add C4+C5+D4, select C4, pitch-class → both C's; D untouched.
+	 * For --smoke-midi-select-pitch-class.
+	 */
+	bool smoke_midi_select_pitch_class ();
+
+	/**
+	 * Add 0.5s×2 + 0.25s, select a 0.5s note → both 0.5s; 0.25 untouched.
+	 * For --smoke-midi-select-same-length.
+	 */
+	bool smoke_midi_select_same_length ();
+
+	/**
+	 * Add ch0×2 + ch1, select a ch0 note → both ch0; ch1 untouched.
+	 * For --smoke-midi-select-same-channel.
+	 */
+	bool smoke_midi_select_same_channel ();
+
+	/**
+	 * Loop [0.5..2.5], notes inside + outside → only intersecting selected.
+	 * For --smoke-midi-select-in-loop.
+	 */
+	bool smoke_midi_select_in_loop ();
+
+	/**
+	 * Punch [0.5..2.5], notes inside + outside → only intersecting selected.
+	 * For --smoke-midi-select-in-punch.
+	 */
+	bool smoke_midi_select_in_punch ();
+
+	/**
+	 * Loop [0.5..2.5], notes inside + outside → only non-intersecting selected.
+	 * For --smoke-midi-select-outside-loop.
+	 */
+	bool smoke_midi_select_outside_loop ();
+
+	/**
+	 * Punch [0.5..2.5], notes inside + outside → only non-intersecting selected.
+	 * For --smoke-midi-select-outside-punch.
+	 */
+	bool smoke_midi_select_outside_punch ();
+
+	/**
+	 * Loop [0.5..2.5] + punch [1.5..3.5]; notes outside the union selected.
+	 * For --smoke-midi-select-outside-ranges.
+	 */
+	bool smoke_midi_select_outside_ranges ();
+
+	/**
+	 * Loop [0.5..2.5] ∩ punch [1.5..3.5]; only notes in the intersection selected.
+	 * For --smoke-midi-select-in-ranges.
+	 */
+	bool smoke_midi_select_in_ranges ();
 
 	/**
 	 * Add note, copy, paste at 1s, cut paste, verify. For --smoke-midi-clipboard.
@@ -2168,19 +2364,14 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 */
 	bool set_midi_program (int program);
 	bool nudge_midi_program (int delta);
-	int  midi_program () const;
 	bool set_midi_bank (int bank);
 	bool nudge_midi_bank (int delta);
-	int  midi_bank () const;
 	/** Apply current bank+program (or explicit args) to MidiTrack. */
 	bool send_midi_program_change (int program = -1, int bank = -1);
 	/** Set bank+program, verify immediate writes. For --smoke-midi-program. */
 	bool smoke_midi_program ();
 
 	/* smoke_midi_cc declared with MIDI CC automation APIs above. */
-
-	std::string session_dir () const;
-	std::string last_export_path () const;
 
 	EngineSnapshot snapshot () const;
 
@@ -2201,6 +2392,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 private:
 	void refresh_snapshot ();
 	bool ensure_session ();
+	/** Build a fresh unnamed Session at dir/snapshot (dir must not exist). */
+	bool create_session_at (const std::string& dir, const std::string& snapshot);
 	void destroy_session ();
 	void read_meters ();
 	void refresh_region_flags ();
@@ -2238,6 +2431,11 @@ private:
 	bool compute_export_range (int64_t* start_sample, int64_t* end_sample) const;
 	bool configure_backend_midi ();
 	void refresh_midi_notes_snap ();
+	template <typename Pred>
+	int select_midi_notes_where (Pred pred);
+	/** Session TempoMap beat↔sec for MIDI notes/CC (falls back to 120 BPM). */
+	double midi_beats_from_sec (float time_sec) const;
+	float midi_sec_from_beats (double beats) const;
 	void rebuild_arp_pitches ();
 	int  arp_pitch_at_step (int step) const;
 	bool midi_immediate_note (uint8_t status, uint8_t pitch, uint8_t velocity);
@@ -2261,6 +2459,8 @@ private:
 	uint32_t    _pref_period_frames;
 	bool        _pref_snap_default;
 	bool        _pref_click_default;
+	std::string _pref_input_device; /* persisted WinShellPrefs device names */
+	std::string _pref_output_device;
 	struct RecentEntry {
 		std::string path;
 		std::string snapshot;

@@ -14,21 +14,10 @@
 #define NOMINMAX
 #endif
 
-#include <cstdint>
 #include <vector>
 
 #include <windows.h>
 #include <d2d1.h>
-
-struct WaveStripParams {
-	bool     engine_running;
-	bool     transport_playing;
-	uint32_t sample_rate;
-	uint32_t period_frames;
-	float    time_sec;     /* UI clock */
-	float    playhead_sec; /* transport time */
-	float    gain;         /* 0..1 amplitude scale */
-};
 
 class WaveStrip
 {
@@ -40,13 +29,22 @@ public:
 	static constexpr float  kDefaultSpanSec = 8.f;
 	/** Screen fraction where playhead sits while following transport. */
 	static constexpr float  kFollowFrac = 0.28f;
+	/* Selection marquee wash/edge opacities (smoke-selection-marquee-tint). */
+	static constexpr float kSelWashOp      = 0.40f;
+	static constexpr float kSelEdgeOp      = 0.95f;
+	/* Muted cue: dimmer wash + stronger edge + hatch (smoke-selection-mute-wash). */
+	static constexpr float kSelMutedWashOp   = 0.12f;
+	static constexpr float kSelMutedEdgeOp   = 0.70f;
+	static constexpr float kSelMutedHatchOp  = 0.38f;
+	static constexpr float kSelMutedHatchPx  = 5.f;   /* stripe pitch @ dpi=1 */
+	static constexpr float kSelFadeWashOp    = 0.55f;
 
 	WaveStrip ();
 
 	void resize_for_width (float width_px);
 
 	/** Update view window + playhead from transport; peaks stay until set_waveform. */
-	void update_view (const WaveStripParams& params);
+	void update_view (float playhead_sec);
 
 	/** Copy Session peak/RMS columns, or clear to empty lane if peaks is null. */
 	void set_waveform (const float* peaks, const float* rms, size_t n, bool has_regions);
@@ -78,6 +76,12 @@ public:
 	void set_selection (bool active, float start_sec, float end_sec,
 	                    float fade_in_sec = 0.f, float fade_out_sec = 0.f, bool muted = false);
 
+	/**
+	 * Region sync-point marker (Region::sync_marked). Drawn as a tick +
+	 * diamond on the selection when marked; cleared when inactive/unmarked.
+	 */
+	void set_sync_marker (bool marked, float sync_sec);
+
 	/** Hit-test fade handles on selection; returns -1 none, 0=in, 1=out. */
 	int hit_fade_handle (const D2D1_RECT_F& bounds, float x, float y, float dpi_scale) const;
 
@@ -97,7 +101,6 @@ public:
 	float x_at_time (const D2D1_RECT_F& bounds, float time_sec) const;
 
 	float  zoom () const { return _zoom; }
-	float  pan () const { return _pan; }
 	float  view_start_sec () const { return _view_start_sec; }
 	float  view_span_sec () const { return _view_span_sec; }
 	bool   interacting () const { return _user_view; }
@@ -122,6 +125,8 @@ private:
 	float              _sel_fade_in_sec;
 	float              _sel_fade_out_sec;
 	bool               _sel_muted;
+	bool               _sel_sync_marked;
+	float              _sel_sync_sec;
 	bool               _loop_active;
 	float              _loop_start_sec;
 	float              _loop_end_sec;

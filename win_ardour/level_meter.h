@@ -16,6 +16,8 @@
 #include <windows.h>
 #include <d2d1.h>
 
+#include "ui_draw.h"
+
 class LevelMeter
 {
 public:
@@ -32,17 +34,14 @@ public:
 	/** Decay toward silence when idle; age peak-hold / clip hold. */
 	void tick (float dt_sec);
 
-	float level () const { return _level; }
-	float peak_hold () const { return _hold; }
 	bool  clipped () const { return _clipped; }
 
 	bool hit (float x, float y) const;
+	/** Top clip-LED band only (not full meter body). */
+	bool hit_clip_led (float x, float y) const;
+	void set_clip_led_height (float h_px);
 
-	void draw (ID2D1RenderTarget* rt,
-	           ID2D1SolidColorBrush* fill,
-	           ID2D1SolidColorBrush* edge,
-	           ID2D1SolidColorBrush* hot,
-	           float dpi_scale) const;
+	void draw (UiDraw& ui) const;
 
 	const D2D1_RECT_F& bounds () const { return _bounds; }
 
@@ -53,4 +52,5 @@ private:
 	float       _hold_age;
 	bool        _clipped;
 	float       _clip_age;
+	float       _led_h; /* px; 0 → fraction of meter height */
 };

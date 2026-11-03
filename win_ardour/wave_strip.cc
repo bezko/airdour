@@ -22,6 +22,8 @@ WaveStrip::WaveStrip ()
 	, _sel_fade_in_sec (0.f)
 	, _sel_fade_out_sec (0.f)
 	, _sel_muted (false)
+	, _sel_sync_marked (false)
+	, _sel_sync_sec (0.f)
 	, _loop_active (false)
 	, _loop_start_sec (0.f)
 	, _loop_end_sec (0.f)
@@ -154,6 +156,16 @@ WaveStrip::set_selection (bool active, float start_sec, float end_sec,
 	_sel_end_sec = end_sec;
 	_sel_fade_in_sec = std::max (0.f, fade_in_sec);
 	_sel_fade_out_sec = std::max (0.f, fade_out_sec);
+	if (!active) {
+		_sel_sync_marked = false;
+	}
+}
+
+void
+WaveStrip::set_sync_marker (bool marked, float sync_sec)
+{
+	_sel_sync_marked = marked;
+	_sel_sync_sec = sync_sec;
 }
 
 int
@@ -284,18 +296,18 @@ WaveStrip::x_at_time (const D2D1_RECT_F& bounds, float time_sec) const
 }
 
 void
-WaveStrip::update_view (const WaveStripParams& params)
+WaveStrip::update_view (float playhead_sec)
 {
 	_view_span_sec = kDefaultSpanSec / std::max (0.001f, _zoom);
 
 	if (_user_view) {
 		_view_start_sec = _pan;
 	} else {
-		_view_start_sec = params.playhead_sec - kFollowFrac * _view_span_sec;
+		_view_start_sec = playhead_sec - kFollowFrac * _view_span_sec;
 		_pan = _view_start_sec;
 	}
 
-	_playhead_norm = (params.playhead_sec - _view_start_sec) / std::max (0.001f, _view_span_sec);
+	_playhead_norm = (playhead_sec - _view_start_sec) / std::max (0.001f, _view_span_sec);
 	if (_playhead_norm < -0.05f || _playhead_norm > 1.05f) {
 		_playhead_norm = -1.f;
 	} else {
@@ -393,14 +405,26 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 		n0 = std::max (0.f, std::min (1.f, n0));
 		n1 = std::max (0.f, std::min (1.f, n1));
 		if (n1 > n0) {
-			/* Muted selection: cooler / dimmer wash so mute is visible. */
-			selection_brush->SetOpacity (_sel_muted ? 0.14f : 0.28f);
+			/* Muted selection: dimmer wash + hatch so mute is scannable. */
+			selection_brush->SetOpacity (_sel_muted ? kSelMutedWashOp : kSelWashOp);
 			rt->FillRectangle (
 				D2D1::RectF (bounds.left + n0 * w, bounds.top,
 				             bounds.left + n1 * w, bounds.bottom),
 				selection_brush);
-			selection_brush->SetOpacity (_sel_muted ? 0.45f : 0.85f);
-			float edge = std::max (1.f, 1.5f * dpi_scale);
+			if (_sel_muted) {
+				selection_brush->SetOpacity (kSelMutedHatchOp);
+				float step = std::max (3.f, kSelMutedHatchPx * dpi_scale);
+				float stripe = std::max (1.f, 1.25f * dpi_scale);
+				float x0 = bounds.left + n0 * w;
+				float x1 = bounds.left + n1 * w;
+				for (float x = x0; x < x1 - stripe; x += step) {
+					rt->FillRectangle (
+						D2D1::RectF (x, bounds.top, x + stripe, bounds.bottom),
+						selection_brush);
+				}
+			}
+			selection_brush->SetOpacity (_sel_muted ? kSelMutedEdgeOp : kSelEdgeOp);
+			float edge = std::max (1.f, 2.f * dpi_scale);
 			rt->FillRectangle (
 				D2D1::RectF (bounds.left + n0 * w, bounds.top,
 				             bounds.left + n0 * w + edge, bounds.bottom),
@@ -414,7 +438,7 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 			float region_len = std::max (0.001f, _sel_end_sec - _sel_start_sec);
 			float fi = std::min (_sel_fade_in_sec, region_len * 0.49f);
 			float fo = std::min (_sel_fade_out_sec, region_len * 0.49f);
-			selection_brush->SetOpacity (0.45f);
+			selection_brush->SetOpacity (kSelFadeWashOp);
 			if (fi > 0.001f) {
 				float nf = (_sel_start_sec + fi - _view_start_sec) / span;
 				nf = std::max (0.f, std::min (1.f, nf));
@@ -435,6 +459,9 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 						rt->FillGeometry (geo, selection_brush);
 					}
 					geo->Release ();
+				}
+				if (fac) {
+					fac->Release ();
 				}
 			}
 			if (fo > 0.001f) {
@@ -458,6 +485,9 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 					}
 					geo->Release ();
 				}
+				if (fac) {
+					fac->Release ();
+				}
 			}
 			/* Tip caps — visible grab targets at fade wedge tips. */
 			float tip_r = std::max (2.5f, 3.5f * dpi_scale);
@@ -477,6 +507,45 @@ WaveStrip::draw (ID2D1RenderTarget* rt,
 				float ty = bounds.top + tip_r;
 				rt->FillEllipse (D2D1::Ellipse (D2D1::Point2F (tx, ty), tip_r, tip_r),
 				                 selection_brush);
+			}
+
+			/* Sync-point marker — vertical tick + mid diamond (Region sync). */
+			if (_sel_sync_marked
+			    && _sel_sync_sec >= _sel_start_sec - 0.001f
+			    && _sel_sync_sec <= _sel_end_sec + 0.001f) {
+				float ns = (_sel_sync_sec - _view_start_sec) / span;
+				if (ns >= 0.f && ns <= 1.f) {
+					float sx = bounds.left + ns * w;
+					float thick = std::max (1.25f, 1.75f * dpi_scale);
+					float diam = std::max (3.5f, 5.f * dpi_scale);
+					float mid_y = (bounds.top + bounds.bottom) * 0.5f;
+					selection_brush->SetOpacity (0.95f);
+					rt->FillRectangle (
+						D2D1::RectF (sx - thick * 0.5f, bounds.top,
+						             sx + thick * 0.5f, bounds.bottom),
+						selection_brush);
+					ID2D1PathGeometry* geo = nullptr;
+					ID2D1Factory* fac = nullptr;
+					rt->GetFactory (&fac);
+					if (fac && SUCCEEDED (fac->CreatePathGeometry (&geo)) && geo) {
+						ID2D1GeometrySink* sink = nullptr;
+						if (SUCCEEDED (geo->Open (&sink)) && sink) {
+							sink->BeginFigure (D2D1::Point2F (sx, mid_y - diam),
+							                   D2D1_FIGURE_BEGIN_FILLED);
+							sink->AddLine (D2D1::Point2F (sx + diam, mid_y));
+							sink->AddLine (D2D1::Point2F (sx, mid_y + diam));
+							sink->AddLine (D2D1::Point2F (sx - diam, mid_y));
+							sink->EndFigure (D2D1_FIGURE_END_CLOSED);
+							sink->Close ();
+							sink->Release ();
+							rt->FillGeometry (geo, selection_brush);
+						}
+						geo->Release ();
+					}
+					if (fac) {
+						fac->Release ();
+					}
+				}
 			}
 			selection_brush->SetOpacity (1.f);
 		}

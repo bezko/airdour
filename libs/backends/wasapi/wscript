@@ -17,12 +17,12 @@ def build(bld):
     obj.source = [
         'wasapi_backend.cc',
         'wasapi_io.cc',
-        'winmmemidi_io.cc',
-        'winmmemidi_input_device.cc',
-        'winmmemidi_output_device.cc',
-        'midi_util.cc',
+        '../portaudio/winmmemidi_io.cc',
+        '../portaudio/winmmemidi_input_device.cc',
+        '../portaudio/winmmemidi_output_device.cc',
+        '../portaudio/midi_util.cc',
     ]
-    obj.includes = ['.']
+    obj.includes = ['.', '../portaudio']
     obj.name = 'wasapi_audiobackend'
     obj.target = 'wasapi_audiobackend'
     obj.use = 'libardour libpbd'
