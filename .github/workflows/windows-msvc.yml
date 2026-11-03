@@ -70,7 +70,7 @@ jobs:
         shell: pwsh
         working-directory: cmake/win64
 
-      - name: Build (preset ui: wasapi_io_smoke + airdour_win_shell)
+      - name: "Build (preset ui: wasapi_io_smoke + airdour_win_shell)"
         run: cmake --build --preset ui
         shell: pwsh
         working-directory: cmake/win64
