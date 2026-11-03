@@ -26,6 +26,28 @@ permissions:
   contents: read
 
 jobs:
+  format:
+    name: clang-format (changed win_ardour files)
+    runs-on: windows-2022
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check formatting
+        shell: pwsh
+        run: |
+          $base = "${{ github.event.pull_request.base.sha }}"
+          if (-not $base) { $base = "${{ github.event.before }}" }
+          if (-not $base -or $base -match '^0+$') {
+            .\tools\win-native\ci\Format-Check.ps1
+          } else {
+            .\tools\win-native\ci\Format-Check.ps1 -BaseRef $base
+          }
+
   wasapi-smoke:
     name: WASAPI I/O smoke (MSVC x64)
     runs-on: windows-2022
@@ -43,41 +65,40 @@ jobs:
       - name: Setup CMake
         uses: lukka/get-cmake@latest
 
-      - name: Configure cmake/win64 (WASAPI + Win shell)
+      - name: Configure (preset ui)
+        run: cmake --preset ui
+        shell: pwsh
+        working-directory: cmake/win64
+
+      - name: "Build (preset ui: wasapi_io_smoke + airdour_win_shell)"
+        run: cmake --build --preset ui
+        shell: pwsh
+        working-directory: cmake/win64
+
+      - name: Run CTest smoke suite
+        run: ctest --preset ui
+        shell: pwsh
+        working-directory: cmake/win64
+
+      - name: Smoke airdour_win_shell (--timeout 2 --no-engine)
         run: |
-          cmake -S cmake/win64 -B build-win64 `
-            -G "Visual Studio 17 2022" -A x64 `
-            -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON `
-            -DAIRDOUR_BUILD_WIN_SHELL=ON
-        shell: pwsh
-
-      - name: Build wasapi_io_smoke
-        run: cmake --build build-win64 --config Release --target wasapi_io_smoke -j $env:NUMBER_OF_PROCESSORS
-        shell: pwsh
-
-      - name: Build airdour_win_shell
-        run: cmake --build build-win64 --config Release --target airdour_win_shell -j $env:NUMBER_OF_PROCESSORS
-        shell: pwsh
-
-      - name: Smoke airdour_win_shell (--timeout 2)
-        run: |
-          $exe = Get-ChildItem -Path build-win64 -Recurse -Filter "airdour_win_shell.exe" | Select-Object -First 1
+          $exe = Get-ChildItem -Path build-ninja-ui -Recurse -Filter "airdour_win_shell.exe" | Select-Object -First 1
           if (-not $exe) { throw "airdour_win_shell.exe not found" }
-          & $exe.FullName --timeout 2
+          & $exe.FullName --timeout 2 --no-engine
           if ($LASTEXITCODE -ne 0) { throw "win_shell smoke exit $LASTEXITCODE" }
         shell: pwsh
 
       - name: Write BUILD_STATUS
         run: |
-          $lib = Get-ChildItem -Path build-win64 -Recurse -Filter "airdour_wasapi_io.lib" | Select-Object -First 1
-          $gui = Get-ChildItem -Path build-win64 -Recurse -Filter "airdour_win_shell.exe" | Select-Object -First 1
+          $lib = Get-ChildItem -Path build-ninja-ui -Recurse -Filter "airdour_wasapi_io.lib" | Select-Object -First 1
+          $gui = Get-ChildItem -Path build-ninja-ui -Recurse -Filter "airdour_win_shell.exe" | Select-Object -First 1
           .\tools\win-native\ci\Write-BuildStatus.ps1 `
-            -OutFile build-win64\BUILD_STATUS.txt `
+            -OutFile build-ninja-ui\BUILD_STATUS.txt `
             -GitSha "${{ github.sha }}" `
             -GitRef "${{ github.ref }}" `
             -WasapiSmokePath $(if ($lib) { $lib.FullName } else { "" }) `
             -WinShellPath $(if ($gui) { $gui.FullName } else { "" })
-          Get-Content build-win64\BUILD_STATUS.txt
+          Get-Content build-ninja-ui\BUILD_STATUS.txt
         shell: pwsh
 
       - name: Upload CI artifacts
@@ -85,9 +106,9 @@ jobs:
         with:
           name: airdour-win64-ci-${{ github.sha }}
           path: |
-            build-win64/**/airdour_wasapi_io.lib
-            build-win64/**/airdour_win_shell.exe
-            build-win64/BUILD_STATUS.txt
+            build-ninja-ui/**/airdour_wasapi_io.lib
+            build-ninja-ui/**/airdour_win_shell.exe
+            build-ninja-ui/BUILD_STATUS.txt
             libs/backends/wasapi/**
             win_ardour/**
             cmake/win64/**

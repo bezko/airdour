@@ -153,6 +153,9 @@ waf3-*
 /build-win64/
 /build-win64-*/
 /build-win64-logs/
+/build-ninja-ui/
+/build-ninja-engine/
+/build-ninja-deps/
 /tools/win-native/vcpkg_installed/
 
 

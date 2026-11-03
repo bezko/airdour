@@ -14,6 +14,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(AIRDOUR_BUILD_WASAPI_IO_SMOKE "Build WasapiIO smoke static lib (Windows SDK only)" ON)
+option(AIRDOUR_WARNINGS_AS_ERRORS "Treat Airdour compiler warnings as errors" OFF)
 option(AIRDOUR_BUILD_WIN_SHELL "Build minimal Win32+Direct2D Airdour shell (no GTK)" ON)
 
 if(NOT WIN32)
@@ -30,7 +31,61 @@ add_compile_definitions(
   WIN32_LEAN_AND_MEAN
 )
 
+# /utf-8 is load-bearing: win_ardour sources are BOM-less UTF-8 and contain
+# wide literals (U+2212, U+266F, …). Without it MSVC decodes them as cp1252
+# and the shipped UI shows mojibake. /Zc:__cplusplus makes feature tests honest.
+add_library(airdour_msvc_options INTERFACE)
+if(MSVC)
+  target_compile_options(airdour_msvc_options INTERFACE
+    /utf-8
+    /Zc:__cplusplus
+    /permissive-
+    /W4
+    # Noise from third-party (waf/vcpkg) headers at /W4.
+    /wd4100 /wd4244 /wd4245 /wd4267 /wd4324 /wd4389
+    $<$<BOOL:${AIRDOUR_WARNINGS_AS_ERRORS}>:/WX>
+  )
+endif()
+# Applies to every target defined below (probes + shell) in this directory.
+link_libraries(airdour_msvc_options)
+
+# Multi-config (VS) + vcpkg: map Release consumers onto RelWithDebInfo/Release imported locs.
+set(CMAKE_MAP_IMPORTED_CONFIG_RELEASE RelWithDebInfo Release MinSizeRel "")
+set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO RelWithDebInfo Release MinSizeRel "")
+set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL MinSizeRel Release RelWithDebInfo "")
+
+set(AIRDOUR_DEPS_ROOT "" CACHE PATH "MSVC dependency root (glib, sndfile, …)")
+if(AIRDOUR_DEPS_ROOT)
+  list(APPEND CMAKE_PREFIX_PATH "${AIRDOUR_DEPS_ROOT}")
+endif()
+
 set(AIRDOUR_SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+
+# Single source of truth for the vcpkg x64-windows prefix. Honors the vcpkg
+# environment variable, else the in-repo install used by tools/win-native.
+set(AIRDOUR_VCPKG_PREFIX "" CACHE PATH "vcpkg x64-windows prefix")
+if(NOT AIRDOUR_VCPKG_PREFIX)
+  if(DEFINED ENV{VCPKG_INSTALLED_DIR} AND EXISTS "$ENV{VCPKG_INSTALLED_DIR}/x64-windows")
+    set(AIRDOUR_VCPKG_PREFIX "$ENV{VCPKG_INSTALLED_DIR}/x64-windows")
+  else()
+    set(AIRDOUR_VCPKG_PREFIX "${AIRDOUR_SRC_ROOT}/tools/win-native/vcpkg_installed/x64-windows")
+  endif()
+endif()
+message(STATUS "Airdour win64: vcpkg prefix = ${AIRDOUR_VCPKG_PREFIX}")
+
+# Imported target for a vcpkg lib so consumers never depend on link_directories.
+function(airdour_import_vcpkg_lib _target _libname)
+  add_library(${_target} UNKNOWN IMPORTED)
+  set_target_properties(${_target} PROPERTIES
+    IMPORTED_CONFIGURATIONS "RELEASE;DEBUG"
+    IMPORTED_LOCATION_RELEASE "${AIRDOUR_VCPKG_PREFIX}/lib/${_libname}.lib"
+    IMPORTED_LOCATION_DEBUG "${AIRDOUR_VCPKG_PREFIX}/debug/lib/${_libname}.lib"
+  )
+endfunction()
+
+# --- Slice order (full product) ---
+# 1. pbd  2. temporal / midipp / evoral  3. ardour  4. dummy + wasapi  5. headless
+# glibmm-2.4 + sigc++-2.0: overlay ports in tools/win-native/overlays.
 
 set(WASAPI_IO_SOURCES
   "${AIRDOUR_SRC_ROOT}/libs/backends/wasapi/wasapi_io.cc"
@@ -102,12 +157,19 @@ if(AIRDOUR_BUILD_WIN_SHELL)
   )
 
   set(_waf_ardour_lib "${AIRDOUR_WAF_BUILD_DIR}/libs/ardour/ardour.lib")
-  if(AIRDOUR_WIN_SHELL_WITH_ENGINE AND EXISTS "${_waf_ardour_lib}")
+  if(AIRDOUR_WIN_SHELL_WITH_ENGINE)
+    if(NOT EXISTS "${_waf_ardour_lib}")
+      message(FATAL_ERROR
+        "AIRDOUR_WIN_SHELL_WITH_ENGINE=ON but ${_waf_ardour_lib} is missing.\n"
+        "Build the engine with tools/win-native/build-waf-release.cmd first, or point "
+        "-DAIRDOUR_WAF_BUILD_DIR=<waf out dir> at an existing build.")
+    endif()
+
     # Match waf CRT: Debug build/ → /MDd; Release build-rel → /MD.
     set_property(TARGET airdour_win_shell PROPERTY
       MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
-    set(_vcpkg_prefix "${AIRDOUR_SRC_ROOT}/tools/win-native/vcpkg_installed/x64-windows")
+    set(_vcpkg_prefix "${AIRDOUR_VCPKG_PREFIX}")
     target_compile_definitions(airdour_win_shell PRIVATE
       AIRDOUR_WIN_SHELL_WITH_ENGINE=1
       COMPILER_MSVC=1
@@ -151,35 +213,60 @@ if(AIRDOUR_BUILD_WIN_SHELL)
       "${_vcpkg_prefix}/lib/sigc++-2.0/include"
       "${_vcpkg_prefix}/include/libxml2"
     )
-    target_link_directories(airdour_win_shell PRIVATE
-      "${AIRDOUR_WAF_BUILD_DIR}/libs/ardour"
-      "${AIRDOUR_WAF_BUILD_DIR}/libs/pbd"
-      "${AIRDOUR_WAF_BUILD_DIR}/libs/temporal"
-      "${AIRDOUR_WAF_BUILD_DIR}/libs/midi++2"
-      "${AIRDOUR_WAF_BUILD_DIR}/libs/evoral"
-      "${AIRDOUR_WAF_BUILD_DIR}/libs/ctrl-interface/control_protocol"
-      "$<$<CONFIG:Debug>:${_vcpkg_prefix}/debug/lib>"
-      "${_vcpkg_prefix}/lib"
+
+    # waf artifacts as imported targets: a missing library now fails at link
+    # with a clear message instead of silently degrading to a UI-only shell.
+    foreach(_entry IN ITEMS
+        "ardour|libs/ardour"
+        "pbd|libs/pbd"
+        "temporal|libs/temporal"
+        "midipp|libs/midi++2"
+        "evoral|libs/evoral"
+        "ardourcp|libs/ctrl-interface/control_protocol")
+      string(REPLACE "|" ";" _pair "${_entry}")
+      list(GET _pair 0 _lib)
+      list(GET _pair 1 _rel)
+      set(_waf_lib_dir "${AIRDOUR_WAF_BUILD_DIR}/${_rel}")
+      add_library(waf_${_lib} SHARED IMPORTED)
+      set_target_properties(waf_${_lib} PROPERTIES
+        IMPORTED_IMPLIB "${_waf_lib_dir}/${_lib}.lib"
+        IMPORTED_LOCATION "${_waf_lib_dir}/${_lib}.dll"
+      )
+    endforeach()
+
+    airdour_import_vcpkg_lib(vcpkg_glib glib-2.0)
+    airdour_import_vcpkg_lib(vcpkg_glibmm glibmm-2.4)
+    airdour_import_vcpkg_lib(vcpkg_sigc sigc-2.0)
+    airdour_import_vcpkg_lib(vcpkg_libxml2 libxml2)
+    airdour_import_vcpkg_lib(vcpkg_sndfile sndfile)
+
+    add_library(vcpkg_pthread UNKNOWN IMPORTED)
+    set_target_properties(vcpkg_pthread PROPERTIES
+      IMPORTED_CONFIGURATIONS "RELEASE;DEBUG"
+      IMPORTED_LOCATION_RELEASE "${_vcpkg_prefix}/lib/pthreadVC3.lib"
+      IMPORTED_LOCATION_DEBUG "${_vcpkg_prefix}/debug/lib/pthreadVC3d.lib"
     )
+
     target_link_libraries(airdour_win_shell PRIVATE
-      ardour
-      pbd
-      temporal
-      midipp
-      evoral
-      ardourcp
+      waf_ardour
+      waf_pbd
+      waf_temporal
+      waf_midipp
+      waf_evoral
+      waf_ardourcp
       # Headers instantiate PBD/XML templates that reference glib; Release needs
       # an explicit import (Debug often pulled it via debug/lib order).
-      glib-2.0
-      glibmm-2.4
-      sigc-2.0
-      libxml2
-      sndfile
-      "$<$<CONFIG:Debug>:pthreadVC3d>"
-      "$<$<NOT:$<CONFIG:Debug>>:pthreadVC3>"
+      vcpkg_glib
+      vcpkg_glibmm
+      vcpkg_sigc
+      vcpkg_libxml2
+      vcpkg_sndfile
+      vcpkg_pthread
     )
+
     # Side-by-side waf DLLs so Explorer / incomplete PATH still finds
     # ptformat.dll (and friends) — avoids "ptformat.dll was not found".
+    # Existence is checked at build time (StageRuntime.cmake), not configure.
     set(_waf_runtime_dlls
       "${AIRDOUR_WAF_BUILD_DIR}/libs/ardour/ardour.dll"
       "${AIRDOUR_WAF_BUILD_DIR}/libs/pbd/pbd.dll"
@@ -190,39 +277,39 @@ if(AIRDOUR_BUILD_WIN_SHELL)
       "${AIRDOUR_WAF_BUILD_DIR}/libs/ptformat/ptformat.dll"
       "${AIRDOUR_WAF_BUILD_DIR}/libs/ctrl-interface/control_protocol/ardourcp.dll"
     )
-    foreach(_dll IN LISTS _waf_runtime_dlls)
-      if(EXISTS "${_dll}")
-        add_custom_command(TARGET airdour_win_shell POST_BUILD
-          COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${_dll}" "$<TARGET_FILE_DIR:airdour_win_shell>"
-          COMMENT "Copy ${_dll} next to airdour_win_shell"
-        )
-      endif()
-    endforeach()
+    add_custom_command(TARGET airdour_win_shell POST_BUILD
+      COMMAND ${CMAKE_COMMAND}
+        "-DSTAGE_DEST=$<TARGET_FILE_DIR:airdour_win_shell>"
+        "-DSTAGE_FILES=${_waf_runtime_dlls}"
+        -P "${CMAKE_CURRENT_LIST_DIR}/StageRuntime.cmake"
+      COMMENT "Stage waf runtime DLLs next to airdour_win_shell"
+      VERBATIM
+    )
     message(STATUS "Airdour win64: airdour_win_shell WITH engine (waf libs @ ${AIRDOUR_WAF_BUILD_DIR})")
-  elseif(AIRDOUR_WIN_SHELL_WITH_ENGINE)
-    message(WARNING "AIRDOUR_WIN_SHELL_WITH_ENGINE set but ${_waf_ardour_lib} missing — building UI-only")
   else()
     message(STATUS "Airdour win64: airdour_win_shell UI-only (enable AIRDOUR_WIN_SHELL_WITH_ENGINE for attach)")
   endif()
 
   # Optional: vcpkg Cairo (gtk-libs) for WaveStrip offline ImageSurface → D2D blit.
   # Works for UI-only and engine-linked shells. No GTK chrome; FillRectangle fallback.
-  set(_cairo_prefix "${AIRDOUR_SRC_ROOT}/tools/win-native/vcpkg_installed/x64-windows")
+  set(_cairo_prefix "${AIRDOUR_VCPKG_PREFIX}")
   if(EXISTS "${_cairo_prefix}/include/cairo/cairo.h" AND EXISTS "${_cairo_prefix}/lib/cairo.lib")
     target_compile_definitions(airdour_win_shell PRIVATE AIRDOUR_HAVE_CAIRO=1)
     target_include_directories(airdour_win_shell PRIVATE "${_cairo_prefix}/include/cairo")
-    target_link_directories(airdour_win_shell PRIVATE "${_cairo_prefix}/lib")
-    target_link_libraries(airdour_win_shell PRIVATE cairo)
-    foreach(_cairo_dll IN ITEMS cairo-2.dll pixman-1-0.dll)
-      if(EXISTS "${_cairo_prefix}/bin/${_cairo_dll}")
-        add_custom_command(TARGET airdour_win_shell POST_BUILD
-          COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${_cairo_prefix}/bin/${_cairo_dll}" "$<TARGET_FILE_DIR:airdour_win_shell>"
-          COMMENT "Copy ${_cairo_dll} next to airdour_win_shell"
-        )
-      endif()
-    endforeach()
+    airdour_import_vcpkg_lib(vcpkg_cairo cairo)
+    target_link_libraries(airdour_win_shell PRIVATE vcpkg_cairo)
+    set(_cairo_dlls
+      "${_cairo_prefix}/bin/cairo-2.dll"
+      "${_cairo_prefix}/bin/pixman-1-0.dll"
+    )
+    add_custom_command(TARGET airdour_win_shell POST_BUILD
+      COMMAND ${CMAKE_COMMAND}
+        "-DSTAGE_DEST=$<TARGET_FILE_DIR:airdour_win_shell>"
+        "-DSTAGE_FILES=${_cairo_dlls}"
+        -P "${CMAKE_CURRENT_LIST_DIR}/StageRuntime.cmake"
+      COMMENT "Stage Cairo runtime DLLs next to airdour_win_shell"
+      VERBATIM
+    )
     message(STATUS "Airdour win64: WaveStrip Cairo→D2D blit enabled (vcpkg cairo)")
   else()
     message(STATUS "Airdour win64: WaveStrip D2D-only peaks (optional Cairo shell blit: Install-HeadlessDeps -WithGtkLibs)")
@@ -233,4 +320,57 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
     OUTPUT_NAME "airdour_win_shell"
   )
+endif()
+
+# --- Smoke tests (CTest) ---
+include(CTest)
+
+if(BUILD_TESTING AND AIRDOUR_BUILD_WIN_SHELL)
+  set(_shell_test_cmake "${CMAKE_CURRENT_LIST_DIR}/RunShellTest.cmake")
+
+  add_test(NAME shell_ui_smoke
+    COMMAND ${CMAKE_COMMAND}
+      "-DTEST_EXE=$<TARGET_FILE:airdour_win_shell>"
+      "-DTEST_ARGS=--timeout;3;--no-engine"
+      "-DVCPKG_BIN=${AIRDOUR_VCPKG_PREFIX}/bin"
+      "-DWAF_ROOT=${AIRDOUR_WAF_BUILD_DIR}"
+      -P "${_shell_test_cmake}"
+  )
+  set_tests_properties(shell_ui_smoke PROPERTIES TIMEOUT 60)
+
+  if(AIRDOUR_WIN_SHELL_WITH_ENGINE)
+    # Each flag drives one engine subsystem, then --timeout exits 0 on success.
+    set(_engine_smokes
+      tracks mute-solo pan pan-width send send-pan mixer-reset track-color
+      edit snap tempo click history prefs zoom locate master-fx
+    )
+    foreach(_smoke IN LISTS _engine_smokes)
+      add_test(NAME "shell_engine_${_smoke}"
+        COMMAND ${CMAKE_COMMAND}
+          "-DTEST_EXE=$<TARGET_FILE:airdour_win_shell>"
+          "-DTEST_ARGS=--smoke-${_smoke};--timeout;3"
+          "-DVCPKG_BIN=${AIRDOUR_VCPKG_PREFIX}/bin"
+          "-DWAF_ROOT=${AIRDOUR_WAF_BUILD_DIR}"
+          -P "${_shell_test_cmake}"
+      )
+      set_tests_properties("shell_engine_${_smoke}" PROPERTIES TIMEOUT 120)
+    endforeach()
+  endif()
+endif()
+
+# --- Install / CPack (basic portable tree; richer packaging lives in
+#     tools/win-native/ci/Package-*.ps1) ---
+if(AIRDOUR_BUILD_WIN_SHELL)
+  install(TARGETS airdour_win_shell RUNTIME DESTINATION .)
+  if(AIRDOUR_WIN_SHELL_WITH_ENGINE)
+    install(FILES ${_waf_runtime_dlls} DESTINATION . OPTIONAL)
+    install(FILES "${AIRDOUR_SRC_ROOT}/win_ardour/run-engine-shell-release.bat"
+            DESTINATION . OPTIONAL)
+  endif()
+  set(CPACK_GENERATOR "ZIP")
+  set(CPACK_PACKAGE_NAME "airdour")
+  set(CPACK_PACKAGE_VENDOR "Airdour")
+  set(CPACK_PACKAGE_VERSION "9")
+  set(CPACK_PACKAGE_FILE_NAME "airdour-win64")
+  include(CPack)
 endif()

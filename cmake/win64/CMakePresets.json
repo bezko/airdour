@@ -1,0 +1,62 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 20, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "AIRDOUR_BUILD_WASAPI_IO_SMOKE": "ON",
+        "AIRDOUR_BUILD_WIN_SHELL": "ON",
+        "BUILD_TESTING": "ON"
+      }
+    },
+    {
+      "name": "ui",
+      "inherits": "base",
+      "displayName": "UI-only shell",
+      "description": "Direct2D shell without libardour (CI green path).",
+      "binaryDir": "${sourceDir}/../../build-ninja-ui",
+      "cacheVariables": {
+        "AIRDOUR_WIN_SHELL_WITH_ENGINE": "OFF"
+      }
+    },
+    {
+      "name": "engine",
+      "inherits": "base",
+      "displayName": "Engine-linked shell",
+      "description": "Links the waf Release engine; run tools/win-native/build-waf-release.cmd first.",
+      "binaryDir": "${sourceDir}/../../build-ninja-engine",
+      "cacheVariables": {
+        "AIRDOUR_WIN_SHELL_WITH_ENGINE": "ON",
+        "AIRDOUR_WAF_BUILD_DIR": "${sourceDir}/../../build-rel"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "ui",
+      "configurePreset": "ui",
+      "targets": ["wasapi_io_smoke", "airdour_win_shell"]
+    },
+    {
+      "name": "engine",
+      "configurePreset": "engine",
+      "targets": ["airdour_win_shell"]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "ui",
+      "configurePreset": "ui",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "engine",
+      "configurePreset": "engine",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

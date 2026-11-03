@@ -1,0 +1,95 @@
+# Airdour — Windows engine-linked shell (manual + weekly)
+#
+# Builds the full native DAW: vcpkg C/C++ deps, waf libardour, then the
+# CMake engine-linked shell, and runs the CTest smoke suite. Heavy (vcpkg +
+# full waf rebuild), so it is not part of per-push CI.
+
+name: Windows Engine Build
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    name: Engine build + smoke (MSVC x64)
+    runs-on: windows-2022
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup CMake + Ninja
+        uses: lukka/get-cmake@latest
+
+      - name: Cache vcpkg installed tree
+        uses: actions/cache@v4
+        with:
+          path: tools/win-native/vcpkg_installed
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('tools/win-native/vcpkg.json', 'tools/win-native/vcpkg-configuration.json', 'tools/win-native/overlays/**') }}
+          restore-keys: vcpkg-${{ runner.os }}-
+
+      - name: Install headless deps (vcpkg manifest + overlays)
+        shell: pwsh
+        run: |
+          .\tools\win-native\Install-HeadlessDeps.ps1 -VcpkgRoot C:\vcpkg
+          if ($LASTEXITCODE -ne 0) { throw "Install-HeadlessDeps failed: $LASTEXITCODE" }
+
+      - name: Configure waf engine (Release, MSVC)
+        shell: cmd
+        run: tools\win-native\configure-waf-release.cmd build-rel
+
+      - name: Build waf engine
+        shell: cmd
+        run: tools\win-native\build-waf-release.cmd build-rel
+
+      - name: Configure engine shell (preset)
+        shell: pwsh
+        working-directory: cmake/win64
+        run: cmake --preset engine
+
+      - name: Build engine shell
+        shell: pwsh
+        working-directory: cmake/win64
+        run: cmake --build --preset engine
+
+      - name: Run CTest smoke suite
+        shell: pwsh
+        working-directory: cmake/win64
+        run: ctest --preset engine
+
+      - name: Write BUILD_STATUS
+        shell: pwsh
+        run: |
+          $lib = Get-ChildItem -Path build-ninja-engine -Recurse -Filter "airdour_wasapi_io.lib" | Select-Object -First 1
+          $gui = Get-ChildItem -Path build-ninja-engine -Recurse -Filter "airdour_win_shell.exe" | Select-Object -First 1
+          .\tools\win-native\ci\Write-BuildStatus.ps1 `
+            -OutFile build-ninja-engine\BUILD_STATUS.txt `
+            -GitSha "${{ github.sha }}" `
+            -GitRef "${{ github.ref }}" `
+            -WasapiSmokePath $(if ($lib) { $lib.FullName } else { "" }) `
+            -WinShellPath $(if ($gui) { $gui.FullName } else { "" })
+
+      - name: Upload engine artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: airdour-win64-engine-${{ github.sha }}
+          path: |
+            build-ninja-engine/artifacts/**
+            build-ninja-engine/BUILD_STATUS.txt
+          if-no-files-found: error
+          retention-days: 14
