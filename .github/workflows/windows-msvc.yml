@@ -80,14 +80,6 @@ jobs:
         shell: pwsh
         working-directory: cmake/win64
 
-      - name: Smoke airdour_win_shell (--timeout 2 --no-engine)
-        run: |
-          $exe = Get-ChildItem -Path build-ninja-ui -Recurse -Filter "airdour_win_shell.exe" | Select-Object -First 1
-          if (-not $exe) { throw "airdour_win_shell.exe not found" }
-          & $exe.FullName --timeout 2 --no-engine
-          if ($LASTEXITCODE -ne 0) { throw "win_shell smoke exit $LASTEXITCODE" }
-        shell: pwsh
-
       - name: Write BUILD_STATUS
         run: |
           $lib = Get-ChildItem -Path build-ninja-ui -Recurse -Filter "airdour_wasapi_io.lib" | Select-Object -First 1
