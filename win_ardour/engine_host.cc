@@ -23196,29 +23196,29 @@ namespace {
 
 /* Bundled ACE Reasonable Synth (libs/plugins/reasonablesynth.lv2). */
 static const char* kReasonableSynthUri = "https://community.ardour.org/node/7596";
-/* Bundled ACE Reverb (libs/plugins/a-reverb.lv2) — audio-track FX, no cairo. */
+/* Bundled ACE Reverb (libs/plugins/a-reverb.lv2). */
 static const char* kAceReverbUri = "urn:ardour:a-reverb";
 /* LV2 control port index for Blend (wet mix); see a-reverb.ttl.in. */
 static const uint32_t kAceReverbBlendPort = 4;
-/* Bundled ACE Compressor (libs/plugins/a-comp.lv2) — DSP-only, no cairo. */
+/* Bundled ACE Compressor (libs/plugins/a-comp.lv2). */
 static const char* kAceCompUri = "urn:ardour:a-comp";
 static const uint32_t kAceCompRatioPort = 3;
 static const uint32_t kAceCompThresholdPort = 4;
 static const uint32_t kAceCompSidechainPort = 9;
-/* Bundled ACE EQ (libs/plugins/a-eq.lv2) — DSP-only, no cairo. */
+/* Bundled ACE EQ (libs/plugins/a-eq.lv2). */
 static const char* kAceEqUri = "urn:ardour:a-eq";
 static const uint32_t kAceEqGainLPort = 1; /* Gain L */
 static const uint32_t kAceEqGain2Port = 6; /* Gain 2 (mid) */
 static const uint32_t kAceEqGainHPort = 15; /* Gain H */
-/* Bundled ACE Delay (libs/plugins/a-delay.lv2) — DSP-only, no cairo. */
+/* Bundled ACE Delay (libs/plugins/a-delay.lv2). */
 static const char* kAceDelayUri = "urn:ardour:a-delay";
 static const uint32_t kAceDelayTimePort = 5; /* Time ms */
 static const uint32_t kAceDelayFeedbackPort = 8; /* Feedback % */
-/* Bundled ACE Limiter (libs/plugins/a-limiter.lv2) — DSP-only. */
+/* Bundled ACE Limiter (libs/plugins/a-limiter.lv2). */
 static const char* kAceLimiterUri = "urn:ardour:a-limiter";
 static const uint32_t kAceLimiterCeilingPort = 0; /* Ceiling dB */
 static const uint32_t kAceLimiterReleasePort = 1; /* Release ms */
-/* Bundled ACE Gate (libs/plugins/a-gate.lv2) — DSP-only. */
+/* Bundled ACE Gate (libs/plugins/a-gate.lv2). */
 static const char* kAceGateUri = "urn:ardour:a-gate";
 static const uint32_t kAceGateThresholdPort = 0; /* Threshold dB */
 static const uint32_t kAceGateHoldPort = 1; /* Hold ms */

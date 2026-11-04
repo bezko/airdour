@@ -491,7 +491,6 @@ void do_toggle_selection_muted ();
 	float _mouse_x;
 	float _mouse_y;
 	bool _mouse_tracking;
-	bool _running;
 	DWORD _start_tick;
 	unsigned _timeout_secs;
 	DragMode _drag;
