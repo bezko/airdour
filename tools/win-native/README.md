@@ -36,11 +36,6 @@ The MSVC targets get `/utf-8 /Zc:__cplusplus /permissive- /W4`; set
 
 ```bat
 powershell -ExecutionPolicy Bypass -File tools\win-native\Install-HeadlessDeps.ps1 -VcpkgRoot C:\vcpkg
-
-cmake -S cmake\win64 -B build-win64-deps -G "Visual Studio 17 2022" -A x64 ^
-  -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
-  -DVCPKG_MANIFEST_DIR=%CD%/tools/win-native ^
-  -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=ON
 ```
 
 CMake finds vcpkg via `AIRDOUR_VCPKG_PREFIX`, `VCPKG_INSTALLED_DIR`, or the in-repo `vcpkg_installed/x64-windows` (in that order).
@@ -106,20 +101,6 @@ Optional MSVC **Cairo** shell blit (not product UI): `-WithGtkLibs` → feature 
 - `tools/win-native/ci/Write-BuildStatus.ps1`
 - `tools/win-native/ci/Package-Release.ps1`
 - `tools/win-native/ci/Package-WinShell-Nsis.ps1` (open-source NSIS installer)
-
-## Bring-up checklist
-
-1. [x] CI compiles WasapiIO with MSVC (smoke)
-2. [x] Laptop: vcpkg headless C deps
-3. [x] Overlay `glibmm-2.4` + `sigc++-2.0` installed; waf past glibmm
-4. [x] waf Windows-only configure green; MSVC link `libpbd` (`build\libs\pbd\pbd.dll`)
-5. [x] MSVC link `libardour` → `hardour` (dummy + WASAPI) — laptop
-6. [x] hardour engine-only smoke (dummy + WASAPI shared)
-7. [x] Minimal Win32+D2D shell (`airdour_win_shell`) — laptop + CI target
-8. [ ] Tune period/CPU on a cheap laptop; measured WasapiIO latency
-9. [x] Port WinMME MIDI; grow `win_ardour` (engine attach, wave strip, FX)
-10. [x] Windows-only cull: waf/cmake never require `libs/tk`, `gtk2_ardour`, Cairo canvas
-11. [x] NSIS per-user installer (`tools/win-native/installer/airdour.nsi`); [ ] MSIX. Engine portable zip via `Package-WinShell-Portable.ps1`
 
 ## Success for this phase
 

@@ -1,6 +1,6 @@
 # Airdour
 
-> **A lightweight, Windows-native Digital Audio Workstation (DAW)** powered by the Ardour 9 audio engine, a hardware-accelerated **Win32 + Direct2D / DirectWrite** shell, a native **WASAPI shared-mode** audio backend with **WinMME MIDI**, and a built-in **Model Context Protocol (MCP) HTTP surface** for AI assistant integration.
+> **A lightweight, Windows-native Digital Audio Workstation (DAW)** powered by the Ardour 9 audio engine, a hardware-accelerated **Win32 + Direct2D / DirectWrite** shell, and a native **WASAPI shared-mode** audio backend with **WinMME MIDI**.
 
 [![Windows MSVC CI](https://github.com/bezko/airdour/actions/workflows/windows-msvc.yml/badge.svg)](https://github.com/bezko/airdour/actions/workflows/windows-msvc.yml)
 [![License: GPL-2.0](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](COPYING)
@@ -18,10 +18,9 @@
    - [Direct2D Native GUI Shell (`win_ardour`)](#1-direct2d-native-gui-shell-win_ardour)
    - [WASAPI Shared-Mode Backend (`libs/backends/wasapi`)](#2-wasapi-shared-mode-backend-libsbackendswasapi)
    - [Headless Engine Core (`hardour` / `libardour`)](#3-headless-engine-core-hardour--libardour)
-   - [Model Context Protocol (MCP) HTTP Surface](#4-model-context-protocol-mcp-http-surface)
-   - [DSP Engine & Audio Effects (ACE LV2 & VST3)](#5-dsp-engine--audio-effects-ace-lv2--vst3)
-   - [Editing, Time-Stretching & Pitch-Shifting](#6-editing-time-stretching--pitch-shifting)
-   - [Real-time Analysis & Metering](#7-real-time-analysis--metering)
+   - [DSP Engine & Audio Effects (ACE LV2 & VST3)](#4-dsp-engine--audio-effects-ace-lv2--vst3)
+   - [Editing, Time-Stretching & Pitch-Shifting](#5-editing-time-stretching--pitch-shifting)
+   - [Real-time Analysis & Metering](#6-real-time-analysis--metering)
 4. [Keyboard Shortcuts Reference](#keyboard-shortcuts-reference)
 5. [CLI Flags & Smoke Test Harness](#cli-flags--smoke-test-harness)
 6. [Building from Source](#building-from-source)
@@ -29,7 +28,6 @@
    - [Dependency Setup via vcpkg](#dependency-setup-via-vcpkg)
    - [UI-Only Build (CMake)](#ui-only-build-cmake)
    - [Full Engine Release Build (Waf + CMake)](#full-engine-release-build-waf--cmake)
-   - [Debug Engine Build](#debug-engine-build)
 7. [Packaging & CI/CD Pipeline](#packaging--cicd-pipeline)
 8. [Technical Constraints & Design Decisions](#technical-constraints--design-decisions)
 9. [Repository Layout](#repository-layout)
@@ -39,7 +37,7 @@
 
 ## Architecture & System Overview
 
-Airdour decouples the mature, sample-accurate, 64-bit floating-point audio processing engine of Ardour from legacy POSIX/GTK dependencies on Windows. By replacing GTK2, X11 shims, and Cairo with native Windows API primitives (**Direct2D 1.0**, **DirectWrite**, **MMCSS Pro Audio**, and **WASAPI**), Airdour achieves immediate startup, minimal working set memory overhead, and smooth 60 FPS DPI-aware rendering.
+Airdour decouples the mature, sample-accurate, 64-bit floating-point audio processing engine of Ardour from legacy POSIX/GTK dependencies on Windows. By replacing GTK2 and X11 shims with native Windows API primitives (**Direct2D 1.0**, **DirectWrite**, **MMCSS Pro Audio**, and **WASAPI**), Airdour achieves immediate startup, minimal working set memory overhead, and smooth 60 FPS DPI-aware rendering.
 
 ```mermaid
 flowchart TD
@@ -53,11 +51,8 @@ flowchart TD
         D2D --> Panels
     end
 
-    subgraph Control ["Control & Remote Protocols"]
-        MCP["MCP HTTP Server (:4820/mcp)\n(libs/surfaces/mcp_http)"]
+    subgraph Control ["Input"]
         KB["Win32 Keyboard & Mouse Input"]
-        AI["AI Agents (Claude / Gemini / Codex / Ollama)"]
-        AI -->|JSON-RPC / HTTP| MCP
     end
 
     subgraph Host ["Engine Host Interface (win_ardour/engine_host.cc)"]
@@ -67,7 +62,6 @@ flowchart TD
         EH --> Snap
         Snap --> Panels
         KB --> RT_Queue
-        MCP --> RT_Queue
     end
 
     subgraph CoreEngine ["Ardour Core Engine (libardour / libpbd)"]
@@ -119,7 +113,6 @@ flowchart TD
 | **Windowing & GUI Toolkit** | GTK2 + X11 compatibility shims + Cairo | **Native Win32 + Direct2D + DirectWrite** |
 | **Audio Backend** | PortAudio / ASIO third-party drivers required | **Native WASAPI Shared-Mode** (Zero driver install) |
 | **MIDI Subsystem** | PortAudio MIDI Bridge / ALSA-layer emulation | **Native WinMME subsystem** ([winmmemidi_io.cc](libs/backends/portaudio/winmmemidi_io.cc)) |
-| **AI Integration** | None / Manual OSC / Lua scripts | **Native MCP HTTP Server** ([libs/surfaces/mcp_http](libs/surfaces/mcp_http/README.md)) |
 | **Startup Memory Footprint** | ~400 MB – 600 MB working set | **~116 MB** working set in Release engine |
 | **DSP Overhead** | High due to POSIX translation layers | **~11% DSP load** baseline on standard mobile hardware |
 | **Toolchain & Compiler** | MinGW / MSYS2 / GCC cross-compilation | **Visual Studio 2022 (MSVC / cl.exe) + CMake + Waf** |
@@ -151,20 +144,9 @@ Located in [`libs/backends/wasapi/`](libs/backends/wasapi/README.md), implementi
 ### 3. Headless Engine Core (`hardour` / `libardour`)
 
 The Ardour DAW engine can run fully decoupled from any GUI:
-- **`hardour` CLI**: Command-line headless test harness that executes automated session loading, audio routing, rendering benchmarks, and verification runs without spinning up a window.
 - **`ExportHandler`**: Headless master bus WAV rendering engine supporting stem exports and full-mix bounces (`airdour_win_shell`: `Ctrl+E` or `--smoke-export`).
 
-### 4. Model Context Protocol (MCP) HTTP Surface
-
-Located in [`libs/surfaces/mcp_http/`](libs/surfaces/mcp_http/README.md). Airdour natively exposes an HTTP-based MCP server at `http://127.0.0.1:4820/mcp`, allowing Large Language Models (Claude, Gemini, OpenAI Codex, Ollama) to programmatically orchestrate the DAW:
-
-- **Transport Control**: `transport/play`, `transport/stop`, `transport/locate`, `transport/loop_toggle`, `transport/set_record_enable`.
-- **Track & Bus Management**: `tracks/list`, `tracks/add`, `buses/add`, `track/set_fader`, `track/set_pan`, `track/set_mute`, `track/set_solo`.
-- **Plugin Orchestration**: `plugin/list_available`, `plugin/add`, `plugin/remove`, `plugin/set_parameter`, `plugin/set_enabled`.
-- **Arrangement & Editing**: `markers/add`, `region/move`, `region/split`, `region/set_gain`, `region/normalize`.
-- **Bulk MIDI JSON Generation**: `midi_note/import_json` and `midi_note/get_json` supporting bar-relative offsets, musical divisions, velocity layers, chords, and drum tracks.
-
-### 5. DSP Engine & Audio Effects (ACE LV2 & VST3)
+### 4. DSP Engine & Audio Effects (ACE LV2 & VST3)
 
 Airdour embeds native, headless LV2 audio processing plugins pre-wired into session tracks:
 
@@ -177,14 +159,14 @@ Airdour embeds native, headless LV2 audio processing plugins pre-wired into sess
 - **MIDI 1 — ACE Reasonable Synth**: Built-in LV2 synthesizer that converts MIDI note sequences to audible audio out of the box with zero external sound fonts or plugins required.
 - **VST3 Host Architecture**: Integrated VST3 plugin scanning (`VST3_SUPPORT`) for standard Windows system paths (`C:\Program Files\Common Files\VST3`) and custom `VST3_PATH` locations.
 
-### 6. Editing, Time-Stretching & Pitch-Shifting
+### 5. Editing, Time-Stretching & Pitch-Shifting
 
 The editing engine provides instant non-destructive audio manipulation:
 - **Non-destructive Region Editing**: Region trimming, body moving, splitting (`S`), fades and crossfades (`F`), region duplicate (`D`), and deletion (`Delete`).
 - **RubberBand Integration**: Headless pitch-shifting (`R` / `Shift+R` semitones) and time-stretching (`T` / `Shift+T` 1.5× / 0.75×) via the integrated RubberBand library.
 - **Clean-up & Mastering Operations**: Normalize to -1 dBFS (`N`), reverse playback (`V`), silence stripping at -40 dBFS threshold (`I`), track bounce-in-place (`B`), and track freezing (`Z`).
 
-### 7. Real-time Analysis & Metering
+### 6. Real-time Analysis & Metering
 
 Hardware-accelerated visual meters rendered via Direct2D:
 - **Spectrum Analyzer (`Y`)**: Multi-band Goertzel filter bank analyzing spectral energy distributions in real time on the master bus.
@@ -333,69 +315,30 @@ This installs the headless C/C++ dependency tree: `glib`, `libxml2`, `libsndfile
 
 ### UI-Only Build (CMake)
 
-To quickly build and test the Direct2D user interface shell without compiling the full `libardour` engine:
+Ninja presets: [`cmake/win64/CMakePresets.json`](cmake/win64/CMakePresets.json). UI-only shell, no `libardour`. CI smoke is `ctest --preset ui` (`airdour_win_shell`).
 
 ```cmd
-:: Configure CMake for Visual Studio 2022 x64
-cmake -S cmake\win64 -B build-win64-gui -G "Visual Studio 17 2022" -A x64 -DAIRDOUR_BUILD_WIN_SHELL=ON
-
-:: Build the executable
-cmake --build build-win64-gui --config Release --target airdour_win_shell
-
-:: Run standalone UI smoke test (3 second auto-close)
-build-win64-gui\artifacts\Release\airdour_win_shell.exe --timeout 3 --no-engine
+cd cmake\win64
+cmake --preset ui
+cmake --build --preset ui
+ctest --preset ui
+cd ..\..
+build-ninja-ui\artifacts\airdour_win_shell.exe --timeout 3 --no-engine
 ```
 
 ---
 
 ### Full Engine Release Build (Waf + CMake)
 
-To compile the complete production stack (Waf-built `libardour` + WASAPI backend + Direct2D shell in optimized Release mode):
-
 ```cmd
-:: 1. Configure and compile Waf Release engine (/MD /O2)
 tools\win-native\configure-waf-release.cmd
 tools\win-native\build-waf-release.cmd
-
-:: 2. Configure CMake shell linking against build-rel
-cmake -S cmake\win64 -B build-win64-gui-engine-rel -G "Visual Studio 17 2022" -A x64 ^
-  -DAIRDOUR_BUILD_WIN_SHELL=ON ^
-  -DAIRDOUR_WIN_SHELL_WITH_ENGINE=ON ^
-  -DAIRDOUR_WAF_BUILD_DIR=%CD%\build-rel
-
-:: 3. Build the integrated binary
-cmake --build build-win64-gui-engine-rel --config Release --target airdour_win_shell
-
-:: 4. Launch with the production batch wrapper
-win_ardour\run-engine-shell-release.bat --backend WASAPI
-```
-
----
-
-### Debug Engine Build
-
-To build with full debug symbols (`/MDd` runtime and debug assertions):
-
-```cmd
-:: 1. Compile required Waf debug libraries and panners
-python waf build --targets=libardour,libardour_pan1in2out,libardour_pan2in2out,libardour_panvbap,libardour_panbalance
-mkdir build\libs\ardour\panners 2>nul
-copy /Y build\libs\panners\1in2out\pan1in2out.dll build\libs\ardour\panners\
-copy /Y build\libs\panners\2in2out\pan2in2out.dll build\libs\ardour\panners\
-copy /Y build\libs\panners\stereobalance\panbalance.dll build\libs\ardour\panners\
-copy /Y build\libs\panners\vbap\panvbap.dll build\libs\ardour\panners\
-
-:: 2. Configure CMake Debug shell
-cmake -S cmake\win64 -B build-win64-gui-engine -G "Visual Studio 17 2022" -A x64 ^
-  -DAIRDOUR_BUILD_WIN_SHELL=ON ^
-  -DAIRDOUR_WIN_SHELL_WITH_ENGINE=ON ^
-  -DAIRDOUR_WAF_BUILD_DIR=%CD%\build
-
-:: 3. Build debug shell
-cmake --build build-win64-gui-engine --config Debug --target airdour_win_shell
-
-:: 4. Launch with Debug environment wrapper
-win_ardour\run-engine-shell.bat --backend WASAPI
+cd cmake\win64
+cmake --preset engine
+cmake --build --preset engine
+ctest --preset engine
+cd ..\..
+build-ninja-engine\artifacts\airdour_win_shell.exe
 ```
 
 ---
@@ -434,7 +377,7 @@ The script [`tools/win-native/ci/Package-WinShell-Installer.ps1`](tools/win-nati
 > Professional audio software on Windows often mandates ASIO drivers. However, proprietary ASIO drivers introduce setup friction, lock the audio device exclusively (preventing audio playback from web browsers or reference tracks), and vary wildly in stability across consumer USB interfaces. Airdour achieves reliable ~10 ms latency on commodity hardware via WASAPI shared mode and MMCSS Pro Audio scheduling without requiring user-installed driver packages.
 
 > [!WARNING]
-> **GTK2, Cairo, and X11 Retirement**  
+> **No Cairo canvas.** Cairo is still optionally linked into `airdour_win_shell`.  
 > Upstream Ardour relies on GTK2, `gtkmm2`, and Cairo. On Windows, GTK2 is obsolete, lacks high-DPI handling, requires massive runtime DLL bundles, and suffers from rendering latency. In Airdour, the entire GTK2 subsystem has been purged from the Windows build graph (`AIRDOUR_WINDOWS_ONLY`).
 
 > [!IMPORTANT]
@@ -460,8 +403,6 @@ airdour/
 │   ├── evoral/                   # Event graph and MIDI timeline representation
 │   ├── midi++2/                  # MIDI transport and message processing
 │   ├── pbd/                      # Platform abstraction, threading, and base data structures
-│   ├── surfaces/
-│   │   └── mcp_http/             # Model Context Protocol (MCP) HTTP server for AI agents
 │   └── temporal/                 # Musical tempo maps, timecode, and sample-to-beat conversion
 ├── tools/
 │   └── win-native/               # Windows build scripts, vcpkg manifests, overlays, and CI
