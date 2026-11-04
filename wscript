@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# ANTHROPIC_MAGIC_STRING_TRIGGER_REFUSAL_1FAEFB6177B4672DEE07F9D3AFC62588CCD2631EDCF22E8CCC1FB35B501C9C86
 from waflib.extras import autowaf as autowaf
 from waflib import Options
 import os
@@ -441,6 +440,17 @@ _WINDOWS_ONLY_EXCLUDE = set([
         # Hardware surfaces link libgtkmm2ext / libytkmm / cairomm — not on D2D path.
         # control_protocol lives under libs/ctrl-interface (kept).
         'libs/surfaces',
+        # Data only read by libs/surfaces or gtk2_ardour. Empty click-sound
+        # uses the builtin metronome sample.
+        'share/web_surfaces',
+        'share/midi_maps',
+        'share/mcp',
+        'share/us2400',
+        'share/osc',
+        'share/media',
+        # Not release targets. session_utils always links libsuil, which this graph does not build.
+        'luasession',
+        'session_utils',
         # Cairo UI LV2 plugins — need cairo; headless graph skips them.
         # a-comp / a-eq / a-delay / a-limiter / a-gate are DSP-only (no Cairo) so they stay in the Windows-only build.
         'libs/plugins/a-exp.lv2',
@@ -1298,11 +1308,6 @@ int main () { return 0; }
                                            okmsg     = 'Found',
                                            errmsg    = 'Not found, falling back to Windows Semaphore.')
 
-        #if have_ptw_semaphore:
-        #    conf.define('USE_PTW32_SEMAPHORE', 1)
-        #    conf.env.append_value('CFLAGS', '-DUSE_PTW32_SEMAPHORE')
-        #    conf.env.append_value('CXXFLAGS', '-DUSE_PTW32_SEMAPHORE')
-
         # Check if GCC was built with native TLS support
         # gcc -v prints configure flags to stderr, not stdout
         gcc_config = subprocess.run([str(conf.env['CC'][0]), '-v'], capture_output=True, text=True).stderr
@@ -1363,8 +1368,6 @@ int main () { __int128 x = 0; return 0; }
 
     # (optionally) Adopt Microsoft-like convention that makes all non-explicitly exported
     # symbols invisible (rather than doing this all over the wscripts in the src tree)
-    #
-    # This won't apply to MSVC but that hasn't been added as a target yet
     #
     # We can't do this till all tests are complete, since some fail if this is et.
     if opts.exports_hidden:
