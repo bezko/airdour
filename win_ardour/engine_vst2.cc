@@ -536,8 +536,14 @@ EngineHost::smoke_vst2_bridge ()
 		std::fflush (stderr);
 		return false;
 	}
+	if (!airdour::vst2_bridge::process_silence_block (128, 48000.f)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-vst2-bridge FAILED (process)\n");
+		std::fflush (stderr);
+		airdour::vst2_bridge::shutdown_all ();
+		return false;
+	}
 	airdour::vst2_bridge::shutdown_all ();
-	std::fprintf (stderr, "airdour_win_shell: smoke-vst2-bridge ok\n");
+	std::fprintf (stderr, "airdour_win_shell: smoke-vst2-bridge ok (open+process)\n");
 	std::fflush (stderr);
 	_snap.detail = L"smoke-vst2-bridge ok";
 	return true;

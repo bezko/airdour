@@ -51,7 +51,8 @@ class ShellWindow
 {
 public:
 	static constexpr int kTracksMax = EngineSnapshot::kMeters;
-	static constexpr int kMixerStripsMax = kTracksMax + 1;
+	static constexpr int kMidiStripsMax = 4; /* visible MIDI mixer strips */
+	static constexpr int kMixerStripsMax = kTracksMax + kMidiStripsMax;
 	/* Legacy aliases used by older loops — prefer n_audio_lanes(). */
 	static constexpr int kTracks = kTracksMax;
 	static constexpr int kMixerStrips = kMixerStripsMax;
@@ -321,7 +322,11 @@ private:
 	void do_set_aux_return (float gain_0_1);
 	int  n_audio_lanes () const;
 	int  n_mixer_strips () const;
+	int n_midi_mixer_strips () const;
 	int  midi_mixer_index () const;
+	/** Mixer strip → MIDI track index, or −1 if not a MIDI strip. */
+	int midi_track_from_mixer (int mixer_index) const;
+	bool activate_midi_mixer_strip (int mixer_index);
 	void sync_track_labels_from_engine ();
 	void sync_mixer_gains_from_engine ();
 	void sync_mixer_group_from_engine ();

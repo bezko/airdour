@@ -144,6 +144,22 @@ Copy-Item -Force $ShellExe (Join-Path $stage "airdour_win_shell.exe")
 $copied = New-Object System.Collections.Generic.List[string]
 $copied.Add("airdour_win_shell.exe")
 
+# Optional VST2-32 bridge (Win32 helper built with -A Win32 / AIRDOUR_BUILD_VST2_BRIDGE_X86).
+$bridgeCandidates = @(
+    (Join-Path (Split-Path $ShellExe -Parent) "ardour-vst2-bridge-x86.exe"),
+    (Join-Path $RepoRoot "build-win32-vst2-bridge\artifacts\Release\ardour-vst2-bridge-x86.exe"),
+    (Join-Path $RepoRoot "build-win32-vst2-bridge\artifacts\Debug\ardour-vst2-bridge-x86.exe"),
+    (Join-Path $RepoRoot "build-win64-gui-engine-rel\artifacts\Release\ardour-vst2-bridge-x86.exe")
+)
+foreach ($bridge in $bridgeCandidates) {
+    if ($bridge -and (Test-Path $bridge)) {
+        Copy-Item -Force $bridge (Join-Path $stage "ardour-vst2-bridge-x86.exe")
+        $copied.Add("ardour-vst2-bridge-x86.exe")
+        Write-Host "  staged VST2-32 bridge from $bridge"
+        break
+    }
+}
+
 if ($Mode -eq "Engine") {
     $wafDlls = @(
         "ardour\ardour.dll",
@@ -295,6 +311,7 @@ How to run
 Layout
 ------
 airdour_win_shell.exe   Win32 + Direct2D/DirectWrite shell
+ardour-vst2-bridge-x86.exe  Optional VST2-32 host (when staged)
 run-airdour.bat         Sets PATH / ARDOUR_DLL_PATH / ARDOUR_BACKEND_PATH
 backends\               Dummy + WASAPI backend DLLs (Engine mode)
 panners\                libardour panner plugins (Engine mode)

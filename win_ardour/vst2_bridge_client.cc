@@ -236,6 +236,47 @@ ensure_bridge_running (const std::string& plugin_dll_path)
 	return true;
 }
 
+bool
+process_silence_block (uint32_t frames, float sample_rate)
+{
+	if (g_bridges.empty () || !g_bridges[0].alive || !g_bridges[0].view) {
+		return false;
+	}
+	BridgeProc& b = g_bridges[0];
+	if (frames == 0) {
+		frames = 64;
+	}
+	if (frames > kMaxBlock) {
+		frames = kMaxBlock;
+	}
+	b.view->hdr.sample_rate = sample_rate > 0.f ? sample_rate : 48000.f;
+	b.view->hdr.frames = frames;
+	b.view->hdr.n_inputs = 2;
+	b.view->hdr.n_outputs = 2;
+	b.view->hdr.op = (uint32_t)Op::SetSampleRate;
+	b.view->hdr.status = 1;
+	SetEvent (b.req_event);
+	if (WaitForSingleObject (b.ack_event, 2000) != WAIT_OBJECT_0 || b.view->hdr.status != 0) {
+		return false;
+	}
+	b.view->hdr.op = (uint32_t)Op::SetBlockSize;
+	b.view->hdr.status = 1;
+	SetEvent (b.req_event);
+	if (WaitForSingleObject (b.ack_event, 2000) != WAIT_OBJECT_0 || b.view->hdr.status != 0) {
+		return false;
+	}
+	std::memset (b.view->audio.in, 0, sizeof (b.view->audio.in));
+	std::memset (b.view->audio.out, 0, sizeof (b.view->audio.out));
+	b.view->hdr.midi_count = 0;
+	b.view->hdr.op = (uint32_t)Op::Process;
+	b.view->hdr.status = 1;
+	SetEvent (b.req_event);
+	if (WaitForSingleObject (b.ack_event, 2000) != WAIT_OBJECT_0) {
+		return false;
+	}
+	return b.view->hdr.status == 0;
+}
+
 void
 shutdown_all ()
 {

@@ -23701,9 +23701,30 @@ EngineHost::refresh_midi_snap ()
 			_snap.midi_track_count = 1;
 		}
 		_snap.active_midi_track = _impl->active_midi_track;
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			_snap.midi_track_names[i][0] = L'\0';
+		}
+		for (size_t i = 0; i < _impl->midi_tracks.size () && i < (size_t)EngineSnapshot::kMeters; ++i) {
+			if (_impl->midi_tracks[i]) {
+				copy_name_to_snap (_snap.midi_track_names[i], EngineSnapshot::kTrackNameLen,
+						   _impl->midi_tracks[i]->name ());
+			}
+		}
+		if (_impl->midi_track) {
+			copy_name_to_snap (_snap.midi_track_name, EngineSnapshot::kTrackNameLen,
+					   _impl->midi_track->name ());
+			if (_snap.midi_track_names[0][0] == L'\0') {
+				copy_name_to_snap (_snap.midi_track_names[0], EngineSnapshot::kTrackNameLen,
+						   _impl->midi_track->name ());
+			}
+		}
 	} else {
 		_snap.midi_track_count = 0;
 		_snap.active_midi_track = 0;
+		_snap.midi_track_name[0] = L'\0';
+		for (int i = 0; i < EngineSnapshot::kMeters; ++i) {
+			_snap.midi_track_names[i][0] = L'\0';
+		}
 	}
 	_snap.midi_activity = _impl ? _impl->midi_activity : 0.f;
 	_snap.midi_device_count = 0;
