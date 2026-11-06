@@ -866,7 +866,7 @@ WasapiIO::open (const std::string& output_name_or_id,
 			if (cap_sr != ren_sr) {
 				_capture_rate_mismatch = true;
 				std::fprintf (stderr,
-					      "wasapi: capture mix rate %u != render %u — enabling linear resample\n",
+					      "wasapi: capture mix rate %u != render %u — enabling cubic resample\n",
 					      (unsigned)cap_sr, (unsigned)ren_sr);
 				std::fflush (stderr);
 			}
