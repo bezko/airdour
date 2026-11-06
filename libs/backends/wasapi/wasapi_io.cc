@@ -51,6 +51,11 @@ struct WasapiIO::ComState {
 	bool                 com_inited_here;
 	bool                 capture_enabled;
 	std::vector<float>   capture_scratch; /* pre-sized; no RT alloc in transfer */
+	std::vector<float> capture_ring;      /* native-rate interleaved ring for resample */
+	uint32_t capture_ring_frames;         /* capacity in frames */
+	uint32_t capture_ring_r;
+	uint32_t capture_ring_w;
+	uint32_t capture_ring_filled;
 
 	ComState ()
 		: enumerator (0)
@@ -64,6 +69,10 @@ struct WasapiIO::ComState {
 		, render_buffer_frames (0)
 		, com_inited_here (false)
 		, capture_enabled (false)
+		, capture_ring_frames (0)
+		, capture_ring_r (0)
+		, capture_ring_w (0)
+		, capture_ring_filled (0)
 	{}
 };
 
@@ -297,6 +306,8 @@ WasapiIO::WasapiIO ()
 	, _measured_playback_latency (0)
 	, _measured_capture_latency (0)
 	, _capture_rate_mismatch (false)
+	, _capture_sample_rate (48000.f)
+	, _cap_resample_phase (0.0)
 #ifdef _WIN32
 	, _com (0)
 #endif
@@ -701,53 +712,63 @@ WasapiIO::open (const std::string& output_name_or_id,
 		return -1;
 	}
 
-	/* Optional capture — same shared-mode rules; clocked by render event. */
+	/* Optional capture — clocked by render event; resample when mix rates differ. */
 	_com->capture_enabled = false;
 	_capture_channels = 0;
 	_capture_rate_mismatch = false;
+	_capture_sample_rate = _sample_rate;
+	_cap_resample_phase = 0.0;
 	_measured_playback_latency = 0;
 	_measured_capture_latency = 0;
+	_com->capture_ring_frames = 0;
+	_com->capture_ring_r = 0;
+	_com->capture_ring_w = 0;
+	_com->capture_ring_filled = 0;
+	_com->capture_ring.clear ();
 	/* Try default capture unless input explicitly disabled with "None". */
 	if (input_name_or_id != "None" && input_name_or_id != "none") {
 		hr = activate_client (_com->enumerator, in_id, eCapture,
 		                      &_com->capture_client, &_com->capture_mix, NULL);
 		if (SUCCEEDED (hr) && _com->capture_client && _com->capture_mix) {
-			/*
-			 * Capture must match render rate for a single-period engine loop.
-			 * If mix rates differ, skip capture (flagged for UI) until a
-			 * resample path is wired.
-			 */
-			if (_com->capture_mix->nSamplesPerSec != _com->render_mix->nSamplesPerSec) {
+			const UINT32 cap_sr = _com->capture_mix->nSamplesPerSec;
+			const UINT32 ren_sr = _com->render_mix->nSamplesPerSec;
+			if (cap_sr != ren_sr) {
 				_capture_rate_mismatch = true;
 				std::fprintf (stderr,
-				              "wasapi: capture mix rate %u != render %u — capture disabled\n",
-				              (unsigned)_com->capture_mix->nSamplesPerSec,
-				              (unsigned)_com->render_mix->nSamplesPerSec);
+					      "wasapi: capture mix rate %u != render %u — enabling linear resample\n",
+					      (unsigned)cap_sr, (unsigned)ren_sr);
+				std::fflush (stderr);
 			}
-			if (_com->capture_mix->nSamplesPerSec == _com->render_mix->nSamplesPerSec) {
-				IAudioClient3* cap3 = 0;
-				bool cap_ok = false;
-				if (SUCCEEDED (_com->capture_client->QueryInterface (__uuidof (IAudioClient3), (void**)&cap3)) && cap3) {
-					hr = cap3->InitializeSharedAudioStream (0, _period_frames, _com->capture_mix, NULL);
-					cap_ok = SUCCEEDED (hr);
-					cap3->Release ();
+			_capture_sample_rate = (float)cap_sr;
+			uint32_t cap_period = _period_frames;
+			if (ren_sr > 0 && cap_sr != ren_sr) {
+				cap_period = (uint32_t)((double)_period_frames * (double)cap_sr / (double)ren_sr + 0.5);
+				if (cap_period < 32) {
+					cap_period = 32;
 				}
-				if (!cap_ok) {
-					hr = _com->capture_client->Initialize (
-						AUDCLNT_SHAREMODE_SHARED,
-						0, /* no separate event; pull on render tick */
-						0, 0,
-						_com->capture_mix,
-						NULL);
-					cap_ok = SUCCEEDED (hr);
-				}
-				if (cap_ok) {
-					hr = _com->capture_client->GetService (
-						__uuidof (IAudioCaptureClient), (void**)&_com->capture);
-					if (SUCCEEDED (hr) && _com->capture) {
-						_capture_channels = _com->capture_mix->nChannels;
-						_com->capture_enabled = true;
-					}
+			}
+			IAudioClient3* cap3 = 0;
+			bool cap_ok = false;
+			if (SUCCEEDED (_com->capture_client->QueryInterface (__uuidof (IAudioClient3), (void**)&cap3)) && cap3) {
+				hr = cap3->InitializeSharedAudioStream (0, cap_period, _com->capture_mix, NULL);
+				cap_ok = SUCCEEDED (hr);
+				cap3->Release ();
+			}
+			if (!cap_ok) {
+				hr = _com->capture_client->Initialize (
+					AUDCLNT_SHAREMODE_SHARED,
+					0, /* no separate event; pull on render tick */
+					0, 0,
+					_com->capture_mix,
+					NULL);
+				cap_ok = SUCCEEDED (hr);
+			}
+			if (cap_ok) {
+				hr = _com->capture_client->GetService (
+					__uuidof (IAudioCaptureClient), (void**)&_com->capture);
+				if (SUCCEEDED (hr) && _com->capture) {
+					_capture_channels = _com->capture_mix->nChannels;
+					_com->capture_enabled = true;
 				}
 			}
 			if (!_com->capture_enabled) {
@@ -760,6 +781,8 @@ WasapiIO::open (const std::string& output_name_or_id,
 					_com->capture_client = 0;
 				}
 				release_format (_com->capture_mix);
+				_capture_rate_mismatch = false;
+				_capture_sample_rate = _sample_rate;
 			}
 		}
 	}
@@ -774,10 +797,29 @@ WasapiIO::open (const std::string& output_name_or_id,
 	}
 
 	if (_com->capture_enabled) {
-		_com->capture_scratch.resize (std::max (_period_frames, _com->render_buffer_frames) * std::max (1u, _capture_channels));
+		const uint32_t ch = std::max (1u, _capture_channels);
+		const uint32_t scratch_frames =
+			std::max (_period_frames, _com->render_buffer_frames) * 4u;
+		_com->capture_scratch.resize (scratch_frames * ch);
+		if (_capture_rate_mismatch) {
+			/* Hold ~4 render periods of native-rate audio for the resampler. */
+			double ratio = (_sample_rate > 0.f)
+					       ? ((double)_capture_sample_rate / (double)_sample_rate)
+					       : 1.0;
+			uint32_t ring_frames = (uint32_t)((double)_period_frames * ratio * 4.0 + 64.0);
+			if (ring_frames < 1024) {
+				ring_frames = 1024;
+			}
+			_com->capture_ring_frames = ring_frames;
+			_com->capture_ring.assign ((size_t)ring_frames * ch, 0.f);
+			_com->capture_ring_r = 0;
+			_com->capture_ring_w = 0;
+			_com->capture_ring_filled = 0;
+			_cap_resample_phase = 0.0;
+		}
 	}
 
-	/* Measured stream latencies (100ns units → frames). */
+	/* Measured stream latencies (100ns units → frames at render rate). */
 	_measured_playback_latency = 0;
 	_measured_capture_latency = 0;
 	REFERENCE_TIME play_lat = 0;
@@ -892,10 +934,30 @@ WasapiIO::read_capture (float* interleaved_capture, uint32_t max_frames)
 		return (int)period;
 	}
 
+	const uint32_t ch = _capture_channels;
+	const bool need_resample = _capture_rate_mismatch && _capture_sample_rate > 0.f && _sample_rate > 0.f && _com->capture_ring_frames > 0;
+
+	auto push_ring = [&] (const float* src, UINT32 frames) {
+		if (!_com->capture_ring_frames || !src || frames == 0) {
+			return;
+		}
+		for (UINT32 i = 0; i < frames; ++i) {
+			if (_com->capture_ring_filled >= _com->capture_ring_frames) {
+				/* Drop oldest frame to keep the newest audio. */
+				_com->capture_ring_r = (_com->capture_ring_r + 1) % _com->capture_ring_frames;
+				--_com->capture_ring_filled;
+			}
+			float* dst = &_com->capture_ring[_com->capture_ring_w * ch];
+			memcpy (dst, src + i * ch, ch * sizeof (float));
+			_com->capture_ring_w = (_com->capture_ring_w + 1) % _com->capture_ring_frames;
+			++_com->capture_ring_filled;
+		}
+	};
+
 	UINT32 packet = 0;
 	HRESULT hr = _com->capture->GetNextPacketSize (&packet);
 	UINT32 written = 0;
-	while (SUCCEEDED (hr) && packet > 0 && written < period) {
+	while (SUCCEEDED (hr) && packet > 0) {
 		BYTE* data = 0;
 		UINT32 frames = 0;
 		DWORD flags = 0;
@@ -903,20 +965,91 @@ WasapiIO::read_capture (float* interleaved_capture, uint32_t max_frames)
 		if (FAILED (hr)) {
 			break;
 		}
-		UINT32 use = frames;
-		if (written + use > period) {
-			use = period - written;
+		if (!(flags & AUDCLNT_BUFFERFLAGS_SILENT) && data && frames && _com->capture_scratch.size () >= frames * ch) {
+			convert_from_device (_com->capture_mix, data, &_com->capture_scratch[0], frames, ch);
+			if (need_resample) {
+				push_ring (&_com->capture_scratch[0], frames);
+			} else {
+				UINT32 use = frames;
+				if (written + use > period) {
+					use = period - written;
+				}
+				if (use) {
+					memcpy (interleaved_capture + written * ch,
+						&_com->capture_scratch[0],
+						use * ch * sizeof (float));
+					written += use;
+				}
+			}
+		} else if (need_resample && frames && _com->capture_scratch.size () >= frames * ch) {
+			/* Silent packet — push zeros so timing stays honest. */
+			memset (&_com->capture_scratch[0], 0, frames * ch * sizeof (float));
+			push_ring (&_com->capture_scratch[0], frames);
+		} else if (!need_resample) {
+			written += frames;
+			if (written > period) {
+				written = period;
+			}
 		}
-		if (!(flags & AUDCLNT_BUFFERFLAGS_SILENT) && data && use &&
-		    _com->capture_scratch.size () >= use * _capture_channels) {
-			convert_from_device (_com->capture_mix, data, &_com->capture_scratch[0], use, _capture_channels);
-			memcpy (interleaved_capture + written * _capture_channels,
-			        &_com->capture_scratch[0],
-			        use * _capture_channels * sizeof (float));
-		}
-		written += use;
 		_com->capture->ReleaseBuffer (frames);
+		if (!need_resample && written >= period) {
+			/* Drain remaining packets without copying past the period. */
+			hr = _com->capture->GetNextPacketSize (&packet);
+			while (SUCCEEDED (hr) && packet > 0) {
+				BYTE* drop = 0;
+				UINT32 df = 0;
+				DWORD dflags = 0;
+				if (FAILED (_com->capture->GetBuffer (&drop, &df, &dflags, NULL, NULL))) {
+					break;
+				}
+				_com->capture->ReleaseBuffer (df);
+				hr = _com->capture->GetNextPacketSize (&packet);
+			}
+			break;
+		}
 		hr = _com->capture->GetNextPacketSize (&packet);
+	}
+
+	if (need_resample) {
+		const double ratio = (double)_capture_sample_rate / (double)_sample_rate;
+		for (uint32_t i = 0; i < period; ++i) {
+			double src_pos = _cap_resample_phase + (double)i * ratio;
+			uint32_t i0 = (uint32_t)src_pos;
+			float frac = (float)(src_pos - (double)i0);
+			if (i0 + 1 >= _com->capture_ring_filled) {
+				/* Underrun — hold last sample or silence. */
+				if (_com->capture_ring_filled == 0) {
+					continue;
+				}
+				i0 = _com->capture_ring_filled - 1;
+				frac = 0.f;
+			}
+			uint32_t i1 = i0 + 1;
+			if (i1 >= _com->capture_ring_filled) {
+				i1 = i0;
+			}
+			uint32_t r0 = (_com->capture_ring_r + i0) % _com->capture_ring_frames;
+			uint32_t r1 = (_com->capture_ring_r + i1) % _com->capture_ring_frames;
+			const float* a = &_com->capture_ring[r0 * ch];
+			const float* b = &_com->capture_ring[r1 * ch];
+			float* out = interleaved_capture + i * ch;
+			for (uint32_t c = 0; c < ch; ++c) {
+				out[c] = a[c] + (b[c] - a[c]) * frac;
+			}
+		}
+		/* Advance ring read by the integer samples consumed this period. */
+		const double advance = (double)period * ratio;
+		const double new_phase = _cap_resample_phase + advance;
+		uint32_t consume = (uint32_t)new_phase; /* floor */
+		_cap_resample_phase = new_phase - (double)consume;
+		if (_cap_resample_phase < 0.0) {
+			_cap_resample_phase = 0.0;
+		}
+		if (consume > _com->capture_ring_filled) {
+			consume = _com->capture_ring_filled;
+		}
+		_com->capture_ring_r = (_com->capture_ring_r + consume) % _com->capture_ring_frames;
+		_com->capture_ring_filled -= consume;
 	}
 	return (int)period;
 #endif

@@ -3662,7 +3662,7 @@ ShellWindow::tick_smoke_record (DWORD now)
 			if (_engine_snap.capture_rate_mismatch) {
 				std::fprintf (stderr,
 					      "airdour_win_shell: smoke-record FAILED "
-					      "(no region — WASAPI capture rate mismatch)\n");
+					      "(no region — capture was resampling; check input arm/path)\n");
 			} else {
 				std::fprintf (stderr,
 					      "airdour_win_shell: smoke-record FAILED (no region after take)\n");
@@ -13906,7 +13906,7 @@ ShellWindow::sync_prefs_from_engine ()
 	_prefs.set_systemic_latency (_engine_snap.systemic_in_frames, _engine_snap.systemic_out_frames);
 	_prefs.set_separate_devices (_engine_snap.separate_io_devices);
 	if (_engine_snap.capture_rate_mismatch) {
-		_prefs.set_status (L"Capture disabled — mix rate ≠ render (WASAPI)");
+		_prefs.set_status (L"Capture resampling — mix rate ≠ render (WASAPI)");
 	}
 	_prefs.set_click_default (_engine_snap.pref_click_default);
 	_prefs.set_snap_default (_engine_snap.pref_snap_default);

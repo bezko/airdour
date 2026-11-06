@@ -70,8 +70,13 @@ public:
 	 */
 	uint32_t measured_playback_latency_frames () const { return _measured_playback_latency; }
 	uint32_t measured_capture_latency_frames () const { return _measured_capture_latency; }
-	/** True when capture was skipped because capture mix rate ≠ render mix rate. */
+	/**
+	 * True when capture mix rate ≠ render mix rate.
+	 * Capture may still be active via linear resample into the render clock.
+	 */
 	bool capture_rate_mismatch () const { return _capture_rate_mismatch; }
+	bool capture_enabled () const { return _capture_channels > 0 && _open; }
+	float capture_sample_rate () const { return _capture_sample_rate; }
 
 	/** Laptop-oriented period list derived from the last open/enum quantum. */
 	void recommended_buffer_sizes (std::vector<uint32_t>& sizes) const;
@@ -104,6 +109,8 @@ private:
 	uint32_t _measured_playback_latency;
 	uint32_t _measured_capture_latency;
 	bool     _capture_rate_mismatch;
+	float _capture_sample_rate; /* native capture mix rate (may ≠ _sample_rate) */
+	double _cap_resample_phase; /* fractional read cursor in capture-rate samples */
 
 	mutable std::vector<DeviceInfo> _cached_devices;
 
