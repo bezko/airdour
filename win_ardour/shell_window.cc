@@ -13901,6 +13901,8 @@ ShellWindow::sync_prefs_from_engine ()
 	_prefs.set_pref_backend (_engine_snap.pref_backend.c_str ());
 	_prefs.set_current_period (_engine_snap.period_frames, _engine_snap.sample_rate);
 	_prefs.set_pref_period (_engine_snap.pref_period_frames);
+	_prefs.set_pref_wasapi_exclusive (_engine_snap.pref_wasapi_exclusive);
+	_prefs.set_wasapi_exclusive_active (_engine_snap.wasapi_exclusive_active);
 	_prefs.set_current_devices (_engine_snap.audio_in_name.c_str (), _engine_snap.audio_out_name.c_str ());
 	_prefs.set_pref_devices (_engine_snap.pref_in_device.c_str (), _engine_snap.pref_out_device.c_str ());
 	_prefs.set_systemic_latency (_engine_snap.systemic_in_frames, _engine_snap.systemic_out_frames);
@@ -14966,6 +14968,14 @@ ShellWindow::apply_prefs_hit (PrefsHit hit)
 		break;
 	case PrefsHit::Period512:
 		_engine.set_pref_period_frames (512);
+		break;
+	case PrefsHit::WasapiShared:
+		_engine.set_pref_wasapi_exclusive (false);
+		_prefs.set_status (L"Shared mode — applies on audio restart");
+		break;
+	case PrefsHit::WasapiExclusive:
+		_engine.set_pref_wasapi_exclusive (true);
+		_prefs.set_status (L"Exclusive mode — applies on audio restart");
 		break;
 	case PrefsHit::ClickToggle:
 		_engine.set_pref_click_default (!_engine.snapshot ().pref_click_default);

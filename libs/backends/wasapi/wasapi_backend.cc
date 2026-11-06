@@ -709,8 +709,14 @@ WasapiBackend::_start (bool for_latency_measurement)
 	_measure_latency = for_latency_measurement;
 
 	if (_io.open (_output_device, _input_device, _samplerate, _buffer_size) != 0) {
-		error << _("WASAPI: failed to open shared-mode device") << endmsg;
+		error << _("WASAPI: failed to open audio device") << endmsg;
 		return AudioDeviceOpenError;
+	}
+	if (_io.exclusive_requested () && !_io.exclusive_active ()) {
+		info << _("WASAPI: exclusive mode requested but shared fallback is active")
+		     << endmsg;
+	} else if (_io.exclusive_active ()) {
+		info << _("WASAPI: exclusive mode active") << endmsg;
 	}
 
 	_samplerate = _io.sample_rate ();

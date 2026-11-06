@@ -535,6 +535,10 @@ public:
 	virtual bool     interleaved () const                                   = 0;
 	/** True when capture was skipped (e.g. WASAPI mix-rate mismatch). Default false. */
 	virtual bool capture_rate_mismatch () const { return false; }
+	/** Request exclusive-mode device access (WASAPI). No-op on other backends. */
+	virtual void set_exclusive_mode (bool) {}
+	/** True when the open device stream is exclusive-mode. */
+	virtual bool exclusive_mode () const { return false; }
 	virtual uint32_t systemic_input_latency () const                        = 0;
 	virtual uint32_t systemic_output_latency () const                       = 0;
 	virtual uint32_t systemic_midi_input_latency (std::string const) const  = 0;
