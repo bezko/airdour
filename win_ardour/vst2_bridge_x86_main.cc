@@ -100,6 +100,8 @@ open_plugin ()
 	}
 	if (g_effect->dispatcher) {
 		g_effect->dispatcher (g_effect, 0 /*effOpen*/, 0, 0, nullptr, 0.f);
+		g_effect->dispatcher (g_effect, 12 /*effMainsChanged*/, 0, 1, nullptr, 0.f);
+		g_effect->dispatcher (g_effect, 71 /*effStartProcess*/, 0, 0, nullptr, 0.f);
 	}
 	g_view->hdr.n_inputs = g_effect->numInputs > 0 ? (uint32_t)g_effect->numInputs : 0u;
 	g_view->hdr.n_outputs = g_effect->numOutputs > 0 ? (uint32_t)g_effect->numOutputs : 0u;
@@ -112,6 +114,8 @@ void
 close_plugin ()
 {
 	if (g_effect && g_effect->dispatcher) {
+		g_effect->dispatcher (g_effect, 72 /*effStopProcess*/, 0, 0, nullptr, 0.f);
+		g_effect->dispatcher (g_effect, 12 /*effMainsChanged*/, 0, 0, nullptr, 0.f);
 		g_effect->dispatcher (g_effect, 1 /*effClose*/, 0, 0, nullptr, 0.f);
 		g_effect = nullptr;
 	}
@@ -159,6 +163,55 @@ handle_op ()
 			for (uint32_t c = 0; c < airdour::vst2_bridge::kMaxChannels; ++c) {
 				inputs[c] = g_view->audio.in[c];
 				outputs[c] = g_view->audio.out[c];
+			}
+			/* Feed host MIDI into the plugin before audio (instruments). */
+			uint32_t n_midi = g_view->hdr.midi_count;
+			if (n_midi > airdour::vst2_bridge::kMaxMidiEvents) {
+				n_midi = airdour::vst2_bridge::kMaxMidiEvents;
+			}
+			if (n_midi > 0 && g_effect->dispatcher) {
+#pragma pack(push, 8)
+				struct LocalMidiEvent {
+					int32_t type;
+					int32_t byteSize;
+					int32_t deltaSamples;
+					int32_t flags;
+					int32_t noteLength;
+					int32_t noteOffset;
+					char midiData[4];
+					char detune;
+					char noteOffVelocity;
+					char reserved1;
+					char reserved2;
+				};
+				struct LocalVstEvents {
+					int32_t numEvents;
+					void* reserved;
+					void* events[airdour::vst2_bridge::kMaxMidiEvents];
+				};
+#pragma pack(pop)
+				LocalMidiEvent midi_store[airdour::vst2_bridge::kMaxMidiEvents];
+				LocalVstEvents ve {};
+				ve.numEvents = (int32_t)n_midi;
+				ve.reserved = nullptr;
+				for (uint32_t i = 0; i < n_midi; ++i) {
+					std::memset (&midi_store[i], 0, sizeof (midi_store[i]));
+					midi_store[i].type = 1; /* kVstMidiType */
+					midi_store[i].byteSize = (int32_t)sizeof (LocalMidiEvent);
+					midi_store[i].deltaSamples =
+						(int32_t)g_view->audio.midi[i].sample_offset;
+					uint8_t sz = g_view->audio.midi[i].size;
+					if (sz > 3) {
+						sz = 3;
+					}
+					for (uint8_t b = 0; b < sz; ++b) {
+						midi_store[i].midiData[b] =
+							(char)g_view->audio.midi[i].data[b];
+					}
+					ve.events[i] = &midi_store[i];
+				}
+				g_effect->dispatcher (g_effect, 25 /*effProcessEvents*/, 0, 0, &ve,
+						      0.f);
 			}
 			if (g_effect->processReplacing) {
 				g_effect->processReplacing (g_effect, inputs, outputs,

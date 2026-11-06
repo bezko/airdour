@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Session Processor that hosts a 32-bit VST2 via ardour-vst2-bridge-x86.exe.
- * Copies audio to SHM, runs Op::Process, writes the result in-place.
+ * Copies audio (+ optional MIDI) to SHM, runs Op::Process, writes audio result.
  */
 #pragma once
 
@@ -23,7 +23,8 @@ public:
 	Vst2BridgeProcessor (ARDOUR::Session& s,
 			     Temporal::TimeDomainProvider const& tdp,
 			     const std::string& display_name,
-			     const std::string& plugin_dll_path);
+			     const std::string& plugin_dll_path,
+			     bool as_instrument = false);
 	~Vst2BridgeProcessor ();
 
 	std::string display_name () const override { return _display_name; }
@@ -38,6 +39,7 @@ public:
 	int set_block_size (pframes_t nframes) override;
 
 	bool bridged_ok () const { return _bridged_ok; }
+	bool is_instrument () const { return _as_instrument; }
 	const std::string& plugin_path () const { return _plugin_path; }
 
 	int param_count () const { return _param_count; }
@@ -51,6 +53,7 @@ private:
 	std::string _display_name;
 	std::string _plugin_path;
 	bool _bridged_ok;
+	bool _as_instrument;
 	bool _configured_rate;
 	float _sample_rate;
 	pframes_t _block_size;

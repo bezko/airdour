@@ -38,6 +38,7 @@
 
 #include "vst2_bridge_client.h"
 #include "vst2_bridge_processor.h"
+#include "vst2_bridge_protocol.h"
 
 namespace {
 
@@ -243,30 +244,37 @@ EngineHost::unload_vst2 ()
 	if (!_impl) {
 		return false;
 	}
-	if (_impl->tracks.size () >= 2 && _impl->tracks[1]) {
+	int ti = _impl->vst2_bridge_track;
+	if (ti < 0) {
+		ti = 1;
+	}
+	if (ti >= 0 && ti < (int)_impl->tracks.size () && _impl->tracks[(size_t)ti]) {
 		std::shared_ptr<ARDOUR::PluginInsert> pi = _impl->vst2_fx.lock ();
 		if (pi) {
 			try {
-				_impl->tracks[1]->remove_processor (pi);
+				_impl->tracks[(size_t)ti]->remove_processor (pi);
 			} catch (...) {
 			}
 		}
 		std::shared_ptr<ARDOUR::Processor> bp = _impl->vst2_bridge_fx.lock ();
 		if (bp) {
 			try {
-				_impl->tracks[1]->remove_processor (bp);
+				_impl->tracks[(size_t)ti]->remove_processor (bp);
 			} catch (...) {
 			}
 		}
 	}
 	_impl->vst2_fx.reset ();
 	_impl->vst2_bridge_fx.reset ();
-	_impl->vst2_bridge_path.clear ();
+	if (!_impl->vst2_bridge_path.empty ()) {
+		airdour::vst2_bridge::shutdown_plugin (_impl->vst2_bridge_path);
+		_impl->vst2_bridge_path.clear ();
+	}
 	_impl->vst2_bridge_track = -1;
-	_impl->vst2_bridged_32 = false;
+	/* Keep vst2_bridged_32 true if a synth bridge remains. */
+	_impl->vst2_bridged_32 = (bool)_impl->vst2_bridge_synth.lock ();
 	_impl->vst2_param_count = 0;
 	refresh_vst2_params_from_insert ();
-	airdour::vst2_bridge::shutdown_all ();
 	_snap.detail = L"VST2 unloaded";
 	return true;
 }
@@ -498,17 +506,55 @@ EngineHost::attach_vst2_instrument_by_index (int index)
 	}
 	try {
 		std::shared_ptr<ARDOUR::MidiTrack> mt = _impl->midi_track;
-		ARDOUR::PluginPtr plugin = info->load (*_impl->session);
-		if (!plugin) {
-			_snap.detail = L"VST2 instrument load failed";
-			return false;
+
+		/* Drop prior bridged synth so re-attach is clean. */
+		{
+			std::shared_ptr<ARDOUR::Processor> prev = _impl->vst2_bridge_synth.lock ();
+			if (prev) {
+				try {
+					mt->remove_processor (prev);
+				} catch (...) {
+				}
+			}
+			if (!_impl->vst2_bridge_synth_path.empty ()) {
+				airdour::vst2_bridge::shutdown_plugin (_impl->vst2_bridge_synth_path);
+				_impl->vst2_bridge_synth_path.clear ();
+			}
+			_impl->vst2_bridge_synth.reset ();
 		}
-		std::shared_ptr<ARDOUR::PluginInsert> pi (
-			new ARDOUR::PluginInsert (*_impl->session, *mt, plugin));
-		pi->set_strict_io (true);
-		if (mt->add_processor (pi, ARDOUR::PreFader) != 0) {
-			return false;
+
+		bool bridged = !info->path.empty () && airdour::vst2_bridge::dll_is_i386 (info->path);
+		if (bridged) {
+			std::shared_ptr<airdour::vst2_bridge::Vst2BridgeProcessor> bp (
+				new airdour::vst2_bridge::Vst2BridgeProcessor (
+					*_impl->session, *mt, info->name, info->path, true));
+			if (!bp->bridged_ok ()) {
+				_snap.detail = L"VST2-32 instrument bridge failed";
+				return false;
+			}
+			if (mt->add_processor (bp, ARDOUR::PreFader) != 0) {
+				_snap.detail = L"VST2-32 instrument add_processor failed";
+				airdour::vst2_bridge::shutdown_plugin (info->path);
+				return false;
+			}
+			bp->activate ();
+			_impl->vst2_bridge_synth = bp;
+			_impl->vst2_bridge_synth_path = info->path;
+			_impl->vst2_bridged_32 = true;
+		} else {
+			ARDOUR::PluginPtr plugin = info->load (*_impl->session);
+			if (!plugin) {
+				_snap.detail = L"VST2 instrument load failed";
+				return false;
+			}
+			std::shared_ptr<ARDOUR::PluginInsert> pi (
+				new ARDOUR::PluginInsert (*_impl->session, *mt, plugin));
+			pi->set_strict_io (true);
+			if (mt->add_processor (pi, ARDOUR::PreFader) != 0) {
+				return false;
+			}
 		}
+
 		bool to_master = false;
 		std::shared_ptr<ARDOUR::Route> master = _impl->session->master_out ();
 		if (master && mt->output () && master->input ()) {
@@ -536,9 +582,9 @@ EngineHost::attach_vst2_instrument_by_index (int index)
 		_snap.midi_synth_ok = true;
 		_snap.midi_synth_to_master = to_master;
 		_snap.midi_synth_name = utf8_to_wide_local (info->name);
-		_snap.detail = L"VST2 instrument attached";
-		std::fprintf (stderr, "airdour_win_shell: VST2 instrument \"%s\" (to_master=%d)\n",
-			      _impl->midi_synth_name.c_str (), to_master ? 1 : 0);
+		_snap.detail = bridged ? L"VST2-32 instrument bridged" : L"VST2 instrument attached";
+		std::fprintf (stderr, "airdour_win_shell: VST2 instrument \"%s\" (bridged=%d to_master=%d)\n",
+			      _impl->midi_synth_name.c_str (), bridged ? 1 : 0, to_master ? 1 : 0);
 		std::fflush (stderr);
 		return true;
 	} catch (...) {
@@ -639,8 +685,30 @@ EngineHost::smoke_vst2_bridge ()
 		airdour::vst2_bridge::shutdown_all ();
 		return false;
 	}
+	/* MIDI note → processEvents path (instruments). Silence in/out is fine. */
+	{
+		airdour::vst2_bridge::MidiEventWire note {};
+		note.sample_offset = 0;
+		note.size = 3;
+		note.data[0] = 0x90;
+		note.data[1] = 60;
+		note.data[2] = 100;
+		float zeros_in[2][128];
+		float zeros_out[2][128];
+		std::memset (zeros_in, 0, sizeof (zeros_in));
+		std::memset (zeros_out, 0, sizeof (zeros_out));
+		float* in_ptrs[2] = { zeros_in[0], zeros_in[1] };
+		float* out_ptrs[2] = { zeros_out[0], zeros_out[1] };
+		if (!airdour::vst2_bridge::process_audio (fixture, in_ptrs, out_ptrs, 2, 2, 128,
+							  48000.f, 2000, &note, 1)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst2-bridge FAILED (midi process)\n");
+			std::fflush (stderr);
+			airdour::vst2_bridge::shutdown_all ();
+			return false;
+		}
+	}
 	airdour::vst2_bridge::shutdown_all ();
-	std::fprintf (stderr, "airdour_win_shell: smoke-vst2-bridge ok (open+process)\n");
+	std::fprintf (stderr, "airdour_win_shell: smoke-vst2-bridge ok (open+process+midi)\n");
 	std::fflush (stderr);
 	_snap.detail = L"smoke-vst2-bridge ok";
 	return true;

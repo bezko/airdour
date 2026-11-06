@@ -84,9 +84,11 @@ public:
 	int rack_slot_count[EngineSnapshot::kMeters];
 	std::weak_ptr<PluginInsert> master_rack[EngineSnapshot::kMaxInsertSlots];
 	int master_rack_count;
-	std::weak_ptr<PluginInsert> vst2_fx;     /* shell VST2-64 PluginInsert on Audio 2 */
-	std::weak_ptr<Processor> vst2_bridge_fx; /* VST2-32 bridge Processor */
+	std::weak_ptr<PluginInsert> vst2_fx;        /* shell VST2-64 PluginInsert on Audio 2 */
+	std::weak_ptr<Processor> vst2_bridge_fx;    /* VST2-32 bridge Processor (FX) */
+	std::weak_ptr<Processor> vst2_bridge_synth; /* VST2-32 bridged instrument on MIDI */
 	std::string vst2_bridge_path;
+	std::string vst2_bridge_synth_path;
 	int vst2_bridge_track; /* audio track index hosting the bridge (−1 none) */
 	uint32_t vst2_param_ports[EngineSnapshot::kMaxVst3Params];
 	int vst2_param_count;

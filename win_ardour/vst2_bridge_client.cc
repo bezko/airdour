@@ -337,10 +337,12 @@ process_audio (const std::string& plugin_dll_path,
 	       float* const* inputs, float* const* outputs,
 	       uint32_t n_inputs, uint32_t n_outputs,
 	       uint32_t frames, float sample_rate,
-	       uint32_t wait_ms)
+	       uint32_t wait_ms,
+	       const MidiEventWire* midi,
+	       uint32_t midi_count)
 {
 	BridgeProc* b = find_bridge (plugin_dll_path);
-	if (!b || !b->view || !inputs || !outputs) {
+	if (!b || !b->view || !outputs) {
 		return false;
 	}
 	if (frames == 0) {
@@ -361,14 +363,22 @@ process_audio (const std::string& plugin_dll_path,
 	std::memset (b->view->audio.in, 0, sizeof (b->view->audio.in));
 	std::memset (b->view->audio.out, 0, sizeof (b->view->audio.out));
 	for (uint32_t c = 0; c < n_inputs; ++c) {
-		if (inputs[c]) {
+		if (inputs && inputs[c]) {
 			std::memcpy (b->view->audio.in[c], inputs[c], frames * sizeof (float));
 		}
+	}
+	if (midi_count > kMaxMidiEvents) {
+		midi_count = kMaxMidiEvents;
+	}
+	b->view->hdr.midi_count = midi_count;
+	if (midi && midi_count > 0) {
+		std::memcpy (b->view->audio.midi, midi, midi_count * sizeof (MidiEventWire));
+	} else {
+		std::memset (b->view->audio.midi, 0, sizeof (b->view->audio.midi));
 	}
 	b->view->hdr.frames = frames;
 	b->view->hdr.n_inputs = n_inputs;
 	b->view->hdr.n_outputs = n_outputs;
-	b->view->hdr.midi_count = 0;
 	if (wait_ms == 0) {
 		wait_ms = 50;
 	}

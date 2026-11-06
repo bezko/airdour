@@ -5,10 +5,13 @@
  */
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 namespace airdour {
 namespace vst2_bridge {
+
+struct MidiEventWire;
 
 /** Absolute path to ardour-vst2-bridge-x86.exe beside the shell, or empty. */
 std::string bridge_exe_path ();
@@ -25,12 +28,14 @@ bool ensure_bridge_running (const std::string& plugin_dll_path);
  */
 bool process_silence_block (uint32_t frames, float sample_rate);
 
-/** Configure rate/block and process planar audio for a bridged path. */
+/** Configure rate/block and process planar audio (+ optional MIDI) for a bridged path. */
 bool process_audio (const std::string& plugin_dll_path,
 		    float* const* inputs, float* const* outputs,
 		    uint32_t n_inputs, uint32_t n_outputs,
 		    uint32_t frames, float sample_rate,
-		    uint32_t wait_ms = 50);
+		    uint32_t wait_ms = 50,
+		    const MidiEventWire* midi = nullptr,
+		    uint32_t midi_count = 0);
 
 bool set_sample_rate (const std::string& plugin_dll_path, float sample_rate);
 bool set_block_size (const std::string& plugin_dll_path, uint32_t frames);
