@@ -54,6 +54,7 @@ struct SharedHeader {
 	float sample_rate;
 	uint32_t midi_count;
 	uint32_t chunk_bytes;
+	uint32_t n_params; /* filled by Open */
 	wchar_t plugin_path[kMaxPathChars];
 	char error[128];
 };

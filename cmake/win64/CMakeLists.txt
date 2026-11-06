@@ -124,6 +124,7 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     "${AIRDOUR_SRC_ROOT}/win_ardour/engine_vst3.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/engine_vst2.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/vst2_bridge_client.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/vst2_bridge_processor.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/wave_strip.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/cairo_wave_blit.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/transport_bar.cc"

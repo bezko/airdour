@@ -25,6 +25,23 @@ bool ensure_bridge_running (const std::string& plugin_dll_path);
  */
 bool process_silence_block (uint32_t frames, float sample_rate);
 
+/** Configure rate/block and process planar audio for a bridged path. */
+bool process_audio (const std::string& plugin_dll_path,
+		    float* const* inputs, float* const* outputs,
+		    uint32_t n_inputs, uint32_t n_outputs,
+		    uint32_t frames, float sample_rate,
+		    uint32_t wait_ms = 50);
+
+bool set_sample_rate (const std::string& plugin_dll_path, float sample_rate);
+bool set_block_size (const std::string& plugin_dll_path, uint32_t frames);
+bool get_io_counts (const std::string& plugin_dll_path, uint32_t* n_in, uint32_t* n_out,
+		    uint32_t* n_params);
+bool get_parameter (const std::string& plugin_dll_path, uint32_t index, float* out_norm);
+bool set_parameter (const std::string& plugin_dll_path, uint32_t index, float norm);
+
+/** Close bridge for one plugin path (or all if path empty). */
+void shutdown_plugin (const std::string& plugin_dll_path);
+
 /** Close all bridge processes started by this client. */
 void shutdown_all ();
 
