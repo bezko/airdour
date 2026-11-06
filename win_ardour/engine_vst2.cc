@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -66,6 +67,31 @@ copy_name_local (wchar_t* dest, size_t dest_chars, const std::string& utf8)
 	} else {
 		wcsncpy_s (dest, dest_chars, w.c_str (), _TRUNCATE);
 	}
+}
+
+/** When set, empty catalogs / missing fixtures fail instead of soft-PASS. */
+bool
+require_plugins_strict ()
+{
+	const char* e = std::getenv ("AIRDOUR_REQUIRE_PLUGINS");
+	return e && e[0] && (e[0] == '1' || e[0] == 'y' || e[0] == 'Y');
+}
+
+bool
+soft_pass_or_require (const char* soft_msg)
+{
+	if (require_plugins_strict ()) {
+		std::fprintf (stderr,
+			      "airdour_win_shell: FAILED (AIRDOUR_REQUIRE_PLUGINS=1; %s)\n",
+			      soft_msg ? soft_msg : "plugin required");
+		std::fflush (stderr);
+		return false;
+	}
+	if (soft_msg && soft_msg[0]) {
+		std::fprintf (stderr, "%s\n", soft_msg);
+		std::fflush (stderr);
+	}
+	return true;
 }
 
 #if defined(WINDOWS_VST_SUPPORT)
@@ -478,7 +504,7 @@ EngineHost::attach_vst2_instrument_by_index (int index)
 		return false;
 	}
 	if (_snap.vst2_scan_count <= 0) {
-		return true; /* soft PASS */
+		return soft_pass_or_require ("airdour_win_shell: VST2 instrument — empty catalog (soft PASS)");
 	}
 	ARDOUR::PluginInfoPtr info = vst2_info_at (index);
 	if (!info) {
@@ -603,14 +629,10 @@ EngineHost::smoke_vst2 ()
 		return false;
 	}
 #if !defined(WINDOWS_VST_SUPPORT)
-	std::fprintf (stderr, "airdour_win_shell: smoke-vst2 ok (not compiled — soft PASS)\n");
-	std::fflush (stderr);
-	return true;
+	return soft_pass_or_require ("smoke-vst2 ok (not compiled — soft PASS)");
 #else
 	if (_snap.vst2_scan_count <= 0) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-vst2 ok (scan-only; set VST_PATH)\n");
-		std::fflush (stderr);
-		return true;
+		return soft_pass_or_require ("airdour_win_shell: smoke-vst2 ok (scan-only; set VST_PATH)");
 	}
 	/* Prefer first non-instrument. */
 	bool inserted = false;
@@ -622,9 +644,7 @@ EngineHost::smoke_vst2 ()
 		}
 	}
 	if (!inserted) {
-		std::fprintf (stderr, "airdour_win_shell: smoke-vst2 ok (no audio FX in catalog)\n");
-		std::fflush (stderr);
-		return true;
+		return soft_pass_or_require ("airdour_win_shell: smoke-vst2 ok (no audio FX in catalog)");
 	}
 	(void)unload_vst2 ();
 	std::fprintf (stderr, "airdour_win_shell: smoke-vst2 ok\n");
@@ -656,18 +676,27 @@ EngineHost::smoke_vst2_bridge ()
 	/* Validates bridge client discovery + optional fixture load. */
 	std::string bridge = airdour::vst2_bridge::bridge_exe_path ();
 	if (bridge.empty ()) {
-		std::fprintf (stderr,
-			      "airdour_win_shell: smoke-vst2-bridge ok (bridge exe not staged — soft PASS)\n");
-		std::fflush (stderr);
-		return true;
+		return soft_pass_or_require (
+			"airdour_win_shell: smoke-vst2-bridge ok (bridge exe not staged — soft PASS)");
 	}
 	const char* fixture = std::getenv ("AIRDOUR_SMOKE_VST2_32");
 	if (!fixture || !*fixture) {
-		std::fprintf (stderr,
-			      "airdour_win_shell: smoke-vst2-bridge ok (exe=%s; set AIRDOUR_SMOKE_VST2_32)\n",
-			      bridge.c_str ());
-		std::fflush (stderr);
-		return true;
+		char buf[512];
+		std::snprintf (buf, sizeof (buf),
+			       "airdour_win_shell: smoke-vst2-bridge ok (exe=%s; set AIRDOUR_SMOKE_VST2_32)",
+			       bridge.c_str ());
+		return soft_pass_or_require (buf);
+	}
+	{
+		std::wstring wfix = utf8_to_wide_local (fixture);
+		DWORD attr = GetFileAttributesW (wfix.c_str ());
+		if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+			std::fprintf (stderr,
+				      "airdour_win_shell: smoke-vst2-bridge FAILED (fixture missing: %s)\n",
+				      fixture);
+			std::fflush (stderr);
+			return false;
+		}
 	}
 	if (!airdour::vst2_bridge::dll_is_i386 (fixture)) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-vst2-bridge FAILED (not i386)\n");

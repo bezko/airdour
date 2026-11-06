@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -33,6 +34,30 @@
 #include "pbd/mutex.h"
 
 namespace {
+
+bool
+require_plugins_strict ()
+{
+	const char* e = std::getenv ("AIRDOUR_REQUIRE_PLUGINS");
+	return e && e[0] && (e[0] == '1' || e[0] == 'y' || e[0] == 'Y');
+}
+
+bool
+soft_pass_or_require (const char* soft_msg)
+{
+	if (require_plugins_strict ()) {
+		std::fprintf (stderr,
+			      "airdour_win_shell: FAILED (AIRDOUR_REQUIRE_PLUGINS=1; %s)\n",
+			      soft_msg ? soft_msg : "plugin required");
+		std::fflush (stderr);
+		return false;
+	}
+	if (soft_msg && soft_msg[0]) {
+		std::fprintf (stderr, "%s\n", soft_msg);
+		std::fflush (stderr);
+	}
+	return true;
+}
 
 std::wstring
 utf8_to_wide_local (const std::string& s)
@@ -246,7 +271,8 @@ EngineHost::attach_vst3_instrument_by_index (int index)
 		}
 		if (_snap.vst3_scan_count <= 0) {
 			_snap.detail = L"VST3 instrument — empty catalog";
-			return true; /* soft PASS */
+			return soft_pass_or_require (
+				"airdour_win_shell: VST3 instrument — empty catalog (soft PASS)");
 		}
 		if (index < 0 || index >= _snap.vst3_scan_count) {
 			_snap.detail = L"VST3 instrument index out of range";
@@ -285,7 +311,8 @@ EngineHost::attach_vst3_instrument_by_index (int index)
 			}
 			if (!info) {
 				_snap.detail = L"VST3 instrument — none in catalog";
-				return true; /* soft PASS */
+				return soft_pass_or_require (
+					"airdour_win_shell: VST3 instrument — none in catalog (soft PASS)");
 			}
 		}
 
@@ -354,18 +381,18 @@ EngineHost::smoke_vst3_instrument ()
 		return false;
 	}
 	if (_snap.vst3_scan_count <= 0) {
-		std::fprintf (stderr,
-			      "airdour_win_shell: smoke-vst3-instrument ok (scan-only; set VST3_PATH)\n");
-		std::fflush (stderr);
-		return true;
+		return soft_pass_or_require (
+			"airdour_win_shell: smoke-vst3-instrument ok (scan-only; set VST3_PATH)");
 	}
 	if (!attach_vst3_instrument_by_index (0)) {
-		/* Soft PASS when catalog has only FX. */
-		if (_snap.detail.find (L"none in catalog") != std::wstring::npos || _snap.detail.find (L"empty catalog") != std::wstring::npos) {
-			std::fprintf (stderr,
-				      "airdour_win_shell: smoke-vst3-instrument ok (no instruments)\n");
-			std::fflush (stderr);
-			return true;
+		/* Soft PASS when catalog has only FX (unless REQUIRE_PLUGINS). */
+		const bool none_in_cat =
+			_snap.detail.find (L"none in catalog") != std::wstring::npos;
+		const bool empty_cat =
+			_snap.detail.find (L"empty catalog") != std::wstring::npos;
+		if (none_in_cat || empty_cat) {
+			return soft_pass_or_require (
+				"airdour_win_shell: smoke-vst3-instrument ok (no instruments)");
 		}
 		std::fprintf (stderr, "airdour_win_shell: smoke-vst3-instrument FAILED\n");
 		std::fflush (stderr);

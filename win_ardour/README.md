@@ -108,6 +108,8 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 | `AIRDOUR_WIN_SHELL_DEMO_TONES=1` | Opt-in sine regions at Session create (prefer Import) |
 | `ARDOUR_PANNER_PATH` | Extra search path if panners are not under `%ARDOUR_DLL_PATH%\panners` |
 | `VST3_PATH` / `AIRDOUR_SMOKE_VST3` | Extra VST3 roots / preferred plugin name for `--smoke-vst3` |
+| `AIRDOUR_REQUIRE_PLUGINS=1` | Fail plugin smokes instead of soft-PASS when catalogs/fixtures are empty |
+| `AIRDOUR_SMOKE_VST2_32` | Path to an i386 VST2 DLL for `--smoke-vst2-bridge` (missing path = hard FAIL) |
 
 **MIDI / audible path:**
 - **Soft synth:** ACE Reasonable Synth LV2 on MIDI 1 → master → Dummy/WASAPI (no MIDI HW needed). Helper: `win_ardour\ensure-reasonable-synth.bat`.
