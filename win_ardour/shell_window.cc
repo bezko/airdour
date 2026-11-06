@@ -2909,7 +2909,7 @@ ShellWindow::sync_mixer_fx_from_engine ()
 			}
 			_mixers[i].set_fx_label (label);
 			_mixers[i].set_fx_bypassed (slot.bypassed);
-			const int n = (std::min) (slot.param_count, 3);
+			const int n = slot.param_count > 3 ? 3 : slot.param_count;
 			_mixers[i].set_fx_param_count (n);
 			_mixers[i].set_fx_param (slot.param_count > 0 ? slot.param_norm[0] : 0.5f);
 			_mixers[i].set_fx_param2 (slot.param_count > 1 ? slot.param_norm[1] : 0.5f);
@@ -2926,9 +2926,8 @@ ShellWindow::sync_mixer_fx_from_engine ()
 			_mixers[i].set_fx_label (_engine_snap.vst3_name);
 			_mixers[i].set_fx_bypassed (_engine_snap.vst3_bypassed);
 			_mixers[i].set_fx_can_unload (true);
-			const int n = (_engine_snap.vst3_param_count > 0)
-					      ? (std::min) (_engine_snap.vst3_param_count, 3)
-					      : 0;
+			const int n = _engine_snap.vst3_param_count > 3 ? 3
+									: (_engine_snap.vst3_param_count > 0 ? _engine_snap.vst3_param_count : 0);
 			_mixers[i].set_fx_param_count (n);
 			_mixers[i].set_fx_param (
 			    (_engine_snap.vst3_param_count > 0) ? _engine_snap.vst3_param_norm[0] : 0.5f);
@@ -2946,9 +2945,8 @@ ShellWindow::sync_mixer_fx_from_engine ()
 			_mixers[i].set_fx_label (label);
 			_mixers[i].set_fx_bypassed (_engine_snap.vst2_bypassed);
 			_mixers[i].set_fx_can_unload (true);
-			const int n = (_engine_snap.vst2_param_count > 0)
-					      ? (std::min) (_engine_snap.vst2_param_count, 3)
-					      : 0;
+			const int n = _engine_snap.vst2_param_count > 3 ? 3
+									: (_engine_snap.vst2_param_count > 0 ? _engine_snap.vst2_param_count : 0);
 			_mixers[i].set_fx_param_count (n);
 			_mixers[i].set_fx_param (
 				(_engine_snap.vst2_param_count > 0) ? _engine_snap.vst2_param_norm[0] : 0.5f);
