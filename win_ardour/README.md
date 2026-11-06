@@ -10,7 +10,7 @@
 - **Mixer** — strips + Monitor + History; faders, **M/S**, rec-arm, PeakMeter
 - **Help** — `?` / F1 / **?** button toggles shortcuts overlay (bindings the shell supports)
 - Playhead follows Session transport when attached, else engine `processed_samples`
-- Optional **engine attach** (Dummy or WASAPI shared)
+- Optional **engine attach** (Dummy or WASAPI shared / optional exclusive)
 - `--timeout N` for unattended smoke
 
 ## Build
@@ -110,9 +110,9 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 | `VST3_PATH` / `AIRDOUR_SMOKE_VST3` | Extra VST3 roots / preferred plugin name for `--smoke-vst3` |
 
 **MIDI / audible path:**
-- **Soft synth:** ACE Reasonable Synth LV2 on MIDI 1 → master → Dummy/WASAPI shared (no MIDI HW needed). Helper: `win_ardour\ensure-reasonable-synth.bat`.
+- **Soft synth:** ACE Reasonable Synth LV2 on MIDI 1 → master → Dummy/WASAPI (no MIDI HW needed). Helper: `win_ardour\ensure-reasonable-synth.bat`.
 - **Multi-MIDI:** `--smoke-midi-multi` ensures ≥2 MIDI tracks; click a MIDI mixer strip to make it active; piano gutter shows C octave labels; viewport scrolls via Ctrl+Alt+wheel (full 0–127).
-- **VST3 / VST2 instruments:** `--smoke-vst3-instrument` / `--smoke-vst2-instrument` attach catalog instruments onto the active MIDI track (soft PASS when catalog empty). Prefs → plugin browser tabs (VST3 / VST2); Shift+click catalog row = instrument, click = insert FX / rack.
+- **VST3 / VST2 instruments:** `--smoke-vst3-instrument` / `--smoke-vst2-instrument` attach catalog instruments onto the active MIDI track (soft PASS when catalog empty). Prefs → plugin browser tabs (VST3 / VST2); Shift+click catalog row = instrument, click = insert FX / rack. **VST2-32 instruments** use the same OOP bridge with MIDI → `effProcessEvents`.
 - Live MIDI **capture** still needs a MIDI input (USB / loopMIDI). GS Wavetable is optional; soft-synth is the default hear-path.
 
 **Audio FX (insert rack, no GTK plugin UI):**
@@ -120,7 +120,7 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 - Mixer: click FX label to **bypass**/enable; drag param chips under it. Ctrl+click cycles rack slots (`name ·2/3`). No LV2/VST GUI.
 - **Insert rack:** `--smoke-fx-chain` exercises per-track + master rack slots (`insert_rack_slot` / `insert_master_rack_slot`). VST2/VST3 inserts target the rack’s track index.
 - **VST3** DSP scan/load via libardour (`VST3_SUPPORT`); `--smoke-vst3` inserts on Audio 2. Catalog/params raised to 64 / 12.
-- **VST2-64** (`WINDOWS_VST_SUPPORT`): `--smoke-vst2` scan/insert. **VST2-32:** out-of-process `ardour-vst2-bridge-x86.exe` beside the shell (`cmake -DAIRDOUR_BUILD_VST2_BRIDGE_X86=ON -A Win32`). Inserting a 32-bit FX adds a session `Vst2BridgeProcessor` on Audio 2 that processes audio over SHM each block (dry on IPC timeout). `--smoke-vst2-bridge` opens + processes a silent block when `AIRDOUR_SMOKE_VST2_32` points at an i386 DLL (soft PASS if bridge/fixture absent). Portable zip stages the bridge exe when present.
+- **VST2-64** (`WINDOWS_VST_SUPPORT`): `--smoke-vst2` scan/insert. **VST2-32:** out-of-process `ardour-vst2-bridge-x86.exe` beside the shell (`cmake -DAIRDOUR_BUILD_VST2_BRIDGE_X86=ON -A Win32`). Inserting a 32-bit FX/instrument adds a session `Vst2BridgeProcessor` that processes audio (+ MIDI for instruments) over SHM each block (dry on IPC timeout). `--smoke-vst2-bridge` opens + processes silence and a MIDI note when `AIRDOUR_SMOKE_VST2_32` points at an i386 DLL (soft PASS if bridge/fixture absent). Portable zip stages the bridge exe when present.
 
 **MSVC notes:**
 - `process_lock().trylock()` while already held deadlocks (SRWLOCK). `Delivery::configure_io` and related asserts are `#ifndef PLATFORM_WINDOWS`.
@@ -146,4 +146,4 @@ Unzip `dist\airdour-*-win64-shell.zip` anywhere and run `run-airdour.bat`. See `
 
 ## Constraints
 
-WASAPI **shared** only. No ASIO, no GTK2, no exclusive mode.
+WASAPI **shared** by default; **exclusive** optional (Prefs Shared/Exclusive, `AIRDOUR_WASAPI_EXCLUSIVE=1`, soft shared fallback). No ASIO, no GTK2.

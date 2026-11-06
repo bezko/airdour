@@ -823,6 +823,7 @@ EngineHost::smoke_prefs ()
 	try {
 		const std::string be0 = _pref_backend;
 		const uint32_t period0 = _pref_period_frames;
+		const bool excl0 = _pref_wasapi_exclusive;
 		const bool snap0 = _pref_snap_default;
 		const bool click0 = _pref_click_default;
 		const std::string in0 = _pref_input_device;
@@ -830,6 +831,7 @@ EngineHost::smoke_prefs ()
 
 		set_pref_backend ("WASAPI");
 		set_pref_period_frames (512);
+		set_pref_wasapi_exclusive (true);
 		set_pref_snap_default (true);
 		set_pref_input_device ("smoke-in");
 		set_pref_output_device ("smoke-out");
@@ -847,6 +849,7 @@ EngineHost::smoke_prefs ()
 		/* Clobber in-memory prefs only (do not touch Config) then reload from disk. */
 		_pref_backend = "Dummy";
 		_pref_period_frames = 0;
+		_pref_wasapi_exclusive = false;
 		_pref_snap_default = false;
 		_pref_click_default = true;
 		_pref_input_device.clear ();
@@ -870,9 +873,15 @@ EngineHost::smoke_prefs ()
 			std::fflush (stderr);
 			return false;
 		}
+		if (!_pref_wasapi_exclusive) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-prefs FAILED (exclusive)\n");
+			std::fflush (stderr);
+			return false;
+		}
 
 		set_pref_backend (be0);
 		set_pref_period_frames (period0);
+		set_pref_wasapi_exclusive (excl0);
 		set_pref_snap_default (snap0);
 		set_pref_click_default (click0);
 		set_pref_input_device (in0);
@@ -883,7 +892,7 @@ EngineHost::smoke_prefs ()
 			return false;
 		}
 
-		std::fprintf (stderr, "airdour_win_shell: smoke-prefs ok (WASAPI/512/snap/click/device round-trip)\n");
+		std::fprintf (stderr, "airdour_win_shell: smoke-prefs ok (WASAPI/512/exclusive/device round-trip)\n");
 		std::fflush (stderr);
 		_snap.detail = L"smoke-prefs ok";
 		return true;
@@ -1002,7 +1011,8 @@ EngineHost::set_audio_devices (const std::string& in, const std::string& out)
 		return false;
 	}
 
-	bool applied = true;	if (sep) {
+	bool applied = true;
+	if (sep) {
 		if (!in.empty () && be->set_input_device_name (in) != 0) {
 			applied = false;
 		}
@@ -1021,11 +1031,15 @@ EngineHost::set_audio_devices (const std::string& in, const std::string& out)
 		              in.c_str (), out.c_str ());
 		std::fflush (stderr);
 		if (was_running) {
+			be->set_exclusive_mode (_pref_wasapi_exclusive);
 			_impl->engine->start ();
 		}
 		_snap.detail = L"audio devices: backend rejected the name";
 		return false;
 	}
+
+	/* Apply exclusive/shared preference on every engine reopen. */
+	be->set_exclusive_mode (_pref_wasapi_exclusive);
 
 	if (was_running && _impl->engine->start () != 0) {
 		_started = false;
@@ -1117,10 +1131,17 @@ EngineHost::restart_audio ()
 	if (!want.empty () && _stricmp (want.c_str (), _impl->engine->current_backend_name ().c_str ()) != 0) {
 		_snap.detail = L"backend change applies on relaunch — restarting current backend";
 	}
+	/* Exclusive/shared is applied inside set_audio_devices on reopen. */
 	if (!set_audio_devices (_pref_input_device, _pref_output_device)) {
 		return false;
 	}
-	_snap.detail = L"audio restarted";
+	if (_pref_wasapi_exclusive && _snap.wasapi_exclusive_active) {
+		_snap.detail = L"audio restarted (exclusive)";
+	} else if (_pref_wasapi_exclusive) {
+		_snap.detail = L"audio restarted (exclusive fallback)";
+	} else {
+		_snap.detail = L"audio restarted (shared)";
+	}
 	return true;
 }
 
