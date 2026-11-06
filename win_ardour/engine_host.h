@@ -336,8 +336,10 @@ struct EngineSnapshot {
 	/* Preferences (RC Config + WinShellPrefs instant.xml). */
 	std::wstring pref_backend = L"Dummy"; /* "Dummy" or "WASAPI" */
 	uint32_t     pref_period_frames = 0; /* 0 = Auto */
-	bool         pref_wasapi_exclusive = false; /* shared fallback if device refuses */
-	bool         wasapi_exclusive_active = false; /* live stream is exclusive */
+
+	bool pref_wasapi_exclusive = false;
+	bool wasapi_exclusive_active = false;
+
 	bool         pref_snap_default = false;
 	bool         pref_click_default = true; /* mirrors Config clicking when saved */
 	static constexpr int kPrefsHintLen = 96;
@@ -2548,7 +2550,9 @@ private:
 	uint32_t    _period_frames; /* 0 = Auto */
 	std::string _pref_backend; /* Dummy / WASAPI — next start if CLI omits --backend */
 	uint32_t    _pref_period_frames;
-	bool        _pref_wasapi_exclusive;
+
+	bool _pref_wasapi_exclusive;
+
 	bool        _pref_snap_default;
 	bool        _pref_click_default;
 	std::string _pref_input_device; /* persisted WinShellPrefs device names */

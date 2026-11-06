@@ -621,8 +621,8 @@ PrefsPanel::draw (UiDraw& ui) const
 	draw_btn (_per_512, L"512", _pref_period == 512);
 
 	_snwprintf_s (line, _TRUNCATE,
-	              L"WASAPI mode  (now: %s)",
-	              _wasapi_exclusive_active ? L"exclusive" : L"shared");
+		      L"WASAPI mode  (now: %s)",
+		      _wasapi_exclusive_active ? L"exclusive" : L"shared");
 	draw_label (_mode_shared.top - 8.f * s, line);
 	draw_btn (_mode_shared, L"Shared", !_pref_wasapi_exclusive);
 	draw_btn (_mode_exclusive, L"Exclusive", _pref_wasapi_exclusive);
@@ -647,9 +647,10 @@ PrefsPanel::draw (UiDraw& ui) const
 
 	float ms_in = (_cur_sr > 0) ? (1000.f * (float)_sys_in / (float)_cur_sr) : 0.f;
 	float ms_out = (_cur_sr > 0) ? (1000.f * (float)_sys_out / (float)_cur_sr) : 0.f;
-	_snwprintf_s (line, _TRUNCATE,
-	              L"Latency (measured)  out %.2f ms · in %.2f ms  (%u / %u fr)",
-	              ms_out, ms_in, (unsigned)_sys_out, (unsigned)_sys_in);
+	_snwprintf_s (
+		line, _TRUNCATE,
+		L"Latency (measured)  out %.2f ms · in %.2f ms  (%u / %u fr)",
+		ms_out, ms_in, (unsigned)_sys_out, (unsigned)_sys_in);
 	ui.text_vcenter (line, ui::TextRole::Caption, ui::ColorToken::TextSecondary,
 	                 D2D1::RectF (_card.left + inset, _in_prev.bottom + 8.f * s,
 	                              _card.right - inset, _in_prev.bottom + 24.f * s));

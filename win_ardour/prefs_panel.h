@@ -148,8 +148,10 @@ private:
 	uint32_t    _cur_period;
 	uint32_t    _cur_sr;
 	uint32_t    _pref_period;
-	bool        _pref_wasapi_exclusive;
-	bool        _wasapi_exclusive_active;
+
+	bool _pref_wasapi_exclusive;
+	bool _wasapi_exclusive_active;
+
 	uint32_t    _sys_in;
 	uint32_t    _sys_out;
 	wchar_t     _cur_backend[32];
