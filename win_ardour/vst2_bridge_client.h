@@ -19,6 +19,12 @@ bool dll_is_i386 (const std::string& path);
 /** Launch (or reuse) a bridge process for this plugin path. */
 bool ensure_bridge_running (const std::string& plugin_dll_path);
 
+/**
+ * Ask the first live bridge to process a silent block (validates IPC Process op).
+ * frames clamped to protocol kMaxBlock.
+ */
+bool process_silence_block (uint32_t frames, float sample_rate);
+
 /** Close all bridge processes started by this client. */
 void shutdown_all ();
 

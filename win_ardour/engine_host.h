@@ -294,7 +294,8 @@ struct EngineSnapshot {
 	int midi_track_count = 0;           /* 0..kMeters MIDI tracks */
 	static constexpr int kTrackNameLen = 32;
 	wchar_t      track_name[kMeters][kTrackNameLen] = {}; /* Session Route names */
-	wchar_t      midi_track_name[kTrackNameLen] = {};
+	wchar_t midi_track_name[kTrackNameLen] = {};          /* active MIDI track name */
+	wchar_t midi_track_names[kMeters][kTrackNameLen] = {}; /* all MIDI strip labels */
 	uint32_t     track_color[kMeters] = {}; /* PresentationInfo RGBA (RRGGBBAA); 0=unset */
 	float        track_gain[kMeters] = {}; /* Route gain_control mirror after reorder */
 	bool         track_in_group[kMeters] = {}; /* member of Session RouteGroup */

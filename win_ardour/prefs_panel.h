@@ -36,6 +36,10 @@ enum class PrefsHit {
 	Vst3Rescan,
 	Vst3Bypass,
 	Vst3Unload,
+	PluginTabVst3,
+	PluginTabVst2,
+	Vst2Rescan,
+	InsertAceReverb,
 	OutDevicePrev,
 	OutDeviceNext,
 	InDevicePrev,
@@ -72,10 +76,16 @@ public:
 	void set_vst3_hint (const wchar_t* text);
 	/** scan_count = full list size; names[0..name_count) shown under hint. */
 	void set_vst3_catalog (int scan_count, const wchar_t names[][kCatalogNameLen], int name_count);
+	void set_vst2_catalog (int scan_count, const wchar_t names[][kCatalogNameLen], int name_count);
+	/** 0 = VST3 browser tab, 1 = VST2 browser tab. */
+	void set_plugin_tab (int tab_0_vst3_1_vst2);
+	int plugin_tab () const { return _plugin_tab; }
 	/** Live insert name for accent highlight (empty → no highlight). */
 	void set_vst3_loaded_name (const wchar_t* name);
+	void set_vst2_loaded_name (const wchar_t* name);
 	void set_vst3_bypassed (bool on) { _vst3_bypassed = on; }
 	void set_vst3_ok (bool on) { _vst3_ok = on; }
+	void set_vst2_ok (bool on) { _vst2_ok = on; }
 	void set_vst3_param_count (int n);
 	void set_status (const wchar_t* text);
 
@@ -109,6 +119,10 @@ private:
 	D2D1_RECT_F _vst3_bypass_btn;
 	D2D1_RECT_F _vst3_param_reset_btn[EngineSnapshot::kMaxVst3Params];
 	D2D1_RECT_F _vst3_unload_btn;
+	D2D1_RECT_F _tab_vst3_btn;
+	D2D1_RECT_F _tab_vst2_btn;
+	D2D1_RECT_F _vst2_rescan_btn;
+	D2D1_RECT_F _ace_reverb_btn;
 	D2D1_RECT_F _vst3_catalog_row[kMaxCatalog];
 	D2D1_RECT_F _out_prev;
 	D2D1_RECT_F _out_next;
@@ -120,8 +134,10 @@ private:
 	bool        _click_on;
 	bool        _snap_on;
 	bool        _vst3_ok;
+	bool _vst2_ok;
 	int         _vst3_param_count;
 	bool        _vst3_bypassed;
+	int _plugin_tab; /* 0=VST3 1=VST2 */
 	bool        _separate_io;
 	uint32_t    _cur_period;
 	uint32_t    _cur_sr;
@@ -139,5 +155,9 @@ private:
 	int         _vst3_catalog_count;
 	wchar_t     _vst3_catalog[kMaxCatalog][kCatalogNameLen];
 	wchar_t     _vst3_loaded_name[kCatalogNameLen];
+	int _vst2_scan_count;
+	int _vst2_catalog_count;
+	wchar_t _vst2_catalog[kMaxCatalog][kCatalogNameLen];
+	wchar_t _vst2_loaded_name[kCatalogNameLen];
 	wchar_t     _status[80];
 };
