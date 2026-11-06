@@ -111,12 +111,16 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 
 **MIDI / audible path:**
 - **Soft synth:** ACE Reasonable Synth LV2 on MIDI 1 → master → Dummy/WASAPI shared (no MIDI HW needed). Helper: `win_ardour\ensure-reasonable-synth.bat`.
+- **Multi-MIDI:** `--smoke-midi-multi` ensures ≥2 MIDI tracks; piano-roll viewport scrolls via Ctrl+Alt+wheel (full 0–127).
+- **VST3 / VST2 instruments:** `--smoke-vst3-instrument` / `--smoke-vst2-instrument` attach catalog instruments onto the active MIDI track (soft PASS when catalog empty).
 - Live MIDI **capture** still needs a MIDI input (USB / loopMIDI). GS Wavetable is optional; soft-synth is the default hear-path.
 
-**Audio FX (v0, no GTK plugin UI):**
+**Audio FX (insert rack, no GTK plugin UI):**
 - **ACE Reverb** LV2 inserted pre-fader on Audio 1 at Session create (and via Mixer **+ FX** / `--smoke-plugin`). Helper: `win_ardour\ensure-a-reverb.bat`.
-- Mixer: click FX label to **bypass**/enable; drag the **Blend** bar under it (wet mix). No LV2 GUI.
-- **VST3** DSP scan/load via libardour (`VST3_SUPPORT`); `--smoke-vst3` inserts on Audio 2. No native VST3 editor (GTK HWND host is out of scope).
+- Mixer: click FX label to **bypass**/enable; drag param chips under it. No LV2/VST GUI.
+- **Insert rack:** `--smoke-fx-chain` exercises per-track + master rack slots (`insert_rack_slot` / `insert_master_rack_slot`).
+- **VST3** DSP scan/load via libardour (`VST3_SUPPORT`); `--smoke-vst3` inserts on Audio 2. Catalog/params raised to 64 / 12.
+- **VST2-64** (`WINDOWS_VST_SUPPORT`): `--smoke-vst2` scan/insert. **VST2-32:** out-of-process `ardour-vst2-bridge-x86.exe` (`--smoke-vst2-bridge`, set `AIRDOUR_SMOKE_VST2_32`).
 
 **MSVC notes:**
 - `process_lock().trylock()` while already held deadlocks (SRWLOCK). `Delivery::configure_io` and related asserts are `#ifndef PLATFORM_WINDOWS`.

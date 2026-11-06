@@ -1266,15 +1266,23 @@ WasapiBackend::get_latency_range (PortHandle port, bool for_playback)
 
 	r = p->latency_range (for_playback);
 	if (p->is_physical () && p->is_terminal ()) {
-		/* Shared-mode device latency is at least one period until
-		 * WasapiIO exposes measured capture/playback latencies. */
+		/* Prefer WasapiIO GetStreamLatency; fall back to one period. */
+		uint32_t measured = 0;
 		if (p->is_input () && for_playback) {
-			r.min += _buffer_size;
-			r.max += _buffer_size;
+			measured = _io.measured_capture_latency_frames ();
+			if (measured == 0) {
+				measured = _buffer_size;
+			}
+			r.min += measured;
+			r.max += measured;
 		}
 		if (p->is_output () && !for_playback) {
-			r.min += _buffer_size;
-			r.max += _buffer_size;
+			measured = _io.measured_playback_latency_frames ();
+			if (measured == 0) {
+				measured = _buffer_size;
+			}
+			r.min += measured;
+			r.max += measured;
 		}
 	}
 	return r;

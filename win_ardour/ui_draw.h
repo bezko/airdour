@@ -53,6 +53,8 @@ public:
 	void card (const D2D1_RECT_F& r);
 	void shadow (const D2D1_RECT_F& r, float radius_dip = 10.f);
 	void divider (const D2D1_RECT_F& r);
+	/** Soft pulse overlay (transport / insert highlight). pulse 0..1. */
+	void pulse_glow (const D2D1_RECT_F& r, float radius_dip, ui::ColorToken c, float pulse_0_1);
 
 	/* Text */
 	void text (const wchar_t* s, ui::TextRole role, ui::ColorToken c,

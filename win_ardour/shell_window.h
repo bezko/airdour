@@ -121,9 +121,13 @@ private:
 		EditorScroll /* drag editor lane scrollbar thumb */
 	};
 
-	static constexpr uint8_t kMidiPitchLo = 48; /* C3 */
-	static constexpr uint8_t kMidiPitchHi = 71; /* B4 */
+	/* Defaults; live viewport is EngineSnapshot::midi_pitch_lo/hi (scrollable). */
+	static constexpr uint8_t kMidiPitchLo = 48; /* C3 default */
+	static constexpr uint8_t kMidiPitchHi = 71; /* B4 default */
 	static constexpr int     kMidiPitchRows = (int)(kMidiPitchHi - kMidiPitchLo + 1);
+	uint8_t midi_view_lo () const;
+	uint8_t midi_view_hi () const;
+	int     midi_view_rows () const;
 
 	enum class SmokeRecordPhase {
 		Off,

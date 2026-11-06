@@ -64,6 +64,15 @@ public:
 	uint32_t default_period_frames () const { return _default_period_frames; }
 	uint32_t min_period_frames () const { return _min_period_frames; }
 
+	/**
+	 * Measured stream latencies from IAudioClient::GetStreamLatency (frames),
+	 * captured at open. Zero when unavailable / not open.
+	 */
+	uint32_t measured_playback_latency_frames () const { return _measured_playback_latency; }
+	uint32_t measured_capture_latency_frames () const { return _measured_capture_latency; }
+	/** True when capture was skipped because capture mix rate ≠ render mix rate. */
+	bool capture_rate_mismatch () const { return _capture_rate_mismatch; }
+
 	/** Laptop-oriented period list derived from the last open/enum quantum. */
 	void recommended_buffer_sizes (std::vector<uint32_t>& sizes) const;
 
@@ -92,6 +101,9 @@ private:
 	uint32_t _playback_channels;
 	uint32_t _mix_bits;
 	bool     _mix_is_float;
+	uint32_t _measured_playback_latency;
+	uint32_t _measured_capture_latency;
+	bool     _capture_rate_mismatch;
 
 	mutable std::vector<DeviceInfo> _cached_devices;
 
