@@ -270,16 +270,35 @@ def set_version (from_file = False):
     #
     # rev is now of the form MAJOR.MINOR[-rcX]-rev-commit
     # or, if right at the same rev as a release, MAJOR.MINOR[-rcX]
+    # Airdour tags are semver with a leading v: v0.1.0-test-143-g<hash>
     #
 
-    parts = sanitize(rev).split ('.', 1)
-    MAJOR = parts[0]
-    other = parts[1].split('-', 1)
-    MINOR = other[0]
-    if len(other) > 1:
-        MICRO = other[1].rsplit('-',1)[0].replace('-','.')
+    rev = sanitize(rev)
+    if rev.startswith('v'):
+        rev = rev[1:]
+    # git describe appends -g<hash> after the nearest tag.
+    rev_body = re.sub(r'-g[0-9a-fA-F]+$', '', rev)
+
+    semver = re.match(r'^(\d+)\.(\d+)\.(\d+)(?:-(.*))?$', rev_body)
+    if semver:
+        MAJOR = semver.group(1)
+        MINOR = semver.group(2)
+        MICRO = semver.group(3)
+        if semver.group(4):
+            MICRO = MICRO + '.' + semver.group(4).replace('-', '.')
     else:
-        MICRO = '0'
+        parts = rev_body.split('.', 1)
+        MAJOR = parts[0]
+        if len(parts) < 2:
+            MINOR = '0'
+            MICRO = '0'
+        else:
+            other = parts[1].split('-', 1)
+            MINOR = other[0]
+            if len(other) > 1:
+                MICRO = other[1].replace('-', '.')
+            else:
+                MICRO = '0'
 
     VERSION = MAJOR + '.' + MINOR + '.' + MICRO
     PROGRAM_VERSION = MAJOR
