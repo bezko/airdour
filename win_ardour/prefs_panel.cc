@@ -629,7 +629,7 @@ PrefsPanel::draw (UiDraw& ui) const
 	float ms_in = (_cur_sr > 0) ? (1000.f * (float)_sys_in / (float)_cur_sr) : 0.f;
 	float ms_out = (_cur_sr > 0) ? (1000.f * (float)_sys_out / (float)_cur_sr) : 0.f;
 	_snwprintf_s (line, _TRUNCATE,
-	              L"Systemic latency  out %.2f ms · in %.2f ms  (%u / %u fr)",
+	              L"Latency (measured)  out %.2f ms · in %.2f ms  (%u / %u fr)",
 	              ms_out, ms_in, (unsigned)_sys_out, (unsigned)_sys_in);
 	ui.text_vcenter (line, ui::TextRole::Caption, ui::ColorToken::TextSecondary,
 	                 D2D1::RectF (_card.left + inset, _in_prev.bottom + 8.f * s,

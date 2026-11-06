@@ -393,8 +393,9 @@ struct EngineSnapshot {
 	std::wstring pref_in_device; /* persisted WinShellPrefs input-device */
 	std::wstring pref_out_device;
 	bool         separate_io_devices = false; /* backend uses separate in/out names */
-	uint32_t     systemic_in_frames = 0; /* backend-reported, excludes one period */
-	uint32_t     systemic_out_frames = 0;
+	uint32_t systemic_in_frames = 0;          /* measured/systemic capture latency */
+	uint32_t systemic_out_frames = 0;         /* measured/systemic playback latency */
+	bool capture_rate_mismatch = false;       /* WASAPI skipped capture (mix rate ≠ render) */
 	/* Recent sessions (WinShellRecent instant.xml, beside WinShellPrefs). */
 	static constexpr int kMaxRecent = 8;
 	static constexpr int kRecentLabelLen = 48;

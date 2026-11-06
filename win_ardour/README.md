@@ -117,8 +117,8 @@ Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI
 
 **Audio FX (insert rack, no GTK plugin UI):**
 - **ACE Reverb** LV2 inserted pre-fader on Audio 1 at Session create (and via Mixer **+ FX** / Prefs ACE button / `--smoke-plugin`). Helper: `win_ardour\ensure-a-reverb.bat`.
-- Mixer: click FX label to **bypass**/enable; drag param chips under it. No LV2/VST GUI.
-- **Insert rack:** `--smoke-fx-chain` exercises per-track + master rack slots (`insert_rack_slot` / `insert_master_rack_slot`).
+- Mixer: click FX label to **bypass**/enable; drag param chips under it. Ctrl+click cycles rack slots (`name ·2/3`). No LV2/VST GUI.
+- **Insert rack:** `--smoke-fx-chain` exercises per-track + master rack slots (`insert_rack_slot` / `insert_master_rack_slot`). VST2/VST3 inserts target the rack’s track index.
 - **VST3** DSP scan/load via libardour (`VST3_SUPPORT`); `--smoke-vst3` inserts on Audio 2. Catalog/params raised to 64 / 12.
 - **VST2-64** (`WINDOWS_VST_SUPPORT`): `--smoke-vst2` scan/insert. **VST2-32:** out-of-process `ardour-vst2-bridge-x86.exe` beside the shell (`cmake -DAIRDOUR_BUILD_VST2_BRIDGE_X86=ON -A Win32`). Inserting a 32-bit FX adds a session `Vst2BridgeProcessor` on Audio 2 that processes audio over SHM each block (dry on IPC timeout). `--smoke-vst2-bridge` opens + processes a silent block when `AIRDOUR_SMOKE_VST2_32` points at an i386 DLL (soft PASS if bridge/fixture absent). Portable zip stages the bridge exe when present.
 

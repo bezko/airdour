@@ -262,6 +262,7 @@ EngineHost::unload_vst2 ()
 	_impl->vst2_fx.reset ();
 	_impl->vst2_bridge_fx.reset ();
 	_impl->vst2_bridge_path.clear ();
+	_impl->vst2_bridge_track = -1;
 	_impl->vst2_bridged_32 = false;
 	_impl->vst2_param_count = 0;
 	refresh_vst2_params_from_insert ();
@@ -336,6 +337,7 @@ EngineHost::insert_vst2_by_index (int index, int track)
 			bp->activate ();
 			_impl->vst2_bridge_fx = bp;
 			_impl->vst2_bridge_path = info->path;
+			_impl->vst2_bridge_track = ti;
 			_impl->vst2_bridged_32 = true;
 			refresh_vst2_params_from_insert ();
 			_snap.detail = L"VST2-32 bridged insert ok";

@@ -397,6 +397,12 @@ WasapiBackend::interleaved () const
 	return false;
 }
 
+bool
+WasapiBackend::capture_rate_mismatch () const
+{
+	return _io.capture_rate_mismatch ();
+}
+
 uint32_t
 WasapiBackend::systemic_input_latency () const
 {

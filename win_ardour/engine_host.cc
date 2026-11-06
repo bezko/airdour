@@ -635,6 +635,7 @@ EngineHost::refresh_prefs_snap ()
 			_snap.audio_out_name = utf8_to_wide (out.empty () ? "Default" : out);
 			_snap.systemic_in_frames = be->systemic_input_latency ();
 			_snap.systemic_out_frames = be->systemic_output_latency ();
+			_snap.capture_rate_mismatch = be->capture_rate_mismatch ();
 		}
 	}
 

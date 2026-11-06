@@ -153,6 +153,8 @@ public:
 	uint32_t    systemic_output_latency () const;
 	uint32_t    systemic_midi_input_latency (std::string const) const;
 	uint32_t    systemic_midi_output_latency (std::string const) const;
+	/** True when capture was disabled because mix rate ≠ render rate. */
+	bool capture_rate_mismatch () const override;
 
 	std::string control_app_name () const;
 	void        launch_control_app ();

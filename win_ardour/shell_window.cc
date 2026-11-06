@@ -225,6 +225,7 @@ ShellWindow::ShellWindow ()
 		_mixers[i].set_gain (0.85f - 0.04f * (float)i);
 		_mixers[i].set_midi_strip (false);
 		_group_pick[i] = false;
+		_fx_rack_slot[i] = 0;
 	}
 	for (int i = 0; i < kMixerStripsMax; ++i) {
 		if (i >= kTracksMax) {
@@ -2984,24 +2985,32 @@ ShellWindow::sync_mixer_fx_from_engine ()
 {
 	for (int i = 0; i < kTracks; ++i) {
 		_mixers[i].set_fx_can_unload (false);
-		/* Prefer Phase-2 insert rack when populated. */
-		if (i < EngineSnapshot::kMeters && _engine_snap.insert_slot_count[i] > 0 && _engine_snap.insert_slots[i][0].ok && _engine_snap.insert_slots[i][0].name[0] != L'\0') {
-			const EngineSnapshot::InsertSlotSnap& slot = _engine_snap.insert_slots[i][0];
-			wchar_t label[40];
-			if (_engine_snap.insert_slot_count[i] > 1) {
-				_snwprintf_s (label, _TRUNCATE, L"%s ·%d", slot.name,
-					      _engine_snap.insert_slot_count[i]);
-			} else {
-				wcsncpy_s (label, slot.name, _TRUNCATE);
+		/* Prefer Phase-2 insert rack when populated (Ctrl+click cycles slot). */
+		if (i < EngineSnapshot::kMeters && _engine_snap.insert_slot_count[i] > 0) {
+			int slot_i = _fx_rack_slot[i];
+			const int nslots = _engine_snap.insert_slot_count[i];
+			if (slot_i < 0 || slot_i >= nslots) {
+				slot_i = 0;
+				_fx_rack_slot[i] = 0;
 			}
-			_mixers[i].set_fx_label (label);
-			_mixers[i].set_fx_bypassed (slot.bypassed);
-			const int n = slot.param_count > 3 ? 3 : slot.param_count;
-			_mixers[i].set_fx_param_count (n);
-			_mixers[i].set_fx_param (slot.param_count > 0 ? slot.param_norm[0] : 0.5f);
-			_mixers[i].set_fx_param2 (slot.param_count > 1 ? slot.param_norm[1] : 0.5f);
-			_mixers[i].set_fx_param3 (slot.param_count > 2 ? slot.param_norm[2] : 0.5f);
-			continue;
+			const EngineSnapshot::InsertSlotSnap& slot = _engine_snap.insert_slots[i][slot_i];
+			if (slot.ok && slot.name[0] != L'\0') {
+				wchar_t label[40];
+				if (nslots > 1) {
+					_snwprintf_s (label, _TRUNCATE, L"%s ·%d/%d", slot.name,
+						      slot_i + 1, nslots);
+				} else {
+					wcsncpy_s (label, slot.name, _TRUNCATE);
+				}
+				_mixers[i].set_fx_label (label);
+				_mixers[i].set_fx_bypassed (slot.bypassed);
+				const int n = slot.param_count > 3 ? 3 : slot.param_count;
+				_mixers[i].set_fx_param_count (n);
+				_mixers[i].set_fx_param (slot.param_count > 0 ? slot.param_norm[0] : 0.5f);
+				_mixers[i].set_fx_param2 (slot.param_count > 1 ? slot.param_norm[1] : 0.5f);
+				_mixers[i].set_fx_param3 (slot.param_count > 2 ? slot.param_norm[2] : 0.5f);
+				continue;
+			}
 		}
 		if (i == 0 && _engine_snap.track_fx_ok && !_engine_snap.track_fx_name.empty ()) {
 			_mixers[i].set_fx_label (_engine_snap.track_fx_name.c_str ());
@@ -3645,12 +3654,19 @@ ShellWindow::tick_smoke_record (DWORD now)
 		_smoke_record = SmokeRecordPhase::Done;
 		const bool have_take = _engine_snap.track_has_regions[0];
 		std::fprintf (stderr,
-			      "airdour_win_shell: smoke-record done — track0 regions=%d\n",
-			      have_take ? 1 : 0);
+			      "airdour_win_shell: smoke-record done — track0 regions=%d mismatch=%d\n",
+			      have_take ? 1 : 0,
+			      _engine_snap.capture_rate_mismatch ? 1 : 0);
 		std::fflush (stderr);
 		if (!have_take) {
-			std::fprintf (stderr,
-				      "airdour_win_shell: smoke-record FAILED (no region after take)\n");
+			if (_engine_snap.capture_rate_mismatch) {
+				std::fprintf (stderr,
+					      "airdour_win_shell: smoke-record FAILED "
+					      "(no region — WASAPI capture rate mismatch)\n");
+			} else {
+				std::fprintf (stderr,
+					      "airdour_win_shell: smoke-record FAILED (no region after take)\n");
+			}
 			std::fflush (stderr);
 			_smoke_failed = true;
 		}
@@ -10922,6 +10938,28 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
 			const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
 			const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
+			const bool ctrl = (GetKeyState (VK_CONTROL) & 0x8000) != 0;
+			if (ctrl && fxi < EngineSnapshot::kMeters && _engine_snap.insert_slot_count[fxi] > 1) {
+				/* Ctrl+click FX → cycle visible rack slot. */
+				_fx_rack_slot[fxi] =
+					(_fx_rack_slot[fxi] + 1) % _engine_snap.insert_slot_count[fxi];
+				sync_mixer_fx_from_engine ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return true;
+			}
+			if (fxi < EngineSnapshot::kMeters && _engine_snap.insert_slot_count[fxi] > 0 && !alt && !shift) {
+				/* Click FX on a populated rack → bypass that slot. */
+				const int slot = _fx_rack_slot[fxi];
+				if (slot >= 0 && slot < _engine_snap.insert_slot_count[fxi] && _engine_snap.insert_slots[fxi][slot].ok) {
+					const bool next = !_engine_snap.insert_slots[fxi][slot].bypassed;
+					_engine.set_rack_slot_bypassed (fxi, slot, next);
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_mixer_fx_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+					return true;
+				}
+			}
 			if (alt && shift) {
 				/* Alt+Shift+click FX → activate every shell ACE insert. */
 				_engine.set_all_fx_bypassed (false);
@@ -13867,6 +13905,9 @@ ShellWindow::sync_prefs_from_engine ()
 	_prefs.set_pref_devices (_engine_snap.pref_in_device.c_str (), _engine_snap.pref_out_device.c_str ());
 	_prefs.set_systemic_latency (_engine_snap.systemic_in_frames, _engine_snap.systemic_out_frames);
 	_prefs.set_separate_devices (_engine_snap.separate_io_devices);
+	if (_engine_snap.capture_rate_mismatch) {
+		_prefs.set_status (L"Capture disabled — mix rate ≠ render (WASAPI)");
+	}
 	_prefs.set_click_default (_engine_snap.pref_click_default);
 	_prefs.set_snap_default (_engine_snap.pref_snap_default);
 	_prefs.set_vst3_hint (_engine_snap.vst3_path_hint);

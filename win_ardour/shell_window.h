@@ -506,6 +506,7 @@ void do_toggle_selection_muted ();
 	DragMode _drag;
 	int _drag_index;
 	int _focus_audio_track; /* last mixer/editor label click for rename/reorder */
+	int _fx_rack_slot[kTracksMax]; /* which insert-rack slot the mixer FX chip shows */
 	bool _group_pick[kTracksMax]; /* Shift+click candidates for Grp */
 	float _pan_last_x;
 	float _pan_last_y;
