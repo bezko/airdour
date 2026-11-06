@@ -48,7 +48,7 @@ class PrefsPanel
 {
 public:
 	static constexpr int kHintLen = 96;
-	static constexpr int kMaxCatalog = 8;
+	static constexpr int kMaxCatalog = 64;
 	static constexpr int kCatalogNameLen = 40;
 	static constexpr int kDeviceLen = 96;
 

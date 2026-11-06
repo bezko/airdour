@@ -294,6 +294,9 @@ WasapiIO::WasapiIO ()
 	, _playback_channels (0)
 	, _mix_bits (32)
 	, _mix_is_float (true)
+	, _measured_playback_latency (0)
+	, _measured_capture_latency (0)
+	, _capture_rate_mismatch (false)
 #ifdef _WIN32
 	, _com (0)
 #endif
@@ -701,6 +704,9 @@ WasapiIO::open (const std::string& output_name_or_id,
 	/* Optional capture — same shared-mode rules; clocked by render event. */
 	_com->capture_enabled = false;
 	_capture_channels = 0;
+	_capture_rate_mismatch = false;
+	_measured_playback_latency = 0;
+	_measured_capture_latency = 0;
 	/* Try default capture unless input explicitly disabled with "None". */
 	if (input_name_or_id != "None" && input_name_or_id != "none") {
 		hr = activate_client (_com->enumerator, in_id, eCapture,
@@ -708,8 +714,16 @@ WasapiIO::open (const std::string& output_name_or_id,
 		if (SUCCEEDED (hr) && _com->capture_client && _com->capture_mix) {
 			/*
 			 * Capture must match render rate for a single-period engine loop.
-			 * If mix rates differ, skip capture for now (honest limitation).
+			 * If mix rates differ, skip capture (flagged for UI) until a
+			 * resample path is wired.
 			 */
+			if (_com->capture_mix->nSamplesPerSec != _com->render_mix->nSamplesPerSec) {
+				_capture_rate_mismatch = true;
+				std::fprintf (stderr,
+				              "wasapi: capture mix rate %u != render %u — capture disabled\n",
+				              (unsigned)_com->capture_mix->nSamplesPerSec,
+				              (unsigned)_com->render_mix->nSamplesPerSec);
+			}
 			if (_com->capture_mix->nSamplesPerSec == _com->render_mix->nSamplesPerSec) {
 				IAudioClient3* cap3 = 0;
 				bool cap_ok = false;
@@ -761,6 +775,24 @@ WasapiIO::open (const std::string& output_name_or_id,
 
 	if (_com->capture_enabled) {
 		_com->capture_scratch.resize (std::max (_period_frames, _com->render_buffer_frames) * std::max (1u, _capture_channels));
+	}
+
+	/* Measured stream latencies (100ns units → frames). */
+	_measured_playback_latency = 0;
+	_measured_capture_latency = 0;
+	REFERENCE_TIME play_lat = 0;
+	if (SUCCEEDED (_com->render_client->GetStreamLatency (&play_lat)) && play_lat > 0
+	    && _sample_rate > 0.f) {
+		_measured_playback_latency =
+		    (uint32_t)((double)play_lat * (double)_sample_rate / 10000000.0 + 0.5);
+	}
+	if (_com->capture_enabled && _com->capture_client) {
+		REFERENCE_TIME cap_lat = 0;
+		if (SUCCEEDED (_com->capture_client->GetStreamLatency (&cap_lat)) && cap_lat > 0
+		    && _sample_rate > 0.f) {
+			_measured_capture_latency =
+			    (uint32_t)((double)cap_lat * (double)_sample_rate / 10000000.0 + 0.5);
+		}
 	}
 
 	_open = true;

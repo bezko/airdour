@@ -77,7 +77,7 @@ struct EngineSnapshot {
 	static constexpr int kMeters = 16; /* max audio tracks (Editor lanes / meters) */
 	static constexpr int kMaxMarkers = 8;
 	static constexpr int kMaxMidiDevices = 16;
-	static constexpr int kMaxMidiNotes = 96;
+	static constexpr int kMaxMidiNotes = 256;
 
 	bool         available = false; /* compiled with AIRDOUR_WIN_SHELL_WITH_ENGINE */
 	bool         running = false;
@@ -291,7 +291,7 @@ struct EngineSnapshot {
 	int          listen_mode = 0; /* 0=Solo 1=PFL 2=AFL (RC solo-control-is-listen + listen-position) */
 	float        click_gain = 1.f; /* Config click_gain linear coeff (1.0 = unity) */
 	int          audio_track_count = 0; /* Session audio tracks (1..kMeters) */
-	int          midi_track_count = 0; /* 0 or 1 in this shell */
+	int midi_track_count = 0;           /* 0..kMeters MIDI tracks */
 	static constexpr int kTrackNameLen = 32;
 	wchar_t      track_name[kMeters][kTrackNameLen] = {}; /* Session Route names */
 	wchar_t      midi_track_name[kTrackNameLen] = {};
@@ -340,12 +340,12 @@ struct EngineSnapshot {
 	static constexpr int kPrefsHintLen = 96;
 	wchar_t      vst3_path_hint[kPrefsHintLen] = {};
 	/* Last VST3 scan catalog (Prefs list; scan-only safe when count=0). */
-	static constexpr int kMaxVst3Catalog = 8;
+	static constexpr int kMaxVst3Catalog = 64;
 	int          vst3_scan_count = 0; /* full PluginManager VST3 list size */
 	int          vst3_catalog_count = 0; /* names stored below (≤kMaxVst3Catalog) */
 	wchar_t      vst3_catalog_name[kMaxVst3Catalog][40] = {};
 	/* VST3 DSP insert on Audio 2 (D2D host params; no GTK editor). */
-	static constexpr int kMaxVst3Params = 3;
+	static constexpr int kMaxVst3Params = 12;
 	static constexpr int kVst3NameLen = 40;
 	static constexpr int kVst3ParamNameLen = 24;
 	bool         vst3_ok = false; /* PluginInsert live on Audio 2 */
@@ -354,6 +354,38 @@ struct EngineSnapshot {
 	wchar_t      vst3_name[kVst3NameLen] = {};
 	wchar_t      vst3_param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
 	float        vst3_param_norm[kMaxVst3Params] = {}; /* 0..1 interface */
+	/* Per-route insert rack (Phase 2). */
+	static constexpr int kMaxInsertSlots = 8;
+	static constexpr int kInsertNameLen = 40;
+	struct InsertSlotSnap {
+		bool ok = false;
+		bool bypassed = false;
+		bool is_instrument = false;
+		int param_count = 0;
+		wchar_t name[kInsertNameLen] = {};
+		wchar_t param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
+		float param_norm[kMaxVst3Params] = {};
+	};
+	int insert_slot_count[kMeters] = {};
+	InsertSlotSnap insert_slots[kMeters][kMaxInsertSlots] = {};
+	int master_insert_count = 0;
+	InsertSlotSnap master_inserts[kMaxInsertSlots] = {};
+	/* VST2 catalog (Phase 3/4). */
+	static constexpr int kMaxVst2Catalog = 64;
+	int vst2_scan_count = 0;
+	int vst2_catalog_count = 0;
+	wchar_t vst2_catalog_name[kMaxVst2Catalog][40] = {};
+	bool vst2_ok = false;
+	bool vst2_bypassed = false;
+	bool vst2_bridged_32 = false; /* hosted via x86 bridge */
+	int vst2_param_count = 0;
+	wchar_t vst2_name[kVst3NameLen] = {};
+	wchar_t vst2_param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
+	float vst2_param_norm[kMaxVst3Params] = {};
+	/* Piano-roll viewport (Phase 1) — full MIDI range model. */
+	int midi_pitch_lo = 48;    /* viewport bottom */
+	int midi_pitch_hi = 71;    /* viewport top */
+	int active_midi_track = 0; /* which MIDI track piano-roll edits */
 	/* Audio devices + measured systemic latency. */
 	std::wstring audio_in_name; /* current backend device ("Default" when unset) */
 	std::wstring audio_out_name;
@@ -373,8 +405,8 @@ struct EngineSnapshot {
 	static_assert (kMeters == 16, "per-meter defaults are listed for sixteen lanes");
 };
 
-static_assert (sizeof (EngineSnapshot) < 256 * 1024,
-               "EngineSnapshot must stay small enough to copy per UI tick");
+static_assert (sizeof (EngineSnapshot) < 512 * 1024,
+	       "EngineSnapshot must stay small enough to copy per UI tick");
 
 class EngineHost
 {
@@ -1670,6 +1702,57 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * toward the master bus so notes are audible via Dummy/WASAPI shared.
 	 */
 	bool attach_midi_synth ();
+
+	/** Select which MIDI track the piano-roll edits (0..midi_track_count-1). */
+	bool set_active_midi_track (int index);
+	int active_midi_track () const { return _snap.active_midi_track; }
+
+	/** Scroll piano-roll viewport by ±semitones (clamped to 0..127). */
+	bool set_midi_pitch_viewport (int lo, int hi);
+	bool scroll_midi_pitch_viewport (int delta_semitones);
+
+	/**
+	 * Ensure at least `count` Session MidiTracks (creates as needed).
+	 * Caps at EngineSnapshot::kMeters. For --smoke-midi-multi.
+	 */
+	bool ensure_midi_track_count (int count);
+	bool smoke_midi_multi ();
+
+	/**
+	 * Attach a VST3 instrument (is_instrument) from the scanned catalog by
+	 * index onto the active MIDI track. Soft-PASS when catalog empty.
+	 */
+	bool attach_vst3_instrument_by_index (int index);
+	bool smoke_vst3_instrument ();
+
+	/**
+	 * Generic insert rack (Phase 2): append/remove/bypass/param on any route.
+	 * kind: 0=ACE LV2 by URI helper, 1=VST3 catalog index, 2=VST2 catalog index.
+	 */
+	bool insert_rack_slot (int track, int kind, int catalog_index);
+	bool remove_rack_slot (int track, int slot);
+	bool set_rack_slot_bypassed (int track, int slot, bool bypassed);
+	bool set_rack_slot_param (int track, int slot, int param, float norm_0_1);
+	void refresh_insert_rack_snap ();
+	bool smoke_fx_chain ();
+
+	/** Master bus multi-slot rack helpers. */
+	bool insert_master_rack_slot (int kind, int catalog_index);
+	bool remove_master_rack_slot (int slot);
+
+	/* --- VST2-64 / VST2-32 bridge (Phase 3/4) --- */
+	bool rescan_vst2 ();
+	void refresh_vst2_catalog_snap ();
+	bool insert_vst2_by_index (int index);
+	bool unload_vst2 ();
+	bool set_vst2_param (int index, float norm_0_1);
+	bool set_vst2_bypassed (bool bypassed);
+	bool toggle_vst2_bypass ();
+	bool attach_vst2_instrument_by_index (int index);
+	bool smoke_vst2 ();
+	bool smoke_vst2_instrument ();
+	bool smoke_vst2_bridge ();
+	void refresh_vst2_params_from_insert ();
 
 	/**
 	 * Insert ACE Reverb (bundled LV2, no GTK UI) on an audio track pre-fader.

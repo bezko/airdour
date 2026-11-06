@@ -21,13 +21,19 @@ Native Windows audio backend implementing `ARDOUR::AudioBackend`.
 - System capture/playback ports registered into `PortEngineSharedImpl`
 - **WinMME MIDI** (`../portaudio/winmmemidi_*`) — option `WinMME`
 
+## Latency
+
+- `WasapiIO::measured_*_latency_frames()` reads `IAudioClient::GetStreamLatency` at open
+- `WasapiBackend::get_latency_range` prefers measured frames; falls back to one period
+- Capture mix-rate mismatch sets `capture_rate_mismatch()` and skips capture (logged)
+
 ## Out of scope (v1)
 
-- WASAPI exclusive mode
+- WASAPI exclusive mode (planned prefs toggle after shared-path correctness)
 - DirectSound
 - ASIO / specialized drivers
 - PortAudio MIDI bridge
-- Capture when capture mix rate ≠ render mix rate (skipped with honest fallback)
+- Capture resample when capture mix rate ≠ render mix rate (flagged; still skipped)
 
 ## Non-Windows / CI
 

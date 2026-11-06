@@ -542,208 +542,7 @@ write_pcm16_wav_gated (const std::string& path_utf8, int sample_rate,
 
 } // namespace
 
-/** Minimal EventLoop so Session signals/butler don't block waiting for GTK. */
-class ShellEventLoop : public EventLoop
-{
-public:
-	ShellEventLoop ()
-		: EventLoop ("win-shell")
-	{
-	}
-
-	bool call_slot (InvalidationRecord*, const std::function<void()>& f) override
-	{
-		/* UI thread owns this loop — run slots immediately. */
-		f ();
-		return true;
-	}
-
-	PBD::RWLock& slot_invalidation_rwlock () override
-	{
-		return _lock;
-	}
-
-private:
-	PBD::RWLock _lock;
-};
-
-class EngineHost::Impl
-{
-public:
-	AudioEngine*    engine;
-	Session*        session;
-	ShellEventLoop* event_loop;
-	bool            ardour_inited;
-	bool            transport_playing;
-	samplecnt_t     play_origin_samples;
-	std::string     session_dir;
-	std::vector<std::shared_ptr<AudioTrack> > tracks;
-	std::shared_ptr<Route> aux_bus; /* Aux destination for mixer sends */
-	std::shared_ptr<RouteGroup> shell_group; /* optional mute/solo/gain link */
-	std::shared_ptr<VCA> shell_vca; /* optional VCA master stub */
-	std::shared_ptr<MidiTrack> midi_track;
-	std::shared_ptr<MidiRegion> midi_region;
-	int             selected_track;
-	std::weak_ptr<Region> selected_region;
-	float           midi_activity;
-	Evoral::event_id_t selected_midi_note_id; /* primary / last clicked */
-	std::set<Evoral::event_id_t> selected_midi_note_ids;
-	bool            midi_out_connected;
-	std::string     midi_out_port;
-	bool            midi_synth_ok;
-	bool            midi_synth_to_master;
-	std::string     midi_synth_name;
-	bool            track_fx_ok;
-	bool            track_fx_bypassed;
-	float           track_fx_param; /* Blend 0..1 */
-	std::string     track_fx_name;
-	std::weak_ptr<PluginInsert> track_fx;
-	std::weak_ptr<PluginInsert> vst3_fx; /* shell VST3 insert (Audio 2) */
-	uint32_t        vst3_param_ports[EngineSnapshot::kMaxVst3Params];
-	int             vst3_param_count;
-	int             vst3_cycle_index; /* last catalog index inserted via cycle (−1 none) */
-	bool            track_comp_ok;
-	bool            track_comp_bypassed;
-	float           track_comp_threshold_db;
-	float           track_comp_ratio;
-	bool            track_comp_sidechain;
-	int             track_comp_sidechain_src;
-	std::string     track_comp_name;
-	std::weak_ptr<PluginInsert> track_comp;
-	bool            track_eq_ok;
-	bool            track_eq_bypassed;
-	float           track_eq_gain_l_db;
-	float           track_eq_gain_m_db;
-	float           track_eq_gain_h_db;
-	std::string     track_eq_name;
-	std::weak_ptr<PluginInsert> track_eq;
-	bool            track_delay_ok;
-	bool            track_delay_bypassed;
-	float           track_delay_time_ms;
-	float           track_delay_feedback_pct;
-	std::string     track_delay_name;
-	std::weak_ptr<PluginInsert> track_delay;
-	bool            track_limiter_ok;
-	bool            track_limiter_bypassed;
-	float           track_limiter_ceiling_db;
-	float           track_limiter_release_ms;
-	std::string     track_limiter_name;
-	std::weak_ptr<PluginInsert> track_limiter;
-	bool            master_fx_ok;
-	bool            master_fx_bypassed;
-	float           master_fx_ceiling_db;
-	std::string     master_fx_name;
-	std::weak_ptr<PluginInsert> master_fx;
-	bool            track_gate_ok;
-	bool            track_gate_bypassed;
-	float           track_gate_threshold_db;
-	float           track_gate_hold_ms;
-	std::string     track_gate_name;
-	std::weak_ptr<PluginInsert> track_gate;
-	bool            plugins_scanned;
-	FadeShape       shell_fade_shape;
-
-	Impl ()
-		: engine (nullptr)
-		, session (nullptr)
-		, event_loop (nullptr)
-		, ardour_inited (false)
-		, transport_playing (false)
-		, play_origin_samples (0)
-		, shell_fade_shape (FadeLinear)
-		, selected_track (-1)
-		, midi_activity (0.f)
-		, selected_midi_note_id (-1)
-		, midi_out_connected (false)
-		, midi_synth_ok (false)
-		, midi_synth_to_master (false)
-		, track_fx_ok (false)
-		, track_fx_bypassed (false)
-		, track_fx_param (0.3f)
-		, vst3_param_count (0)
-		, vst3_cycle_index (-1)
-		, track_comp_ok (false)
-		, track_comp_bypassed (false)
-		, track_comp_threshold_db (0.f)
-		, track_comp_ratio (4.f)
-		, track_comp_sidechain (false)
-		, track_comp_sidechain_src (-1)
-		, track_eq_ok (false)
-		, track_eq_bypassed (false)
-		, track_eq_gain_l_db (0.f)
-		, track_eq_gain_m_db (0.f)
-		, track_eq_gain_h_db (0.f)
-		, track_delay_ok (false)
-		, track_delay_bypassed (false)
-		, track_delay_time_ms (160.f)
-		, track_delay_feedback_pct (20.f)
-		, track_limiter_ok (false)
-		, track_limiter_bypassed (false)
-		, track_limiter_ceiling_db (-0.3f)
-		, track_limiter_release_ms (100.f)
-		, master_fx_ok (false)
-		, master_fx_bypassed (false)
-		, master_fx_ceiling_db (-0.3f)
-		, track_gate_ok (false)
-		, track_gate_bypassed (false)
-		, track_gate_threshold_db (-40.f)
-		, track_gate_hold_ms (50.f)
-		, plugins_scanned (false)
-	{
-		for (int i = 0; i < EngineSnapshot::kMaxVst3Params; ++i) {
-			vst3_param_ports[i] = 0;
-		}
-	}
-
-	void clear_midi_note_sel ()
-	{
-		selected_midi_note_ids.clear ();
-		selected_midi_note_id = -1;
-	}
-
-	void set_midi_note_sel (Evoral::event_id_t id)
-	{
-		selected_midi_note_ids.clear ();
-		if (id >= 0) {
-			selected_midi_note_ids.insert (id);
-		}
-		selected_midi_note_id = id;
-	}
-
-	void toggle_midi_note_sel (Evoral::event_id_t id)
-	{
-		if (id < 0) {
-			return;
-		}
-		/* Seed from primary when first additive click after a legacy single. */
-		if (selected_midi_note_ids.empty () && selected_midi_note_id >= 0) {
-			selected_midi_note_ids.insert (selected_midi_note_id);
-		}
-		std::set<Evoral::event_id_t>::iterator it = selected_midi_note_ids.find (id);
-		if (it != selected_midi_note_ids.end ()) {
-			selected_midi_note_ids.erase (it);
-			if (selected_midi_note_id == id) {
-				selected_midi_note_id = selected_midi_note_ids.empty ()
-				                            ? -1
-				                            : *selected_midi_note_ids.rbegin ();
-			}
-		} else {
-			selected_midi_note_ids.insert (id);
-			selected_midi_note_id = id;
-		}
-	}
-
-	bool midi_note_sel_has (Evoral::event_id_t id) const
-	{
-		if (id < 0) {
-			return false;
-		}
-		if (!selected_midi_note_ids.empty ()) {
-			return selected_midi_note_ids.count (id) > 0;
-		}
-		return selected_midi_note_id >= 0 && selected_midi_note_id == id;
-	}
-};
+#include "engine_host_priv.h"
 
 EngineHost::EngineHost ()
 	: _started (false)
@@ -23891,6 +23690,21 @@ EngineHost::refresh_midi_snap ()
 {
 	_snap.midi_ok = false;
 	_snap.midi_track_ok = (_impl && _impl->midi_track);
+	if (_impl) {
+		if (_impl->midi_tracks.empty () && _impl->midi_track) {
+			_impl->midi_tracks.push_back (_impl->midi_track);
+			_impl->midi_regions.push_back (_impl->midi_region);
+			_impl->active_midi_track = 0;
+		}
+		_snap.midi_track_count = (int)_impl->midi_tracks.size ();
+		if (_snap.midi_track_count == 0 && _impl->midi_track) {
+			_snap.midi_track_count = 1;
+		}
+		_snap.active_midi_track = _impl->active_midi_track;
+	} else {
+		_snap.midi_track_count = 0;
+		_snap.active_midi_track = 0;
+	}
 	_snap.midi_activity = _impl ? _impl->midi_activity : 0.f;
 	_snap.midi_device_count = 0;
 	for (int i = 0; i < EngineSnapshot::kMaxMidiDevices; ++i) {
@@ -27550,25 +27364,34 @@ EngineHost::smoke_perf (unsigned sample_secs)
 		: (100.0 - (double)dsp_max);
 
 	std::fprintf (stderr,
-	              "airdour_win_shell: PERF backend=%ls sr=%u period=%u (%.2f ms) "
-	              "cb_us last=%llu avg=%llu max=%llu / period_us=%.0f "
-	              "dsp_pct avg=%.1f max=%.1f headroom_pct≈%.1f xruns=%llu "
-	              "ws_peak_mb=%.1f cycles=%llu\n",
-	              _snap.backend.c_str (),
-	              (unsigned)sr0,
-	              (unsigned)period0,
-	              period_ms,
-	              (unsigned long long)_snap.callback_last_us,
-	              (unsigned long long)_snap.callback_avg_us,
-	              (unsigned long long)_snap.callback_max_us,
-	              period_us,
-	              dsp_avg,
-	              dsp_max,
-	              headroom,
-	              (unsigned long long)xruns,
-	              (double)ws_peak / (1024.0 * 1024.0),
-	              (unsigned long long)_snap.callback_count);
+		      "airdour_win_shell: PERF backend=%ls sr=%u period=%u (%.2f ms) "
+		      "cb_us last=%llu avg=%llu max=%llu / period_us=%.0f "
+		      "dsp_pct avg=%.1f max=%.1f headroom_pct≈%.1f xruns=%llu "
+		      "ws_peak_mb=%.1f cycles=%llu measured_lat in=%u out=%u\n",
+		      _snap.backend.c_str (),
+		      (unsigned)sr0,
+		      (unsigned)period0,
+		      period_ms,
+		      (unsigned long long)_snap.callback_last_us,
+		      (unsigned long long)_snap.callback_avg_us,
+		      (unsigned long long)_snap.callback_max_us,
+		      period_us,
+		      dsp_avg,
+		      dsp_max,
+		      headroom,
+		      (unsigned long long)xruns,
+		      (double)ws_peak / (1024.0 * 1024.0),
+		      (unsigned long long)_snap.callback_count,
+		      (unsigned)_snap.systemic_in_frames,
+		      (unsigned)_snap.systemic_out_frames);
 	std::fflush (stderr);
+	/* Soft gates: Dummy/CI may have no WASAPI; only fail on extreme DSP overload. */
+	if (dsp_max > 98.f && period0 > 0) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-perf FAILED (dsp_max=%.1f)\n", dsp_max);
+		std::fflush (stderr);
+		_snap.detail = L"smoke-perf FAILED dsp";
+		return false;
+	}
 	_snap.detail = L"smoke-perf ok";
 	return true;
 }
@@ -28750,6 +28573,12 @@ EngineHost::ensure_midi_track ()
 		return false;
 	}
 	if (_impl->midi_track) {
+		if (_impl->midi_tracks.empty ()) {
+			_impl->midi_tracks.push_back (_impl->midi_track);
+			_impl->midi_regions.push_back (_impl->midi_region);
+			_impl->active_midi_track = 0;
+		}
+		_impl->sync_active_midi_from_index ();
 		attach_midi_synth ();
 		refresh_midi_snap ();
 		return true;
@@ -28782,6 +28611,13 @@ EngineHost::ensure_midi_track ()
 			return false;
 		}
 		_impl->midi_track = created.front ();
+		_impl->midi_tracks.clear ();
+		_impl->midi_regions.clear ();
+		_impl->midi_tracks.push_back (_impl->midi_track);
+		_impl->midi_regions.push_back (std::shared_ptr<MidiRegion> ());
+		_impl->active_midi_track = 0;
+		_snap.active_midi_track = 0;
+		_snap.midi_track_count = 1;
 		if (_impl->midi_track->the_instrument ()) {
 			_impl->midi_synth_ok = true;
 			_impl->midi_synth_name = _impl->midi_track->the_instrument ()->name ();
@@ -36170,6 +36006,8 @@ EngineHost::refresh_snapshot ()
 			refresh_midi_snap ();
 			refresh_track_fx_snap ();
 			refresh_vst3_params_snap ();
+			refresh_vst2_params_from_insert ();
+			refresh_insert_rack_snap ();
 			refresh_track_comp_snap ();
 			refresh_track_eq_snap ();
 			refresh_track_delay_snap ();
