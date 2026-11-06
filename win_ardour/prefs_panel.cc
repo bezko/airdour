@@ -68,6 +68,8 @@ PrefsPanel::PrefsPanel ()
 	, _cur_period (0)
 	, _cur_sr (0)
 	, _pref_period (0)
+	, _pref_wasapi_exclusive (false)
+	, _wasapi_exclusive_active (false)
 	, _sys_in (0)
 	, _sys_out (0)
 {
@@ -117,6 +119,10 @@ PrefsPanel::layout (float view_w, float view_h, float dpi_scale)
 	_per_480 = D2D1::RectF (_per_auto.right + gap, y, _per_auto.right + gap + third, y + btn_h);
 	_per_512 = D2D1::RectF (_per_480.right + gap, y, _per_480.right + gap + third, y + btn_h);
 	y = _per_auto.bottom + 28.f * dpi_scale;
+
+	_mode_shared = D2D1::RectF (x, y, x + half, y + btn_h);
+	_mode_exclusive = D2D1::RectF (x + half + gap, y, x + half + gap + half, y + btn_h);
+	y = _mode_shared.bottom + 28.f * dpi_scale;
 
 	_click_btn = D2D1::RectF (x, y, x + half, y + btn_h);
 	_snap_btn = D2D1::RectF (x + half + gap, y, x + half + gap + half, y + btn_h);
@@ -365,6 +371,12 @@ PrefsPanel::hit_test (float x, float y) const
 	if (contains (_per_512, x, y)) {
 		return PrefsHit::Period512;
 	}
+	if (contains (_mode_shared, x, y)) {
+		return PrefsHit::WasapiShared;
+	}
+	if (contains (_mode_exclusive, x, y)) {
+		return PrefsHit::WasapiExclusive;
+	}
 	if (contains (_click_btn, x, y)) {
 		return PrefsHit::ClickToggle;
 	}
@@ -608,6 +620,13 @@ PrefsPanel::draw (UiDraw& ui) const
 	draw_btn (_per_480, L"480", _pref_period == 480);
 	draw_btn (_per_512, L"512", _pref_period == 512);
 
+	_snwprintf_s (line, _TRUNCATE,
+		      L"WASAPI mode  (now: %s)",
+		      _wasapi_exclusive_active ? L"exclusive" : L"shared");
+	draw_label (_mode_shared.top - 8.f * s, line);
+	draw_btn (_mode_shared, L"Shared", !_pref_wasapi_exclusive);
+	draw_btn (_mode_exclusive, L"Exclusive", _pref_wasapi_exclusive);
+
 	draw_label (_click_btn.top - 8.f * s, L"Defaults (persist)");
 
 	draw_btn (_click_btn, _click_on ? L"Click ON" : L"Click OFF", _click_on);
@@ -628,9 +647,10 @@ PrefsPanel::draw (UiDraw& ui) const
 
 	float ms_in = (_cur_sr > 0) ? (1000.f * (float)_sys_in / (float)_cur_sr) : 0.f;
 	float ms_out = (_cur_sr > 0) ? (1000.f * (float)_sys_out / (float)_cur_sr) : 0.f;
-	_snwprintf_s (line, _TRUNCATE,
-	              L"Systemic latency  out %.2f ms · in %.2f ms  (%u / %u fr)",
-	              ms_out, ms_in, (unsigned)_sys_out, (unsigned)_sys_in);
+	_snwprintf_s (
+		line, _TRUNCATE,
+		L"Latency (measured)  out %.2f ms · in %.2f ms  (%u / %u fr)",
+		ms_out, ms_in, (unsigned)_sys_out, (unsigned)_sys_in);
 	ui.text_vcenter (line, ui::TextRole::Caption, ui::ColorToken::TextSecondary,
 	                 D2D1::RectF (_card.left + inset, _in_prev.bottom + 8.f * s,
 	                              _card.right - inset, _in_prev.bottom + 24.f * s));

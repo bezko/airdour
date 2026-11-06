@@ -5,6 +5,7 @@
 #include "vst2_bridge_client.h"
 #include "vst2_bridge_protocol.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -30,9 +31,14 @@ struct BridgeProc {
 	HANDLE ack_event = nullptr;
 	std::string plugin_path;
 	bool alive = false;
+	bool rate_set = false;
+	bool block_set = false;
+	float last_rate = 0.f;
+	uint32_t last_block = 0;
 };
 
 std::vector<BridgeProc> g_bridges;
+uint32_t g_bridge_serial = 0;
 
 std::wstring
 utf8_to_wide (const std::string& s)
@@ -71,6 +77,7 @@ close_bridge (BridgeProc& b)
 		b.view->hdr.op = (uint32_t)Op::Shutdown;
 		if (b.req_event) {
 			SetEvent (b.req_event);
+			WaitForSingleObject (b.ack_event, 500);
 		}
 	}
 	if (b.pi.hProcess) {
@@ -99,6 +106,32 @@ close_bridge (BridgeProc& b)
 	b.alive = false;
 }
 
+BridgeProc*
+find_bridge (const std::string& plugin_dll_path)
+{
+	for (size_t i = 0; i < g_bridges.size (); ++i) {
+		if (g_bridges[i].alive && g_bridges[i].plugin_path == plugin_dll_path) {
+			return &g_bridges[i];
+		}
+	}
+	return nullptr;
+}
+
+bool
+wait_op (BridgeProc& b, Op op, DWORD timeout_ms)
+{
+	if (!b.view || !b.req_event || !b.ack_event) {
+		return false;
+	}
+	b.view->hdr.op = (uint32_t)op;
+	b.view->hdr.status = 1;
+	SetEvent (b.req_event);
+	if (WaitForSingleObject (b.ack_event, timeout_ms) != WAIT_OBJECT_0) {
+		return false;
+	}
+	return b.view->hdr.status == 0;
+}
+
 } // namespace
 
 std::string
@@ -117,7 +150,6 @@ bridge_exe_path ()
 	std::wstring exe = path.substr (0, slash + 1) + L"ardour-vst2-bridge-x86.exe";
 	DWORD attr = GetFileAttributesW (exe.c_str ());
 	if (attr == INVALID_FILE_ATTRIBUTES) {
-		/* Also try tools staging name used by packaging. */
 		exe = path.substr (0, slash + 1) + L"vst2-bridge-x86.exe";
 		attr = GetFileAttributesW (exe.c_str ());
 		if (attr == INVALID_FILE_ATTRIBUTES) {
@@ -156,10 +188,8 @@ dll_is_i386 (const std::string& path)
 bool
 ensure_bridge_running (const std::string& plugin_dll_path)
 {
-	for (size_t i = 0; i < g_bridges.size (); ++i) {
-		if (g_bridges[i].alive && g_bridges[i].plugin_path == plugin_dll_path) {
-			return true;
-		}
+	if (find_bridge (plugin_dll_path)) {
+		return true;
 	}
 
 	std::string exe = bridge_exe_path ();
@@ -172,12 +202,16 @@ ensure_bridge_running (const std::string& plugin_dll_path)
 	BridgeProc b;
 	b.plugin_path = plugin_dll_path;
 	DWORD pid = GetCurrentProcessId ();
+	uint32_t serial = ++g_bridge_serial;
 	wchar_t shm_name[128];
 	wchar_t req_name[128];
 	wchar_t ack_name[128];
-	_snwprintf_s (shm_name, _TRUNCATE, L"Local\\AirdourVST2Bridge-%lu", (unsigned long)pid);
-	_snwprintf_s (req_name, _TRUNCATE, L"Local\\AirdourVST2BridgeReq-%lu", (unsigned long)pid);
-	_snwprintf_s (ack_name, _TRUNCATE, L"Local\\AirdourVST2BridgeAck-%lu", (unsigned long)pid);
+	_snwprintf_s (shm_name, _TRUNCATE, L"Local\\AirdourVST2Bridge-%lu-%u",
+		      (unsigned long)pid, (unsigned)serial);
+	_snwprintf_s (req_name, _TRUNCATE, L"Local\\AirdourVST2BridgeReq-%lu-%u",
+		      (unsigned long)pid, (unsigned)serial);
+	_snwprintf_s (ack_name, _TRUNCATE, L"Local\\AirdourVST2BridgeAck-%lu-%u",
+		      (unsigned long)pid, (unsigned)serial);
 
 	b.shm = CreateFileMappingW (INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
 				    (DWORD)sizeof (SharedState), shm_name);
@@ -216,74 +250,216 @@ ensure_bridge_running (const std::string& plugin_dll_path)
 		return false;
 	}
 
-	/* Open plugin. */
-	b.view->hdr.op = (uint32_t)Op::Open;
-	b.view->hdr.status = 1;
-	SetEvent (b.req_event);
-	DWORD wr = WaitForSingleObject (b.ack_event, 8000);
-	if (wr != WAIT_OBJECT_0 || b.view->hdr.status != 0) {
+	if (!wait_op (b, Op::Open, 8000)) {
 		std::fprintf (stderr, "airdour_win_shell: bridge Open failed (%s)\n",
-			      b.view->hdr.error);
+			      b.view ? b.view->hdr.error : "?");
 		std::fflush (stderr);
 		close_bridge (b);
 		return false;
 	}
 	b.alive = true;
 	g_bridges.push_back (b);
-	std::fprintf (stderr, "airdour_win_shell: vst2-bridge started for %s\n",
-		      plugin_dll_path.c_str ());
+	std::fprintf (stderr, "airdour_win_shell: vst2-bridge started for %s (in=%u out=%u params=%u)\n",
+		      plugin_dll_path.c_str (),
+		      (unsigned)(b.view ? b.view->hdr.n_inputs : 0),
+		      (unsigned)(b.view ? b.view->hdr.n_outputs : 0),
+		      (unsigned)(b.view ? b.view->hdr.n_params : 0));
 	std::fflush (stderr);
 	return true;
 }
 
 bool
-process_silence_block (uint32_t frames, float sample_rate)
+get_io_counts (const std::string& plugin_dll_path, uint32_t* n_in, uint32_t* n_out,
+	       uint32_t* n_params)
 {
-	if (g_bridges.empty () || !g_bridges[0].alive || !g_bridges[0].view) {
+	BridgeProc* b = find_bridge (plugin_dll_path);
+	if (!b || !b->view) {
 		return false;
 	}
-	BridgeProc& b = g_bridges[0];
+	if (n_in) {
+		*n_in = b->view->hdr.n_inputs;
+	}
+	if (n_out) {
+		*n_out = b->view->hdr.n_outputs;
+	}
+	if (n_params) {
+		*n_params = b->view->hdr.n_params;
+	}
+	return true;
+}
+
+bool
+set_sample_rate (const std::string& plugin_dll_path, float sample_rate)
+{
+	BridgeProc* b = find_bridge (plugin_dll_path);
+	if (!b || !b->view) {
+		return false;
+	}
+	if (b->rate_set && b->last_rate == sample_rate) {
+		return true;
+	}
+	b->view->hdr.sample_rate = sample_rate > 0.f ? sample_rate : 48000.f;
+	if (!wait_op (*b, Op::SetSampleRate, 2000)) {
+		return false;
+	}
+	b->rate_set = true;
+	b->last_rate = b->view->hdr.sample_rate;
+	return true;
+}
+
+bool
+set_block_size (const std::string& plugin_dll_path, uint32_t frames)
+{
+	BridgeProc* b = find_bridge (plugin_dll_path);
+	if (!b || !b->view) {
+		return false;
+	}
 	if (frames == 0) {
 		frames = 64;
 	}
 	if (frames > kMaxBlock) {
 		frames = kMaxBlock;
 	}
-	b.view->hdr.sample_rate = sample_rate > 0.f ? sample_rate : 48000.f;
-	b.view->hdr.frames = frames;
-	b.view->hdr.n_inputs = 2;
-	b.view->hdr.n_outputs = 2;
-	b.view->hdr.op = (uint32_t)Op::SetSampleRate;
-	b.view->hdr.status = 1;
-	SetEvent (b.req_event);
-	if (WaitForSingleObject (b.ack_event, 2000) != WAIT_OBJECT_0 || b.view->hdr.status != 0) {
+	if (b->block_set && b->last_block == frames) {
+		return true;
+	}
+	b->view->hdr.frames = frames;
+	if (!wait_op (*b, Op::SetBlockSize, 2000)) {
 		return false;
 	}
-	b.view->hdr.op = (uint32_t)Op::SetBlockSize;
-	b.view->hdr.status = 1;
-	SetEvent (b.req_event);
-	if (WaitForSingleObject (b.ack_event, 2000) != WAIT_OBJECT_0 || b.view->hdr.status != 0) {
+	b->block_set = true;
+	b->last_block = frames;
+	return true;
+}
+
+bool
+process_audio (const std::string& plugin_dll_path,
+	       float* const* inputs, float* const* outputs,
+	       uint32_t n_inputs, uint32_t n_outputs,
+	       uint32_t frames, float sample_rate,
+	       uint32_t wait_ms,
+	       const MidiEventWire* midi,
+	       uint32_t midi_count)
+{
+	BridgeProc* b = find_bridge (plugin_dll_path);
+	if (!b || !b->view || !outputs) {
 		return false;
 	}
-	std::memset (b.view->audio.in, 0, sizeof (b.view->audio.in));
-	std::memset (b.view->audio.out, 0, sizeof (b.view->audio.out));
-	b.view->hdr.midi_count = 0;
-	b.view->hdr.op = (uint32_t)Op::Process;
-	b.view->hdr.status = 1;
-	SetEvent (b.req_event);
-	if (WaitForSingleObject (b.ack_event, 2000) != WAIT_OBJECT_0) {
+	if (frames == 0) {
+		frames = 64;
+	}
+	if (frames > kMaxBlock) {
+		frames = kMaxBlock;
+	}
+	if (!set_sample_rate (plugin_dll_path, sample_rate) || !set_block_size (plugin_dll_path, frames)) {
 		return false;
 	}
-	return b.view->hdr.status == 0;
+	if (n_inputs > kMaxChannels) {
+		n_inputs = kMaxChannels;
+	}
+	if (n_outputs > kMaxChannels) {
+		n_outputs = kMaxChannels;
+	}
+	std::memset (b->view->audio.in, 0, sizeof (b->view->audio.in));
+	std::memset (b->view->audio.out, 0, sizeof (b->view->audio.out));
+	for (uint32_t c = 0; c < n_inputs; ++c) {
+		if (inputs && inputs[c]) {
+			std::memcpy (b->view->audio.in[c], inputs[c], frames * sizeof (float));
+		}
+	}
+	if (midi_count > kMaxMidiEvents) {
+		midi_count = kMaxMidiEvents;
+	}
+	b->view->hdr.midi_count = midi_count;
+	if (midi && midi_count > 0) {
+		std::memcpy (b->view->audio.midi, midi, midi_count * sizeof (MidiEventWire));
+	} else {
+		std::memset (b->view->audio.midi, 0, sizeof (b->view->audio.midi));
+	}
+	b->view->hdr.frames = frames;
+	b->view->hdr.n_inputs = n_inputs;
+	b->view->hdr.n_outputs = n_outputs;
+	if (wait_ms == 0) {
+		wait_ms = 50;
+	}
+	if (!wait_op (*b, Op::Process, wait_ms)) {
+		return false;
+	}
+	for (uint32_t c = 0; c < n_outputs; ++c) {
+		if (outputs[c]) {
+			std::memcpy (outputs[c], b->view->audio.out[c], frames * sizeof (float));
+		}
+	}
+	return true;
+}
+
+bool
+process_silence_block (uint32_t frames, float sample_rate)
+{
+	if (g_bridges.empty () || !g_bridges[0].alive) {
+		return false;
+	}
+	float zeros_in[kMaxChannels][64];
+	float zeros_out[kMaxChannels][64];
+	std::memset (zeros_in, 0, sizeof (zeros_in));
+	std::memset (zeros_out, 0, sizeof (zeros_out));
+	if (frames == 0 || frames > 64) {
+		frames = 64;
+	}
+	float* in_ptrs[kMaxChannels];
+	float* out_ptrs[kMaxChannels];
+	for (uint32_t c = 0; c < kMaxChannels; ++c) {
+		in_ptrs[c] = zeros_in[c];
+		out_ptrs[c] = zeros_out[c];
+	}
+	return process_audio (g_bridges[0].plugin_path, in_ptrs, out_ptrs, 2, 2, frames,
+			      sample_rate, 2000);
+}
+
+bool
+get_parameter (const std::string& plugin_dll_path, uint32_t index, float* out_norm)
+{
+	BridgeProc* b = find_bridge (plugin_dll_path);
+	if (!b || !b->view || !out_norm) {
+		return false;
+	}
+	b->view->hdr.param_index = index;
+	if (!wait_op (*b, Op::GetParameter, 2000)) {
+		return false;
+	}
+	*out_norm = b->view->hdr.param_value;
+	return true;
+}
+
+bool
+set_parameter (const std::string& plugin_dll_path, uint32_t index, float norm)
+{
+	BridgeProc* b = find_bridge (plugin_dll_path);
+	if (!b || !b->view) {
+		return false;
+	}
+	b->view->hdr.param_index = index;
+	b->view->hdr.param_value = norm;
+	return wait_op (*b, Op::SetParameter, 2000);
+}
+
+void
+shutdown_plugin (const std::string& plugin_dll_path)
+{
+	for (size_t i = 0; i < g_bridges.size ();) {
+		if (plugin_dll_path.empty () || g_bridges[i].plugin_path == plugin_dll_path) {
+			close_bridge (g_bridges[i]);
+			g_bridges.erase (g_bridges.begin () + (std::ptrdiff_t)i);
+		} else {
+			++i;
+		}
+	}
 }
 
 void
 shutdown_all ()
 {
-	for (size_t i = 0; i < g_bridges.size (); ++i) {
-		close_bridge (g_bridges[i]);
-	}
-	g_bridges.clear ();
+	shutdown_plugin (std::string ());
 }
 
 } /* namespace vst2_bridge */

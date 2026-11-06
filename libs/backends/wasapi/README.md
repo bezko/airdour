@@ -4,9 +4,12 @@ Native Windows audio backend implementing `ARDOUR::AudioBackend`.
 
 ## Scope (v1) — implemented in-tree
 
-- **WASAPI shared mode only** (`AUDCLNT_SHAREMODE_SHARED`)
+- **WASAPI shared mode** by default (`AUDCLNT_SHAREMODE_SHARED`)
+- **Optional exclusive render** (`AUDCLNT_SHAREMODE_EXCLUSIVE`) via prefs Shared/Exclusive,
+  `AudioBackend::set_exclusive_mode`, or env `AIRDOUR_WASAPI_EXCLUSIVE=1` — falls back to shared
+  when the device/format refuses exclusive
 - Device enumeration (`IMMDeviceEnumerator`, friendly names + ids)
-- Mix-format negotiation (`GetMixFormat`); adopt device sample rate
+- Mix-format negotiation (`GetMixFormat`); adopt device sample rate (shared); exclusive may adopt closest format
 - Period via `IAudioClient3::InitializeSharedAudioStream` when available (else classic `Initialize`)
 - Auto ladder tries low shared periods (128 / 240 / 256 / …) then falls back toward ~10 ms
 - Snaps to `GetSharedModeEnginePeriod` fundamental; respects per-device min/max
@@ -25,15 +28,15 @@ Native Windows audio backend implementing `ARDOUR::AudioBackend`.
 
 - `WasapiIO::measured_*_latency_frames()` reads `IAudioClient::GetStreamLatency` at open
 - `WasapiBackend::get_latency_range` prefers measured frames; falls back to one period
-- Capture mix-rate mismatch sets `capture_rate_mismatch()` and skips capture (logged)
+- Capture mix-rate mismatch sets `capture_rate_mismatch()` and enables linear resample into the render clock (logged)
 
 ## Out of scope (v1)
 
-- WASAPI exclusive mode (planned prefs toggle after shared-path correctness)
 - DirectSound
 - ASIO / specialized drivers
 - PortAudio MIDI bridge
-- Capture resample when capture mix rate ≠ render mix rate (flagged; still skipped)
+- High-quality (non-linear) capture resampler / SRC library
+- Exclusive-mode capture (render exclusive; capture stays shared when opened)
 
 ## Non-Windows / CI
 

@@ -1,6 +1,6 @@
 # Airdour — Windows MSVC CI (win64 only)
 #
-# Product path: AIRDOUR_WINDOWS_ONLY / WASAPI shared.
+# Product path: AIRDOUR_WINDOWS_ONLY / WASAPI (shared default, optional exclusive).
 # This job compiles the WasapiIO smoke library (Windows SDK only) and
 # configures the cmake/win64 spine.
 

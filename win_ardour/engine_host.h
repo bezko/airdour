@@ -336,6 +336,10 @@ struct EngineSnapshot {
 	/* Preferences (RC Config + WinShellPrefs instant.xml). */
 	std::wstring pref_backend = L"Dummy"; /* "Dummy" or "WASAPI" */
 	uint32_t     pref_period_frames = 0; /* 0 = Auto */
+
+	bool pref_wasapi_exclusive = false;
+	bool wasapi_exclusive_active = false;
+
 	bool         pref_snap_default = false;
 	bool         pref_click_default = true; /* mirrors Config clicking when saved */
 	static constexpr int kPrefsHintLen = 96;
@@ -393,8 +397,11 @@ struct EngineSnapshot {
 	std::wstring pref_in_device; /* persisted WinShellPrefs input-device */
 	std::wstring pref_out_device;
 	bool         separate_io_devices = false; /* backend uses separate in/out names */
-	uint32_t     systemic_in_frames = 0; /* backend-reported, excludes one period */
-	uint32_t     systemic_out_frames = 0;
+	uint32_t systemic_in_frames = 0;          /* measured/systemic capture latency */
+	uint32_t systemic_out_frames = 0;         /* measured/systemic playback latency */
+
+	bool capture_rate_mismatch = false;
+
 	/* Recent sessions (WinShellRecent instant.xml, beside WinShellPrefs). */
 	static constexpr int kMaxRecent = 8;
 	static constexpr int kRecentLabelLen = 48;
@@ -428,6 +435,8 @@ public:
 	/** Write WinShellPrefs + Config::save_state (clicking). */
 	bool save_shell_prefs ();
 	void set_pref_backend (const std::string& name); /* Dummy / WASAPI */
+	void set_pref_wasapi_exclusive (bool on);
+	bool pref_wasapi_exclusive () const { return _pref_wasapi_exclusive; }
 	void set_pref_period_frames (uint32_t frames);
 	void set_pref_snap_default (bool on);
 	/** Click default → Config::set_clicking (+ save on save_shell_prefs). */
@@ -1744,7 +1753,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	/* --- VST2-64 / VST2-32 bridge (Phase 3/4) --- */
 	bool rescan_vst2 ();
 	void refresh_vst2_catalog_snap ();
-	bool insert_vst2_by_index (int index);
+	/** Insert VST2 FX. track < 0 → Audio 2 (legacy); else audio track index. */
+	bool insert_vst2_by_index (int index, int track = -1);
 	bool unload_vst2 ();
 	bool set_vst2_param (int index, float norm_0_1);
 	bool set_vst2_bypassed (bool bypassed);
@@ -2014,7 +2024,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * onto Audio 2 (DSP-only). index is into the scanned list (same order
 	 * as vst3_catalog_*). Returns false when out of range / load fails.
 	 */
-	bool insert_vst3_by_index (int index);
+	/** Insert VST3 FX. track < 0 → Audio 2 (legacy); else audio track index. */
+	bool insert_vst3_by_index (int index, int track = -1);
 
 	/**
 	 * Rescan → insert index 0 when plugins exist → unload.
@@ -2541,6 +2552,9 @@ private:
 	uint32_t    _period_frames; /* 0 = Auto */
 	std::string _pref_backend; /* Dummy / WASAPI — next start if CLI omits --backend */
 	uint32_t    _pref_period_frames;
+
+	bool _pref_wasapi_exclusive;
+
 	bool        _pref_snap_default;
 	bool        _pref_click_default;
 	std::string _pref_input_device; /* persisted WinShellPrefs device names */

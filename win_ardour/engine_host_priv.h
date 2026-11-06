@@ -84,7 +84,12 @@ public:
 	int rack_slot_count[EngineSnapshot::kMeters];
 	std::weak_ptr<PluginInsert> master_rack[EngineSnapshot::kMaxInsertSlots];
 	int master_rack_count;
-	std::weak_ptr<PluginInsert> vst2_fx; /* shell VST2 insert (Audio 2 or bridge) */
+	std::weak_ptr<PluginInsert> vst2_fx;        /* shell VST2-64 PluginInsert on Audio 2 */
+	std::weak_ptr<Processor> vst2_bridge_fx;    /* VST2-32 bridge Processor (FX) */
+	std::weak_ptr<Processor> vst2_bridge_synth; /* VST2-32 bridged instrument on MIDI */
+	std::string vst2_bridge_path;
+	std::string vst2_bridge_synth_path;
+	int vst2_bridge_track; /* audio track index hosting the bridge (−1 none) */
 	uint32_t vst2_param_ports[EngineSnapshot::kMaxVst3Params];
 	int vst2_param_count;
 	bool vst2_bridged_32;
@@ -160,6 +165,7 @@ public:
 		, master_rack_count (0)
 		, vst2_param_count (0)
 		, vst2_bridged_32 (false)
+		, vst2_bridge_track (-1)
 		, selected_track (-1)
 		, midi_activity (0.f)
 		, selected_midi_note_id (-1)
@@ -206,6 +212,17 @@ public:
 		for (int t = 0; t < EngineSnapshot::kMeters; ++t) {
 			rack_slot_count[t] = 0;
 		}
+	}
+
+	void persist_active_midi_region ()
+	{
+		if (active_midi_track < 0) {
+			return;
+		}
+		while ((int)midi_regions.size () <= active_midi_track) {
+			midi_regions.push_back (std::shared_ptr<MidiRegion> ());
+		}
+		midi_regions[(size_t)active_midi_track] = midi_region;
 	}
 
 	void sync_active_midi_from_index ()

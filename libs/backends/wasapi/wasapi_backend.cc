@@ -397,16 +397,29 @@ WasapiBackend::interleaved () const
 	return false;
 }
 
+bool
+WasapiBackend::capture_rate_mismatch () const
+{
+	return _io.capture_rate_mismatch ();
+}
+
 uint32_t
 WasapiBackend::systemic_input_latency () const
 {
-	return _systemic_input_latency;
+	/* Prefer explicit systemic override; otherwise report measured stream latency. */
+	if (_systemic_input_latency > 0) {
+		return _systemic_input_latency;
+	}
+	return _io.measured_capture_latency_frames ();
 }
 
 uint32_t
 WasapiBackend::systemic_output_latency () const
 {
-	return _systemic_output_latency;
+	if (_systemic_output_latency > 0) {
+		return _systemic_output_latency;
+	}
+	return _io.measured_playback_latency_frames ();
 }
 
 uint32_t
@@ -696,8 +709,14 @@ WasapiBackend::_start (bool for_latency_measurement)
 	_measure_latency = for_latency_measurement;
 
 	if (_io.open (_output_device, _input_device, _samplerate, _buffer_size) != 0) {
-		error << _("WASAPI: failed to open shared-mode device") << endmsg;
+		error << _("WASAPI: failed to open audio device") << endmsg;
 		return AudioDeviceOpenError;
+	}
+	if (_io.exclusive_requested () && !_io.exclusive_active ()) {
+		info << _("WASAPI: exclusive mode requested but shared fallback is active")
+		     << endmsg;
+	} else if (_io.exclusive_active ()) {
+		info << _("WASAPI: exclusive mode active") << endmsg;
 	}
 
 	_samplerate = _io.sample_rate ();

@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -40,17 +41,22 @@
 
 struct WasapiIO::ComState {
 	IMMDeviceEnumerator* enumerator;
-	IAudioClient*        render_client;
-	IAudioClient*        capture_client;
-	IAudioRenderClient*  render;
+	IAudioClient* render_client;
+	IAudioClient* capture_client;
+	IAudioRenderClient* render;
 	IAudioCaptureClient* capture;
-	HANDLE               render_event;
-	WAVEFORMATEX*        render_mix;
-	WAVEFORMATEX*        capture_mix;
-	UINT32               render_buffer_frames;
-	bool                 com_inited_here;
-	bool                 capture_enabled;
-	std::vector<float>   capture_scratch; /* pre-sized; no RT alloc in transfer */
+	HANDLE render_event;
+	WAVEFORMATEX* render_mix;
+	WAVEFORMATEX* capture_mix;
+	UINT32 render_buffer_frames;
+	bool com_inited_here;
+	bool capture_enabled;
+	std::vector<float> capture_scratch; /* pre-sized; no RT alloc in transfer */
+	std::vector<float> capture_ring;    /* native-rate interleaved ring for resample */
+	uint32_t capture_ring_frames;       /* capacity in frames */
+	uint32_t capture_ring_r;
+	uint32_t capture_ring_w;
+	uint32_t capture_ring_filled;
 
 	ComState ()
 		: enumerator (0)
@@ -64,7 +70,12 @@ struct WasapiIO::ComState {
 		, render_buffer_frames (0)
 		, com_inited_here (false)
 		, capture_enabled (false)
-	{}
+		, capture_ring_frames (0)
+		, capture_ring_r (0)
+		, capture_ring_w (0)
+		, capture_ring_filled (0)
+	{
+	}
 };
 
 static std::string
@@ -91,6 +102,15 @@ hns_to_frames (REFERENCE_TIME hns, float sr)
 	/* REFERENCE_TIME is 100ns units */
 	double frames = (double)hns * (double)sr / 10000000.0;
 	return (uint32_t)std::max (1.0, std::floor (frames + 0.5));
+}
+
+static REFERENCE_TIME
+frames_to_hns (uint32_t frames, float sr)
+{
+	if (frames == 0 || sr <= 0.f) {
+		return 0;
+	}
+	return (REFERENCE_TIME)((double)frames * 10000000.0 / (double)sr + 0.5);
 }
 
 static void
@@ -204,8 +224,10 @@ convert_to_device (const WAVEFORMATEX* fmt, const float* src, BYTE* dst, UINT32 
 		const UINT32 n = frames * chans;
 		for (UINT32 i = 0; i < n; ++i) {
 			float x = src[i];
-			if (x > 1.f) x = 1.f;
-			if (x < -1.f) x = -1.f;
+			if (x > 1.f)
+				x = 1.f;
+			if (x < -1.f)
+				x = -1.f;
 			d[i] = (int16_t)lrintf (x * 32767.f);
 		}
 		return;
@@ -215,8 +237,10 @@ convert_to_device (const WAVEFORMATEX* fmt, const float* src, BYTE* dst, UINT32 
 		const UINT32 n = frames * chans;
 		for (UINT32 i = 0; i < n; ++i) {
 			float x = src[i];
-			if (x > 1.f) x = 1.f;
-			if (x < -1.f) x = -1.f;
+			if (x > 1.f)
+				x = 1.f;
+			if (x < -1.f)
+				x = -1.f;
 			int32_t v = (int32_t)lrintf (x * 8388607.f);
 			p[0] = (BYTE)(v & 0xff);
 			p[1] = (BYTE)((v >> 8) & 0xff);
@@ -230,8 +254,10 @@ convert_to_device (const WAVEFORMATEX* fmt, const float* src, BYTE* dst, UINT32 
 		const UINT32 n = frames * chans;
 		for (UINT32 i = 0; i < n; ++i) {
 			float x = src[i];
-			if (x > 1.f) x = 1.f;
-			if (x < -1.f) x = -1.f;
+			if (x > 1.f)
+				x = 1.f;
+			if (x < -1.f)
+				x = -1.f;
 			d[i] = (int32_t)lrintf (x * 2147483647.f);
 		}
 		return;
@@ -241,11 +267,11 @@ convert_to_device (const WAVEFORMATEX* fmt, const float* src, BYTE* dst, UINT32 
 
 static HRESULT
 activate_client (IMMDeviceEnumerator* enumerator,
-                 const std::string& device_id,
-                 EDataFlow flow,
-                 IAudioClient** out_client,
-                 WAVEFORMATEX** out_mix,
-                 IMMDevice** out_dev_optional)
+		 const std::string& device_id,
+		 EDataFlow flow,
+		 IAudioClient** out_client,
+		 WAVEFORMATEX** out_mix,
+		 IMMDevice** out_dev_optional)
 {
 	*out_client = 0;
 	*out_mix = 0;
@@ -286,6 +312,8 @@ activate_client (IMMDeviceEnumerator* enumerator,
 
 WasapiIO::WasapiIO ()
 	: _open (false)
+	, _exclusive_requested (false)
+	, _exclusive_active (false)
 	, _sample_rate (48000.f)
 	, _period_frames (512)
 	, _default_period_frames (480)
@@ -297,6 +325,8 @@ WasapiIO::WasapiIO ()
 	, _measured_playback_latency (0)
 	, _measured_capture_latency (0)
 	, _capture_rate_mismatch (false)
+	, _capture_sample_rate (48000.f)
+	, _cap_resample_phase (0.0)
 #ifdef _WIN32
 	, _com (0)
 #endif
@@ -379,7 +409,7 @@ WasapiIO::enumerate_devices (std::vector<DeviceInfo>& devices)
 	}
 
 	hr = CoCreateInstance (__uuidof (MMDeviceEnumerator), NULL, CLSCTX_ALL,
-	                       __uuidof (IMMDeviceEnumerator), (void**)&enumerator);
+			       __uuidof (IMMDeviceEnumerator), (void**)&enumerator);
 	if (FAILED (hr) || !enumerator) {
 		if (com_here) {
 			CoUninitialize ();
@@ -471,11 +501,19 @@ WasapiIO::enumerate_devices (std::vector<DeviceInfo>& devices)
 
 int
 WasapiIO::open (const std::string& output_name_or_id,
-                const std::string& input_name_or_id,
-                float             /*sample_rate_hint*/,
-                uint32_t          frames_per_period)
+		const std::string& input_name_or_id,
+		float /*sample_rate_hint*/,
+		uint32_t frames_per_period)
 {
 	close ();
+	_exclusive_active = false;
+	/* Env override for CI / scripting (1/y/Y). */
+	if (!_exclusive_requested) {
+		const char* env = std::getenv ("AIRDOUR_WASAPI_EXCLUSIVE");
+		if (env && env[0] && (env[0] == '1' || env[0] == 'y' || env[0] == 'Y')) {
+			_exclusive_requested = true;
+		}
+	}
 
 #ifndef _WIN32
 	(void)output_name_or_id;
@@ -500,7 +538,7 @@ WasapiIO::open (const std::string& output_name_or_id,
 	}
 
 	hr = CoCreateInstance (__uuidof (MMDeviceEnumerator), NULL, CLSCTX_ALL,
-	                       __uuidof (IMMDeviceEnumerator), (void**)&_com->enumerator);
+			       __uuidof (IMMDeviceEnumerator), (void**)&_com->enumerator);
 	if (FAILED (hr) || !_com->enumerator) {
 		close ();
 		return -1;
@@ -510,7 +548,7 @@ WasapiIO::open (const std::string& output_name_or_id,
 	const std::string in_id = resolve_device_id (input_name_or_id, true);
 
 	hr = activate_client (_com->enumerator, out_id, eRender,
-	                      &_com->render_client, &_com->render_mix, NULL);
+			      &_com->render_client, &_com->render_mix, NULL);
 	if (FAILED (hr) || !_com->render_client || !_com->render_mix) {
 		close ();
 		return -1;
@@ -537,8 +575,8 @@ WasapiIO::open (const std::string& output_name_or_id,
 	IAudioClient3* ac3 = 0;
 	if (SUCCEEDED (_com->render_client->QueryInterface (__uuidof (IAudioClient3), (void**)&ac3)) && ac3) {
 		if (SUCCEEDED (ac3->GetSharedModeEnginePeriod (_com->render_mix,
-		                                               &default_period, &fundamental,
-		                                               &min_period_f, &max_period_f))) {
+							       &default_period, &fundamental,
+							       &min_period_f, &max_period_f))) {
 			if (fundamental) {
 				_min_period_frames = fundamental;
 			} else if (min_period_f) {
@@ -609,79 +647,183 @@ WasapiIO::open (const std::string& output_name_or_id,
 		return -1;
 	}
 
-	std::fprintf (stderr,
-	              "wasapi: shared engine fund=%u min=%u def=%u max=%u req=%u\n",
-	              (unsigned)fundamental,
-	              (unsigned)(min_period_f ? min_period_f : _min_period_frames),
-	              (unsigned)_default_period_frames,
-	              (unsigned)max_period_f,
-	              (unsigned)frames_per_period);
-	std::fflush (stderr);
-
 	DWORD stream_flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
 	uint32_t period = try_periods.empty () ? snap_period (480) : try_periods.front ();
 	bool opened = false;
 
-	if (ac3) {
-		for (size_t i = 0; i < try_periods.size (); ++i) {
-			period = try_periods[i];
-			if (min_period_f && period < min_period_f) {
-				continue;
+	/* Exclusive render: try mix / closest format, recreate client on failure. */
+	if (_exclusive_requested) {
+		WAVEFORMATEX* closest = 0;
+		HRESULT fmt_hr = _com->render_client->IsFormatSupported (
+			AUDCLNT_SHAREMODE_EXCLUSIVE, _com->render_mix, &closest);
+		WAVEFORMATEX* excl_fmt = _com->render_mix;
+		bool free_closest = false;
+		if (fmt_hr == S_FALSE && closest) {
+			excl_fmt = closest;
+			free_closest = true;
+			_sample_rate = (float)excl_fmt->nSamplesPerSec;
+			_playback_channels = excl_fmt->nChannels;
+			_mix_is_float = format_is_float (excl_fmt);
+			_mix_bits = format_bits (excl_fmt);
+		} else if (FAILED (fmt_hr) && fmt_hr != AUDCLNT_E_UNSUPPORTED_FORMAT) {
+			std::fprintf (stderr, "wasapi: exclusive IsFormatSupported hr=0x%lx — shared fallback\n",
+				      (unsigned long)fmt_hr);
+			std::fflush (stderr);
+		}
+
+		if (fmt_hr == S_OK || fmt_hr == S_FALSE) {
+			uint32_t excl_period = explicit_period
+						       ? snap_period (frames_per_period)
+						       : snap_period (_min_period_frames ? _min_period_frames : 128u);
+			REFERENCE_TIME hns = frames_to_hns (excl_period, _sample_rate);
+			if (min_period > 0 && hns < min_period) {
+				hns = min_period;
+				excl_period = hns_to_frames (hns, _sample_rate);
 			}
-			if (max_period_f && period > max_period_f) {
-				continue;
-			}
-			hr = ac3->InitializeSharedAudioStream (stream_flags, period, _com->render_mix, NULL);
+			hr = _com->render_client->Initialize (
+				AUDCLNT_SHAREMODE_EXCLUSIVE,
+				stream_flags,
+				hns,
+				hns,
+				excl_fmt,
+				NULL);
 			if (SUCCEEDED (hr)) {
 				opened = true;
-				break;
+				_exclusive_active = true;
+				period = excl_period;
+				std::fprintf (stderr,
+					      "wasapi: opened exclusive period=%u (%.2f ms @ %.0f Hz)\n",
+					      (unsigned)period,
+					      (_sample_rate > 0.f)
+						      ? (1000.0 * (double)period / (double)_sample_rate)
+						      : 0.0,
+					      (double)_sample_rate);
+				std::fflush (stderr);
+			} else {
+				std::fprintf (stderr,
+					      "wasapi: exclusive Initialize failed hr=0x%lx — recreating for shared\n",
+					      (unsigned long)hr);
+				std::fflush (stderr);
+				/* Failed Initialize kills the client — reopen for shared. */
+				_com->render_client->Release ();
+				_com->render_client = 0;
+				release_format (_com->render_mix);
+				if (ac3) {
+					ac3->Release ();
+					ac3 = 0;
+				}
+				hr = activate_client (_com->enumerator, out_id, eRender,
+						      &_com->render_client, &_com->render_mix, NULL);
+				if (FAILED (hr) || !_com->render_client || !_com->render_mix) {
+					if (free_closest) {
+						CoTaskMemFree (closest);
+					}
+					close ();
+					return -1;
+				}
+				_sample_rate = (float)_com->render_mix->nSamplesPerSec;
+				_playback_channels = _com->render_mix->nChannels;
+				_mix_is_float = format_is_float (_com->render_mix);
+				_mix_bits = format_bits (_com->render_mix);
+				if (SUCCEEDED (_com->render_client->QueryInterface (
+					    __uuidof (IAudioClient3), (void**)&ac3)) &&
+				    ac3) {
+					UINT32 dp = 0, fund = 0, mn = 0, mx = 0;
+					if (SUCCEEDED (ac3->GetSharedModeEnginePeriod (
+						    _com->render_mix, &dp, &fund, &mn, &mx))) {
+						if (fund) {
+							_min_period_frames = fund;
+						}
+						if (dp) {
+							_default_period_frames = dp;
+						}
+						fundamental = fund;
+						min_period_f = mn;
+						max_period_f = mx;
+						default_period = dp;
+					}
+				}
 			}
+		}
+		if (free_closest) {
+			CoTaskMemFree (closest);
 		}
 	}
 
 	if (!opened) {
-		/* Classic shared Initialize → device default event cadence. */
-		period = snap_period (_default_period_frames ? _default_period_frames
-		                                            : (ten_ms ? ten_ms : 480u));
-		hr = _com->render_client->Initialize (
-			AUDCLNT_SHAREMODE_SHARED,
-			stream_flags,
-			0, /* hnsBufferDuration: shared default */
-			0, /* hnsPeriodicity must be 0 in shared */
-			_com->render_mix,
-			NULL);
-		if (FAILED (hr)) {
-			if (ac3) {
-				ac3->Release ();
+		std::fprintf (stderr,
+			      "wasapi: shared engine fund=%u min=%u def=%u max=%u req=%u\n",
+			      (unsigned)fundamental,
+			      (unsigned)(min_period_f ? min_period_f : _min_period_frames),
+			      (unsigned)_default_period_frames,
+			      (unsigned)max_period_f,
+			      (unsigned)frames_per_period);
+		std::fflush (stderr);
+
+		if (ac3) {
+			for (size_t i = 0; i < try_periods.size (); ++i) {
+				period = try_periods[i];
+				if (min_period_f && period < min_period_f) {
+					continue;
+				}
+				if (max_period_f && period > max_period_f) {
+					continue;
+				}
+				hr = ac3->InitializeSharedAudioStream (stream_flags, period, _com->render_mix, NULL);
+				if (SUCCEEDED (hr)) {
+					opened = true;
+					break;
+				}
 			}
-			close ();
-			return -1;
 		}
-		opened = true;
+
+		if (!opened) {
+			/* Classic shared Initialize → device default event cadence. */
+			period = snap_period (_default_period_frames ? _default_period_frames
+								     : (ten_ms ? ten_ms : 480u));
+			hr = _com->render_client->Initialize (
+				AUDCLNT_SHAREMODE_SHARED,
+				stream_flags,
+				0, /* hnsBufferDuration: shared default */
+				0, /* hnsPeriodicity must be 0 in shared */
+				_com->render_mix,
+				NULL);
+			if (FAILED (hr)) {
+				if (ac3) {
+					ac3->Release ();
+				}
+				close ();
+				return -1;
+			}
+			opened = true;
+		}
+
+		/* Prefer the period the audio engine actually settled on. */
+		if (ac3) {
+			WAVEFORMATEX* cur_fmt = 0;
+			UINT32 cur_period = 0;
+			if (SUCCEEDED (ac3->GetCurrentSharedModeEnginePeriod (&cur_fmt, &cur_period)) && cur_period) {
+				period = cur_period;
+			}
+			if (cur_fmt) {
+				CoTaskMemFree (cur_fmt);
+			}
+		}
+		std::fprintf (stderr,
+			      "wasapi: opened shared period=%u (%.2f ms @ %.0f Hz)\n",
+			      (unsigned)period,
+			      (_sample_rate > 0.f)
+				      ? (1000.0 * (double)period / (double)_sample_rate)
+				      : 0.0,
+			      (double)_sample_rate);
+		std::fflush (stderr);
 	}
 
-	/* Prefer the period the audio engine actually settled on. */
 	if (ac3) {
-		WAVEFORMATEX* cur_fmt = 0;
-		UINT32 cur_period = 0;
-		if (SUCCEEDED (ac3->GetCurrentSharedModeEnginePeriod (&cur_fmt, &cur_period)) && cur_period) {
-			period = cur_period;
-		}
-		if (cur_fmt) {
-			CoTaskMemFree (cur_fmt);
-		}
 		ac3->Release ();
 		ac3 = 0;
 	}
 	_period_frames = period;
-	std::fprintf (stderr,
-	              "wasapi: opened shared period=%u (%.2f ms @ %.0f Hz)\n",
-	              (unsigned)_period_frames,
-	              (_sample_rate > 0.f)
-	                      ? (1000.0 * (double)_period_frames / (double)_sample_rate)
-	                      : 0.0,
-	              (double)_sample_rate);
-	std::fflush (stderr);
 
 	hr = _com->render_client->SetEventHandle (_com->render_event);
 	if (FAILED (hr)) {
@@ -701,53 +843,63 @@ WasapiIO::open (const std::string& output_name_or_id,
 		return -1;
 	}
 
-	/* Optional capture — same shared-mode rules; clocked by render event. */
+	/* Optional capture — clocked by render event; resample when mix rates differ. */
 	_com->capture_enabled = false;
 	_capture_channels = 0;
 	_capture_rate_mismatch = false;
+	_capture_sample_rate = _sample_rate;
+	_cap_resample_phase = 0.0;
 	_measured_playback_latency = 0;
 	_measured_capture_latency = 0;
+	_com->capture_ring_frames = 0;
+	_com->capture_ring_r = 0;
+	_com->capture_ring_w = 0;
+	_com->capture_ring_filled = 0;
+	_com->capture_ring.clear ();
 	/* Try default capture unless input explicitly disabled with "None". */
 	if (input_name_or_id != "None" && input_name_or_id != "none") {
 		hr = activate_client (_com->enumerator, in_id, eCapture,
-		                      &_com->capture_client, &_com->capture_mix, NULL);
+				      &_com->capture_client, &_com->capture_mix, NULL);
 		if (SUCCEEDED (hr) && _com->capture_client && _com->capture_mix) {
-			/*
-			 * Capture must match render rate for a single-period engine loop.
-			 * If mix rates differ, skip capture (flagged for UI) until a
-			 * resample path is wired.
-			 */
-			if (_com->capture_mix->nSamplesPerSec != _com->render_mix->nSamplesPerSec) {
+			const UINT32 cap_sr = _com->capture_mix->nSamplesPerSec;
+			const UINT32 ren_sr = _com->render_mix->nSamplesPerSec;
+			if (cap_sr != ren_sr) {
 				_capture_rate_mismatch = true;
 				std::fprintf (stderr,
-				              "wasapi: capture mix rate %u != render %u — capture disabled\n",
-				              (unsigned)_com->capture_mix->nSamplesPerSec,
-				              (unsigned)_com->render_mix->nSamplesPerSec);
+					      "wasapi: capture mix rate %u != render %u — enabling linear resample\n",
+					      (unsigned)cap_sr, (unsigned)ren_sr);
+				std::fflush (stderr);
 			}
-			if (_com->capture_mix->nSamplesPerSec == _com->render_mix->nSamplesPerSec) {
-				IAudioClient3* cap3 = 0;
-				bool cap_ok = false;
-				if (SUCCEEDED (_com->capture_client->QueryInterface (__uuidof (IAudioClient3), (void**)&cap3)) && cap3) {
-					hr = cap3->InitializeSharedAudioStream (0, _period_frames, _com->capture_mix, NULL);
-					cap_ok = SUCCEEDED (hr);
-					cap3->Release ();
+			_capture_sample_rate = (float)cap_sr;
+			uint32_t cap_period = _period_frames;
+			if (ren_sr > 0 && cap_sr != ren_sr) {
+				cap_period = (uint32_t)((double)_period_frames * (double)cap_sr / (double)ren_sr + 0.5);
+				if (cap_period < 32) {
+					cap_period = 32;
 				}
-				if (!cap_ok) {
-					hr = _com->capture_client->Initialize (
-						AUDCLNT_SHAREMODE_SHARED,
-						0, /* no separate event; pull on render tick */
-						0, 0,
-						_com->capture_mix,
-						NULL);
-					cap_ok = SUCCEEDED (hr);
-				}
-				if (cap_ok) {
-					hr = _com->capture_client->GetService (
-						__uuidof (IAudioCaptureClient), (void**)&_com->capture);
-					if (SUCCEEDED (hr) && _com->capture) {
-						_capture_channels = _com->capture_mix->nChannels;
-						_com->capture_enabled = true;
-					}
+			}
+			IAudioClient3* cap3 = 0;
+			bool cap_ok = false;
+			if (SUCCEEDED (_com->capture_client->QueryInterface (__uuidof (IAudioClient3), (void**)&cap3)) && cap3) {
+				hr = cap3->InitializeSharedAudioStream (0, cap_period, _com->capture_mix, NULL);
+				cap_ok = SUCCEEDED (hr);
+				cap3->Release ();
+			}
+			if (!cap_ok) {
+				hr = _com->capture_client->Initialize (
+					AUDCLNT_SHAREMODE_SHARED,
+					0, /* no separate event; pull on render tick */
+					0, 0,
+					_com->capture_mix,
+					NULL);
+				cap_ok = SUCCEEDED (hr);
+			}
+			if (cap_ok) {
+				hr = _com->capture_client->GetService (
+					__uuidof (IAudioCaptureClient), (void**)&_com->capture);
+				if (SUCCEEDED (hr) && _com->capture) {
+					_capture_channels = _com->capture_mix->nChannels;
+					_com->capture_enabled = true;
 				}
 			}
 			if (!_com->capture_enabled) {
@@ -760,6 +912,8 @@ WasapiIO::open (const std::string& output_name_or_id,
 					_com->capture_client = 0;
 				}
 				release_format (_com->capture_mix);
+				_capture_rate_mismatch = false;
+				_capture_sample_rate = _sample_rate;
 			}
 		}
 	}
@@ -774,24 +928,41 @@ WasapiIO::open (const std::string& output_name_or_id,
 	}
 
 	if (_com->capture_enabled) {
-		_com->capture_scratch.resize (std::max (_period_frames, _com->render_buffer_frames) * std::max (1u, _capture_channels));
+		const uint32_t ch = std::max (1u, _capture_channels);
+		const uint32_t scratch_frames =
+			std::max (_period_frames, _com->render_buffer_frames) * 4u;
+		_com->capture_scratch.resize (scratch_frames * ch);
+		if (_capture_rate_mismatch) {
+			/* Hold ~4 render periods of native-rate audio for the resampler. */
+			double ratio = (_sample_rate > 0.f)
+					       ? ((double)_capture_sample_rate / (double)_sample_rate)
+					       : 1.0;
+			uint32_t ring_frames = (uint32_t)((double)_period_frames * ratio * 4.0 + 64.0);
+			if (ring_frames < 1024) {
+				ring_frames = 1024;
+			}
+			_com->capture_ring_frames = ring_frames;
+			_com->capture_ring.assign ((size_t)ring_frames * ch, 0.f);
+			_com->capture_ring_r = 0;
+			_com->capture_ring_w = 0;
+			_com->capture_ring_filled = 0;
+			_cap_resample_phase = 0.0;
+		}
 	}
 
-	/* Measured stream latencies (100ns units → frames). */
+	/* Measured stream latencies (100ns units → frames at render rate). */
 	_measured_playback_latency = 0;
 	_measured_capture_latency = 0;
 	REFERENCE_TIME play_lat = 0;
-	if (SUCCEEDED (_com->render_client->GetStreamLatency (&play_lat)) && play_lat > 0
-	    && _sample_rate > 0.f) {
+	if (SUCCEEDED (_com->render_client->GetStreamLatency (&play_lat)) && play_lat > 0 && _sample_rate > 0.f) {
 		_measured_playback_latency =
-		    (uint32_t)((double)play_lat * (double)_sample_rate / 10000000.0 + 0.5);
+			(uint32_t)((double)play_lat * (double)_sample_rate / 10000000.0 + 0.5);
 	}
 	if (_com->capture_enabled && _com->capture_client) {
 		REFERENCE_TIME cap_lat = 0;
-		if (SUCCEEDED (_com->capture_client->GetStreamLatency (&cap_lat)) && cap_lat > 0
-		    && _sample_rate > 0.f) {
+		if (SUCCEEDED (_com->capture_client->GetStreamLatency (&cap_lat)) && cap_lat > 0 && _sample_rate > 0.f) {
 			_measured_capture_latency =
-			    (uint32_t)((double)cap_lat * (double)_sample_rate / 10000000.0 + 0.5);
+				(uint32_t)((double)cap_lat * (double)_sample_rate / 10000000.0 + 0.5);
 		}
 	}
 
@@ -803,6 +974,7 @@ WasapiIO::open (const std::string& output_name_or_id,
 void
 WasapiIO::close ()
 {
+	_exclusive_active = false;
 #ifdef _WIN32
 	if (_com) {
 		if (_com->capture_client) {
@@ -892,10 +1064,30 @@ WasapiIO::read_capture (float* interleaved_capture, uint32_t max_frames)
 		return (int)period;
 	}
 
+	const uint32_t ch = _capture_channels;
+	const bool need_resample = _capture_rate_mismatch && _capture_sample_rate > 0.f && _sample_rate > 0.f && _com->capture_ring_frames > 0;
+
+	auto push_ring = [&] (const float* src, UINT32 frames) {
+		if (!_com->capture_ring_frames || !src || frames == 0) {
+			return;
+		}
+		for (UINT32 i = 0; i < frames; ++i) {
+			if (_com->capture_ring_filled >= _com->capture_ring_frames) {
+				/* Drop oldest frame to keep the newest audio. */
+				_com->capture_ring_r = (_com->capture_ring_r + 1) % _com->capture_ring_frames;
+				--_com->capture_ring_filled;
+			}
+			float* dst = &_com->capture_ring[_com->capture_ring_w * ch];
+			memcpy (dst, src + i * ch, ch * sizeof (float));
+			_com->capture_ring_w = (_com->capture_ring_w + 1) % _com->capture_ring_frames;
+			++_com->capture_ring_filled;
+		}
+	};
+
 	UINT32 packet = 0;
 	HRESULT hr = _com->capture->GetNextPacketSize (&packet);
 	UINT32 written = 0;
-	while (SUCCEEDED (hr) && packet > 0 && written < period) {
+	while (SUCCEEDED (hr) && packet > 0) {
 		BYTE* data = 0;
 		UINT32 frames = 0;
 		DWORD flags = 0;
@@ -903,20 +1095,91 @@ WasapiIO::read_capture (float* interleaved_capture, uint32_t max_frames)
 		if (FAILED (hr)) {
 			break;
 		}
-		UINT32 use = frames;
-		if (written + use > period) {
-			use = period - written;
+		if (!(flags & AUDCLNT_BUFFERFLAGS_SILENT) && data && frames && _com->capture_scratch.size () >= frames * ch) {
+			convert_from_device (_com->capture_mix, data, &_com->capture_scratch[0], frames, ch);
+			if (need_resample) {
+				push_ring (&_com->capture_scratch[0], frames);
+			} else {
+				UINT32 use = frames;
+				if (written + use > period) {
+					use = period - written;
+				}
+				if (use) {
+					memcpy (interleaved_capture + written * ch,
+						&_com->capture_scratch[0],
+						use * ch * sizeof (float));
+					written += use;
+				}
+			}
+		} else if (need_resample && frames && _com->capture_scratch.size () >= frames * ch) {
+			/* Silent packet — push zeros so timing stays honest. */
+			memset (&_com->capture_scratch[0], 0, frames * ch * sizeof (float));
+			push_ring (&_com->capture_scratch[0], frames);
+		} else if (!need_resample) {
+			written += frames;
+			if (written > period) {
+				written = period;
+			}
 		}
-		if (!(flags & AUDCLNT_BUFFERFLAGS_SILENT) && data && use &&
-		    _com->capture_scratch.size () >= use * _capture_channels) {
-			convert_from_device (_com->capture_mix, data, &_com->capture_scratch[0], use, _capture_channels);
-			memcpy (interleaved_capture + written * _capture_channels,
-			        &_com->capture_scratch[0],
-			        use * _capture_channels * sizeof (float));
-		}
-		written += use;
 		_com->capture->ReleaseBuffer (frames);
+		if (!need_resample && written >= period) {
+			/* Drain remaining packets without copying past the period. */
+			hr = _com->capture->GetNextPacketSize (&packet);
+			while (SUCCEEDED (hr) && packet > 0) {
+				BYTE* drop = 0;
+				UINT32 df = 0;
+				DWORD dflags = 0;
+				if (FAILED (_com->capture->GetBuffer (&drop, &df, &dflags, NULL, NULL))) {
+					break;
+				}
+				_com->capture->ReleaseBuffer (df);
+				hr = _com->capture->GetNextPacketSize (&packet);
+			}
+			break;
+		}
 		hr = _com->capture->GetNextPacketSize (&packet);
+	}
+
+	if (need_resample) {
+		const double ratio = (double)_capture_sample_rate / (double)_sample_rate;
+		for (uint32_t i = 0; i < period; ++i) {
+			double src_pos = _cap_resample_phase + (double)i * ratio;
+			uint32_t i0 = (uint32_t)src_pos;
+			float frac = (float)(src_pos - (double)i0);
+			if (i0 + 1 >= _com->capture_ring_filled) {
+				/* Underrun — hold last sample or silence. */
+				if (_com->capture_ring_filled == 0) {
+					continue;
+				}
+				i0 = _com->capture_ring_filled - 1;
+				frac = 0.f;
+			}
+			uint32_t i1 = i0 + 1;
+			if (i1 >= _com->capture_ring_filled) {
+				i1 = i0;
+			}
+			uint32_t r0 = (_com->capture_ring_r + i0) % _com->capture_ring_frames;
+			uint32_t r1 = (_com->capture_ring_r + i1) % _com->capture_ring_frames;
+			const float* a = &_com->capture_ring[r0 * ch];
+			const float* b = &_com->capture_ring[r1 * ch];
+			float* out = interleaved_capture + i * ch;
+			for (uint32_t c = 0; c < ch; ++c) {
+				out[c] = a[c] + (b[c] - a[c]) * frac;
+			}
+		}
+		/* Advance ring read by the integer samples consumed this period. */
+		const double advance = (double)period * ratio;
+		const double new_phase = _cap_resample_phase + advance;
+		uint32_t consume = (uint32_t)new_phase; /* floor */
+		_cap_resample_phase = new_phase - (double)consume;
+		if (_cap_resample_phase < 0.0) {
+			_cap_resample_phase = 0.0;
+		}
+		if (consume > _com->capture_ring_filled) {
+			consume = _com->capture_ring_filled;
+		}
+		_com->capture_ring_r = (_com->capture_ring_r + consume) % _com->capture_ring_frames;
+		_com->capture_ring_filled -= consume;
 	}
 	return (int)period;
 #endif
@@ -944,8 +1207,8 @@ WasapiIO::write_playback (const float* interleaved_playback, uint32_t max_frames
 		return -1;
 	}
 	UINT32 available = (_com->render_buffer_frames > padding)
-		? (_com->render_buffer_frames - padding)
-		: 0;
+				   ? (_com->render_buffer_frames - padding)
+				   : 0;
 	if (available == 0) {
 		return -2;
 	}

@@ -25,7 +25,7 @@ Airdour Windows CI / release artifact status
 git_ref:  $GitRef
 git_sha:  $GitSha
 host:     windows-latest (MSVC / Win64)
-audio:    WASAPI shared only (no exclusive, DirectSound, or ASIO)
+audio:    WASAPI shared (default) + optional exclusive (prefs/env); no DirectSound/ASIO
 gui:      Win32 + Direct2D/DirectWrite (no GTK2)
 product:  AIRDOUR_WINDOWS_ONLY / --windows-only
 
@@ -34,7 +34,7 @@ What is in this artifact
 $smokeLine
 $guiLine
 GREEN  cmake/win64 spine configured
-GREEN  libs/backends/wasapi sources (shared-mode implementation)
+GREEN  libs/backends/wasapi sources (shared + exclusive open path)
 GREEN  tools/win-native/README.md
 
 Dependency expectations (Windows-only product)

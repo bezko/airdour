@@ -33,6 +33,8 @@
 #include "evoral/Parameter.h"
 #include "pbd/controllable.h"
 
+#include "vst2_bridge_processor.h"
+
 namespace {
 
 std::wstring
@@ -124,6 +126,50 @@ EngineHost::refresh_insert_rack_snap ()
 		for (int s = 0; s < n; ++s) {
 			fill_slot_from_insert (_snap.insert_slots[t][s], _impl->rack_slots[t][s].lock ());
 		}
+		/* Fill empty rack slots that hold a VST2-32 bridge Processor. */
+		if (_impl->vst2_bridge_track == t) {
+			std::shared_ptr<ARDOUR::Processor> bp = _impl->vst2_bridge_fx.lock ();
+			if (bp) {
+				int slot = -1;
+				for (int s = 0; s < n; ++s) {
+					if (!_snap.insert_slots[t][s].ok) {
+						slot = s;
+						break;
+					}
+				}
+				if (slot < 0 && n < EngineSnapshot::kMaxInsertSlots) {
+					slot = n;
+					_snap.insert_slot_count[t] = n + 1;
+					_impl->rack_slot_count[t] = n + 1;
+				}
+				if (slot >= 0) {
+					EngineSnapshot::InsertSlotSnap& slot_snap = _snap.insert_slots[t][slot];
+					slot_snap = EngineSnapshot::InsertSlotSnap ();
+					slot_snap.ok = true;
+					slot_snap.bypassed = !bp->active ();
+					std::wstring w = utf8_to_wide_local (bp->display_name ());
+					if (w.empty ()) {
+						w = L"VST2-32";
+					}
+					wcsncpy_s (slot_snap.name, EngineSnapshot::kInsertNameLen, w.c_str (),
+						   _TRUNCATE);
+					auto* bridge =
+						dynamic_cast<airdour::vst2_bridge::Vst2BridgeProcessor*> (bp.get ());
+					if (bridge) {
+						const int pc = std::min (bridge->param_count (),
+									 EngineSnapshot::kMaxVst3Params);
+						slot_snap.param_count = pc;
+						for (int p = 0; p < pc; ++p) {
+							wchar_t pname[16];
+							_snwprintf_s (pname, _TRUNCATE, L"P%d", p + 1);
+							wcsncpy_s (slot_snap.param_name[p],
+								   EngineSnapshot::kVst3ParamNameLen, pname, _TRUNCATE);
+							slot_snap.param_norm[p] = bridge->get_param_norm (p);
+						}
+					}
+				}
+			}
+		}
 	}
 	int mn = std::max (0, std::min (EngineSnapshot::kMaxInsertSlots, _impl->master_rack_count));
 	_snap.master_insert_count = mn;
@@ -196,18 +242,25 @@ EngineHost::insert_rack_slot (int track, int kind, int catalog_index)
 			}
 		}
 	} else if (kind == 1) {
-		ok = insert_vst3_by_index (catalog_index);
+		ok = insert_vst3_by_index (catalog_index, track);
 		if (ok) {
 			int slot = _impl->rack_slot_count[track];
-			_impl->rack_slots[track][slot] = _impl->vst3_fx;
-			_impl->rack_slot_count[track] = slot + 1;
+			if (_impl->vst3_fx.lock () && slot < EngineSnapshot::kMaxInsertSlots) {
+				_impl->rack_slots[track][slot] = _impl->vst3_fx;
+				_impl->rack_slot_count[track] = slot + 1;
+			}
 		}
 	} else if (kind == 2) {
-		ok = insert_vst2_by_index (catalog_index);
+		ok = insert_vst2_by_index (catalog_index, track);
 		if (ok) {
 			int slot = _impl->rack_slot_count[track];
-			_impl->rack_slots[track][slot] = _impl->vst2_fx;
-			_impl->rack_slot_count[track] = slot + 1;
+			if (_impl->vst2_fx.lock () && slot < EngineSnapshot::kMaxInsertSlots) {
+				_impl->rack_slots[track][slot] = _impl->vst2_fx;
+				_impl->rack_slot_count[track] = slot + 1;
+			} else if (_impl->vst2_bridge_fx.lock () && slot < EngineSnapshot::kMaxInsertSlots) {
+				/* Bridged 32-bit insert lives as Processor, not PluginInsert. */
+				_impl->rack_slot_count[track] = slot + 1;
+			}
 		}
 	}
 	refresh_insert_rack_snap ();

@@ -37,6 +37,8 @@
 #include "pbd/mutex.h"
 
 #include "vst2_bridge_client.h"
+#include "vst2_bridge_processor.h"
+#include "vst2_bridge_protocol.h"
 
 namespace {
 
@@ -177,6 +179,30 @@ EngineHost::refresh_vst2_params_from_insert ()
 		return;
 	}
 	_impl->vst2_param_count = 0;
+
+	std::shared_ptr<ARDOUR::Processor> bp = _impl->vst2_bridge_fx.lock ();
+	if (bp) {
+		auto* bridge = dynamic_cast<airdour::vst2_bridge::Vst2BridgeProcessor*> (bp.get ());
+		if (bridge && bridge->bridged_ok ()) {
+			copy_name_local (_snap.vst2_name, EngineSnapshot::kVst3NameLen, bridge->display_name ());
+			_snap.vst2_bypassed = !bridge->active ();
+			_snap.vst2_ok = true;
+			_snap.vst2_bridged_32 = true;
+			_impl->vst2_bridged_32 = true;
+			const int n = std::min (bridge->param_count (), EngineSnapshot::kMaxVst3Params);
+			for (int i = 0; i < n; ++i) {
+				_impl->vst2_param_ports[i] = (uint32_t)i;
+				_snap.vst2_param_norm[i] = bridge->get_param_norm (i);
+				char pname[16];
+				std::snprintf (pname, sizeof (pname), "P%d", i + 1);
+				copy_name_local (_snap.vst2_param_name[i], EngineSnapshot::kVst3ParamNameLen, pname);
+			}
+			_impl->vst2_param_count = n;
+			_snap.vst2_param_count = n;
+			return;
+		}
+	}
+
 	std::shared_ptr<ARDOUR::PluginInsert> pi = _impl->vst2_fx.lock ();
 	if (!pi || !pi->plugin (0)) {
 		return;
@@ -218,24 +244,43 @@ EngineHost::unload_vst2 ()
 	if (!_impl) {
 		return false;
 	}
-	std::shared_ptr<ARDOUR::PluginInsert> pi = _impl->vst2_fx.lock ();
-	if (pi && _impl->tracks.size () >= 2 && _impl->tracks[1]) {
-		try {
-			_impl->tracks[1]->remove_processor (pi);
-		} catch (...) {
+	int ti = _impl->vst2_bridge_track;
+	if (ti < 0) {
+		ti = 1;
+	}
+	if (ti >= 0 && ti < (int)_impl->tracks.size () && _impl->tracks[(size_t)ti]) {
+		std::shared_ptr<ARDOUR::PluginInsert> pi = _impl->vst2_fx.lock ();
+		if (pi) {
+			try {
+				_impl->tracks[(size_t)ti]->remove_processor (pi);
+			} catch (...) {
+			}
+		}
+		std::shared_ptr<ARDOUR::Processor> bp = _impl->vst2_bridge_fx.lock ();
+		if (bp) {
+			try {
+				_impl->tracks[(size_t)ti]->remove_processor (bp);
+			} catch (...) {
+			}
 		}
 	}
 	_impl->vst2_fx.reset ();
-	_impl->vst2_bridged_32 = false;
+	_impl->vst2_bridge_fx.reset ();
+	if (!_impl->vst2_bridge_path.empty ()) {
+		airdour::vst2_bridge::shutdown_plugin (_impl->vst2_bridge_path);
+		_impl->vst2_bridge_path.clear ();
+	}
+	_impl->vst2_bridge_track = -1;
+	/* Keep vst2_bridged_32 true if a synth bridge remains. */
+	_impl->vst2_bridged_32 = (bool)_impl->vst2_bridge_synth.lock ();
 	_impl->vst2_param_count = 0;
 	refresh_vst2_params_from_insert ();
-	airdour::vst2_bridge::shutdown_all ();
 	_snap.detail = L"VST2 unloaded";
 	return true;
 }
 
 bool
-EngineHost::insert_vst2_by_index (int index)
+EngineHost::insert_vst2_by_index (int index, int track)
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"VST2 insert failed — no Session";
@@ -243,6 +288,7 @@ EngineHost::insert_vst2_by_index (int index)
 	}
 #if !defined(WINDOWS_VST_SUPPORT)
 	(void)index;
+	(void)track;
 	_snap.detail = L"VST2 insert — not compiled";
 	return false;
 #else
@@ -264,55 +310,65 @@ EngineHost::insert_vst2_by_index (int index)
 			return false;
 		}
 		(void)unload_vst2 ();
-		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
 			collect_tracks ();
 		}
-		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
-			_snap.detail = L"VST2 insert — no Audio 2";
+		int ti = track;
+		if (ti < 0) {
+			ti = 1; /* legacy default: Audio 2 */
+		}
+		if (ti < 0 || ti >= (int)_impl->tracks.size () || !_impl->tracks[(size_t)ti]) {
+			_snap.detail = L"VST2 insert — no target track";
 			return false;
 		}
 
-		/* PE gate: 32-bit DLLs go through the x86 bridge client. */
+		/* PE gate: 32-bit DLLs go through the x86 bridge Processor. */
 		bool bridged = false;
 		if (!info->path.empty ()) {
 			bridged = airdour::vst2_bridge::dll_is_i386 (info->path);
 		}
+
+		std::shared_ptr<ARDOUR::AudioTrack> atr = _impl->tracks[(size_t)ti];
 		if (bridged) {
-			if (!airdour::vst2_bridge::ensure_bridge_running (info->path)) {
+			std::shared_ptr<airdour::vst2_bridge::Vst2BridgeProcessor> bp (
+				new airdour::vst2_bridge::Vst2BridgeProcessor (
+					*_impl->session, *atr, info->name, info->path));
+			if (!bp->bridged_ok ()) {
 				_snap.detail = L"VST2-32 bridge failed to start";
 				return false;
 			}
+			if (atr->add_processor (bp, ARDOUR::PreFader) != 0) {
+				_snap.detail = L"VST2-32 add_processor failed";
+				airdour::vst2_bridge::shutdown_plugin (info->path);
+				return false;
+			}
+			bp->activate ();
+			_impl->vst2_bridge_fx = bp;
+			_impl->vst2_bridge_path = info->path;
+			_impl->vst2_bridge_track = ti;
 			_impl->vst2_bridged_32 = true;
-			/* Bridged plugins still load via PluginInfo when the engine
-			 * wrapper is present; otherwise soft-record bridge readiness. */
+			refresh_vst2_params_from_insert ();
+			_snap.detail = L"VST2-32 bridged insert ok";
+			return _snap.vst2_ok;
 		}
 
-		std::shared_ptr<ARDOUR::AudioTrack> track = _impl->tracks[1];
 		ARDOUR::PluginPtr plugin = info->load (*_impl->session);
 		if (!plugin) {
-			if (bridged) {
-				/* Bridge process is up — treat as soft success for CI. */
-				_snap.vst2_ok = true;
-				_snap.vst2_bridged_32 = true;
-				copy_name_local (_snap.vst2_name, EngineSnapshot::kVst3NameLen, info->name);
-				_snap.detail = L"VST2-32 bridge ready (load deferred)";
-				return true;
-			}
 			_snap.detail = L"VST2 load failed";
 			return false;
 		}
 		std::shared_ptr<ARDOUR::PluginInsert> pi (
-			new ARDOUR::PluginInsert (*_impl->session, *track, plugin));
+			new ARDOUR::PluginInsert (*_impl->session, *atr, plugin));
 		pi->set_strict_io (true);
-		if (track->add_processor (pi, ARDOUR::PreFader) != 0) {
+		if (atr->add_processor (pi, ARDOUR::PreFader) != 0) {
 			_snap.detail = L"VST2 add_processor failed";
 			return false;
 		}
 		pi->activate ();
 		_impl->vst2_fx = pi;
-		_impl->vst2_bridged_32 = bridged;
+		_impl->vst2_bridged_32 = false;
 		refresh_vst2_params_from_insert ();
-		_snap.detail = bridged ? L"VST2-32 bridged insert ok" : L"VST2 inserted";
+		_snap.detail = L"VST2 inserted";
 		return _snap.vst2_ok;
 	} catch (std::exception& e) {
 		std::fprintf (stderr, "airdour_win_shell: insert_vst2: %s\n", e.what ());
@@ -330,14 +386,27 @@ EngineHost::set_vst2_param (int index, float norm_0_1)
 	if (!_impl || index < 0 || index >= EngineSnapshot::kMaxVst3Params) {
 		return false;
 	}
-	std::shared_ptr<ARDOUR::PluginInsert> pi = _impl->vst2_fx.lock ();
-	if (!pi) {
-		return false;
-	}
 	if (_impl->vst2_param_count <= 0) {
 		refresh_vst2_params_from_insert ();
 	}
 	if (index >= _impl->vst2_param_count) {
+		return false;
+	}
+
+	std::shared_ptr<ARDOUR::Processor> bp = _impl->vst2_bridge_fx.lock ();
+	if (bp) {
+		auto* bridge = dynamic_cast<airdour::vst2_bridge::Vst2BridgeProcessor*> (bp.get ());
+		if (bridge) {
+			if (!bridge->set_param_norm (index, norm_0_1)) {
+				return false;
+			}
+			refresh_vst2_params_from_insert ();
+			return true;
+		}
+	}
+
+	std::shared_ptr<ARDOUR::PluginInsert> pi = _impl->vst2_fx.lock ();
+	if (!pi) {
 		return false;
 	}
 	uint32_t port = _impl->vst2_param_ports[index];
@@ -361,6 +430,16 @@ EngineHost::set_vst2_bypassed (bool bypassed)
 {
 	if (!_impl) {
 		return false;
+	}
+	std::shared_ptr<ARDOUR::Processor> bp = _impl->vst2_bridge_fx.lock ();
+	if (bp) {
+		if (bypassed) {
+			bp->deactivate ();
+		} else {
+			bp->activate ();
+		}
+		refresh_vst2_params_from_insert ();
+		return true;
 	}
 	std::shared_ptr<ARDOUR::PluginInsert> pi = _impl->vst2_fx.lock ();
 	if (!pi) {
@@ -427,22 +506,86 @@ EngineHost::attach_vst2_instrument_by_index (int index)
 	}
 	try {
 		std::shared_ptr<ARDOUR::MidiTrack> mt = _impl->midi_track;
-		ARDOUR::PluginPtr plugin = info->load (*_impl->session);
-		if (!plugin) {
-			_snap.detail = L"VST2 instrument load failed";
-			return false;
+
+		/* Drop prior bridged synth so re-attach is clean. */
+		{
+			std::shared_ptr<ARDOUR::Processor> prev = _impl->vst2_bridge_synth.lock ();
+			if (prev) {
+				try {
+					mt->remove_processor (prev);
+				} catch (...) {
+				}
+			}
+			if (!_impl->vst2_bridge_synth_path.empty ()) {
+				airdour::vst2_bridge::shutdown_plugin (_impl->vst2_bridge_synth_path);
+				_impl->vst2_bridge_synth_path.clear ();
+			}
+			_impl->vst2_bridge_synth.reset ();
 		}
-		std::shared_ptr<ARDOUR::PluginInsert> pi (
-			new ARDOUR::PluginInsert (*_impl->session, *mt, plugin));
-		pi->set_strict_io (true);
-		if (mt->add_processor (pi, ARDOUR::PreFader) != 0) {
-			return false;
+
+		bool bridged = !info->path.empty () && airdour::vst2_bridge::dll_is_i386 (info->path);
+		if (bridged) {
+			std::shared_ptr<airdour::vst2_bridge::Vst2BridgeProcessor> bp (
+				new airdour::vst2_bridge::Vst2BridgeProcessor (
+					*_impl->session, *mt, info->name, info->path, true));
+			if (!bp->bridged_ok ()) {
+				_snap.detail = L"VST2-32 instrument bridge failed";
+				return false;
+			}
+			if (mt->add_processor (bp, ARDOUR::PreFader) != 0) {
+				_snap.detail = L"VST2-32 instrument add_processor failed";
+				airdour::vst2_bridge::shutdown_plugin (info->path);
+				return false;
+			}
+			bp->activate ();
+			_impl->vst2_bridge_synth = bp;
+			_impl->vst2_bridge_synth_path = info->path;
+			_impl->vst2_bridged_32 = true;
+		} else {
+			ARDOUR::PluginPtr plugin = info->load (*_impl->session);
+			if (!plugin) {
+				_snap.detail = L"VST2 instrument load failed";
+				return false;
+			}
+			std::shared_ptr<ARDOUR::PluginInsert> pi (
+				new ARDOUR::PluginInsert (*_impl->session, *mt, plugin));
+			pi->set_strict_io (true);
+			if (mt->add_processor (pi, ARDOUR::PreFader) != 0) {
+				return false;
+			}
+		}
+
+		bool to_master = false;
+		std::shared_ptr<ARDOUR::Route> master = _impl->session->master_out ();
+		if (master && mt->output () && master->input ()) {
+			ARDOUR::ChanCount want = mt->output ()->n_ports ();
+			want.set (ARDOUR::DataType::AUDIO, 2);
+			{
+				PBD::Mutex::Lock lm (_impl->engine->process_lock ());
+				mt->output ()->ensure_io (want, false);
+			}
+			uint32_t n_out = mt->output ()->n_ports ().n_audio ();
+			uint32_t n_in = master->input ()->n_ports ().n_audio ();
+			uint32_t n = std::min (n_out, n_in);
+			for (uint32_t i = 0; i < n; ++i) {
+				std::shared_ptr<ARDOUR::Port> our = mt->output ()->nth (i);
+				std::shared_ptr<ARDOUR::Port> theirs = master->input ()->nth (i);
+				if (our && theirs) {
+					mt->output ()->connect (our, theirs->name ());
+					to_master = true;
+				}
+			}
 		}
 		_impl->midi_synth_ok = true;
+		_impl->midi_synth_to_master = to_master;
 		_impl->midi_synth_name = info->name;
 		_snap.midi_synth_ok = true;
+		_snap.midi_synth_to_master = to_master;
 		_snap.midi_synth_name = utf8_to_wide_local (info->name);
-		_snap.detail = L"VST2 instrument attached";
+		_snap.detail = bridged ? L"VST2-32 instrument bridged" : L"VST2 instrument attached";
+		std::fprintf (stderr, "airdour_win_shell: VST2 instrument \"%s\" (bridged=%d to_master=%d)\n",
+			      _impl->midi_synth_name.c_str (), bridged ? 1 : 0, to_master ? 1 : 0);
+		std::fflush (stderr);
 		return true;
 	} catch (...) {
 		return false;
@@ -542,8 +685,30 @@ EngineHost::smoke_vst2_bridge ()
 		airdour::vst2_bridge::shutdown_all ();
 		return false;
 	}
+	/* MIDI note → processEvents path (instruments). Silence in/out is fine. */
+	{
+		airdour::vst2_bridge::MidiEventWire note {};
+		note.sample_offset = 0;
+		note.size = 3;
+		note.data[0] = 0x90;
+		note.data[1] = 60;
+		note.data[2] = 100;
+		float zeros_in[2][128];
+		float zeros_out[2][128];
+		std::memset (zeros_in, 0, sizeof (zeros_in));
+		std::memset (zeros_out, 0, sizeof (zeros_out));
+		float* in_ptrs[2] = { zeros_in[0], zeros_in[1] };
+		float* out_ptrs[2] = { zeros_out[0], zeros_out[1] };
+		if (!airdour::vst2_bridge::process_audio (fixture, in_ptrs, out_ptrs, 2, 2, 128,
+							  48000.f, 2000, &note, 1)) {
+			std::fprintf (stderr, "airdour_win_shell: smoke-vst2-bridge FAILED (midi process)\n");
+			std::fflush (stderr);
+			airdour::vst2_bridge::shutdown_all ();
+			return false;
+		}
+	}
 	airdour::vst2_bridge::shutdown_all ();
-	std::fprintf (stderr, "airdour_win_shell: smoke-vst2-bridge ok (open+process)\n");
+	std::fprintf (stderr, "airdour_win_shell: smoke-vst2-bridge ok (open+process+midi)\n");
 	std::fflush (stderr);
 	_snap.detail = L"smoke-vst2-bridge ok";
 	return true;
@@ -561,7 +726,7 @@ EngineHost::refresh_vst2_catalog_snap ()
 {
 }
 bool
-EngineHost::insert_vst2_by_index (int)
+EngineHost::insert_vst2_by_index (int, int)
 {
 	return false;
 }

@@ -550,6 +550,7 @@ EngineHost::EngineHost ()
 	, _period_frames (0)
 	, _pref_backend ("Dummy")
 	, _pref_period_frames (0)
+	, _pref_wasapi_exclusive (false)
 	, _pref_snap_default (false)
 	, _pref_click_default (true)
 	, _autosave_enabled (true)
@@ -620,10 +621,12 @@ EngineHost::refresh_prefs_snap ()
 {
 	_snap.pref_backend = utf8_to_wide (_pref_backend.empty () ? "Dummy" : _pref_backend);
 	_snap.pref_period_frames = _pref_period_frames;
+	_snap.pref_wasapi_exclusive = _pref_wasapi_exclusive;
 	_snap.pref_snap_default = _pref_snap_default;
 	_snap.pref_click_default = _pref_click_default;
 	_snap.pref_in_device = utf8_to_wide (_pref_input_device.empty () ? "Default" : _pref_input_device);
 	_snap.pref_out_device = utf8_to_wide (_pref_output_device.empty () ? "Default" : _pref_output_device);
+	_snap.wasapi_exclusive_active = false;
 
 	if (_impl && _impl->engine) {
 		if (std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ()) {
@@ -635,6 +638,8 @@ EngineHost::refresh_prefs_snap ()
 			_snap.audio_out_name = utf8_to_wide (out.empty () ? "Default" : out);
 			_snap.systemic_in_frames = be->systemic_input_latency ();
 			_snap.systemic_out_frames = be->systemic_output_latency ();
+			_snap.capture_rate_mismatch = be->capture_rate_mismatch ();
+			_snap.wasapi_exclusive_active = be->exclusive_mode ();
 		}
 	}
 
@@ -674,6 +679,10 @@ EngineHost::load_shell_prefs ()
 			uint32_t period = 0;
 			if (node->get_property ("period", period)) {
 				_pref_period_frames = period;
+			}
+			int excl = 0;
+			if (node->get_property ("wasapi-exclusive", excl)) {
+				_pref_wasapi_exclusive = (excl != 0);
 			}
 			int snap = 0;
 			if (node->get_property ("snap-default", snap)) {
@@ -725,6 +734,7 @@ EngineHost::save_shell_prefs ()
 		XMLNode node ("WinShellPrefs");
 		node.set_property ("backend", _pref_backend.empty () ? "Dummy" : _pref_backend);
 		node.set_property ("period", _pref_period_frames);
+		node.set_property ("wasapi-exclusive", _pref_wasapi_exclusive ? 1 : 0);
 		node.set_property ("snap-default", _pref_snap_default ? 1 : 0);
 		node.set_property ("click-default", _pref_click_default ? 1 : 0);
 		node.set_property ("input-device", _pref_input_device);
@@ -767,6 +777,13 @@ void
 EngineHost::set_pref_period_frames (uint32_t frames)
 {
 	_pref_period_frames = frames;
+	refresh_prefs_snap ();
+}
+
+void
+EngineHost::set_pref_wasapi_exclusive (bool on)
+{
+	_pref_wasapi_exclusive = on;
 	refresh_prefs_snap ();
 }
 
@@ -3330,6 +3347,10 @@ EngineHost::start ()
 			_snap.detail = L"set_buffer_size failed";
 			return false;
 		}
+	}
+
+	if (std::shared_ptr<AudioBackend> be = _impl->engine->current_backend ()) {
+		be->set_exclusive_mode (_pref_wasapi_exclusive);
 	}
 
 	step ("engine->start");
@@ -28137,7 +28158,7 @@ EngineHost::smoke_vst3_catalog ()
 }
 
 bool
-EngineHost::insert_vst3_by_index (int index)
+EngineHost::insert_vst3_by_index (int index, int track)
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"VST3 insert failed — no Session";
@@ -28184,18 +28205,22 @@ EngineHost::insert_vst3_by_index (int index)
 			return false;
 		}
 
-		/* Replace any live shell VST3 on Audio 2. */
+		/* Replace any live shell VST3 on the target track. */
 		(void)unload_vst3 ();
 
-		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
 			collect_tracks ();
 		}
-		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
-			_snap.detail = L"VST3 insert — no Audio 2";
+		int ti = track;
+		if (ti < 0) {
+			ti = 1; /* legacy default: Audio 2 */
+		}
+		if (ti < 0 || ti >= (int)_impl->tracks.size () || !_impl->tracks[(size_t)ti]) {
+			_snap.detail = L"VST3 insert — no target track";
 			return false;
 		}
 
-		std::shared_ptr<AudioTrack> track = _impl->tracks[1];
+		std::shared_ptr<AudioTrack> atr = _impl->tracks[(size_t)ti];
 		PluginPtr plugin = info->load (*_impl->session);
 		if (!plugin) {
 			_snap.detail = L"VST3 load failed";
@@ -28205,9 +28230,9 @@ EngineHost::insert_vst3_by_index (int index)
 			return false;
 		}
 		std::shared_ptr<PluginInsert> pi (
-		    new PluginInsert (*_impl->session, *track, plugin));
+			new PluginInsert (*_impl->session, *atr, plugin));
 		pi->set_strict_io (true);
-		if (track->add_processor (pi, PreFader) != 0) {
+		if (atr->add_processor (pi, PreFader) != 0) {
 			_snap.detail = L"VST3 add_processor failed";
 			return false;
 		}
@@ -28678,6 +28703,7 @@ EngineHost::ensure_midi_region (float length_sec)
 		return false;
 	}
 	if (_impl->midi_region) {
+		_impl->persist_active_midi_region ();
 		refresh_midi_notes_snap ();
 		return true;
 	}
@@ -28698,6 +28724,7 @@ EngineHost::ensure_midi_region (float length_sec)
 			}
 		});
 		if (_impl->midi_region) {
+			_impl->persist_active_midi_region ();
 			refresh_midi_notes_snap ();
 			return true;
 		}
@@ -28769,6 +28796,7 @@ EngineHost::ensure_midi_region (float length_sec)
 			_snap.detail = L"MIDI region cast failed";
 			return false;
 		}
+		_impl->persist_active_midi_region ();
 		refresh_midi_notes_snap ();
 		std::fprintf (stderr, "airdour_win_shell: MIDI region ready (%.1fs)\n", length_sec);
 		std::fflush (stderr);
@@ -36094,6 +36122,7 @@ EngineHost::EngineHost ()
 	, _period_frames (0)
 	, _pref_backend ("Dummy")
 	, _pref_period_frames (0)
+	, _pref_wasapi_exclusive (false)
 	, _pref_snap_default (false)
 	, _pref_click_default (true)
 	, _autosave_enabled (false)
@@ -36154,6 +36183,8 @@ EngineHost::refresh_prefs_snap ()
 {
 	_snap.pref_backend = (_pref_backend == "WASAPI") ? L"WASAPI" : L"Dummy";
 	_snap.pref_period_frames = _pref_period_frames;
+	_snap.pref_wasapi_exclusive = _pref_wasapi_exclusive;
+	_snap.wasapi_exclusive_active = false;
 	_snap.pref_snap_default = _pref_snap_default;
 	_snap.pref_click_default = _pref_click_default;
 	_snap.pref_in_device = _pref_input_device.empty ()
@@ -36194,6 +36225,13 @@ void
 EngineHost::set_pref_period_frames (uint32_t frames)
 {
 	_pref_period_frames = frames;
+	refresh_prefs_snap ();
+}
+
+void
+EngineHost::set_pref_wasapi_exclusive (bool on)
+{
+	_pref_wasapi_exclusive = on;
 	refresh_prefs_snap ();
 }
 
@@ -40321,9 +40359,10 @@ EngineHost::smoke_vst3_catalog ()
 }
 
 bool
-EngineHost::insert_vst3_by_index (int index)
+EngineHost::insert_vst3_by_index (int index, int track)
 {
 	(void)index;
+	(void)track;
 	return false;
 }
 

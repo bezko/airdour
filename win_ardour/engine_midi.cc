@@ -66,6 +66,7 @@ EngineHost::set_active_midi_track (int index)
 		_snap.detail = L"active MIDI track out of range";
 		return false;
 	}
+	_impl->persist_active_midi_region ();
 	_impl->active_midi_track = index;
 	_impl->sync_active_midi_from_index ();
 	_snap.active_midi_track = index;
@@ -145,6 +146,13 @@ EngineHost::ensure_midi_track_count (int count)
 			}
 			_impl->midi_tracks.push_back (created.front ());
 			_impl->midi_regions.push_back (std::shared_ptr<ARDOUR::MidiRegion> ());
+			/* Soft-synth on each new track so multi-MIDI is audible. */
+			_impl->persist_active_midi_region ();
+			_impl->active_midi_track = (int)_impl->midi_tracks.size () - 1;
+			_impl->sync_active_midi_from_index ();
+			(void)attach_midi_synth ();
+			(void)ensure_midi_region (16.f);
+			_impl->persist_active_midi_region ();
 		} catch (...) {
 			_snap.detail = L"MIDI multi exception";
 			return false;
@@ -176,8 +184,32 @@ EngineHost::smoke_midi_multi ()
 		std::fflush (stderr);
 		return false;
 	}
+	if (!set_active_midi_track (0) || !ensure_midi_region (16.f)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi FAILED (region0)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!add_midi_note (60, 0.0f, 0.5f, 100)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi FAILED (note0)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	const int notes0 = _snap.midi_note_count;
 	if (!set_active_midi_track (1) || _snap.active_midi_track != 1) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi FAILED (active)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	if (!ensure_midi_region (16.f) || !add_midi_note (64, 0.25f, 0.5f, 100)) {
+		std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi FAILED (note1)\n");
+		std::fflush (stderr);
+		return false;
+	}
+	const int notes1 = _snap.midi_note_count;
+	if (!set_active_midi_track (0) || _snap.midi_note_count < 1) {
+		std::fprintf (stderr,
+			      "airdour_win_shell: smoke-midi-multi FAILED (region persist notes0=%d now=%d)\n",
+			      notes0, _snap.midi_note_count);
 		std::fflush (stderr);
 		return false;
 	}
@@ -188,8 +220,9 @@ EngineHost::smoke_midi_multi ()
 	}
 	(void)set_active_midi_track (0);
 	(void)set_midi_pitch_viewport (48, 71);
-	std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi ok (tracks=%d)\n",
-		      _snap.midi_track_count);
+	std::fprintf (stderr,
+		      "airdour_win_shell: smoke-midi-multi ok (tracks=%d notes0=%d notes1=%d)\n",
+		      _snap.midi_track_count, notes0, notes1);
 	std::fflush (stderr);
 	_snap.detail = L"smoke-midi-multi ok";
 	return true;
