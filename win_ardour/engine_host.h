@@ -1744,7 +1744,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	/* --- VST2-64 / VST2-32 bridge (Phase 3/4) --- */
 	bool rescan_vst2 ();
 	void refresh_vst2_catalog_snap ();
-	bool insert_vst2_by_index (int index);
+	/** Insert VST2 FX. track < 0 → Audio 2 (legacy); else audio track index. */
+	bool insert_vst2_by_index (int index, int track = -1);
 	bool unload_vst2 ();
 	bool set_vst2_param (int index, float norm_0_1);
 	bool set_vst2_bypassed (bool bypassed);
@@ -2014,7 +2015,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * onto Audio 2 (DSP-only). index is into the scanned list (same order
 	 * as vst3_catalog_*). Returns false when out of range / load fails.
 	 */
-	bool insert_vst3_by_index (int index);
+	/** Insert VST3 FX. track < 0 → Audio 2 (legacy); else audio track index. */
+	bool insert_vst3_by_index (int index, int track = -1);
 
 	/**
 	 * Rescan → insert index 0 when plugins exist → unload.

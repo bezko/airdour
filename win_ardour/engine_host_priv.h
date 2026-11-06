@@ -210,6 +210,17 @@ public:
 		}
 	}
 
+	void persist_active_midi_region ()
+	{
+		if (active_midi_track < 0) {
+			return;
+		}
+		while ((int)midi_regions.size () <= active_midi_track) {
+			midi_regions.push_back (std::shared_ptr<MidiRegion> ());
+		}
+		midi_regions[(size_t)active_midi_track] = midi_region;
+	}
+
 	void sync_active_midi_from_index ()
 	{
 		if (active_midi_track < 0) {

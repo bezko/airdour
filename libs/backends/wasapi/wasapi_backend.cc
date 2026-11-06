@@ -400,13 +400,20 @@ WasapiBackend::interleaved () const
 uint32_t
 WasapiBackend::systemic_input_latency () const
 {
-	return _systemic_input_latency;
+	/* Prefer explicit systemic override; otherwise report measured stream latency. */
+	if (_systemic_input_latency > 0) {
+		return _systemic_input_latency;
+	}
+	return _io.measured_capture_latency_frames ();
 }
 
 uint32_t
 WasapiBackend::systemic_output_latency () const
 {
-	return _systemic_output_latency;
+	if (_systemic_output_latency > 0) {
+		return _systemic_output_latency;
+	}
+	return _io.measured_playback_latency_frames ();
 }
 
 uint32_t

@@ -28137,7 +28137,7 @@ EngineHost::smoke_vst3_catalog ()
 }
 
 bool
-EngineHost::insert_vst3_by_index (int index)
+EngineHost::insert_vst3_by_index (int index, int track)
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"VST3 insert failed — no Session";
@@ -28184,18 +28184,22 @@ EngineHost::insert_vst3_by_index (int index)
 			return false;
 		}
 
-		/* Replace any live shell VST3 on Audio 2. */
+		/* Replace any live shell VST3 on the target track. */
 		(void)unload_vst3 ();
 
-		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
 			collect_tracks ();
 		}
-		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
-			_snap.detail = L"VST3 insert — no Audio 2";
+		int ti = track;
+		if (ti < 0) {
+			ti = 1; /* legacy default: Audio 2 */
+		}
+		if (ti < 0 || ti >= (int)_impl->tracks.size () || !_impl->tracks[(size_t)ti]) {
+			_snap.detail = L"VST3 insert — no target track";
 			return false;
 		}
 
-		std::shared_ptr<AudioTrack> track = _impl->tracks[1];
+		std::shared_ptr<AudioTrack> atr = _impl->tracks[(size_t)ti];
 		PluginPtr plugin = info->load (*_impl->session);
 		if (!plugin) {
 			_snap.detail = L"VST3 load failed";
@@ -28205,9 +28209,9 @@ EngineHost::insert_vst3_by_index (int index)
 			return false;
 		}
 		std::shared_ptr<PluginInsert> pi (
-		    new PluginInsert (*_impl->session, *track, plugin));
+			new PluginInsert (*_impl->session, *atr, plugin));
 		pi->set_strict_io (true);
-		if (track->add_processor (pi, PreFader) != 0) {
+		if (atr->add_processor (pi, PreFader) != 0) {
 			_snap.detail = L"VST3 add_processor failed";
 			return false;
 		}
@@ -28678,6 +28682,7 @@ EngineHost::ensure_midi_region (float length_sec)
 		return false;
 	}
 	if (_impl->midi_region) {
+		_impl->persist_active_midi_region ();
 		refresh_midi_notes_snap ();
 		return true;
 	}
@@ -28698,6 +28703,7 @@ EngineHost::ensure_midi_region (float length_sec)
 			}
 		});
 		if (_impl->midi_region) {
+			_impl->persist_active_midi_region ();
 			refresh_midi_notes_snap ();
 			return true;
 		}
@@ -28769,6 +28775,7 @@ EngineHost::ensure_midi_region (float length_sec)
 			_snap.detail = L"MIDI region cast failed";
 			return false;
 		}
+		_impl->persist_active_midi_region ();
 		refresh_midi_notes_snap ();
 		std::fprintf (stderr, "airdour_win_shell: MIDI region ready (%.1fs)\n", length_sec);
 		std::fflush (stderr);
@@ -40321,9 +40328,10 @@ EngineHost::smoke_vst3_catalog ()
 }
 
 bool
-EngineHost::insert_vst3_by_index (int index)
+EngineHost::insert_vst3_by_index (int index, int track)
 {
 	(void)index;
+	(void)track;
 	return false;
 }
 

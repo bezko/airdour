@@ -3643,10 +3643,17 @@ ShellWindow::tick_smoke_record (DWORD now)
 		_engine_snap = _engine.snapshot ();
 		sync_mixer_arm_from_engine ();
 		_smoke_record = SmokeRecordPhase::Done;
+		const bool have_take = _engine_snap.track_has_regions[0];
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-record done — track0 regions=%d\n",
-		              _engine_snap.track_has_regions[0] ? 1 : 0);
+			      "airdour_win_shell: smoke-record done — track0 regions=%d\n",
+			      have_take ? 1 : 0);
 		std::fflush (stderr);
+		if (!have_take) {
+			std::fprintf (stderr,
+				      "airdour_win_shell: smoke-record FAILED (no region after take)\n");
+			std::fflush (stderr);
+			_smoke_failed = true;
+		}
 		/* Leave early so ExitProcess is less likely to race Butler after a take. */
 		PostQuitMessage (0);
 	}

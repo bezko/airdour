@@ -196,18 +196,25 @@ EngineHost::insert_rack_slot (int track, int kind, int catalog_index)
 			}
 		}
 	} else if (kind == 1) {
-		ok = insert_vst3_by_index (catalog_index);
+		ok = insert_vst3_by_index (catalog_index, track);
 		if (ok) {
 			int slot = _impl->rack_slot_count[track];
-			_impl->rack_slots[track][slot] = _impl->vst3_fx;
-			_impl->rack_slot_count[track] = slot + 1;
+			if (_impl->vst3_fx.lock () && slot < EngineSnapshot::kMaxInsertSlots) {
+				_impl->rack_slots[track][slot] = _impl->vst3_fx;
+				_impl->rack_slot_count[track] = slot + 1;
+			}
 		}
 	} else if (kind == 2) {
-		ok = insert_vst2_by_index (catalog_index);
+		ok = insert_vst2_by_index (catalog_index, track);
 		if (ok) {
 			int slot = _impl->rack_slot_count[track];
-			_impl->rack_slots[track][slot] = _impl->vst2_fx;
-			_impl->rack_slot_count[track] = slot + 1;
+			if (_impl->vst2_fx.lock () && slot < EngineSnapshot::kMaxInsertSlots) {
+				_impl->rack_slots[track][slot] = _impl->vst2_fx;
+				_impl->rack_slot_count[track] = slot + 1;
+			} else if (_impl->vst2_bridge_fx.lock () && slot < EngineSnapshot::kMaxInsertSlots) {
+				/* Bridged 32-bit insert lives as Processor, not PluginInsert. */
+				_impl->rack_slot_count[track] = slot + 1;
+			}
 		}
 	}
 	refresh_insert_rack_snap ();

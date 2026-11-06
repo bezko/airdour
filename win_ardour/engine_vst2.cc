@@ -271,7 +271,7 @@ EngineHost::unload_vst2 ()
 }
 
 bool
-EngineHost::insert_vst2_by_index (int index)
+EngineHost::insert_vst2_by_index (int index, int track)
 {
 	if (!_impl || !_impl->session) {
 		_snap.detail = L"VST2 insert failed — no Session";
@@ -279,6 +279,7 @@ EngineHost::insert_vst2_by_index (int index)
 	}
 #if !defined(WINDOWS_VST_SUPPORT)
 	(void)index;
+	(void)track;
 	_snap.detail = L"VST2 insert — not compiled";
 	return false;
 #else
@@ -300,11 +301,15 @@ EngineHost::insert_vst2_by_index (int index)
 			return false;
 		}
 		(void)unload_vst2 ();
-		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
+		if (_impl->tracks.empty () || !_impl->tracks[0]) {
 			collect_tracks ();
 		}
-		if (_impl->tracks.size () < 2 || !_impl->tracks[1]) {
-			_snap.detail = L"VST2 insert — no Audio 2";
+		int ti = track;
+		if (ti < 0) {
+			ti = 1; /* legacy default: Audio 2 */
+		}
+		if (ti < 0 || ti >= (int)_impl->tracks.size () || !_impl->tracks[(size_t)ti]) {
+			_snap.detail = L"VST2 insert — no target track";
 			return false;
 		}
 
@@ -314,16 +319,16 @@ EngineHost::insert_vst2_by_index (int index)
 			bridged = airdour::vst2_bridge::dll_is_i386 (info->path);
 		}
 
-		std::shared_ptr<ARDOUR::AudioTrack> track = _impl->tracks[1];
+		std::shared_ptr<ARDOUR::AudioTrack> atr = _impl->tracks[(size_t)ti];
 		if (bridged) {
 			std::shared_ptr<airdour::vst2_bridge::Vst2BridgeProcessor> bp (
 				new airdour::vst2_bridge::Vst2BridgeProcessor (
-					*_impl->session, *track, info->name, info->path));
+					*_impl->session, *atr, info->name, info->path));
 			if (!bp->bridged_ok ()) {
 				_snap.detail = L"VST2-32 bridge failed to start";
 				return false;
 			}
-			if (track->add_processor (bp, ARDOUR::PreFader) != 0) {
+			if (atr->add_processor (bp, ARDOUR::PreFader) != 0) {
 				_snap.detail = L"VST2-32 add_processor failed";
 				airdour::vst2_bridge::shutdown_plugin (info->path);
 				return false;
@@ -343,9 +348,9 @@ EngineHost::insert_vst2_by_index (int index)
 			return false;
 		}
 		std::shared_ptr<ARDOUR::PluginInsert> pi (
-			new ARDOUR::PluginInsert (*_impl->session, *track, plugin));
+			new ARDOUR::PluginInsert (*_impl->session, *atr, plugin));
 		pi->set_strict_io (true);
-		if (track->add_processor (pi, ARDOUR::PreFader) != 0) {
+		if (atr->add_processor (pi, ARDOUR::PreFader) != 0) {
 			_snap.detail = L"VST2 add_processor failed";
 			return false;
 		}
@@ -502,11 +507,37 @@ EngineHost::attach_vst2_instrument_by_index (int index)
 		if (mt->add_processor (pi, ARDOUR::PreFader) != 0) {
 			return false;
 		}
+		bool to_master = false;
+		std::shared_ptr<ARDOUR::Route> master = _impl->session->master_out ();
+		if (master && mt->output () && master->input ()) {
+			ARDOUR::ChanCount want = mt->output ()->n_ports ();
+			want.set (ARDOUR::DataType::AUDIO, 2);
+			{
+				PBD::Mutex::Lock lm (_impl->engine->process_lock ());
+				mt->output ()->ensure_io (want, false);
+			}
+			uint32_t n_out = mt->output ()->n_ports ().n_audio ();
+			uint32_t n_in = master->input ()->n_ports ().n_audio ();
+			uint32_t n = std::min (n_out, n_in);
+			for (uint32_t i = 0; i < n; ++i) {
+				std::shared_ptr<ARDOUR::Port> our = mt->output ()->nth (i);
+				std::shared_ptr<ARDOUR::Port> theirs = master->input ()->nth (i);
+				if (our && theirs) {
+					mt->output ()->connect (our, theirs->name ());
+					to_master = true;
+				}
+			}
+		}
 		_impl->midi_synth_ok = true;
+		_impl->midi_synth_to_master = to_master;
 		_impl->midi_synth_name = info->name;
 		_snap.midi_synth_ok = true;
+		_snap.midi_synth_to_master = to_master;
 		_snap.midi_synth_name = utf8_to_wide_local (info->name);
 		_snap.detail = L"VST2 instrument attached";
+		std::fprintf (stderr, "airdour_win_shell: VST2 instrument \"%s\" (to_master=%d)\n",
+			      _impl->midi_synth_name.c_str (), to_master ? 1 : 0);
+		std::fflush (stderr);
 		return true;
 	} catch (...) {
 		return false;
@@ -625,7 +656,7 @@ EngineHost::refresh_vst2_catalog_snap ()
 {
 }
 bool
-EngineHost::insert_vst2_by_index (int)
+EngineHost::insert_vst2_by_index (int, int)
 {
 	return false;
 }
