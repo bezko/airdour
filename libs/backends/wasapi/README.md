@@ -4,9 +4,12 @@ Native Windows audio backend implementing `ARDOUR::AudioBackend`.
 
 ## Scope (v1) — implemented in-tree
 
-- **WASAPI shared mode only** (`AUDCLNT_SHAREMODE_SHARED`)
+- **WASAPI shared mode** by default (`AUDCLNT_SHAREMODE_SHARED`)
+- **Optional exclusive render** (`AUDCLNT_SHAREMODE_EXCLUSIVE`) via prefs Shared/Exclusive,
+  `AudioBackend::set_exclusive_mode`, or env `AIRDOUR_WASAPI_EXCLUSIVE=1` — falls back to shared
+  when the device/format refuses exclusive
 - Device enumeration (`IMMDeviceEnumerator`, friendly names + ids)
-- Mix-format negotiation (`GetMixFormat`); adopt device sample rate
+- Mix-format negotiation (`GetMixFormat`); adopt device sample rate (shared); exclusive may adopt closest format
 - Period via `IAudioClient3::InitializeSharedAudioStream` when available (else classic `Initialize`)
 - Auto ladder tries low shared periods (128 / 240 / 256 / …) then falls back toward ~10 ms
 - Snaps to `GetSharedModeEnginePeriod` fundamental; respects per-device min/max
@@ -29,11 +32,11 @@ Native Windows audio backend implementing `ARDOUR::AudioBackend`.
 
 ## Out of scope (v1)
 
-- WASAPI exclusive mode (planned prefs toggle after shared-path correctness)
 - DirectSound
 - ASIO / specialized drivers
 - PortAudio MIDI bridge
 - High-quality (non-linear) capture resampler / SRC library
+- Exclusive-mode capture (render exclusive; capture stays shared when opened)
 
 ## Non-Windows / CI
 
