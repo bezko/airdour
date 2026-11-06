@@ -399,7 +399,9 @@ struct EngineSnapshot {
 	bool         separate_io_devices = false; /* backend uses separate in/out names */
 	uint32_t systemic_in_frames = 0;          /* measured/systemic capture latency */
 	uint32_t systemic_out_frames = 0;         /* measured/systemic playback latency */
-	bool capture_rate_mismatch = false; /* WASAPI capture mix rate ≠ render (resampled) */
+
+	bool capture_rate_mismatch = false;
+
 	/* Recent sessions (WinShellRecent instant.xml, beside WinShellPrefs). */
 	static constexpr int kMaxRecent = 8;
 	static constexpr int kRecentLabelLen = 48;
