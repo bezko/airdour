@@ -28,14 +28,14 @@ Native Windows audio backend implementing `ARDOUR::AudioBackend`.
 
 - `WasapiIO::measured_*_latency_frames()` reads `IAudioClient::GetStreamLatency` at open
 - `WasapiBackend::get_latency_range` prefers measured frames; falls back to one period
-- Capture mix-rate mismatch sets `capture_rate_mismatch()` and enables linear resample into the render clock (logged)
+- Capture mix-rate mismatch sets `capture_rate_mismatch()` and enables Catmull-Rom cubic resample into the render clock (logged)
 
 ## Out of scope (v1)
 
 - DirectSound
 - ASIO / specialized drivers
 - PortAudio MIDI bridge
-- High-quality (non-linear) capture resampler / SRC library
+- Full SRC library (rubberband/zita) in the WASAPI smoke-only build path
 - Exclusive-mode capture (render exclusive; capture stays shared when opened)
 
 ## Non-Windows / CI

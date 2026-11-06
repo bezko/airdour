@@ -15265,6 +15265,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Shift+click meter", L"Cycle meter tap In/Pre/Post/Out" },
 		{ L"Ctrl+click meter", L"Cycle meter type Peak↔K14" },
 		{ L"Ctrl+click Send", L"Mute / unmute Aux send (Sm)" },
+		{ L"Ctrl+click FX", L"Cycle mixer insert-rack slot" },
 		{ L"Dbl-click FX param", L"Reset FX knob to insert default" },
 		{ L"Dbl-click fader/pan", L"Reset fader → unity · pan → center" },
 		{ L"Dbl-click send", L"Reset aux send → 0 (off)" },

@@ -78,7 +78,7 @@ public:
 	uint32_t measured_capture_latency_frames () const { return _measured_capture_latency; }
 	/**
 	 * True when capture mix rate ≠ render mix rate.
-	 * Capture may still be active via linear resample into the render clock.
+	 * Capture may still be active via cubic resample into the render clock.
 	 */
 	bool capture_rate_mismatch () const { return _capture_rate_mismatch; }
 	bool capture_enabled () const { return _capture_channels > 0 && _open; }

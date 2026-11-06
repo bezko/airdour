@@ -866,7 +866,7 @@ WasapiIO::open (const std::string& output_name_or_id,
 			if (cap_sr != ren_sr) {
 				_capture_rate_mismatch = true;
 				std::fprintf (stderr,
-					      "wasapi: capture mix rate %u != render %u — enabling linear resample\n",
+					      "wasapi: capture mix rate %u != render %u — enabling cubic resample\n",
 					      (unsigned)cap_sr, (unsigned)ren_sr);
 				std::fflush (stderr);
 			}
@@ -1142,29 +1142,55 @@ WasapiIO::read_capture (float* interleaved_capture, uint32_t max_frames)
 
 	if (need_resample) {
 		const double ratio = (double)_capture_sample_rate / (double)_sample_rate;
+		auto ring_at = [&] (uint32_t idx) -> const float* {
+			if (_com->capture_ring_filled == 0) {
+				return nullptr;
+			}
+			if (idx >= _com->capture_ring_filled) {
+				idx = _com->capture_ring_filled - 1;
+			}
+			uint32_t r = (_com->capture_ring_r + idx) % _com->capture_ring_frames;
+			return &_com->capture_ring[r * ch];
+		};
+		/* Catmull-Rom cubic (4-point) — no extra deps in the WASAPI smoke lib. */
+		auto hermite = [] (float y0, float y1, float y2, float y3, float t) -> float {
+			const float t2 = t * t;
+			const float t3 = t2 * t;
+			const float a0 = -0.5f * y0 + 1.5f * y1 - 1.5f * y2 + 0.5f * y3;
+			const float a1 = y0 - 2.5f * y1 + 2.f * y2 - 0.5f * y3;
+			const float a2 = -0.5f * y0 + 0.5f * y2;
+			return a0 * t3 + a1 * t2 + a2 * t + y1;
+		};
 		for (uint32_t i = 0; i < period; ++i) {
 			double src_pos = _cap_resample_phase + (double)i * ratio;
-			uint32_t i0 = (uint32_t)src_pos;
-			float frac = (float)(src_pos - (double)i0);
-			if (i0 + 1 >= _com->capture_ring_filled) {
-				/* Underrun — hold last sample or silence. */
-				if (_com->capture_ring_filled == 0) {
-					continue;
-				}
-				i0 = _com->capture_ring_filled - 1;
+			uint32_t i1 = (uint32_t)src_pos;
+			float frac = (float)(src_pos - (double)i1);
+			if (_com->capture_ring_filled == 0) {
+				continue;
+			}
+			if (i1 >= _com->capture_ring_filled) {
+				i1 = _com->capture_ring_filled - 1;
 				frac = 0.f;
 			}
-			uint32_t i1 = i0 + 1;
-			if (i1 >= _com->capture_ring_filled) {
-				i1 = i0;
+			uint32_t i0 = (i1 > 0) ? (i1 - 1) : 0;
+			uint32_t i2 = i1 + 1;
+			if (i2 >= _com->capture_ring_filled) {
+				i2 = _com->capture_ring_filled - 1;
 			}
-			uint32_t r0 = (_com->capture_ring_r + i0) % _com->capture_ring_frames;
-			uint32_t r1 = (_com->capture_ring_r + i1) % _com->capture_ring_frames;
-			const float* a = &_com->capture_ring[r0 * ch];
-			const float* b = &_com->capture_ring[r1 * ch];
+			uint32_t i3 = i2 + 1;
+			if (i3 >= _com->capture_ring_filled) {
+				i3 = _com->capture_ring_filled - 1;
+			}
+			const float* s0 = ring_at (i0);
+			const float* s1 = ring_at (i1);
+			const float* s2 = ring_at (i2);
+			const float* s3 = ring_at (i3);
+			if (!s0 || !s1 || !s2 || !s3) {
+				continue;
+			}
 			float* out = interleaved_capture + i * ch;
 			for (uint32_t c = 0; c < ch; ++c) {
-				out[c] = a[c] + (b[c] - a[c]) * frac;
+				out[c] = hermite (s0[c], s1[c], s2[c], s3[c], frac);
 			}
 		}
 		/* Advance ring read by the integer samples consumed this period. */
