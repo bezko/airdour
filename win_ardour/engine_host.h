@@ -291,7 +291,7 @@ struct EngineSnapshot {
 	int          listen_mode = 0; /* 0=Solo 1=PFL 2=AFL (RC solo-control-is-listen + listen-position) */
 	float        click_gain = 1.f; /* Config click_gain linear coeff (1.0 = unity) */
 	int          audio_track_count = 0; /* Session audio tracks (1..kMeters) */
-	int          midi_track_count = 0; /* 0..kMeters MIDI tracks */
+	int midi_track_count = 0;           /* 0..kMeters MIDI tracks */
 	static constexpr int kTrackNameLen = 32;
 	wchar_t      track_name[kMeters][kTrackNameLen] = {}; /* Session Route names */
 	wchar_t      midi_track_name[kTrackNameLen] = {};
@@ -358,34 +358,34 @@ struct EngineSnapshot {
 	static constexpr int kMaxInsertSlots = 8;
 	static constexpr int kInsertNameLen = 40;
 	struct InsertSlotSnap {
-		bool    ok = false;
-		bool    bypassed = false;
-		bool    is_instrument = false;
-		int     param_count = 0;
+		bool ok = false;
+		bool bypassed = false;
+		bool is_instrument = false;
+		int param_count = 0;
 		wchar_t name[kInsertNameLen] = {};
 		wchar_t param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
-		float   param_norm[kMaxVst3Params] = {};
+		float param_norm[kMaxVst3Params] = {};
 	};
-	int          insert_slot_count[kMeters] = {};
+	int insert_slot_count[kMeters] = {};
 	InsertSlotSnap insert_slots[kMeters][kMaxInsertSlots] = {};
-	int          master_insert_count = 0;
+	int master_insert_count = 0;
 	InsertSlotSnap master_inserts[kMaxInsertSlots] = {};
 	/* VST2 catalog (Phase 3/4). */
 	static constexpr int kMaxVst2Catalog = 64;
-	int          vst2_scan_count = 0;
-	int          vst2_catalog_count = 0;
-	wchar_t      vst2_catalog_name[kMaxVst2Catalog][40] = {};
-	bool         vst2_ok = false;
-	bool         vst2_bypassed = false;
-	bool         vst2_bridged_32 = false; /* hosted via x86 bridge */
-	int          vst2_param_count = 0;
-	wchar_t      vst2_name[kVst3NameLen] = {};
-	wchar_t      vst2_param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
-	float        vst2_param_norm[kMaxVst3Params] = {};
+	int vst2_scan_count = 0;
+	int vst2_catalog_count = 0;
+	wchar_t vst2_catalog_name[kMaxVst2Catalog][40] = {};
+	bool vst2_ok = false;
+	bool vst2_bypassed = false;
+	bool vst2_bridged_32 = false; /* hosted via x86 bridge */
+	int vst2_param_count = 0;
+	wchar_t vst2_name[kVst3NameLen] = {};
+	wchar_t vst2_param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
+	float vst2_param_norm[kMaxVst3Params] = {};
 	/* Piano-roll viewport (Phase 1) — full MIDI range model. */
-	int          midi_pitch_lo = 48; /* viewport bottom */
-	int          midi_pitch_hi = 71; /* viewport top */
-	int          active_midi_track = 0; /* which MIDI track piano-roll edits */
+	int midi_pitch_lo = 48;    /* viewport bottom */
+	int midi_pitch_hi = 71;    /* viewport top */
+	int active_midi_track = 0; /* which MIDI track piano-roll edits */
 	/* Audio devices + measured systemic latency. */
 	std::wstring audio_in_name; /* current backend device ("Default" when unset) */
 	std::wstring audio_out_name;
@@ -406,7 +406,7 @@ struct EngineSnapshot {
 };
 
 static_assert (sizeof (EngineSnapshot) < 512 * 1024,
-               "EngineSnapshot must stay small enough to copy per UI tick");
+	       "EngineSnapshot must stay small enough to copy per UI tick");
 
 class EngineHost
 {
@@ -1705,7 +1705,7 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 
 	/** Select which MIDI track the piano-roll edits (0..midi_track_count-1). */
 	bool set_active_midi_track (int index);
-	int  active_midi_track () const { return _snap.active_midi_track; }
+	int active_midi_track () const { return _snap.active_midi_track; }
 
 	/** Scroll piano-roll viewport by ±semitones (clamped to 0..127). */
 	bool set_midi_pitch_viewport (int lo, int hi);

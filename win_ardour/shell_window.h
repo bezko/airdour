@@ -127,7 +127,7 @@ private:
 	static constexpr int     kMidiPitchRows = (int)(kMidiPitchHi - kMidiPitchLo + 1);
 	uint8_t midi_view_lo () const;
 	uint8_t midi_view_hi () const;
-	int     midi_view_rows () const;
+	int midi_view_rows () const;
 
 	enum class SmokeRecordPhase {
 		Off,

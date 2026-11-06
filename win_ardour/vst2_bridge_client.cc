@@ -24,12 +24,12 @@ namespace {
 
 struct BridgeProc {
 	PROCESS_INFORMATION pi {};
-	HANDLE              shm = nullptr;
-	SharedState*        view = nullptr;
-	HANDLE              req_event = nullptr;
-	HANDLE              ack_event = nullptr;
-	std::string         plugin_path;
-	bool                alive = false;
+	HANDLE shm = nullptr;
+	SharedState* view = nullptr;
+	HANDLE req_event = nullptr;
+	HANDLE ack_event = nullptr;
+	std::string plugin_path;
+	bool alive = false;
 };
 
 std::vector<BridgeProc> g_bridges;
@@ -132,15 +132,14 @@ dll_is_i386 (const std::string& path)
 {
 	std::wstring w = utf8_to_wide (path);
 	HANDLE f = CreateFileW (w.c_str (), GENERIC_READ, FILE_SHARE_READ, nullptr,
-	                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+				OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 	if (f == INVALID_HANDLE_VALUE) {
 		return false;
 	}
 	IMAGE_DOS_HEADER dos {};
 	DWORD rd = 0;
 	bool ok = false;
-	if (ReadFile (f, &dos, sizeof (dos), &rd, nullptr) && rd == sizeof (dos)
-	    && dos.e_magic == IMAGE_DOS_SIGNATURE) {
+	if (ReadFile (f, &dos, sizeof (dos), &rd, nullptr) && rd == sizeof (dos) && dos.e_magic == IMAGE_DOS_SIGNATURE) {
 		SetFilePointer (f, dos.e_lfanew, nullptr, FILE_BEGIN);
 		DWORD pe_sig = 0;
 		if (ReadFile (f, &pe_sig, sizeof (pe_sig), &rd, nullptr) && pe_sig == IMAGE_NT_SIGNATURE) {
@@ -181,7 +180,7 @@ ensure_bridge_running (const std::string& plugin_dll_path)
 	_snwprintf_s (ack_name, _TRUNCATE, L"Local\\AirdourVST2BridgeAck-%lu", (unsigned long)pid);
 
 	b.shm = CreateFileMappingW (INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
-	                            (DWORD)sizeof (SharedState), shm_name);
+				    (DWORD)sizeof (SharedState), shm_name);
 	if (!b.shm) {
 		return false;
 	}
@@ -203,16 +202,15 @@ ensure_bridge_running (const std::string& plugin_dll_path)
 		return false;
 	}
 
-	std::wstring cmd = utf8_to_wide (exe) + L" --shm " + shm_name + L" --req " + req_name
-	                   + L" --ack " + ack_name;
+	std::wstring cmd = utf8_to_wide (exe) + L" --shm " + shm_name + L" --req " + req_name + L" --ack " + ack_name;
 	STARTUPINFOW si {};
 	si.cb = sizeof (si);
 	std::vector<wchar_t> cmdline (cmd.begin (), cmd.end ());
 	cmdline.push_back (L'\0');
 	if (!CreateProcessW (nullptr, cmdline.data (), nullptr, nullptr, FALSE, 0, nullptr, nullptr,
-	                     &si, &b.pi)) {
+			     &si, &b.pi)) {
 		std::fprintf (stderr, "airdour_win_shell: CreateProcess bridge failed (%lu)\n",
-		              (unsigned long)GetLastError ());
+			      (unsigned long)GetLastError ());
 		std::fflush (stderr);
 		close_bridge (b);
 		return false;
@@ -225,7 +223,7 @@ ensure_bridge_running (const std::string& plugin_dll_path)
 	DWORD wr = WaitForSingleObject (b.ack_event, 8000);
 	if (wr != WAIT_OBJECT_0 || b.view->hdr.status != 0) {
 		std::fprintf (stderr, "airdour_win_shell: bridge Open failed (%s)\n",
-		              b.view->hdr.error);
+			      b.view->hdr.error);
 		std::fflush (stderr);
 		close_bridge (b);
 		return false;
@@ -233,7 +231,7 @@ ensure_bridge_running (const std::string& plugin_dll_path)
 	b.alive = true;
 	g_bridges.push_back (b);
 	std::fprintf (stderr, "airdour_win_shell: vst2-bridge started for %s\n",
-	              plugin_dll_path.c_str ());
+		      plugin_dll_path.c_str ());
 	std::fflush (stderr);
 	return true;
 }

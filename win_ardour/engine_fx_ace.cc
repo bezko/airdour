@@ -75,7 +75,7 @@ fill_slot_from_insert (EngineSnapshot::InsertSlotSnap& slot, std::shared_ptr<ARD
 			}
 			try {
 				std::shared_ptr<ARDOUR::AutomationControl> ac = pi->automation_control (
-				    Evoral::Parameter (ARDOUR::PluginAutomation, 0, port));
+					Evoral::Parameter (ARDOUR::PluginAutomation, 0, port));
 				if (!ac) {
 					continue;
 				}
@@ -85,11 +85,11 @@ fill_slot_from_insert (EngineSnapshot::InsertSlotSnap& slot, std::shared_ptr<ARD
 				std::string pname = ac->name ();
 				if (pname.empty ()) {
 					pname = plug->describe_parameter (
-					    Evoral::Parameter (ARDOUR::PluginAutomation, 0, port));
+						Evoral::Parameter (ARDOUR::PluginAutomation, 0, port));
 				}
 				std::wstring pw = utf8_to_wide_local (pname.empty () ? "P" : pname);
 				wcsncpy_s (slot.param_name[filled], EngineSnapshot::kVst3ParamNameLen,
-				           pw.c_str (), _TRUNCATE);
+					   pw.c_str (), _TRUNCATE);
 				float norm = (float)ac->internal_to_interface (ac->get_value ());
 				slot.param_norm[filled] = std::max (0.f, std::min (1.f, norm));
 				++filled;
@@ -151,12 +151,24 @@ EngineHost::insert_rack_slot (int track, int kind, int catalog_index)
 	bool ok = false;
 	if (kind == 0) {
 		switch (track % 6) {
-		case 0: ok = insert_track_fx (track); break;
-		case 1: ok = insert_track_comp (track); break;
-		case 2: ok = insert_track_eq (track); break;
-		case 3: ok = insert_track_delay (track); break;
-		case 4: ok = insert_track_limiter (track); break;
-		default: ok = insert_track_gate (track); break;
+		case 0:
+			ok = insert_track_fx (track);
+			break;
+		case 1:
+			ok = insert_track_comp (track);
+			break;
+		case 2:
+			ok = insert_track_eq (track);
+			break;
+		case 3:
+			ok = insert_track_delay (track);
+			break;
+		case 4:
+			ok = insert_track_limiter (track);
+			break;
+		default:
+			ok = insert_track_gate (track);
+			break;
 		}
 		if (ok) {
 			/* Mirror legacy single insert into rack slot 0 when empty. */
@@ -282,7 +294,7 @@ EngineHost::set_rack_slot_param (int track, int slot, int param, float norm_0_1)
 			continue;
 		}
 		std::shared_ptr<ARDOUR::AutomationControl> ac = pi->automation_control (
-		    Evoral::Parameter (ARDOUR::PluginAutomation, 0, port));
+			Evoral::Parameter (ARDOUR::PluginAutomation, 0, port));
 		if (!ac || (ac->flags () & PBD::Controllable::HiddenControl)) {
 			continue;
 		}
@@ -379,7 +391,7 @@ EngineHost::smoke_fx_chain ()
 		return false;
 	}
 	std::fprintf (stderr, "airdour_win_shell: smoke-fx-chain ok (slots=%d master=%d)\n",
-	              _snap.insert_slot_count[0], _snap.master_insert_count);
+		      _snap.insert_slot_count[0], _snap.master_insert_count);
 	std::fflush (stderr);
 	_snap.detail = L"smoke-fx-chain ok";
 	return true;
@@ -387,13 +399,44 @@ EngineHost::smoke_fx_chain ()
 
 #else /* !AIRDOUR_WIN_SHELL_WITH_ENGINE */
 
-void EngineHost::refresh_insert_rack_snap () {}
-bool EngineHost::insert_rack_slot (int, int, int) { return false; }
-bool EngineHost::remove_rack_slot (int, int) { return false; }
-bool EngineHost::set_rack_slot_bypassed (int, int, bool) { return false; }
-bool EngineHost::set_rack_slot_param (int, int, int, float) { return false; }
-bool EngineHost::insert_master_rack_slot (int, int) { return false; }
-bool EngineHost::remove_master_rack_slot (int) { return false; }
-bool EngineHost::smoke_fx_chain () { return false; }
+void
+EngineHost::refresh_insert_rack_snap ()
+{
+}
+bool
+EngineHost::insert_rack_slot (int, int, int)
+{
+	return false;
+}
+bool
+EngineHost::remove_rack_slot (int, int)
+{
+	return false;
+}
+bool
+EngineHost::set_rack_slot_bypassed (int, int, bool)
+{
+	return false;
+}
+bool
+EngineHost::set_rack_slot_param (int, int, int, float)
+{
+	return false;
+}
+bool
+EngineHost::insert_master_rack_slot (int, int)
+{
+	return false;
+}
+bool
+EngineHost::remove_master_rack_slot (int)
+{
+	return false;
+}
+bool
+EngineHost::smoke_fx_chain ()
+{
+	return false;
+}
 
 #endif

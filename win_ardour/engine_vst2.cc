@@ -66,7 +66,7 @@ copy_name_local (wchar_t* dest, size_t dest_chars, const std::string& utf8)
 	}
 }
 
-#if defined (WINDOWS_VST_SUPPORT)
+#if defined(WINDOWS_VST_SUPPORT)
 
 const ARDOUR::PluginInfoList&
 vst2_info_list ()
@@ -102,7 +102,7 @@ EngineHost::rescan_vst2 ()
 		_snap.detail = L"VST2 rescan failed — no Session";
 		return false;
 	}
-#if !defined (WINDOWS_VST_SUPPORT)
+#if !defined(WINDOWS_VST_SUPPORT)
 	_snap.vst2_scan_count = 0;
 	_snap.vst2_catalog_count = 0;
 	_snap.detail = L"VST2 support not compiled (WINDOWS_VST_SUPPORT)";
@@ -139,7 +139,7 @@ EngineHost::refresh_vst2_catalog_snap ()
 	for (int i = 0; i < EngineSnapshot::kMaxVst2Catalog; ++i) {
 		_snap.vst2_catalog_name[i][0] = L'\0';
 	}
-#if defined (WINDOWS_VST_SUPPORT)
+#if defined(WINDOWS_VST_SUPPORT)
 	try {
 		const ARDOUR::PluginInfoList& plugs = vst2_info_list ();
 		_snap.vst2_scan_count = (int)plugs.size ();
@@ -196,7 +196,7 @@ EngineHost::refresh_vst2_params_from_insert ()
 			continue;
 		}
 		std::shared_ptr<ARDOUR::AutomationControl> ac = pi->automation_control (
-		    Evoral::Parameter (ARDOUR::PluginAutomation, 0, port));
+			Evoral::Parameter (ARDOUR::PluginAutomation, 0, port));
 		if (!ac || (ac->flags () & PBD::Controllable::HiddenControl)) {
 			continue;
 		}
@@ -205,7 +205,7 @@ EngineHost::refresh_vst2_params_from_insert ()
 		_snap.vst2_param_norm[filled] = std::max (0.f, std::min (1.f, norm));
 		std::string pname = ac->name ();
 		copy_name_local (_snap.vst2_param_name[filled], EngineSnapshot::kVst3ParamNameLen,
-		                 pname.empty () ? "P" : pname);
+				 pname.empty () ? "P" : pname);
 		++filled;
 	}
 	_impl->vst2_param_count = filled;
@@ -241,7 +241,7 @@ EngineHost::insert_vst2_by_index (int index)
 		_snap.detail = L"VST2 insert failed — no Session";
 		return false;
 	}
-#if !defined (WINDOWS_VST_SUPPORT)
+#if !defined(WINDOWS_VST_SUPPORT)
 	(void)index;
 	_snap.detail = L"VST2 insert — not compiled";
 	return false;
@@ -302,7 +302,7 @@ EngineHost::insert_vst2_by_index (int index)
 			return false;
 		}
 		std::shared_ptr<ARDOUR::PluginInsert> pi (
-		    new ARDOUR::PluginInsert (*_impl->session, *track, plugin));
+			new ARDOUR::PluginInsert (*_impl->session, *track, plugin));
 		pi->set_strict_io (true);
 		if (track->add_processor (pi, ARDOUR::PreFader) != 0) {
 			_snap.detail = L"VST2 add_processor failed";
@@ -343,7 +343,7 @@ EngineHost::set_vst2_param (int index, float norm_0_1)
 	uint32_t port = _impl->vst2_param_ports[index];
 	try {
 		std::shared_ptr<ARDOUR::AutomationControl> ac = pi->automation_control (
-		    Evoral::Parameter (ARDOUR::PluginAutomation, 0, port));
+			Evoral::Parameter (ARDOUR::PluginAutomation, 0, port));
 		if (!ac) {
 			return false;
 		}
@@ -387,7 +387,7 @@ EngineHost::attach_vst2_instrument_by_index (int index)
 	if (!_impl || !_impl->session) {
 		return false;
 	}
-#if !defined (WINDOWS_VST_SUPPORT)
+#if !defined(WINDOWS_VST_SUPPORT)
 	(void)index;
 	_snap.detail = L"VST2 instrument — not compiled";
 	return true; /* soft */
@@ -433,7 +433,7 @@ EngineHost::attach_vst2_instrument_by_index (int index)
 			return false;
 		}
 		std::shared_ptr<ARDOUR::PluginInsert> pi (
-		    new ARDOUR::PluginInsert (*_impl->session, *mt, plugin));
+			new ARDOUR::PluginInsert (*_impl->session, *mt, plugin));
 		pi->set_strict_io (true);
 		if (mt->add_processor (pi, ARDOUR::PreFader) != 0) {
 			return false;
@@ -459,7 +459,7 @@ EngineHost::smoke_vst2 ()
 	if (!rescan_vst2 ()) {
 		return false;
 	}
-#if !defined (WINDOWS_VST_SUPPORT)
+#if !defined(WINDOWS_VST_SUPPORT)
 	std::fprintf (stderr, "airdour_win_shell: smoke-vst2 ok (not compiled — soft PASS)\n");
 	std::fflush (stderr);
 	return true;
@@ -514,15 +514,15 @@ EngineHost::smoke_vst2_bridge ()
 	std::string bridge = airdour::vst2_bridge::bridge_exe_path ();
 	if (bridge.empty ()) {
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-vst2-bridge ok (bridge exe not staged — soft PASS)\n");
+			      "airdour_win_shell: smoke-vst2-bridge ok (bridge exe not staged — soft PASS)\n");
 		std::fflush (stderr);
 		return true;
 	}
 	const char* fixture = std::getenv ("AIRDOUR_SMOKE_VST2_32");
 	if (!fixture || !*fixture) {
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-vst2-bridge ok (exe=%s; set AIRDOUR_SMOKE_VST2_32)\n",
-		              bridge.c_str ());
+			      "airdour_win_shell: smoke-vst2-bridge ok (exe=%s; set AIRDOUR_SMOKE_VST2_32)\n",
+			      bridge.c_str ());
 		std::fflush (stderr);
 		return true;
 	}
@@ -545,16 +545,59 @@ EngineHost::smoke_vst2_bridge ()
 
 #else /* !ENGINE */
 
-bool EngineHost::rescan_vst2 () { return false; }
-void EngineHost::refresh_vst2_catalog_snap () {}
-bool EngineHost::insert_vst2_by_index (int) { return false; }
-bool EngineHost::unload_vst2 () { return false; }
-bool EngineHost::set_vst2_param (int, float) { return false; }
-bool EngineHost::set_vst2_bypassed (bool) { return false; }
-bool EngineHost::toggle_vst2_bypass () { return false; }
-bool EngineHost::attach_vst2_instrument_by_index (int) { return false; }
-bool EngineHost::smoke_vst2 () { return false; }
-bool EngineHost::smoke_vst2_instrument () { return false; }
-bool EngineHost::smoke_vst2_bridge () { return false; }
+bool
+EngineHost::rescan_vst2 ()
+{
+	return false;
+}
+void
+EngineHost::refresh_vst2_catalog_snap ()
+{
+}
+bool
+EngineHost::insert_vst2_by_index (int)
+{
+	return false;
+}
+bool
+EngineHost::unload_vst2 ()
+{
+	return false;
+}
+bool
+EngineHost::set_vst2_param (int, float)
+{
+	return false;
+}
+bool
+EngineHost::set_vst2_bypassed (bool)
+{
+	return false;
+}
+bool
+EngineHost::toggle_vst2_bypass ()
+{
+	return false;
+}
+bool
+EngineHost::attach_vst2_instrument_by_index (int)
+{
+	return false;
+}
+bool
+EngineHost::smoke_vst2 ()
+{
+	return false;
+}
+bool
+EngineHost::smoke_vst2_instrument ()
+{
+	return false;
+}
+bool
+EngineHost::smoke_vst2_bridge ()
+{
+	return false;
+}
 
 #endif

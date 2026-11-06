@@ -246,8 +246,10 @@ uint8_t
 ShellWindow::midi_view_lo () const
 {
 	int lo = _engine_snap.midi_pitch_lo;
-	if (lo < 0) lo = 0;
-	if (lo > 127) lo = 127;
+	if (lo < 0)
+		lo = 0;
+	if (lo > 127)
+		lo = 127;
 	return (uint8_t)lo;
 }
 
@@ -255,10 +257,13 @@ uint8_t
 ShellWindow::midi_view_hi () const
 {
 	int hi = _engine_snap.midi_pitch_hi;
-	if (hi < 0) hi = 0;
-	if (hi > 127) hi = 127;
+	if (hi < 0)
+		hi = 0;
+	if (hi > 127)
+		hi = 127;
 	int lo = (int)midi_view_lo ();
-	if (hi < lo) hi = lo;
+	if (hi < lo)
+		hi = lo;
 	return (uint8_t)hi;
 }
 
@@ -267,7 +272,6 @@ ShellWindow::midi_view_rows () const
 {
 	return (int)midi_view_hi () - (int)midi_view_lo () + 1;
 }
-
 
 ShellWindow::~ShellWindow ()
 {
@@ -2020,9 +2024,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "vst3-status-unload", [this]() { return smoke_vst3_status_unload (); });
 	run_smoke_check (ok, "vst3-status-bypass", [this]() { return smoke_vst3_status_bypass (); });
 	run_smoke_check (ok, "vst3-status-param-reset", [this]() { return smoke_vst3_status_param_reset (); });
-	run_smoke_check (ok, "midi-multi", [this]() { return _engine.smoke_midi_multi (); });
-	run_smoke_check (ok, "vst3-instrument", [this]() { return _engine.smoke_vst3_instrument (); });
-	run_smoke_check (ok, "fx-chain", [this]() {
+	run_smoke_check (ok, "midi-multi", [this] () { return _engine.smoke_midi_multi (); });
+	run_smoke_check (ok, "vst3-instrument", [this] () { return _engine.smoke_vst3_instrument (); });
+	run_smoke_check (ok, "fx-chain", [this] () {
 		if (!_engine.smoke_fx_chain ()) {
 			return false;
 		}
@@ -2031,9 +2035,9 @@ ShellWindow::attach_engine (const std::string& backend_name,
 		sync_mixer_fx_from_engine ();
 		return true;
 	});
-	run_smoke_check (ok, "vst2", [this]() { return _engine.smoke_vst2 (); });
-	run_smoke_check (ok, "vst2-instrument", [this]() { return _engine.smoke_vst2_instrument (); });
-	run_smoke_check (ok, "vst2-bridge", [this]() { return _engine.smoke_vst2_bridge (); });
+	run_smoke_check (ok, "vst2", [this] () { return _engine.smoke_vst2 (); });
+	run_smoke_check (ok, "vst2-instrument", [this] () { return _engine.smoke_vst2_instrument (); });
+	run_smoke_check (ok, "vst2-bridge", [this] () { return _engine.smoke_vst2_bridge (); });
 	run_smoke_check (ok, "meter-clip-led", [this]() { return smoke_meter_clip_led (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
@@ -2894,14 +2898,12 @@ ShellWindow::sync_mixer_fx_from_engine ()
 	for (int i = 0; i < kTracks; ++i) {
 		_mixers[i].set_fx_can_unload (false);
 		/* Prefer Phase-2 insert rack when populated. */
-		if (i < EngineSnapshot::kMeters && _engine_snap.insert_slot_count[i] > 0
-		    && _engine_snap.insert_slots[i][0].ok
-		    && _engine_snap.insert_slots[i][0].name[0] != L'\0') {
+		if (i < EngineSnapshot::kMeters && _engine_snap.insert_slot_count[i] > 0 && _engine_snap.insert_slots[i][0].ok && _engine_snap.insert_slots[i][0].name[0] != L'\0') {
 			const EngineSnapshot::InsertSlotSnap& slot = _engine_snap.insert_slots[i][0];
 			wchar_t label[40];
 			if (_engine_snap.insert_slot_count[i] > 1) {
 				_snwprintf_s (label, _TRUNCATE, L"%s ·%d", slot.name,
-				              _engine_snap.insert_slot_count[i]);
+					      _engine_snap.insert_slot_count[i]);
 			} else {
 				wcsncpy_s (label, slot.name, _TRUNCATE);
 			}
@@ -2925,8 +2927,8 @@ ShellWindow::sync_mixer_fx_from_engine ()
 			_mixers[i].set_fx_bypassed (_engine_snap.vst3_bypassed);
 			_mixers[i].set_fx_can_unload (true);
 			const int n = (_engine_snap.vst3_param_count > 0)
-			                  ? (std::min) (_engine_snap.vst3_param_count, 3)
-			                  : 0;
+					      ? (std::min) (_engine_snap.vst3_param_count, 3)
+					      : 0;
 			_mixers[i].set_fx_param_count (n);
 			_mixers[i].set_fx_param (
 			    (_engine_snap.vst3_param_count > 0) ? _engine_snap.vst3_param_norm[0] : 0.5f);
@@ -2945,17 +2947,16 @@ ShellWindow::sync_mixer_fx_from_engine ()
 			_mixers[i].set_fx_bypassed (_engine_snap.vst2_bypassed);
 			_mixers[i].set_fx_can_unload (true);
 			const int n = (_engine_snap.vst2_param_count > 0)
-			                  ? (std::min) (_engine_snap.vst2_param_count, 3)
-			                  : 0;
+					      ? (std::min) (_engine_snap.vst2_param_count, 3)
+					      : 0;
 			_mixers[i].set_fx_param_count (n);
 			_mixers[i].set_fx_param (
-			    (_engine_snap.vst2_param_count > 0) ? _engine_snap.vst2_param_norm[0] : 0.5f);
+				(_engine_snap.vst2_param_count > 0) ? _engine_snap.vst2_param_norm[0] : 0.5f);
 			_mixers[i].set_fx_param2 (
-			    (_engine_snap.vst2_param_count > 1) ? _engine_snap.vst2_param_norm[1] : 0.5f);
+				(_engine_snap.vst2_param_count > 1) ? _engine_snap.vst2_param_norm[1] : 0.5f);
 			_mixers[i].set_fx_param3 (
-			    (_engine_snap.vst2_param_count > 2) ? _engine_snap.vst2_param_norm[2] : 0.5f);
-		} else if (i == 1 && _engine_snap.track_comp_ok
-		           && !_engine_snap.track_comp_name.empty ()) {
+				(_engine_snap.vst2_param_count > 2) ? _engine_snap.vst2_param_norm[2] : 0.5f);
+		} else if (i == 1 && _engine_snap.track_comp_ok && !_engine_snap.track_comp_name.empty ()) {
 			wchar_t label[40];
 			if (_engine_snap.track_comp_sidechain) {
 				_snwprintf_s (label, _TRUNCATE, L"%s SC",
@@ -2968,30 +2969,26 @@ ShellWindow::sync_mixer_fx_from_engine ()
 			_mixers[i].set_fx_param_count (2);
 			_mixers[i].set_fx_param (_engine_snap.track_comp_threshold_norm);
 			_mixers[i].set_fx_param2 (_engine_snap.track_comp_ratio_norm);
-		} else if (i == 2 && _engine_snap.track_eq_ok
-		           && !_engine_snap.track_eq_name.empty ()) {
+		} else if (i == 2 && _engine_snap.track_eq_ok && !_engine_snap.track_eq_name.empty ()) {
 			_mixers[i].set_fx_label (_engine_snap.track_eq_name.c_str ());
 			_mixers[i].set_fx_bypassed (_engine_snap.track_eq_bypassed);
 			_mixers[i].set_fx_param_count (3);
 			_mixers[i].set_fx_param (_engine_snap.track_eq_gain_l_norm);
 			_mixers[i].set_fx_param2 (_engine_snap.track_eq_gain_m_norm);
 			_mixers[i].set_fx_param3 (_engine_snap.track_eq_gain_h_norm);
-		} else if (i == 3 && _engine_snap.track_delay_ok
-		           && !_engine_snap.track_delay_name.empty ()) {
+		} else if (i == 3 && _engine_snap.track_delay_ok && !_engine_snap.track_delay_name.empty ()) {
 			_mixers[i].set_fx_label (_engine_snap.track_delay_name.c_str ());
 			_mixers[i].set_fx_bypassed (_engine_snap.track_delay_bypassed);
 			_mixers[i].set_fx_param_count (2);
 			_mixers[i].set_fx_param (_engine_snap.track_delay_time_norm);
 			_mixers[i].set_fx_param2 (_engine_snap.track_delay_feedback_norm);
-		} else if (i == 4 && _engine_snap.track_limiter_ok
-		           && !_engine_snap.track_limiter_name.empty ()) {
+		} else if (i == 4 && _engine_snap.track_limiter_ok && !_engine_snap.track_limiter_name.empty ()) {
 			_mixers[i].set_fx_label (_engine_snap.track_limiter_name.c_str ());
 			_mixers[i].set_fx_bypassed (_engine_snap.track_limiter_bypassed);
 			_mixers[i].set_fx_param_count (2);
 			_mixers[i].set_fx_param (_engine_snap.track_limiter_ceiling_norm);
 			_mixers[i].set_fx_param2 (_engine_snap.track_limiter_release_norm);
-		} else if (i == 5 && _engine_snap.track_gate_ok
-		           && !_engine_snap.track_gate_name.empty ()) {
+		} else if (i == 5 && _engine_snap.track_gate_ok && !_engine_snap.track_gate_name.empty ()) {
 			_mixers[i].set_fx_label (_engine_snap.track_gate_name.c_str ());
 			_mixers[i].set_fx_bypassed (_engine_snap.track_gate_bypassed);
 			_mixers[i].set_fx_param_count (2);
@@ -9604,8 +9601,7 @@ ShellWindow::on_mouse_wheel (WPARAM wparam, LPARAM lparam)
 	}
 	int lane = hit_editor_lane (x, y);
 	bool over_midi = hit_midi_lane (x, y);
-	bool over_editor = (lane >= 0) || hit_editor_ruler (x, y) || over_midi
-	                   || _midi_cc_lane.hit (_midi_cc_lane_bounds, x, y);
+	bool over_editor = (lane >= 0) || hit_editor_ruler (x, y) || over_midi || _midi_cc_lane.hit (_midi_cc_lane_bounds, x, y);
 	if (!over_editor) {
 		return false;
 	}
@@ -12994,8 +12990,7 @@ ShellWindow::draw_midi_lane ()
 	}
 
 	/* Audition ghost — full-width wash on the sounding pitch row. */
-	if (_engine_snap.midi_audition_pitch >= midi_view_lo ()
-	    && _engine_snap.midi_audition_pitch <= midi_view_hi ()) {
+	if (_engine_snap.midi_audition_pitch >= midi_view_lo () && _engine_snap.midi_audition_pitch <= midi_view_hi ()) {
 		int arow = (int)(midi_view_hi () - _engine_snap.midi_audition_pitch);
 		float ay0 = piano.top + (float)arow * row_h;
 		_ui.fill_round (D2D1::RectF (piano.left, ay0, piano.right, ay0 + row_h - 0.5f),

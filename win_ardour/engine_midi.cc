@@ -133,12 +133,12 @@ EngineHost::ensure_midi_track_count (int count)
 			outs.set (ARDOUR::DataType::AUDIO, 2);
 			char name[32];
 			std::snprintf (name, sizeof (name), "MIDI %d", (int)_impl->midi_tracks.size () + 1);
-			std::list<std::shared_ptr<ARDOUR::MidiTrack> > created =
-			    _impl->session->new_midi_track (
-			        midi_io, outs, true, ARDOUR::PluginInfoPtr (),
-			        (ARDOUR::Plugin::PresetRecord*)0,
-			        std::shared_ptr<ARDOUR::RouteGroup> (), 1, name,
-			        ARDOUR::PresentationInfo::max_order, ARDOUR::Normal, true, false);
+			std::list<std::shared_ptr<ARDOUR::MidiTrack>> created =
+				_impl->session->new_midi_track (
+					midi_io, outs, true, ARDOUR::PluginInfoPtr (),
+					(ARDOUR::Plugin::PresetRecord*)0,
+					std::shared_ptr<ARDOUR::RouteGroup> (), 1, name,
+					ARDOUR::PresentationInfo::max_order, ARDOUR::Normal, true, false);
 			if (created.empty () || !created.front ()) {
 				_snap.detail = L"MIDI multi create failed";
 				return false;
@@ -172,7 +172,7 @@ EngineHost::smoke_midi_multi ()
 	}
 	if (_snap.midi_track_count < 2) {
 		std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi FAILED (count=%d)\n",
-		              _snap.midi_track_count);
+			      _snap.midi_track_count);
 		std::fflush (stderr);
 		return false;
 	}
@@ -189,7 +189,7 @@ EngineHost::smoke_midi_multi ()
 	(void)set_active_midi_track (0);
 	(void)set_midi_pitch_viewport (48, 71);
 	std::fprintf (stderr, "airdour_win_shell: smoke-midi-multi ok (tracks=%d)\n",
-	              _snap.midi_track_count);
+		      _snap.midi_track_count);
 	std::fflush (stderr);
 	_snap.detail = L"smoke-midi-multi ok";
 	return true;
@@ -263,7 +263,7 @@ EngineHost::attach_vst3_instrument_by_index (int index)
 			return false;
 		}
 		std::shared_ptr<ARDOUR::PluginInsert> pi (
-		    new ARDOUR::PluginInsert (*_impl->session, *mt, plugin));
+			new ARDOUR::PluginInsert (*_impl->session, *mt, plugin));
 		pi->set_strict_io (true);
 		if (mt->add_processor (pi, ARDOUR::PreFader) != 0) {
 			_snap.detail = L"VST3 instrument add_processor failed";
@@ -298,7 +298,7 @@ EngineHost::attach_vst3_instrument_by_index (int index)
 		_snap.midi_synth_name = utf8_to_wide_local (_impl->midi_synth_name);
 		_snap.detail = L"VST3 instrument attached";
 		std::fprintf (stderr, "airdour_win_shell: VST3 instrument \"%s\" (to_master=%d)\n",
-		              _impl->midi_synth_name.c_str (), to_master ? 1 : 0);
+			      _impl->midi_synth_name.c_str (), to_master ? 1 : 0);
 		std::fflush (stderr);
 		return true;
 	} catch (std::exception& e) {
@@ -322,16 +322,15 @@ EngineHost::smoke_vst3_instrument ()
 	}
 	if (_snap.vst3_scan_count <= 0) {
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-vst3-instrument ok (scan-only; set VST3_PATH)\n");
+			      "airdour_win_shell: smoke-vst3-instrument ok (scan-only; set VST3_PATH)\n");
 		std::fflush (stderr);
 		return true;
 	}
 	if (!attach_vst3_instrument_by_index (0)) {
 		/* Soft PASS when catalog has only FX. */
-		if (_snap.detail.find (L"none in catalog") != std::wstring::npos
-		    || _snap.detail.find (L"empty catalog") != std::wstring::npos) {
+		if (_snap.detail.find (L"none in catalog") != std::wstring::npos || _snap.detail.find (L"empty catalog") != std::wstring::npos) {
 			std::fprintf (stderr,
-			              "airdour_win_shell: smoke-vst3-instrument ok (no instruments)\n");
+				      "airdour_win_shell: smoke-vst3-instrument ok (no instruments)\n");
 			std::fflush (stderr);
 			return true;
 		}
@@ -346,12 +345,40 @@ EngineHost::smoke_vst3_instrument ()
 
 #else /* !AIRDOUR_WIN_SHELL_WITH_ENGINE */
 
-bool EngineHost::set_active_midi_track (int) { return false; }
-bool EngineHost::set_midi_pitch_viewport (int, int) { return false; }
-bool EngineHost::scroll_midi_pitch_viewport (int) { return false; }
-bool EngineHost::ensure_midi_track_count (int) { return false; }
-bool EngineHost::smoke_midi_multi () { return false; }
-bool EngineHost::attach_vst3_instrument_by_index (int) { return false; }
-bool EngineHost::smoke_vst3_instrument () { return false; }
+bool
+EngineHost::set_active_midi_track (int)
+{
+	return false;
+}
+bool
+EngineHost::set_midi_pitch_viewport (int, int)
+{
+	return false;
+}
+bool
+EngineHost::scroll_midi_pitch_viewport (int)
+{
+	return false;
+}
+bool
+EngineHost::ensure_midi_track_count (int)
+{
+	return false;
+}
+bool
+EngineHost::smoke_midi_multi ()
+{
+	return false;
+}
+bool
+EngineHost::attach_vst3_instrument_by_index (int)
+{
+	return false;
+}
+bool
+EngineHost::smoke_vst3_instrument ()
+{
+	return false;
+}
 
 #endif

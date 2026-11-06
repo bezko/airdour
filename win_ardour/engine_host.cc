@@ -544,7 +544,6 @@ write_pcm16_wav_gated (const std::string& path_utf8, int sample_rate,
 
 #include "engine_host_priv.h"
 
-
 EngineHost::EngineHost ()
 	: _started (false)
 	, _backend_name () /* empty → resolve from WinShellPrefs / Dummy in start() */
@@ -27365,26 +27364,26 @@ EngineHost::smoke_perf (unsigned sample_secs)
 		: (100.0 - (double)dsp_max);
 
 	std::fprintf (stderr,
-	              "airdour_win_shell: PERF backend=%ls sr=%u period=%u (%.2f ms) "
-	              "cb_us last=%llu avg=%llu max=%llu / period_us=%.0f "
-	              "dsp_pct avg=%.1f max=%.1f headroom_pct≈%.1f xruns=%llu "
-	              "ws_peak_mb=%.1f cycles=%llu measured_lat in=%u out=%u\n",
-	              _snap.backend.c_str (),
-	              (unsigned)sr0,
-	              (unsigned)period0,
-	              period_ms,
-	              (unsigned long long)_snap.callback_last_us,
-	              (unsigned long long)_snap.callback_avg_us,
-	              (unsigned long long)_snap.callback_max_us,
-	              period_us,
-	              dsp_avg,
-	              dsp_max,
-	              headroom,
-	              (unsigned long long)xruns,
-	              (double)ws_peak / (1024.0 * 1024.0),
-	              (unsigned long long)_snap.callback_count,
-	              (unsigned)_snap.systemic_in_frames,
-	              (unsigned)_snap.systemic_out_frames);
+		      "airdour_win_shell: PERF backend=%ls sr=%u period=%u (%.2f ms) "
+		      "cb_us last=%llu avg=%llu max=%llu / period_us=%.0f "
+		      "dsp_pct avg=%.1f max=%.1f headroom_pct≈%.1f xruns=%llu "
+		      "ws_peak_mb=%.1f cycles=%llu measured_lat in=%u out=%u\n",
+		      _snap.backend.c_str (),
+		      (unsigned)sr0,
+		      (unsigned)period0,
+		      period_ms,
+		      (unsigned long long)_snap.callback_last_us,
+		      (unsigned long long)_snap.callback_avg_us,
+		      (unsigned long long)_snap.callback_max_us,
+		      period_us,
+		      dsp_avg,
+		      dsp_max,
+		      headroom,
+		      (unsigned long long)xruns,
+		      (double)ws_peak / (1024.0 * 1024.0),
+		      (unsigned long long)_snap.callback_count,
+		      (unsigned)_snap.systemic_in_frames,
+		      (unsigned)_snap.systemic_out_frames);
 	std::fflush (stderr);
 	/* Soft gates: Dummy/CI may have no WASAPI; only fail on extreme DSP overload. */
 	if (dsp_max > 98.f && period0 > 0) {

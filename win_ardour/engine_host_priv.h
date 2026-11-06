@@ -45,7 +45,7 @@ public:
 	{
 	}
 
-	bool call_slot (InvalidationRecord*, const std::function<void()>& f) override
+	bool call_slot (InvalidationRecord*, const std::function<void ()>& f) override
 	{
 		/* UI thread owns this loop — run slots immediately. */
 		f ();
@@ -64,89 +64,89 @@ private:
 class EngineHost::Impl
 {
 public:
-	AudioEngine*    engine;
-	Session*        session;
+	AudioEngine* engine;
+	Session* session;
 	ShellEventLoop* event_loop;
-	bool            ardour_inited;
-	bool            transport_playing;
-	samplecnt_t     play_origin_samples;
-	std::string     session_dir;
-	std::vector<std::shared_ptr<AudioTrack> > tracks;
-	std::shared_ptr<Route> aux_bus; /* Aux destination for mixer sends */
+	bool ardour_inited;
+	bool transport_playing;
+	samplecnt_t play_origin_samples;
+	std::string session_dir;
+	std::vector<std::shared_ptr<AudioTrack>> tracks;
+	std::shared_ptr<Route> aux_bus;          /* Aux destination for mixer sends */
 	std::shared_ptr<RouteGroup> shell_group; /* optional mute/solo/gain link */
-	std::shared_ptr<VCA> shell_vca; /* optional VCA master stub */
-	std::shared_ptr<MidiTrack> midi_track; /* active MIDI track (alias of midi_tracks[active]) */
+	std::shared_ptr<VCA> shell_vca;          /* optional VCA master stub */
+	std::shared_ptr<MidiTrack> midi_track;   /* active MIDI track (alias of midi_tracks[active]) */
 	std::shared_ptr<MidiRegion> midi_region; /* active MIDI region */
-	std::vector<std::shared_ptr<MidiTrack> > midi_tracks;
-	std::vector<std::shared_ptr<MidiRegion> > midi_regions;
-	int             active_midi_track; /* index into midi_tracks */
+	std::vector<std::shared_ptr<MidiTrack>> midi_tracks;
+	std::vector<std::shared_ptr<MidiRegion>> midi_regions;
+	int active_midi_track; /* index into midi_tracks */
 	std::weak_ptr<PluginInsert> rack_slots[EngineSnapshot::kMeters][EngineSnapshot::kMaxInsertSlots];
-	int             rack_slot_count[EngineSnapshot::kMeters];
+	int rack_slot_count[EngineSnapshot::kMeters];
 	std::weak_ptr<PluginInsert> master_rack[EngineSnapshot::kMaxInsertSlots];
-	int             master_rack_count;
+	int master_rack_count;
 	std::weak_ptr<PluginInsert> vst2_fx; /* shell VST2 insert (Audio 2 or bridge) */
-	uint32_t        vst2_param_ports[EngineSnapshot::kMaxVst3Params];
-	int             vst2_param_count;
-	bool            vst2_bridged_32;
-	int             selected_track;
+	uint32_t vst2_param_ports[EngineSnapshot::kMaxVst3Params];
+	int vst2_param_count;
+	bool vst2_bridged_32;
+	int selected_track;
 	std::weak_ptr<Region> selected_region;
-	float           midi_activity;
+	float midi_activity;
 	Evoral::event_id_t selected_midi_note_id; /* primary / last clicked */
 	std::set<Evoral::event_id_t> selected_midi_note_ids;
-	bool            midi_out_connected;
-	std::string     midi_out_port;
-	bool            midi_synth_ok;
-	bool            midi_synth_to_master;
-	std::string     midi_synth_name;
-	bool            track_fx_ok;
-	bool            track_fx_bypassed;
-	float           track_fx_param; /* Blend 0..1 */
-	std::string     track_fx_name;
+	bool midi_out_connected;
+	std::string midi_out_port;
+	bool midi_synth_ok;
+	bool midi_synth_to_master;
+	std::string midi_synth_name;
+	bool track_fx_ok;
+	bool track_fx_bypassed;
+	float track_fx_param; /* Blend 0..1 */
+	std::string track_fx_name;
 	std::weak_ptr<PluginInsert> track_fx;
 	std::weak_ptr<PluginInsert> vst3_fx; /* shell VST3 insert (Audio 2) */
-	uint32_t        vst3_param_ports[EngineSnapshot::kMaxVst3Params];
-	int             vst3_param_count;
-	int             vst3_cycle_index; /* last catalog index inserted via cycle (−1 none) */
-	bool            track_comp_ok;
-	bool            track_comp_bypassed;
-	float           track_comp_threshold_db;
-	float           track_comp_ratio;
-	bool            track_comp_sidechain;
-	int             track_comp_sidechain_src;
-	std::string     track_comp_name;
+	uint32_t vst3_param_ports[EngineSnapshot::kMaxVst3Params];
+	int vst3_param_count;
+	int vst3_cycle_index; /* last catalog index inserted via cycle (−1 none) */
+	bool track_comp_ok;
+	bool track_comp_bypassed;
+	float track_comp_threshold_db;
+	float track_comp_ratio;
+	bool track_comp_sidechain;
+	int track_comp_sidechain_src;
+	std::string track_comp_name;
 	std::weak_ptr<PluginInsert> track_comp;
-	bool            track_eq_ok;
-	bool            track_eq_bypassed;
-	float           track_eq_gain_l_db;
-	float           track_eq_gain_m_db;
-	float           track_eq_gain_h_db;
-	std::string     track_eq_name;
+	bool track_eq_ok;
+	bool track_eq_bypassed;
+	float track_eq_gain_l_db;
+	float track_eq_gain_m_db;
+	float track_eq_gain_h_db;
+	std::string track_eq_name;
 	std::weak_ptr<PluginInsert> track_eq;
-	bool            track_delay_ok;
-	bool            track_delay_bypassed;
-	float           track_delay_time_ms;
-	float           track_delay_feedback_pct;
-	std::string     track_delay_name;
+	bool track_delay_ok;
+	bool track_delay_bypassed;
+	float track_delay_time_ms;
+	float track_delay_feedback_pct;
+	std::string track_delay_name;
 	std::weak_ptr<PluginInsert> track_delay;
-	bool            track_limiter_ok;
-	bool            track_limiter_bypassed;
-	float           track_limiter_ceiling_db;
-	float           track_limiter_release_ms;
-	std::string     track_limiter_name;
+	bool track_limiter_ok;
+	bool track_limiter_bypassed;
+	float track_limiter_ceiling_db;
+	float track_limiter_release_ms;
+	std::string track_limiter_name;
 	std::weak_ptr<PluginInsert> track_limiter;
-	bool            master_fx_ok;
-	bool            master_fx_bypassed;
-	float           master_fx_ceiling_db;
-	std::string     master_fx_name;
+	bool master_fx_ok;
+	bool master_fx_bypassed;
+	float master_fx_ceiling_db;
+	std::string master_fx_name;
 	std::weak_ptr<PluginInsert> master_fx;
-	bool            track_gate_ok;
-	bool            track_gate_bypassed;
-	float           track_gate_threshold_db;
-	float           track_gate_hold_ms;
-	std::string     track_gate_name;
+	bool track_gate_ok;
+	bool track_gate_bypassed;
+	float track_gate_threshold_db;
+	float track_gate_hold_ms;
+	std::string track_gate_name;
 	std::weak_ptr<PluginInsert> track_gate;
-	bool            plugins_scanned;
-	FadeShape       shell_fade_shape;
+	bool plugins_scanned;
+	FadeShape shell_fade_shape;
 
 	Impl ()
 		: engine (nullptr)
@@ -259,8 +259,8 @@ public:
 			selected_midi_note_ids.erase (it);
 			if (selected_midi_note_id == id) {
 				selected_midi_note_id = selected_midi_note_ids.empty ()
-				                            ? -1
-				                            : *selected_midi_note_ids.rbegin ();
+								? -1
+								: *selected_midi_note_ids.rbegin ();
 			}
 		} else {
 			selected_midi_note_ids.insert (id);

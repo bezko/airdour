@@ -36,26 +36,26 @@ enum class Op : uint32_t {
 #pragma pack(push, 1)
 struct MidiEventWire {
 	uint32_t sample_offset;
-	uint8_t  size;
-	uint8_t  data[3];
-	uint8_t  pad;
+	uint8_t size;
+	uint8_t data[3];
+	uint8_t pad;
 };
 
 struct SharedHeader {
 	uint32_t magic;
 	uint32_t version;
-	uint32_t op; /* Op */
+	uint32_t op;     /* Op */
 	uint32_t status; /* 0=ok, nonzero=error */
 	uint32_t frames;
 	uint32_t n_inputs;
 	uint32_t n_outputs;
 	uint32_t param_index;
-	float    param_value;
-	float    sample_rate;
+	float param_value;
+	float sample_rate;
 	uint32_t midi_count;
 	uint32_t chunk_bytes;
-	wchar_t  plugin_path[kMaxPathChars];
-	char     error[128];
+	wchar_t plugin_path[kMaxPathChars];
+	char error[128];
 };
 
 struct SharedAudio {
@@ -66,7 +66,7 @@ struct SharedAudio {
 
 struct SharedState {
 	SharedHeader hdr;
-	SharedAudio  audio;
+	SharedAudio audio;
 };
 #pragma pack(pop)
 

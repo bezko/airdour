@@ -40,4 +40,4 @@ namespace {
 struct Vst3ModuleAnchor {
 	Vst3ModuleAnchor () { airdour_vst3_module_anchor (); }
 } g_vst3_module_anchor;
-}
+} // namespace

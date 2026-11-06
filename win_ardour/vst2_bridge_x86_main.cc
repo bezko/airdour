@@ -22,16 +22,16 @@
 #endif
 #include <windows.h>
 
+using airdour::vst2_bridge::kProtocolMagic;
 using airdour::vst2_bridge::Op;
 using airdour::vst2_bridge::SharedState;
-using airdour::vst2_bridge::kProtocolMagic;
 
 namespace {
 
 SharedState* g_view = nullptr;
-HANDLE       g_req = nullptr;
-HANDLE       g_ack = nullptr;
-HMODULE      g_dll = nullptr;
+HANDLE g_req = nullptr;
+HANDLE g_ack = nullptr;
+HMODULE g_dll = nullptr;
 
 /* Function-pointer VST2 surface — avoids pulling fst.h into the Win32 target. */
 typedef intptr_t (*AudioMasterProc) (void*, int32_t, int32_t, intptr_t, void*, float);
@@ -66,7 +66,7 @@ open_plugin ()
 	g_dll = LoadLibraryW (g_view->hdr.plugin_path);
 	if (!g_dll) {
 		std::snprintf (g_view->hdr.error, sizeof (g_view->hdr.error),
-		               "LoadLibrary failed (%lu)", (unsigned long)GetLastError ());
+			       "LoadLibrary failed (%lu)", (unsigned long)GetLastError ());
 		return false;
 	}
 	typedef BridgeAEffect* (*VstMain) (AudioMasterProc);
@@ -126,13 +126,13 @@ handle_op ()
 	case Op::SetBlockSize:
 		if (g_effect && g_effect->dispatcher) {
 			g_effect->dispatcher (g_effect, 11 /*effSetBlockSize*/, 0,
-			                      (intptr_t)g_view->hdr.frames, nullptr, 0.f);
+					      (intptr_t)g_view->hdr.frames, nullptr, 0.f);
 		}
 		break;
 	case Op::SetSampleRate:
 		if (g_effect && g_effect->dispatcher) {
 			g_effect->dispatcher (g_effect, 10 /*effSetSampleRate*/, 0, 0, nullptr,
-			                      g_view->hdr.sample_rate);
+					      g_view->hdr.sample_rate);
 		}
 		break;
 	case Op::Process:
@@ -149,13 +149,13 @@ handle_op ()
 	case Op::GetParameter:
 		if (g_effect && g_effect->getParameter) {
 			g_view->hdr.param_value =
-			    g_effect->getParameter (g_effect, (int32_t)g_view->hdr.param_index);
+				g_effect->getParameter (g_effect, (int32_t)g_view->hdr.param_index);
 		}
 		break;
 	case Op::SetParameter:
 		if (g_effect && g_effect->setParameter) {
 			g_effect->setParameter (g_effect, (int32_t)g_view->hdr.param_index,
-			                        g_view->hdr.param_value);
+						g_view->hdr.param_value);
 		}
 		break;
 	case Op::Idle:
