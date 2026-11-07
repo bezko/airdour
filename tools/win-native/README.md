@@ -56,10 +56,13 @@ ctest --preset engine
 cd ..\..
 ```
 
-The scripts derive the repo root from their own location, find VS via `vswhere`,
-honor `VCPKG_INSTALLED_DIR`, and accept an output dir. `engine` refuses to
-configure when `build-rel\libs\ardour\ardour.lib` is missing instead of silently
-building a UI-only exe, and stages the waf DLLs at build time.
+The scripts derive the repo root from their own location, honor
+`VCPKG_INSTALLED_DIR`, and accept an output dir. `configure-waf-release.cmd`
+gives waf a short PATH and `--msvc_targets=x64` so its vcvarsall probe works on
+GitHub-hosted runners (a preloaded Developer Prompt PATH makes that bat exit
+255). `build-waf-release.cmd` still uses `vswhere` + VsDevCmd when needed.
+`engine` refuses to configure when `build-rel\libs\ardour\ardour.lib` is missing
+instead of silently building a UI-only exe, and stages the waf DLLs at build time.
 
 Default backends: **dummy** + **wasapi**. Needs the MSVC deps above **plus** the glibmm-2.4 overlay.
 
