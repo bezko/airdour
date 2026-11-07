@@ -9212,9 +9212,6 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				_engine.set_midi_gain (1.f);
 			} else {
 				_engine.set_track_gain (fi, 1.f);
-				if (fi == 0) {
-					_engine_snap.gain = 1.f;
-				}
 			}
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
@@ -11031,9 +11028,6 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			_engine.set_midi_gain (_mixers[mi].gain ());
 		} else {
 			_engine.set_track_gain (mi, _mixers[mi].gain ());
-			if (mi == 0) {
-				_engine_snap.gain = _mixers[0].gain ();
-			}
 		}
 		SetCapture (_hwnd);
 		SetCursor (LoadCursorW (nullptr, IDC_SIZENS));
