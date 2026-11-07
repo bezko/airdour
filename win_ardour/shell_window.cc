@@ -125,7 +125,6 @@ ShellWindow::ShellWindow ()
 	, _mouse_x (0.f)
 	, _mouse_y (0.f)
 	, _mouse_tracking (false)
-	, _running (false)
 	, _start_tick (0)
 	, _timeout_secs (0)
 	, _drag (DragMode::None)
@@ -2274,7 +2273,6 @@ ShellWindow::sync_transport_tempo_from_engine ()
 	_transport.set_tempo_bpm (_engine_snap.tempo_bpm);
 	_transport.set_count_in_enabled (_engine_snap.count_in_enabled);
 	_transport.set_click_enabled (_engine_snap.click_enabled);
-	_transport.set_click_gain (_engine_snap.click_gain);
 }
 
 void
@@ -8531,6 +8529,15 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			           && !(GetKeyState (VK_MENU) & 0x8000)) {
 				/* Ctrl+L = lock / unlock selected region (blocks move/trim). */
 				do_toggle_selection_locked ();
+			} else if ((GetKeyState (VK_MENU) & 0x8000) && (GetKeyState (VK_SHIFT) & 0x8000) && !(GetKeyState (VK_CONTROL) & 0x8000)) {
+				/* Alt+Shift+L — cycle Solo → PFL → AFL → Solo. */
+				if (_engine.is_linked () && _engine_snap.session_ok) {
+					_engine.cycle_listen_mode ();
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_mixer_listen_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+				}
 			} else {
 				do_toggle_loop ();
 			}
@@ -8540,21 +8547,6 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				/* Alt+O = toggle region opaque / transparent. */
 				do_toggle_selection_opaque ();
 			}
-		} else if ((GetKeyState (VK_MENU) & 0x8000)
-		           && (GetKeyState (VK_SHIFT) & 0x8000)
-		           && !(GetKeyState (VK_CONTROL) & 0x8000)
-		           && (wparam == 'L' || wparam == 'l')) {
-			/* Alt+Shift+L — cycle Solo → PFL → AFL → Solo. */
-			if (_engine.is_linked () && _engine_snap.session_ok) {
-				_engine.cycle_listen_mode ();
-				_engine.poll ();
-				_engine_snap = _engine.snapshot ();
-				sync_mixer_listen_from_engine ();
-				InvalidateRect (_hwnd, nullptr, FALSE);
-			}
-		} else if (!(GetKeyState (VK_MENU) & 0x8000)
-		           && (wparam == 'L' || wparam == 'l')) {
-			do_toggle_loop ();
 		} else if (wparam == 'P' || wparam == 'p') {
 			if ((GetKeyState (VK_CONTROL) & 0x8000)
 			    && (GetKeyState (VK_SHIFT) & 0x8000)
@@ -9237,9 +9229,6 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				_engine.set_midi_gain (1.f);
 			} else {
 				_engine.set_track_gain (fi, 1.f);
-				if (fi == 0) {
-					_engine_snap.gain = 1.f;
-				}
 			}
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
@@ -11056,9 +11045,6 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			_engine.set_midi_gain (_mixers[mi].gain ());
 		} else {
 			_engine.set_track_gain (mi, _mixers[mi].gain ());
-			if (mi == 0) {
-				_engine_snap.gain = _mixers[0].gain ();
-			}
 		}
 		SetCapture (_hwnd);
 		SetCursor (LoadCursorW (nullptr, IDC_SIZENS));
@@ -12670,8 +12656,9 @@ ShellWindow::draw_loop_overlay ()
 		if (w < 4.f) {
 			continue;
 		}
-		float bot = (i == 0 && _auto_lane_bounds.bottom > lb.bottom)
-		            ? _auto_lane_bounds.bottom : lb.bottom;
+		float bot = (i == _auto_lane_track && _auto_lane_bounds.bottom > lb.bottom)
+				    ? _auto_lane_bounds.bottom
+				    : lb.bottom;
 		float x0 = lb.left + n0 * w;
 		float x1 = lb.left + n1 * w;
 		_rt->FillRectangle (D2D1::RectF (x0, lb.top, x1, bot), _brush_loop);
@@ -12936,7 +12923,6 @@ ShellWindow::draw_editor_pane ()
 		    D2D1_ANTIALIAS_MODE_ALIASED);
 	}
 
-	float label_w = 64.f * _dpi_scale;
 	float view0 = _lanes[0].strip.view_start_sec ();
 	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
 	const int n_lanes_draw = n_audio_lanes ();
@@ -12948,7 +12934,6 @@ ShellWindow::draw_editor_pane ()
 		}
 		D2D1_RECT_F label_rc = D2D1::RectF (
 			r.left + inset, lb.top, lb.left - 4.f * _dpi_scale, label_bot);
-		(void)label_w;
 		const bool focused = (i == _focus_audio_track);
 		_ui.text_vcenter (_lanes[i].label, ui::TextRole::Section,
 		                  focused ? ui::ColorToken::TextPrimary
@@ -14136,7 +14121,6 @@ ShellWindow::smoke_vst3_mixer_unload ()
 	}
 	/* Center of unload chip = right edge of FX row. */
 	const D2D1_RECT_F& b = _mixers[1].bounds ();
-	float fx_top = b.top + 80.f * _dpi_scale; /* approximate; use hit scan */
 	bool hit = false;
 	for (float y = b.top; y < b.bottom; y += 2.f * _dpi_scale) {
 		for (float x = b.right - 20.f * _dpi_scale; x < b.right; x += 2.f * _dpi_scale) {
@@ -14156,7 +14140,6 @@ after_hit:
 		              "airdour_win_shell: smoke-vst3-mixer-unload FAILED (× not hittable)\n");
 		return false;
 	}
-	(void)fx_top;
 	if (_engine_snap.vst3_ok) {
 		std::fprintf (stderr,
 		              "airdour_win_shell: smoke-vst3-mixer-unload FAILED (still loaded)\n");
@@ -15173,7 +15156,6 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+B / Alt+click FX", L"Bypass all ACE inserts" },
 		{ L"Alt+Shift+B / Alt+Shift+click FX", L"Activate all ACE inserts" },
 		{ L"Z", L"Freeze / unfreeze focused audio track" },
-		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"Status snap chip", L"Show density · click to cycle" },
 		{ nullptr, L"MARKERS & RANGES" },
 		{ L"M / Shift+M", L"Add / remove marker" },
@@ -15863,11 +15845,10 @@ ShellWindow::run_message_loop (unsigned timeout_secs)
 	_timeout_secs = timeout_secs;
 	_start_tick = GetTickCount ();
 	_last_tick_ms = _start_tick;
-	_running = true;
 	_engine_snap = _engine.snapshot ();
 
 	MSG msg = {};
-	while (_running && GetMessageW (&msg, nullptr, 0, 0) > 0) {
+	while (GetMessageW (&msg, nullptr, 0, 0) > 0) {
 		TranslateMessage (&msg);
 		DispatchMessageW (&msg);
 	}

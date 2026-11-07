@@ -7,10 +7,13 @@ param(
     [string]$WinShellPath = ""
 )
 
-$smokeLine = if ($WasapiSmokePath -and (Test-Path $WasapiSmokePath)) {
-    "GREEN  wasapi_io_smoke static lib: $WasapiSmokePath"
-} else {
-    "MISSING wasapi_io_smoke (compile may have been skipped)"
+$smokeLine = $null
+if ($PSBoundParameters.ContainsKey('WasapiSmokePath')) {
+    $smokeLine = if ($WasapiSmokePath -and (Test-Path $WasapiSmokePath)) {
+        "GREEN  wasapi_io_smoke static lib: $WasapiSmokePath"
+    } else {
+        "MISSING wasapi_io_smoke (compile may have been skipped)"
+    }
 }
 
 $guiLine = if ($WinShellPath -and (Test-Path $WinShellPath)) {
@@ -18,6 +21,8 @@ $guiLine = if ($WinShellPath -and (Test-Path $WinShellPath)) {
 } else {
     "MISSING airdour_win_shell (GUI shell may have been skipped)"
 }
+
+$shipped = if ($null -ne $smokeLine) { $smokeLine + "`n" + $guiLine } else { $guiLine }
 
 $status = @"
 Airdour Windows CI / release artifact status
@@ -31,8 +36,7 @@ product:  AIRDOUR_WINDOWS_ONLY / --windows-only
 
 What is in this artifact
 ------------------------
-$smokeLine
-$guiLine
+$shipped
 GREEN  cmake/win64 spine configured
 GREEN  libs/backends/wasapi sources (shared + exclusive open path)
 GREEN  tools/win-native/README.md

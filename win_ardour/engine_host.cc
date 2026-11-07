@@ -55,7 +55,6 @@
 #include "ardour/send.h"
 #include "ardour/panner_shell.h"
 #include "ardour/pannable.h"
-#include "ardour/audio_backend.h"
 #include "ardour/chan_count.h"
 #include "ardour/location.h"
 #include "ardour/midi_scene_change.h"
@@ -72,9 +71,7 @@
 #include "ardour/solo_safe_control.h"
 #include "ardour/phase_control.h"
 #include "ardour/amp.h"
-#include "ardour/monitor_control.h"
 #include "ardour/gain_control.h"
-#include "ardour/panner_shell.h"
 #include "ardour/plugin.h"
 #include "ardour/plugin_insert.h"
 #include "ardour/plugin_manager.h"
@@ -558,7 +555,6 @@ EngineHost::EngineHost ()
 	, _recovery_saved_ft (0)
 	, _recovery_last_open_ft (0)
 	, _recovery_dirty (false)
-	, _gain (0.85f)
 	, _arp_enabled (false)
 	, _arp_mode (0)
 	, _arp_step (0)
@@ -579,7 +575,6 @@ EngineHost::EngineHost ()
 		_snap.track_gain[i] = _track_gain[i];
 	}
 	_snap.available = true;
-	_snap.gain = _gain;
 	_snap.backend = L"(idle)";
 	_snap.detail = L"engine linked — not started";
 	_last_export_path.clear ();
@@ -3517,12 +3512,6 @@ EngineHost::stop ()
 }
 
 void
-EngineHost::set_gain (float linear)
-{
-	set_track_gain (0, linear);
-}
-
-void
 EngineHost::set_track_gain (int track, float linear)
 {
 	linear = std::max (0.f, std::min (1.f, linear));
@@ -3530,10 +3519,6 @@ EngineHost::set_track_gain (int track, float linear)
 		return;
 	}
 	_track_gain[track] = linear;
-	if (track == 0) {
-		_gain = linear;
-		_snap.gain = linear;
-	}
 	if (_impl && track < (int)_impl->tracks.size () && _impl->tracks[track]
 	    && _impl->tracks[track]->gain_control ()) {
 		_impl->tracks[track]->gain_control ()->set_value (linear, Controllable::UseGroup);
@@ -3544,8 +3529,6 @@ EngineHost::set_track_gain (int track, float linear)
 				_snap.track_gain[i] = _track_gain[i];
 			}
 		}
-		_gain = _track_gain[0];
-		_snap.gain = _gain;
 	}
 }
 
@@ -3572,8 +3555,6 @@ EngineHost::reset_all_faders ()
 			_impl->midi_track->gain_control ()->set_value (1.0, Controllable::NoGroup);
 			++n;
 		}
-		_gain = _track_gain[0];
-		_snap.gain = _gain;
 		std::fprintf (stderr, "airdour_win_shell: reset all faders to unity (%d)\n", n);
 		std::fflush (stderr);
 		_snap.detail = L"all faders → unity";
@@ -3651,12 +3632,6 @@ EngineHost::set_midi_gain (float linear)
 	} catch (...) {
 		return false;
 	}
-}
-
-float
-EngineHost::gain () const
-{
-	return _gain;
 }
 
 void
@@ -7556,12 +7531,6 @@ EngineHost::set_aux_return (float gain_0_1)
 	} catch (...) {
 		return false;
 	}
-}
-
-float
-EngineHost::aux_return () const
-{
-	return _snap.aux_return;
 }
 
 bool
@@ -14561,10 +14530,6 @@ EngineHost::move_audio_track (int index, int delta)
 			float tmp = _track_gain[index];
 			_track_gain[index] = _track_gain[other];
 			_track_gain[other] = tmp;
-			if (index == 0 || other == 0) {
-				_gain = _track_gain[0];
-				_snap.gain = _gain;
-			}
 		}
 		if (_snap.selection_track == index) {
 			_snap.selection_track = other;
@@ -14580,8 +14545,6 @@ EngineHost::move_audio_track (int index, int delta)
 				_track_gain[i] = (float)_impl->tracks[i]->gain_control ()->get_value ();
 			}
 		}
-		_gain = _track_gain[0];
-		_snap.gain = _gain;
 		refresh_region_flags ();
 		refresh_mute_solo_flags ();
 		refresh_pan_flags ();
@@ -23041,29 +23004,29 @@ namespace {
 
 /* Bundled ACE Reasonable Synth (libs/plugins/reasonablesynth.lv2). */
 static const char* kReasonableSynthUri = "https://community.ardour.org/node/7596";
-/* Bundled ACE Reverb (libs/plugins/a-reverb.lv2) — audio-track FX, no cairo. */
+/* Bundled ACE Reverb (libs/plugins/a-reverb.lv2). */
 static const char* kAceReverbUri = "urn:ardour:a-reverb";
 /* LV2 control port index for Blend (wet mix); see a-reverb.ttl.in. */
 static const uint32_t kAceReverbBlendPort = 4;
-/* Bundled ACE Compressor (libs/plugins/a-comp.lv2) — DSP-only, no cairo. */
+/* Bundled ACE Compressor (libs/plugins/a-comp.lv2). */
 static const char* kAceCompUri = "urn:ardour:a-comp";
 static const uint32_t kAceCompRatioPort = 3;
 static const uint32_t kAceCompThresholdPort = 4;
 static const uint32_t kAceCompSidechainPort = 9;
-/* Bundled ACE EQ (libs/plugins/a-eq.lv2) — DSP-only, no cairo. */
+/* Bundled ACE EQ (libs/plugins/a-eq.lv2). */
 static const char* kAceEqUri = "urn:ardour:a-eq";
 static const uint32_t kAceEqGainLPort = 1; /* Gain L */
 static const uint32_t kAceEqGain2Port = 6; /* Gain 2 (mid) */
 static const uint32_t kAceEqGainHPort = 15; /* Gain H */
-/* Bundled ACE Delay (libs/plugins/a-delay.lv2) — DSP-only, no cairo. */
+/* Bundled ACE Delay (libs/plugins/a-delay.lv2). */
 static const char* kAceDelayUri = "urn:ardour:a-delay";
 static const uint32_t kAceDelayTimePort = 5; /* Time ms */
 static const uint32_t kAceDelayFeedbackPort = 8; /* Feedback % */
-/* Bundled ACE Limiter (libs/plugins/a-limiter.lv2) — DSP-only. */
+/* Bundled ACE Limiter (libs/plugins/a-limiter.lv2). */
 static const char* kAceLimiterUri = "urn:ardour:a-limiter";
 static const uint32_t kAceLimiterCeilingPort = 0; /* Ceiling dB */
 static const uint32_t kAceLimiterReleasePort = 1; /* Release ms */
-/* Bundled ACE Gate (libs/plugins/a-gate.lv2) — DSP-only. */
+/* Bundled ACE Gate (libs/plugins/a-gate.lv2). */
 static const char* kAceGateUri = "urn:ardour:a-gate";
 static const uint32_t kAceGateThresholdPort = 0; /* Threshold dB */
 static const uint32_t kAceGateHoldPort = 1; /* Hold ms */
@@ -24337,13 +24300,6 @@ EngineHost::set_track_fx_param (int track, float value_0_1)
 	} catch (...) {
 		return false;
 	}
-}
-
-float
-EngineHost::track_fx_param (int track) const
-{
-	(void)track;
-	return _snap.track_fx_param;
 }
 
 bool
@@ -36013,7 +35969,6 @@ EngineHost::smoke_midi_scale ()
 void
 EngineHost::refresh_snapshot ()
 {
-	_snap.gain = _gain;
 	if (!_impl || !_impl->engine || !_started) {
 		return;
 	}
@@ -36062,7 +36017,6 @@ EngineHost::refresh_snapshot ()
 			refresh_monitor_choice_flags ();
 			refresh_active_flags ();
 			refresh_selection_flags ();
-			refresh_monitor_choice_flags ();
 			refresh_pan_flags ();
 			refresh_pan_auto_state_flags ();
 			refresh_send_flags ();
@@ -36155,7 +36109,6 @@ EngineHost::EngineHost ()
 	, _recovery_saved_ft (0)
 	, _recovery_last_open_ft (0)
 	, _recovery_dirty (false)
-	, _gain (0.85f)
 	, _arp_enabled (false)
 	, _arp_mode (0)
 	, _arp_step (0)
@@ -36174,7 +36127,6 @@ EngineHost::EngineHost ()
 		_track_gain[i] = 0.85f;
 		_snap.track_gain[i] = _track_gain[i];
 	}
-	_snap.gain = _gain;
 	_snap.backend = L"(not linked)";
 	_snap.detail = L"build with AIRDOUR_WIN_SHELL_WITH_ENGINE + waf libs";
 	_last_export_path.clear ();
@@ -36530,34 +36482,17 @@ EngineHost::stop ()
 }
 
 void
-EngineHost::set_gain (float linear)
-{
-	set_track_gain (0, linear);
-}
-
-void
 EngineHost::set_track_gain (int track, float linear)
 {
 	linear = std::max (0.f, std::min (1.f, linear));
 	if (track >= 0 && track < EngineSnapshot::kMeters) {
 		_track_gain[track] = linear;
 	}
-	if (track == 0) {
-		_gain = linear;
-		_snap.gain = linear;
-	}
-}
-
-float
-EngineHost::gain () const
-{
-	return _gain;
 }
 
 void
 EngineHost::refresh_snapshot ()
 {
-	_snap.gain = _gain;
 }
 
 void
@@ -37236,12 +37171,6 @@ EngineHost::set_aux_return (float gain_0_1)
 {
 	(void)gain_0_1;
 	return false;
-}
-
-float
-EngineHost::aux_return () const
-{
-	return 1.f;
 }
 
 bool
@@ -39791,13 +39720,6 @@ EngineHost::set_track_fx_param (int track, float value_0_1)
 	(void)track;
 	(void)value_0_1;
 	return false;
-}
-
-float
-EngineHost::track_fx_param (int track) const
-{
-	(void)track;
-	return 0.f;
 }
 
 bool

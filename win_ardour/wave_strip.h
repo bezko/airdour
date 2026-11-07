@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Wave strip — Direct2D peak/RMS + canvas zoom/pan (not Cairo WaveView).
+ * Wave strip — Direct2D peak/RMS + canvas zoom/pan.
  * Peaks come from Session playlist readouts (or stay empty). No synthetic fill.
  */
 
@@ -112,7 +112,6 @@ public:
 private:
 	std::vector<float> _peaks;
 	std::vector<float> _rms;
-	float              _pan; /* view start seconds when user-panned */
 	float              _zoom;
 	bool               _user_view;
 	bool               _has_regions;

@@ -54,25 +54,6 @@ struct EngineMidiNoteSnap {
 	bool    selected = false;
 };
 
-struct EnginePluginSnap {
-	wchar_t name[48];
-	wchar_t unique_id[72];
-	bool    is_instrument;
-};
-
-struct EnginePluginSlotSnap {
-	wchar_t name[48];
-	wchar_t unique_id[72];
-	bool    active;
-};
-
-struct EnginePluginParamSnap {
-	wchar_t name[32];
-	float   value; /* plugin units */
-	float   norm; /* 0..1 UI */
-	bool    toggled;
-};
-
 struct EngineSnapshot {
 	static constexpr int kMeters = 16; /* max audio tracks (Editor lanes / meters) */
 	static constexpr int kMaxMarkers = 8;
@@ -225,7 +206,6 @@ struct EngineSnapshot {
 	uint64_t     callback_avg_us = 0;
 	uint64_t     callback_count = 0;
 	uint64_t     xrun_count = 0; /* Session + backend underruns */
-	float        gain = 0.85f; /* track 0 stub/session gain */
 	float        meter_peak[kMeters] = {}; /* linear 0..1 */
 	bool         meter_clip[kMeters] = {}; /* ≥0 dBFS / PeakMeter MeterMaxPeak */
 	int          track_meter_point[kMeters] = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2}; /* 0=In 1=Pre 2=Post 3=Out (skip Custom) */
@@ -527,7 +507,6 @@ public:
 
 	void poll ();
 
-	void  set_gain (float linear);
 	void  set_track_gain (int track, float linear);
 	bool  set_midi_gain (float linear);
 	/**
@@ -537,7 +516,6 @@ public:
 	bool reset_all_faders ();
 	/** Drop gains → reset_all → verify ≈1.0. For --smoke-fader-reset-all. */
 	bool smoke_fader_reset_all ();
-	float gain () const;
 
 	/** Arm / disarm a track for recording (Session rec-enable control). */
 	bool set_track_armed (int track, bool armed);
@@ -786,7 +764,6 @@ public:
 
 	/** Aux bus return (wet) gain coeff 0..1. Double-click → unity. */
 	bool  set_aux_return (float gain_0_1);
-	float aux_return () const;
 	/** Ensure Aux → set 0.5 → set 1.0. For --smoke-aux-return. */
 	bool smoke_aux_return ();
 
@@ -1792,7 +1769,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * UI-thread safe Controllable::set_value.
 	 */
 	bool set_track_fx_param (int track, float value_0_1);
-	float track_fx_param (int track = 0) const;
 
 	/**
 	 * Reset mixer FX param 1..3 on track to insert defaults (Blend 0.3, EQ 0.5, …).
@@ -1919,7 +1895,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	/** Toggle UI-rate spectrum analyzer (Spec / Y). */
 	bool set_spectrum_enabled (bool on);
 	bool toggle_spectrum_enabled ();
-	bool spectrum_enabled () const { return _snap.spectrum_enabled; }
 	/** false = selected/Audio1; true = mix of audio tracks (master view). */
 	bool set_spectrum_master (bool master);
 	bool toggle_spectrum_master ();
@@ -1932,7 +1907,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	/** Toggle UI-rate phase / goniometer (Phase / X). */
 	bool set_correlation_enabled (bool on);
 	bool toggle_correlation_enabled ();
-	bool correlation_enabled () const { return _snap.correlation_enabled; }
 	bool set_correlation_master (bool master);
 	bool toggle_correlation_master ();
 
@@ -1944,7 +1918,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	/** Toggle UI-rate approximate LUFS (LUFS / J). */
 	bool set_loudness_enabled (bool on);
 	bool toggle_loudness_enabled ();
-	bool loudness_enabled () const { return _snap.loudness_enabled; }
 	bool set_loudness_master (bool master);
 	bool toggle_loudness_master ();
 
@@ -2577,7 +2550,6 @@ private:
 	std::string recovery_copy_path () const;
 	bool copy_snapshot_to_recovery ();
 	uint64_t snapshot_filetime (const std::string& session_dir, const std::string& snap) const;
-	float       _gain;
 	float       _track_gain[EngineSnapshot::kMeters];
 	EngineSnapshot _snap;
 

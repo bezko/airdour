@@ -145,12 +145,9 @@ try {
     }
     if ($ShellExe) { $shellArgs.ShellExe = $ShellExe }
     elseif ($BuildDir) {
-        foreach ($c in @(
-            (Join-Path $BuildDir "artifacts\Release\airdour_win_shell.exe"),
-            (Join-Path $BuildDir "artifacts\Debug\airdour_win_shell.exe")
-        )) {
-            if (Test-Path $c) { $shellArgs.ShellExe = $c; break }
-        }
+        # Same single-config preset layout the wasapi lib search already accepts.
+        $shellCandidate = Join-Path $BuildDir "artifacts\airdour_win_shell.exe"
+        if (Test-Path $shellCandidate) { $shellArgs.ShellExe = $shellCandidate }
     }
     if ($WafLibsDir) { $shellArgs.WafLibsDir = $WafLibsDir }
     & $packShell @shellArgs | Out-Null

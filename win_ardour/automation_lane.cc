@@ -19,13 +19,6 @@ AutomationLane::AutomationLane ()
 	, _playhead_norm (-1.f)
 {
 	wcsncpy_s (_label, L"Gain", _TRUNCATE);
-	for (size_t i = 0; i < kMaxColumns; ++i) {
-		_curve[i] = 0.5f;
-	}
-	for (size_t i = 0; i < kMaxPoints; ++i) {
-		_pt_x[i] = 0.f;
-		_pt_y[i] = 0.5f;
-	}
 }
 
 void

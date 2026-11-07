@@ -1,7 +1,4 @@
-# Airdour win64 / MSVC first-slice spine
-#
-# Stages:
-#   1) wasapi_io_smoke     — WasapiIO + Windows SDK only (CI green path)
+# Airdour win64 / MSVC
 #
 # Audio product path: WASAPI shared (libs/backends/wasapi).
 # Exclusive / DirectSound / ASIO: out of scope.
@@ -54,11 +51,6 @@ set(CMAKE_MAP_IMPORTED_CONFIG_RELEASE RelWithDebInfo Release MinSizeRel "")
 set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO RelWithDebInfo Release MinSizeRel "")
 set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL MinSizeRel Release RelWithDebInfo "")
 
-set(AIRDOUR_DEPS_ROOT "" CACHE PATH "MSVC dependency root (glib, sndfile, …)")
-if(AIRDOUR_DEPS_ROOT)
-  list(APPEND CMAKE_PREFIX_PATH "${AIRDOUR_DEPS_ROOT}")
-endif()
-
 set(AIRDOUR_SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 
 # Single source of truth for the vcpkg x64-windows prefix. Honors the vcpkg
@@ -82,10 +74,6 @@ function(airdour_import_vcpkg_lib _target _libname)
     IMPORTED_LOCATION_DEBUG "${AIRDOUR_VCPKG_PREFIX}/debug/lib/${_libname}.lib"
   )
 endfunction()
-
-# --- Slice order (full product) ---
-# 1. pbd  2. temporal / midipp / evoral  3. ardour  4. dummy + wasapi  5. headless
-# glibmm-2.4 + sigc++-2.0: overlay ports in tools/win-native/overlays.
 
 set(WASAPI_IO_SOURCES
   "${AIRDOUR_SRC_ROOT}/libs/backends/wasapi/wasapi_io.cc"
@@ -392,24 +380,4 @@ if(AIRDOUR_BUILD_VST2_BRIDGE_X86 AND WIN32)
       VERBATIM
     )
   endif()
-endif()
-
-# --- Install / CPack (basic portable tree; richer packaging lives in
-#     tools/win-native/ci/Package-*.ps1) ---
-if(AIRDOUR_BUILD_WIN_SHELL)
-  install(TARGETS airdour_win_shell RUNTIME DESTINATION .)
-  if(TARGET ardour-vst2-bridge-x86)
-    install(TARGETS ardour-vst2-bridge-x86 RUNTIME DESTINATION .)
-  endif()
-  if(AIRDOUR_WIN_SHELL_WITH_ENGINE)
-    install(FILES ${_waf_runtime_dlls} DESTINATION . OPTIONAL)
-    install(FILES "${AIRDOUR_SRC_ROOT}/win_ardour/run-engine-shell-release.bat"
-            DESTINATION . OPTIONAL)
-  endif()
-  set(CPACK_GENERATOR "ZIP")
-  set(CPACK_PACKAGE_NAME "airdour")
-  set(CPACK_PACKAGE_VENDOR "Airdour")
-  set(CPACK_PACKAGE_VERSION "9")
-  set(CPACK_PACKAGE_FILE_NAME "airdour-win64")
-  include(CPack)
 endif()
