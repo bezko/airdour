@@ -134,8 +134,6 @@ public:
 	void set_count_in_enabled (bool on) { _count_in_enabled = on; }
 
 	void set_click_enabled (bool on) { _click_enabled = on; }
-	/** Linear click gain (1.0 = unity); used for Click button caption. */
-	void set_click_gain (float g) { _click_gain = g; }
 
 	void set_tempo_bpm (float bpm) { _tempo_bpm = bpm; }
 
@@ -280,7 +278,6 @@ private:
 	bool        _freeze_active;
 	bool        _count_in_enabled;
 	bool        _click_enabled;
-	float       _click_gain;
 	bool        _group_active;
 	bool        _group_relative;
 	bool        _spectrum_enabled;

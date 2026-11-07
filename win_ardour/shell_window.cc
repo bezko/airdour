@@ -125,7 +125,6 @@ ShellWindow::ShellWindow ()
 	, _mouse_x (0.f)
 	, _mouse_y (0.f)
 	, _mouse_tracking (false)
-	, _running (false)
 	, _start_tick (0)
 	, _timeout_secs (0)
 	, _drag (DragMode::None)
@@ -2274,7 +2273,6 @@ ShellWindow::sync_transport_tempo_from_engine ()
 	_transport.set_tempo_bpm (_engine_snap.tempo_bpm);
 	_transport.set_count_in_enabled (_engine_snap.count_in_enabled);
 	_transport.set_click_enabled (_engine_snap.click_enabled);
-	_transport.set_click_gain (_engine_snap.click_gain);
 }
 
 void
@@ -12906,7 +12904,6 @@ ShellWindow::draw_editor_pane ()
 		    D2D1_ANTIALIAS_MODE_ALIASED);
 	}
 
-	float label_w = 64.f * _dpi_scale;
 	float view0 = _lanes[0].strip.view_start_sec ();
 	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
 	const int n_lanes_draw = n_audio_lanes ();
@@ -12918,7 +12915,6 @@ ShellWindow::draw_editor_pane ()
 		}
 		D2D1_RECT_F label_rc = D2D1::RectF (
 			r.left + inset, lb.top, lb.left - 4.f * _dpi_scale, label_bot);
-		(void)label_w;
 		const bool focused = (i == _focus_audio_track);
 		_ui.text_vcenter (_lanes[i].label, ui::TextRole::Section,
 		                  focused ? ui::ColorToken::TextPrimary
@@ -14106,7 +14102,6 @@ ShellWindow::smoke_vst3_mixer_unload ()
 	}
 	/* Center of unload chip = right edge of FX row. */
 	const D2D1_RECT_F& b = _mixers[1].bounds ();
-	float fx_top = b.top + 80.f * _dpi_scale; /* approximate; use hit scan */
 	bool hit = false;
 	for (float y = b.top; y < b.bottom; y += 2.f * _dpi_scale) {
 		for (float x = b.right - 20.f * _dpi_scale; x < b.right; x += 2.f * _dpi_scale) {
@@ -14126,7 +14121,6 @@ after_hit:
 		              "airdour_win_shell: smoke-vst3-mixer-unload FAILED (× not hittable)\n");
 		return false;
 	}
-	(void)fx_top;
 	if (_engine_snap.vst3_ok) {
 		std::fprintf (stderr,
 		              "airdour_win_shell: smoke-vst3-mixer-unload FAILED (still loaded)\n");
@@ -15143,7 +15137,6 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+B / Alt+click FX", L"Bypass all ACE inserts" },
 		{ L"Alt+Shift+B / Alt+Shift+click FX", L"Activate all ACE inserts" },
 		{ L"Z", L"Freeze / unfreeze focused audio track" },
-		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"Status snap chip", L"Show density · click to cycle" },
 		{ nullptr, L"MARKERS & RANGES" },
 		{ L"M / Shift+M", L"Add / remove marker" },
@@ -15833,11 +15826,10 @@ ShellWindow::run_message_loop (unsigned timeout_secs)
 	_timeout_secs = timeout_secs;
 	_start_tick = GetTickCount ();
 	_last_tick_ms = _start_tick;
-	_running = true;
 	_engine_snap = _engine.snapshot ();
 
 	MSG msg = {};
-	while (_running && GetMessageW (&msg, nullptr, 0, 0) > 0) {
+	while (GetMessageW (&msg, nullptr, 0, 0) > 0) {
 		TranslateMessage (&msg);
 		DispatchMessageW (&msg);
 	}
