@@ -5,10 +5,9 @@
 #   - manual workflow_dispatch (builds a draft/prerelease zip)
 #
 # Publishes (GHA windows-2022 — honest UiOnly + scripts):
-#   1) airdour-*-win64-ci.zip — WASAPI I/O smoke lib + sources + BUILD_STATUS
-#   2) airdour-*-win64-shell-ui.zip — portable D2D shell (UiOnly)
-#   3) airdour-*-win64-setup-ui.exe — NSIS installer of the UiOnly shell (per-user)
-#   4) airdour-*-win64-installer-src.zip — airdour.nsi + packaging scripts
+#   1) airdour-*-win64-shell-ui.zip — portable D2D shell (UiOnly)
+#   2) airdour-*-win64-setup-ui.exe — NSIS installer of the UiOnly shell (per-user)
+#   3) airdour-*-win64-installer-src.zip — airdour.nsi + packaging scripts
 #
 # Full Engine portable zip + Engine setup.exe (Dummy/WASAPI + ACE LV2, MSVC Release /MD)
 # are produced on a laptop via Package-WinShell-Portable.ps1 + Package-WinShell-Nsis.ps1
@@ -128,7 +127,6 @@ jobs:
           Get-ChildItem dist -Filter "*.exe" | ForEach-Object {
             Write-Host "EXE $($_.Name) ($([int]($_.Length/1KB)) KB)"
           }
-          Get-Content (Join-Path dist stage BUILD_STATUS.txt) -ErrorAction SilentlyContinue
           $shellZip = Get-ChildItem dist -Filter "airdour-*-win64-shell*.zip" | Select-Object -First 1
           if ($shellZip) { echo "shell_zip=$($shellZip.FullName)" >> $env:GITHUB_OUTPUT }
           $setup = Get-ChildItem dist -Filter "airdour-*-win64-setup*.exe" | Select-Object -First 1
@@ -206,7 +204,6 @@ jobs:
             **Audio path:** WASAPI shared only (no ASIO / DirectSound / exclusive)
 
             ### Artifacts from GitHub Actions (`windows-latest`)
-            - `airdour-*-win64-ci.zip` — WASAPI I/O smoke lib + sources + BUILD_STATUS
             - `airdour-*-win64-shell-ui.zip` — portable **UiOnly** `airdour_win_shell` (unzip + `run-airdour.bat --no-engine`)
             - `airdour-*-win64-setup-ui.exe` — **NSIS** installer of the UiOnly shell (per-user, no UAC)
             - `airdour-*-win64-installer-src.zip` — `airdour.nsi` + packaging scripts to rebuild the installer
@@ -218,7 +215,7 @@ jobs:
             Uninstall.exe /S _?=C:\Airdour
             ```
 
-            ### Engine portable + installer (laptop — MSVC Release; not built on GHA yet)
+            ### Engine portable + installer (laptop — MSVC Release; not published by CI)
             Full Dummy/WASAPI + ACE LV2 package needs `build-rel` + vcpkg Release DLLs (too heavy for default GHA):
 
             ```bat
@@ -231,6 +228,5 @@ jobs:
             ### Not included yet
             - Code-signed installer
             - GTK plugin UIs
-            - Full Engine build inside GitHub-hosted runners
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

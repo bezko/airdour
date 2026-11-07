@@ -3,7 +3,7 @@
 #
 # Modes:
 #   Engine  — exe linked with libardour + Dummy/WASAPI + ACE LV2
-#   UiOnly  — D2D shell without engine (what GHA can build today)
+#   UiOnly  — D2D shell without engine (what the release workflow publishes)
 #
 # Config:
 #   Release — Ninja presets (build-ninja-engine / build-ninja-ui) are Release (/MD)
@@ -306,7 +306,7 @@ Honest limits
 -------------
 - No GTK plugin UIs. Mixer shows FX name / BYP / Blend.
 - Default Engine package is MSVC Release (/MD). Pass -Config Debug for the Debug slice.
-- GitHub Actions publishes UiOnly when waf+vcpkg engine libs are not in CI yet.
+- GitHub Actions publishes the UiOnly zip. windows-engine builds the libs weekly and on demand and does not publish this zip.
 - Installer: Package-WinShell-Nsis.ps1 (NSIS, open source → dist\*-setup.exe).
 
 Smoke examples (Engine)
