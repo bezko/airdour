@@ -13,15 +13,18 @@ def sub_config_and_use(conf, name, has_objects = True):
     conf.recurse(name)
     autowaf.set_local_lib(conf, name, has_objects)
 
+def active_children(ctx):
+    if ctx.is_defined('AIRDOUR_WINDOWS_ONLY'):
+        return [c for c in children if c != 'midi_surface']
+    return children
+
 def configure(conf):
-    global children
     autowaf.set_recursive()
-    for i in children:
+    for i in active_children(conf):
         sub_config_and_use(conf, i)
 
 def build(bld):
-    global children
-    for i in children:
+    for i in active_children(bld):
         bld.recurse(i)
 
 def shutdown():
