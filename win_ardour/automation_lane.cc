@@ -119,11 +119,18 @@ AutomationLane::draw (ID2D1RenderTarget* rt,
 	rt->DrawRectangle (bounds, edge, 1.f);
 
 	if (fmt_meta && fill) {
+		/* One line, clipped to the lane. The old 72px box wrapped
+		   "CC7 · Volume" onto the curve. */
 		D2D1_RECT_F lab = D2D1::RectF (
 			bounds.left + 4.f * dpi_scale, bounds.top + 1.f * dpi_scale,
-			bounds.left + 72.f * dpi_scale, bounds.top + 16.f * dpi_scale);
+			bounds.right - 4.f * dpi_scale, bounds.top + 16.f * dpi_scale);
+		const DWRITE_WORD_WRAPPING old_wrap = fmt_meta->GetWordWrapping ();
+		fmt_meta->SetWordWrapping (DWRITE_WORD_WRAPPING_NO_WRAP);
 		fill->SetOpacity (0.85f);
+		rt->PushAxisAlignedClip (lab, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 		rt->DrawTextW (_label, (UINT32)wcslen (_label), fmt_meta, lab, fill);
+		rt->PopAxisAlignedClip ();
+		fmt_meta->SetWordWrapping (old_wrap);
 		fill->SetOpacity (1.f);
 	}
 

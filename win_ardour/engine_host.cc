@@ -3032,7 +3032,11 @@ EngineHost::export_route_index_wav (int track_index, const std::string& outfile,
 			"  <SRCQuality quality=\"SRC_SincBest\"/>"
 			"  <EncodingOptions>"
 			"    <Option name=\"sample-format\" value=\"SF_16\"/>"
-			"    <Option name=\"dithering\" value=\"D_None\"/>"
+			/* Integer PCM only. D_Tri is TPDF (triangular) dither in
+			   AudioGrapher::SampleFormatConverter<int16_t>. Float masters
+			   never enter that converter: the float specialization ignores
+			   the dither type and copies samples through. */
+			"    <Option name=\"dithering\" value=\"D_Tri\"/>"
 			"    <Option name=\"tag-metadata\" value=\"true\"/>"
 			"    <Option name=\"tag-support\" value=\"false\"/>"
 			"    <Option name=\"broadcast-info\" value=\"false\"/>"

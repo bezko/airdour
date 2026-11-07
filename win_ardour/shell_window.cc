@@ -2969,13 +2969,8 @@ ShellWindow::draw_midi_cc_lane ()
 	}
 	_ui.fill_round (_midi_cc_lane_bounds, 3.f, ui::ColorToken::Surface, 0.42f);
 	_ui.stroke_round (_midi_cc_lane_bounds, 3.f, ui::ColorToken::Border, 1.f, 0.55f);
-	const float inset = 12.f * _dpi_scale;
-	_ui.text_vcenter (midi_cc_label (), ui::TextRole::Caption,
-	                  ui::ColorToken::TextSecondary,
-	                  D2D1::RectF (_editor_pane.left + inset, _midi_cc_lane_bounds.top,
-	                               _midi_cc_lane_bounds.left - 4.f * _dpi_scale,
-	                               _midi_cc_lane_bounds.bottom),
-	                  DWRITE_TEXT_ALIGNMENT_TRAILING);
+	/* Name is drawn once inside the lane. The 64px gutter cannot hold
+	   "CC7 · Volume" and the unclipped caption painted over the lane. */
 	_midi_cc_lane.draw (_rt, _midi_cc_lane_bounds, _brush_midi, _brush_body,
 	                    _brush_pane_edge, _brush_playhead, _fmt_meta, _dpi_scale);
 }
@@ -7747,7 +7742,33 @@ ShellWindow::layout_panes ()
 	float body_bot = h - status_h - pad;
 	float left = pad;
 	float right = w - pad;
-	float split = left + (right - left) * 0.64f;
+	/* 0.64 editor share clips the default 3 audio + MIDI strips against
+	   History/Monitor at the 1180px client. Grow the mixer until those
+	   strips fit at min width, and stop before the editor goes unreadably
+	   narrow. Wider windows keep the 0.64 split. Many tracks still scroll. */
+	const float body_span = right - left;
+	const float mix_inset_need = 10.f * _dpi_scale;
+	const float strip_gap_need = 6.f * _dpi_scale;
+	const float mon_need = 56.f * _dpi_scale;
+	const float hist_need = 128.f * _dpi_scale;
+	const int n_mix_need = std::max (1, n_mixer_strips ());
+	float min_strip_need = _engine_snap.mixer_narrow ? 52.f * _dpi_scale
+	                                                : 64.f * _dpi_scale;
+	if (_mixer_force_min_w > 1.f) {
+		min_strip_need = _mixer_force_min_w * _dpi_scale;
+	}
+	const float strips_need = min_strip_need * (float)n_mix_need
+	                          + strip_gap_need * (float)std::max (0, n_mix_need - 1);
+	const float mixer_need = strips_need + mon_need + hist_need
+	                         + strip_gap_need * 2.f + mix_inset_need * 2.f;
+	float split = left + body_span * 0.64f;
+	float mixer_w = right - (split + gap * 0.5f);
+	const float editor_min = 480.f * _dpi_scale;
+	const float mixer_max = std::max (0.f, body_span - gap - editor_min);
+	if (mixer_w < mixer_need && mixer_max > mixer_w) {
+		const float give = std::min (mixer_need, mixer_max);
+		split = right - give - gap * 0.5f;
+	}
 
 	_editor_pane = D2D1::RectF (left, body_top, split - gap * 0.5f, body_bot);
 	_mixer_pane = D2D1::RectF (split + gap * 0.5f, body_top, right, body_bot);
