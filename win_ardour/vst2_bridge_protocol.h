@@ -6,6 +6,7 @@
  */
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace airdour {
@@ -48,7 +49,8 @@ struct SharedHeader {
 	float param_value;
 	float sample_rate;
 	uint32_t midi_count;
-	uint32_t n_params; /* filled by Open */
+	uint32_t reserved_chunk; /* v1 slot, unused */
+	uint32_t n_params;       /* filled by Open */
 	wchar_t plugin_path[kMaxPathChars];
 	char error[128];
 };
@@ -64,6 +66,23 @@ struct SharedState {
 	SharedAudio audio;
 };
 #pragma pack(pop)
+
+static_assert (kProtocolVersion == 1u, "v1 wire");
+static_assert (static_cast<uint32_t> (Op::Open) == 1u, "Open");
+static_assert (static_cast<uint32_t> (Op::SetBlockSize) == 3u, "SetBlockSize");
+static_assert (static_cast<uint32_t> (Op::SetSampleRate) == 4u, "SetSampleRate");
+static_assert (static_cast<uint32_t> (Op::Process) == 5u, "Process");
+static_assert (static_cast<uint32_t> (Op::GetParameter) == 6u, "GetParameter");
+static_assert (static_cast<uint32_t> (Op::SetParameter) == 7u, "SetParameter");
+static_assert (static_cast<uint32_t> (Op::Shutdown) == 11u, "Shutdown");
+static_assert (offsetof (SharedHeader, op) == 8, "op");
+static_assert (offsetof (SharedHeader, midi_count) == 40, "midi_count");
+static_assert (offsetof (SharedHeader, reserved_chunk) == 44, "v1 chunk slot");
+static_assert (offsetof (SharedHeader, n_params) == 48, "n_params");
+static_assert (offsetof (SharedHeader, plugin_path) == 52, "plugin_path");
+static_assert (offsetof (SharedHeader, error) == 1076, "error");
+static_assert (sizeof (SharedHeader) == 1204, "SharedHeader");
+static_assert (sizeof (SharedState) == 527796, "SharedState");
 
 } /* namespace vst2_bridge */
 } /* namespace airdour */
