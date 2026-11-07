@@ -156,6 +156,7 @@ waf3-*
 /build-ninja-ui/
 /build-ninja-engine/
 /build-ninja-deps/
+/build-win32-vst2-bridge/
 /tools/win-native/vcpkg_installed/
 
 
