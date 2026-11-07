@@ -9,8 +9,7 @@
 #include <cmath>
 
 WaveStrip::WaveStrip ()
-	: _pan (0.f)
-	, _zoom (1.f)
+	: _zoom (1.f)
 	, _user_view (false)
 	, _has_regions (false)
 	, _playhead_norm (kFollowFrac)
@@ -55,8 +54,7 @@ WaveStrip::zoom_at (float factor, float norm_x)
 	float old_span = kDefaultSpanSec / old_zoom;
 	float content_at_cursor = _view_start_sec + norm_x * old_span;
 	float new_span = kDefaultSpanSec / _zoom;
-	_pan = content_at_cursor - norm_x * new_span;
-	_view_start_sec = _pan;
+	_view_start_sec = content_at_cursor - norm_x * new_span;
 	_view_span_sec = new_span;
 	_user_view = true;
 }
@@ -65,8 +63,7 @@ void
 WaveStrip::pan_by (float delta_widths)
 {
 	float span = kDefaultSpanSec / std::max (0.001f, _zoom);
-	_pan += delta_widths * span;
-	_view_start_sec = _pan;
+	_view_start_sec += delta_widths * span;
 	_view_span_sec = span;
 	_user_view = true;
 }
@@ -75,7 +72,6 @@ void
 WaveStrip::reset_view ()
 {
 	_zoom = 1.f;
-	_pan = 0.f;
 	_user_view = false;
 	_view_span_sec = kDefaultSpanSec;
 }
@@ -90,7 +86,6 @@ WaveStrip::set_view_window (float start_sec, float span_sec)
 	zoom = std::max (kZoomMin, std::min (kZoomMax, zoom));
 	span_sec = kDefaultSpanSec / zoom;
 	_zoom = zoom;
-	_pan = start_sec;
 	_view_start_sec = start_sec;
 	_view_span_sec = span_sec;
 	_user_view = true;
@@ -135,7 +130,6 @@ void
 WaveStrip::sync_view_from (const WaveStrip& other)
 {
 	_zoom = other._zoom;
-	_pan = other._pan;
 	_user_view = other._user_view;
 	_view_start_sec = other._view_start_sec;
 	_view_span_sec = other._view_span_sec;
@@ -300,11 +294,8 @@ WaveStrip::update_view (float playhead_sec)
 {
 	_view_span_sec = kDefaultSpanSec / std::max (0.001f, _zoom);
 
-	if (_user_view) {
-		_view_start_sec = _pan;
-	} else {
+	if (!_user_view) {
 		_view_start_sec = playhead_sec - kFollowFrac * _view_span_sec;
-		_pan = _view_start_sec;
 	}
 
 	_playhead_norm = (playhead_sec - _view_start_sec) / std::max (0.001f, _view_span_sec);
@@ -329,10 +320,9 @@ WaveStrip::set_waveform (const float* peaks, const float* rms, size_t n, bool ha
 	}
 
 	const size_t count = std::min (n, _peaks.size ());
-	float amp = 1.f;
 	for (size_t i = 0; i < count; ++i) {
-		float p = std::max (0.f, std::min (1.f, peaks[i] * amp));
-		float r = rms ? std::max (0.f, std::min (p, rms[i] * amp)) : p * 0.55f;
+		float p = std::max (0.f, std::min (1.f, peaks[i]));
+		float r = rms ? std::max (0.f, std::min (p, rms[i])) : p * 0.55f;
 		_peaks[i] = p;
 		_rms[i] = r;
 	}

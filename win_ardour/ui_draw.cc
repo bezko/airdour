@@ -239,6 +239,14 @@ UiDraw::stroke_round (const D2D1_RECT_F& r, float radius_dip, ui::ColorToken c,
 }
 
 void
+UiDraw::pulse_glow (const D2D1_RECT_F& r, float radius_dip, ui::ColorToken c, float pulse_0_1)
+{
+	const float a = 0.12f + 0.28f * clamp01 (pulse_0_1);
+	fill_round (r, radius_dip, c, a);
+	stroke_round (r, radius_dip, c, 1.25f, 0.35f + 0.45f * clamp01 (pulse_0_1));
+}
+
+void
 UiDraw::shadow (const D2D1_RECT_F& r, float radius_dip)
 {
 	if (!_rt) {

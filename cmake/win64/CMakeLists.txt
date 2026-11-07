@@ -107,6 +107,12 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     "${AIRDOUR_SRC_ROOT}/win_ardour/ui_draw.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/shell_window.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/engine_host.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/engine_midi.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/engine_fx_ace.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/engine_vst3.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/engine_vst2.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/vst2_bridge_client.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/vst2_bridge_processor.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/wave_strip.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/cairo_wave_blit.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/transport_bar.cc"
@@ -164,6 +170,7 @@ if(AIRDOUR_BUILD_WIN_SHELL)
       PLATFORM_WINDOWS=1
       AIRDOUR_WINDOWS_ONLY=1
       VST3_SUPPORT=1
+      WINDOWS_VST_SUPPORT=1
       WAF_BUILD=1
       LOCALEDIR=\"\"
       PROGRAM_NAME=\"Airdour\"
@@ -331,6 +338,7 @@ if(BUILD_TESTING AND AIRDOUR_BUILD_WIN_SHELL)
     set(_engine_smokes
       tracks mute-solo pan pan-width send send-pan mixer-reset track-color
       edit snap tempo click history prefs zoom locate master-fx
+      midi-multi fx-chain vst2 vst2-bridge vst3-instrument
     )
     foreach(_smoke IN LISTS _engine_smokes)
       add_test(NAME "shell_engine_${_smoke}"
@@ -343,5 +351,33 @@ if(BUILD_TESTING AND AIRDOUR_BUILD_WIN_SHELL)
       )
       set_tests_properties("shell_engine_${_smoke}" PROPERTIES TIMEOUT 120)
     endforeach()
+  endif()
+endif()
+
+# --- VST2-32 bridge (Win32 / x86 helper; build with -A Win32 or a second preset) ---
+option(AIRDOUR_BUILD_VST2_BRIDGE_X86 "Build ardour-vst2-bridge-x86.exe (Win32)" OFF)
+if(AIRDOUR_BUILD_VST2_BRIDGE_X86 AND WIN32)
+  add_executable(ardour-vst2-bridge-x86
+    "${AIRDOUR_SRC_ROOT}/win_ardour/vst2_bridge_x86_main.cc"
+  )
+  target_include_directories(ardour-vst2-bridge-x86 PRIVATE
+    "${AIRDOUR_SRC_ROOT}/win_ardour"
+  )
+  target_compile_definitions(ardour-vst2-bridge-x86 PRIVATE
+    UNICODE _UNICODE PLATFORM_WINDOWS=1
+  )
+  target_link_libraries(ardour-vst2-bridge-x86 PRIVATE user32)
+  set_target_properties(ardour-vst2-bridge-x86 PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
+    OUTPUT_NAME "ardour-vst2-bridge-x86"
+  )
+  if(AIRDOUR_BUILD_WIN_SHELL)
+    add_custom_command(TARGET airdour_win_shell POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:ardour-vst2-bridge-x86>"
+        "$<TARGET_FILE_DIR:airdour_win_shell>/ardour-vst2-bridge-x86.exe"
+      COMMENT "Stage VST2-32 bridge beside win_shell"
+      VERBATIM
+    )
   endif()
 endif()

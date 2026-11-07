@@ -15,7 +15,7 @@ def configure(conf):
     pass
 
 def build(bld):
-    # just the normal executable version of the GTK GUI
+    # headless session runner (hardour)
     obj = bld (features = 'cxx c cxxprogram')
     # this program does not do the whole hidden symbols thing
     if bld.env['build_target'] != 'msvc':

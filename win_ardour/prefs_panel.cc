@@ -46,6 +46,10 @@ PrefsPanel::PrefsPanel ()
 	, _vst3_bypass_btn ()
 	, _vst3_param_reset_btn ()
 	, _vst3_unload_btn ()
+	, _tab_vst3_btn ()
+	, _tab_vst2_btn ()
+	, _vst2_rescan_btn ()
+	, _ace_reverb_btn ()
 	, _out_prev ()
 	, _out_next ()
 	, _in_prev ()
@@ -56,12 +60,16 @@ PrefsPanel::PrefsPanel ()
 	, _click_on (false)
 	, _snap_on (false)
 	, _vst3_ok (false)
+	, _vst2_ok (false)
 	, _vst3_param_count (0)
 	, _vst3_bypassed (false)
+	, _plugin_tab (0)
 	, _separate_io (false)
 	, _cur_period (0)
 	, _cur_sr (0)
 	, _pref_period (0)
+	, _pref_wasapi_exclusive (false)
+	, _wasapi_exclusive_active (false)
 	, _sys_in (0)
 	, _sys_out (0)
 {
@@ -75,8 +83,12 @@ PrefsPanel::PrefsPanel ()
 	_vst3_scan_count = 0;
 	_vst3_catalog_count = 0;
 	_vst3_loaded_name[0] = L'\0';
+	_vst2_scan_count = 0;
+	_vst2_catalog_count = 0;
+	_vst2_loaded_name[0] = L'\0';
 	for (int i = 0; i < kMaxCatalog; ++i) {
 		_vst3_catalog[i][0] = L'\0';
+		_vst2_catalog[i][0] = L'\0';
 		_vst3_catalog_row[i] = D2D1::RectF ();
 	}
 	_status[0] = L'\0';
@@ -108,6 +120,10 @@ PrefsPanel::layout (float view_w, float view_h, float dpi_scale)
 	_per_512 = D2D1::RectF (_per_480.right + gap, y, _per_480.right + gap + third, y + btn_h);
 	y = _per_auto.bottom + 28.f * dpi_scale;
 
+	_mode_shared = D2D1::RectF (x, y, x + half, y + btn_h);
+	_mode_exclusive = D2D1::RectF (x + half + gap, y, x + half + gap + half, y + btn_h);
+	y = _mode_shared.bottom + 28.f * dpi_scale;
+
 	_click_btn = D2D1::RectF (x, y, x + half, y + btn_h);
 	_snap_btn = D2D1::RectF (x + half + gap, y, x + half + gap + half, y + btn_h);
 	y = _snap_btn.bottom + 28.f * dpi_scale;
@@ -121,21 +137,40 @@ PrefsPanel::layout (float view_w, float view_h, float dpi_scale)
 	_in_prev = D2D1::RectF (x, y, x + arrow, y + btn_h);
 	_in_next = D2D1::RectF (right - arrow, y, right, y + btn_h);
 
-	/* Path hint + catalog rows sit below device rows. */
-	float cat_y = _in_prev.bottom + 52.f * dpi_scale;
+	/* Plugin browser tabs + ACE quick insert. */
+	y = _in_prev.bottom + 28.f * dpi_scale;
+	float tab_w = 88.f * dpi_scale;
+	_tab_vst3_btn = D2D1::RectF (x, y, x + tab_w, y + btn_h);
+	_tab_vst2_btn = D2D1::RectF (_tab_vst3_btn.right + gap, y,
+				     _tab_vst3_btn.right + gap + tab_w, y + btn_h);
+	_ace_reverb_btn = D2D1::RectF (_tab_vst2_btn.right + gap, y,
+				       _tab_vst2_btn.right + gap + 110.f * dpi_scale,
+				       y + btn_h);
+
+	/* Path hint + catalog rows sit below tabs. */
+	float cat_y = _tab_vst3_btn.bottom + 28.f * dpi_scale;
 	float row_h = 15.f * dpi_scale;
 	float cat_left = _card.left + 16.f * dpi_scale;
 	float cat_right = _card.right - 16.f * dpi_scale;
+	/* Visible catalog window — keep panel usable (first 12 rows hit-testable). */
+	const int visible_rows = 12;
 	for (int i = 0; i < kMaxCatalog; ++i) {
-		_vst3_catalog_row[i] = D2D1::RectF (cat_left, cat_y, cat_right, cat_y + row_h);
-		cat_y += row_h;
+		if (i < visible_rows) {
+			_vst3_catalog_row[i] = D2D1::RectF (cat_left, cat_y, cat_right, cat_y + row_h);
+			cat_y += row_h;
+		} else {
+			_vst3_catalog_row[i] = D2D1::RectF (0.f, 0.f, 0.f, 0.f);
+		}
 	}
 	y = cat_y + 8.f * dpi_scale;
 
-	_vst3_rescan_btn = D2D1::RectF (x, y, x + 120.f * dpi_scale, y + btn_h);
-	_vst3_bypass_btn = D2D1::RectF (_vst3_rescan_btn.right + gap, y,
-	                                _vst3_rescan_btn.right + gap + 100.f * dpi_scale,
-	                                y + btn_h);
+	_vst3_rescan_btn = D2D1::RectF (x, y, x + 110.f * dpi_scale, y + btn_h);
+	_vst2_rescan_btn = D2D1::RectF (_vst3_rescan_btn.right + gap, y,
+					_vst3_rescan_btn.right + gap + 110.f * dpi_scale,
+					y + btn_h);
+	_vst3_bypass_btn = D2D1::RectF (_vst2_rescan_btn.right + gap, y,
+					_vst2_rescan_btn.right + gap + 90.f * dpi_scale,
+					y + btn_h);
 	{
 		float cursor = _vst3_bypass_btn.right;
 		int n = 0;
@@ -267,6 +302,42 @@ PrefsPanel::set_vst3_loaded_name (const wchar_t* name)
 }
 
 void
+PrefsPanel::set_vst2_catalog (int scan_count, const wchar_t names[][kCatalogNameLen], int name_count)
+{
+	_vst2_scan_count = std::max (0, scan_count);
+	_vst2_catalog_count = 0;
+	for (int i = 0; i < kMaxCatalog; ++i) {
+		_vst2_catalog[i][0] = L'\0';
+	}
+	if (!names || name_count <= 0) {
+		return;
+	}
+	const int n = std::min (name_count, kMaxCatalog);
+	for (int i = 0; i < n; ++i) {
+		if (names[i][0]) {
+			wcsncpy_s (_vst2_catalog[i], kCatalogNameLen, names[i], _TRUNCATE);
+			_vst2_catalog_count = i + 1;
+		}
+	}
+}
+
+void
+PrefsPanel::set_vst2_loaded_name (const wchar_t* name)
+{
+	if (name && name[0]) {
+		wcsncpy_s (_vst2_loaded_name, kCatalogNameLen, name, _TRUNCATE);
+	} else {
+		_vst2_loaded_name[0] = L'\0';
+	}
+}
+
+void
+PrefsPanel::set_plugin_tab (int tab_0_vst3_1_vst2)
+{
+	_plugin_tab = (tab_0_vst3_1_vst2 == 1) ? 1 : 0;
+}
+
+void
 PrefsPanel::set_status (const wchar_t* text)
 {
 	if (text) {
@@ -300,6 +371,12 @@ PrefsPanel::hit_test (float x, float y) const
 	if (contains (_per_512, x, y)) {
 		return PrefsHit::Period512;
 	}
+	if (contains (_mode_shared, x, y)) {
+		return PrefsHit::WasapiShared;
+	}
+	if (contains (_mode_exclusive, x, y)) {
+		return PrefsHit::WasapiExclusive;
+	}
 	if (contains (_click_btn, x, y)) {
 		return PrefsHit::ClickToggle;
 	}
@@ -319,8 +396,20 @@ PrefsPanel::hit_test (float x, float y) const
 		return PrefsHit::InDeviceNext;
 	}
 	/* Catalog rows are handled via hit_vst3_catalog_index before PrefsHit. */
+	if (contains (_tab_vst3_btn, x, y)) {
+		return PrefsHit::PluginTabVst3;
+	}
+	if (contains (_tab_vst2_btn, x, y)) {
+		return PrefsHit::PluginTabVst2;
+	}
+	if (contains (_ace_reverb_btn, x, y)) {
+		return PrefsHit::InsertAceReverb;
+	}
 	if (contains (_vst3_rescan_btn, x, y)) {
 		return PrefsHit::Vst3Rescan;
+	}
+	if (contains (_vst2_rescan_btn, x, y)) {
+		return PrefsHit::Vst2Rescan;
 	}
 	if (contains (_vst3_bypass_btn, x, y)) {
 		return PrefsHit::Vst3Bypass;
@@ -343,11 +432,15 @@ PrefsPanel::hit_test (float x, float y) const
 int
 PrefsPanel::hit_vst3_catalog_index (float x, float y) const
 {
-	if (!_visible || _vst3_catalog_count <= 0) {
+	if (!_visible) {
 		return -1;
 	}
-	for (int i = 0; i < _vst3_catalog_count; ++i) {
-		if (contains (_vst3_catalog_row[i], x, y)) {
+	const int count = (_plugin_tab == 1) ? _vst2_catalog_count : _vst3_catalog_count;
+	if (count <= 0) {
+		return -1;
+	}
+	for (int i = 0; i < count && i < kMaxCatalog; ++i) {
+		if (_vst3_catalog_row[i].right > _vst3_catalog_row[i].left && contains (_vst3_catalog_row[i], x, y)) {
 			return i;
 		}
 	}
@@ -527,6 +620,13 @@ PrefsPanel::draw (UiDraw& ui) const
 	draw_btn (_per_480, L"480", _pref_period == 480);
 	draw_btn (_per_512, L"512", _pref_period == 512);
 
+	_snwprintf_s (line, _TRUNCATE,
+		      L"WASAPI mode  (now: %s)",
+		      _wasapi_exclusive_active ? L"exclusive" : L"shared");
+	draw_label (_mode_shared.top - 8.f * s, line);
+	draw_btn (_mode_shared, L"Shared", !_pref_wasapi_exclusive);
+	draw_btn (_mode_exclusive, L"Exclusive", _pref_wasapi_exclusive);
+
 	draw_label (_click_btn.top - 8.f * s, L"Defaults (persist)");
 
 	draw_btn (_click_btn, _click_on ? L"Click ON" : L"Click OFF", _click_on);
@@ -547,37 +647,61 @@ PrefsPanel::draw (UiDraw& ui) const
 
 	float ms_in = (_cur_sr > 0) ? (1000.f * (float)_sys_in / (float)_cur_sr) : 0.f;
 	float ms_out = (_cur_sr > 0) ? (1000.f * (float)_sys_out / (float)_cur_sr) : 0.f;
-	_snwprintf_s (line, _TRUNCATE,
-	              L"Systemic latency  out %.2f ms · in %.2f ms  (%u / %u fr)",
-	              ms_out, ms_in, (unsigned)_sys_out, (unsigned)_sys_in);
+	_snwprintf_s (
+		line, _TRUNCATE,
+		L"Latency (measured)  out %.2f ms · in %.2f ms  (%u / %u fr)",
+		ms_out, ms_in, (unsigned)_sys_out, (unsigned)_sys_in);
 	ui.text_vcenter (line, ui::TextRole::Caption, ui::ColorToken::TextSecondary,
 	                 D2D1::RectF (_card.left + inset, _in_prev.bottom + 8.f * s,
 	                              _card.right - inset, _in_prev.bottom + 24.f * s));
 
-	_snwprintf_s (line, _TRUNCATE, L"VST3 path hint · scanned %d", _vst3_scan_count);
+	draw_label (_tab_vst3_btn.top - 8.f * s, L"Plugin browser (click row → insert)");
+	draw_btn (_tab_vst3_btn, L"VST3", _plugin_tab == 0);
+	draw_btn (_tab_vst2_btn, L"VST2", _plugin_tab == 1);
+	draw_btn (_ace_reverb_btn, L"+ ACE Reverb", false);
+
+	const int active_scan = (_plugin_tab == 1) ? _vst2_scan_count : _vst3_scan_count;
+	const int active_count = (_plugin_tab == 1) ? _vst2_catalog_count : _vst3_catalog_count;
+	const wchar_t (*active_names)[kCatalogNameLen] =
+		(_plugin_tab == 1) ? _vst2_catalog : _vst3_catalog;
+	const wchar_t* loaded =
+		(_plugin_tab == 1) ? _vst2_loaded_name : _vst3_loaded_name;
+
+	_snwprintf_s (line, _TRUNCATE, L"%s · scanned %d",
+		      (_plugin_tab == 1) ? L"VST2 catalog" : L"VST3 path hint",
+		      active_scan);
 	ui.text_vcenter (line, ui::TextRole::Caption, ui::ColorToken::TextMuted,
 	                 D2D1::RectF (_card.left + inset, _vst3_catalog_row[0].top - 30.f * s,
 	                              _card.right - inset, _vst3_catalog_row[0].top - 16.f * s));
-	ui.text_vcenter (_vst3_hint[0] ? _vst3_hint : L"(VST3_PATH unset · config @default@)",
-	                 ui::TextRole::Caption, ui::ColorToken::TextSecondary,
-	                 D2D1::RectF (_card.left + inset, _vst3_catalog_row[0].top - 16.f * s,
-	                              _card.right - inset, _vst3_catalog_row[0].top - 2.f * s));
-	if (_vst3_catalog_count <= 0) {
+	ui.text_vcenter ((_plugin_tab == 0 && _vst3_hint[0])
+				 ? _vst3_hint
+				 : ((_plugin_tab == 1)
+					    ? L"(VST_PATH / VST2_PATH · 32-bit via bridge)"
+					    : L"(VST3_PATH unset · config @default@)"),
+			 ui::TextRole::Caption, ui::ColorToken::TextSecondary,
+			 D2D1::RectF (_card.left + inset, _vst3_catalog_row[0].top - 16.f * s,
+				      _card.right - inset, _vst3_catalog_row[0].top - 2.f * s));
+	if (active_count <= 0) {
 		ui.text_vcenter (L"(none scanned)", ui::TextRole::Caption,
 		                 ui::ColorToken::TextMuted, _vst3_catalog_row[0]);
 	} else {
-		const int loaded_i = vst3_loaded_catalog_index ();
-		for (int i = 0; i < _vst3_catalog_count; ++i) {
-			if (i == loaded_i) {
+		for (int i = 0; i < active_count; ++i) {
+			if (_vst3_catalog_row[i].right <= _vst3_catalog_row[i].left) {
+				break;
+			}
+			const bool is_loaded =
+				loaded[0] && _wcsicmp (active_names[i], loaded) == 0;
+			if (is_loaded) {
 				ui.fill_round (_vst3_catalog_row[i], 3.f, ui::ColorToken::Accent, 0.28f);
 			}
-			_snwprintf_s (line, _TRUNCATE, L"· %s%s", _vst3_catalog[i],
-			              (i == loaded_i) ? L"  ←" : L"");
+			_snwprintf_s (line, _TRUNCATE, L"· %s%s", active_names[i],
+				      is_loaded ? L"  ←" : L"");
 			ui.text_vcenter (line, ui::TextRole::Caption, ui::ColorToken::TextPrimary,
 			                 _vst3_catalog_row[i]);
 		}
 	}
 	draw_btn (_vst3_rescan_btn, L"Rescan VST3", false);
+	draw_btn (_vst2_rescan_btn, L"Rescan VST2", false);
 	draw_btn (_vst3_bypass_btn,
 	          _vst3_bypassed ? L"Bypassed" : L"Bypass",
 	          _vst3_ok && _vst3_bypassed);

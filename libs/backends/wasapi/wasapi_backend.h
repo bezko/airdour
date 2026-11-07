@@ -100,8 +100,7 @@ private:
 };
 
 /**
- * Native WASAPI shared-mode backend (AUDCLNT_SHAREMODE_SHARED).
- * Exclusive / DirectSound / ASIO are out of scope.
+ * Native WASAPI backend (shared by default; exclusive when requested).
  */
 class WasapiBackend : public AudioBackend, public PortEngineSharedImpl
 {
@@ -153,6 +152,10 @@ public:
 	uint32_t    systemic_output_latency () const;
 	uint32_t    systemic_midi_input_latency (std::string const) const;
 	uint32_t    systemic_midi_output_latency (std::string const) const;
+	/** True when capture mix rate ≠ render (may still resample). */
+	bool capture_rate_mismatch () const override;
+	void set_exclusive_mode (bool on) override { _io.set_exclusive (on); }
+	bool exclusive_mode () const override { return _io.exclusive_active (); }
 
 	std::string control_app_name () const;
 	void        launch_control_app ();

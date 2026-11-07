@@ -38,7 +38,6 @@
 #include "pbd/failed_constructor.h"
 
 #include "ardour/ardour.h"
-#include "ardour/audio_backend.h"
 #include "ardour/audioengine.h"
 #include "ardour/revision.h"
 #include "ardour/session.h"
@@ -66,9 +65,6 @@ static string backend_name = "JACK/Pipewire";
 #else
 static string backend_name = "JACK";
 #endif
-
-static unsigned int smoke_timeout_secs = 0;
-static bool         engine_only        = false;
 
 static AudioEngine*
 start_engine ()
@@ -171,22 +167,18 @@ print_help ()
 	     << "  -h, --help                  Print this message\n"
 	     << "  -b, --backend <name>        Audio backend (e.g. \"None (Dummy)\", WASAPI); default depends on platform\n"
 	     << "  -c, --name <name>           Use a specific backend client name, default is ardour\n"
+	     << "  -B, --bypass-plugins        Bypass all plugins in an existing session\n"
 	     << "  -d, --disable-plugins       Disable all plugins in an existing session\n"
 	     << "  -D, --debug <options>       Set debug flags. Use \"-D list\" to see available options\n"
-	     << "  -e, --engine-only           Start the audio engine only (no session); implies a timeout\n"
-	     << "  -t, --timeout <seconds>     Auto-quit after N seconds (required with --engine-only; useful on Windows)\n"
 	     << "  -O, --no-hw-optimizations   Disable h/w specific optimizations\n"
 	     << "  -P, --no-connect-ports      Do not connect any ports at startup\n"
-#ifdef WINDOWS_VST_SUPPORT
-	     << "  -V, --novst                 Do not use VST support\n"
-#endif
 	    ;
 }
 
 int
 main (int argc, char* argv[])
 {
-	const char* optstring = "vhBdD:c:OU:Pb:t:e";
+	const char* optstring = "vhBdD:c:OPb:";
 
 	/* clang-format off */
 	const struct option longopts[] = {
@@ -197,8 +189,6 @@ main (int argc, char* argv[])
 		{ "debug",               required_argument, 0, 'D' },
 		{ "backend",             required_argument, 0, 'b' },
 		{ "name",                required_argument, 0, 'c' },
-		{ "engine-only",         no_argument,       0, 'e' },
-		{ "timeout",             required_argument, 0, 't' },
 		{ "no-hw-optimizations", no_argument,       0, 'O' },
 		{ "no-connect-ports",    no_argument,       0, 'P' },
 		{ 0, 0, 0, 0 }
@@ -238,14 +228,6 @@ main (int argc, char* argv[])
 				backend_client_name = optarg;
 				break;
 
-			case 'e':
-				engine_only = true;
-				break;
-
-			case 't':
-				smoke_timeout_secs = (unsigned int)std::strtoul (optarg, 0, 10);
-				break;
-
 			case 'B':
 				ARDOUR::Session::set_bypass_all_loaded_plugins (true);
 				break;
@@ -274,11 +256,7 @@ main (int argc, char* argv[])
 		}
 	}
 
-	if (engine_only && smoke_timeout_secs == 0) {
-		smoke_timeout_secs = 3;
-	}
-
-	if (!engine_only && (argc - optind) < 2) {
+	if ((argc - optind) < 2) {
 		print_help ();
 		exit (EXIT_FAILURE);
 	}
@@ -295,11 +273,7 @@ main (int argc, char* argv[])
 	Session* s = 0;
 
 	try {
-		if (engine_only) {
-			start_engine ();
-		} else {
-			s = load_session (argv[optind], argv[optind + 1]);
-		}
+		s = load_session (argv[optind], argv[optind + 1]);
 	} catch (failed_constructor& e) {
 		cerr << "failed_constructor: " << e.what () << "\n";
 		exit (EXIT_FAILURE);
@@ -319,7 +293,7 @@ main (int argc, char* argv[])
 	 */
 	Glib::usleep (1000000); // 1 sec
 
-	if (!engine_only && !s) {
+	if (!s) {
 		cerr << "failed_to load session\n";
 		exit (EXIT_FAILURE);
 	}
@@ -337,31 +311,9 @@ main (int argc, char* argv[])
 		s->request_roll ();
 	}
 
-	if (smoke_timeout_secs > 0) {
-		/* Wall-clock wait; avoid CrossThreadChannel poll (smoke only). */
-		g_usleep ((gulong)smoke_timeout_secs * 1000000UL);
-		cerr << "smoke timeout (" << smoke_timeout_secs << "s) - stopping engine" << endl;
-
-		if (engine_only) {
-			/* AudioEngine::stop() takes _process_lock then joins the
-			 * backend thread; with no session that can hang on Windows.
-			 * Stop the backend directly, then hard-exit so we never leave
-			 * a shared-mode WASAPI client dangling in the agent.
-			 */
-			std::shared_ptr<AudioBackend> be = AudioEngine::instance ()->current_backend ();
-			if (be) {
-				be->stop ();
-			}
-			delete xthread;
-			xthread = 0;
-			cerr << "engine-only smoke: exit 0" << endl;
-			_exit (0);
-		}
-	} else {
-		char msg;
-		do {
-		} while (0 == xthread->receive (msg, true));
-	}
+	char msg;
+	do {
+	} while (0 == xthread->receive (msg, true));
 
 	if (s) {
 		AudioEngine::instance ()->remove_session ();

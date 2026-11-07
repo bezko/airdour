@@ -397,16 +397,29 @@ WasapiBackend::interleaved () const
 	return false;
 }
 
+bool
+WasapiBackend::capture_rate_mismatch () const
+{
+	return _io.capture_rate_mismatch ();
+}
+
 uint32_t
 WasapiBackend::systemic_input_latency () const
 {
-	return _systemic_input_latency;
+	/* Prefer explicit systemic override; otherwise report measured stream latency. */
+	if (_systemic_input_latency > 0) {
+		return _systemic_input_latency;
+	}
+	return _io.measured_capture_latency_frames ();
 }
 
 uint32_t
 WasapiBackend::systemic_output_latency () const
 {
-	return _systemic_output_latency;
+	if (_systemic_output_latency > 0) {
+		return _systemic_output_latency;
+	}
+	return _io.measured_playback_latency_frames ();
 }
 
 uint32_t
@@ -696,8 +709,14 @@ WasapiBackend::_start (bool for_latency_measurement)
 	_measure_latency = for_latency_measurement;
 
 	if (_io.open (_output_device, _input_device, _samplerate, _buffer_size) != 0) {
-		error << _("WASAPI: failed to open shared-mode device") << endmsg;
+		error << _("WASAPI: failed to open audio device") << endmsg;
 		return AudioDeviceOpenError;
+	}
+	if (_io.exclusive_requested () && !_io.exclusive_active ()) {
+		info << _("WASAPI: exclusive mode requested but shared fallback is active")
+		     << endmsg;
+	} else if (_io.exclusive_active ()) {
+		info << _("WASAPI: exclusive mode active") << endmsg;
 	}
 
 	_samplerate = _io.sample_rate ();
@@ -1266,15 +1285,23 @@ WasapiBackend::get_latency_range (PortHandle port, bool for_playback)
 
 	r = p->latency_range (for_playback);
 	if (p->is_physical () && p->is_terminal ()) {
-		/* Shared-mode device latency is at least one period until
-		 * WasapiIO exposes measured capture/playback latencies. */
+		/* Prefer WasapiIO GetStreamLatency; fall back to one period. */
+		uint32_t measured = 0;
 		if (p->is_input () && for_playback) {
-			r.min += _buffer_size;
-			r.max += _buffer_size;
+			measured = _io.measured_capture_latency_frames ();
+			if (measured == 0) {
+				measured = _buffer_size;
+			}
+			r.min += measured;
+			r.max += measured;
 		}
 		if (p->is_output () && !for_playback) {
-			r.min += _buffer_size;
-			r.max += _buffer_size;
+			measured = _io.measured_playback_latency_frames ();
+			if (measured == 0) {
+				measured = _buffer_size;
+			}
+			r.min += measured;
+			r.max += measured;
 		}
 	}
 	return r;

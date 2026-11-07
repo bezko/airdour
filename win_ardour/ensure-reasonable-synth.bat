@@ -22,9 +22,15 @@ copy /Y "%SRC%\reasonablesynth.dll" "%DST%\" >nul
 REM waf subst for TTL is flaky on this tree — write from .in
 powershell -NoProfile -Command ^
   "$utf8 = New-Object System.Text.UTF8Encoding $false; " ^
-  "$m = '@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .`n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .`n`n<https://community.ardour.org/node/7596>`n`ta lv2:Plugin ;`n`tlv2:binary <reasonablesynth.dll>  ;`n`trdfs:seeAlso <reasonablesynth.ttl> .`n'; " ^
-  "[IO.File]::WriteAllText('%DST%\manifest.ttl', $m, $utf8); " ^
-  "[IO.File]::WriteAllText('%DST%\reasonablesynth.ttl', (Get-Content -Raw '%IN%\reasonablesynth.ttl.in'), $utf8)"
+  "$nl = [char]10; " ^
+  "$m = '@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .' + $nl + " ^
+  "  '@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .' + $nl + $nl + " ^
+  "  '<https://community.ardour.org/node/7596>' + $nl + " ^
+  "  [char]9 + 'a lv2:Plugin ;' + $nl + " ^
+  "  [char]9 + 'lv2:binary <reasonablesynth.dll>  ;' + $nl + " ^
+  "  [char]9 + 'rdfs:seeAlso <reasonablesynth.ttl> .' + $nl; " ^
+  "[IO.File]::WriteAllText((Join-Path '%DST%' 'manifest.ttl'), $m, $utf8); " ^
+  "[IO.File]::WriteAllText((Join-Path '%DST%' 'reasonablesynth.ttl'), (Get-Content -Raw '%IN%\reasonablesynth.ttl.in'), $utf8)"
 
 echo Installed:
 dir /b "%DST%"

@@ -4,7 +4,7 @@
 #   -DSTAGE_DEST=<target dir> -DSTAGE_FILES=<;-list of dll paths>
 #
 # Unlike a configure-time if(EXISTS), this does not bake stale decisions into
-# the build tree: adding/removing a waf DLL is picked up on the next build.
+# the build tree. A missing file fails the build.
 
 if(NOT STAGE_DEST)
   message(FATAL_ERROR "StageRuntime.cmake: STAGE_DEST is required")
@@ -20,6 +20,6 @@ foreach(_src IN LISTS STAGE_FILES)
       message(FATAL_ERROR "Failed to stage ${_src} -> ${STAGE_DEST} (${_rc})")
     endif()
   else()
-    message(STATUS "StageRuntime: skip missing ${_src}")
+    message(FATAL_ERROR "StageRuntime: missing ${_src}")
   endif()
 endforeach()

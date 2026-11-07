@@ -31,11 +31,17 @@ enum class PrefsHit {
 	PeriodAuto,
 	Period480,
 	Period512,
+	WasapiShared,
+	WasapiExclusive,
 	ClickToggle,
 	SnapToggle,
 	Vst3Rescan,
 	Vst3Bypass,
 	Vst3Unload,
+	PluginTabVst3,
+	PluginTabVst2,
+	Vst2Rescan,
+	InsertAceReverb,
 	OutDevicePrev,
 	OutDeviceNext,
 	InDevicePrev,
@@ -48,7 +54,7 @@ class PrefsPanel
 {
 public:
 	static constexpr int kHintLen = 96;
-	static constexpr int kMaxCatalog = 8;
+	static constexpr int kMaxCatalog = 64;
 	static constexpr int kCatalogNameLen = 40;
 	static constexpr int kDeviceLen = 96;
 
@@ -63,6 +69,8 @@ public:
 	void set_pref_backend (const wchar_t* name); /* "Dummy" or "WASAPI" */
 	void set_current_period (uint32_t frames, uint32_t sample_rate);
 	void set_pref_period (uint32_t frames);
+	void set_pref_wasapi_exclusive (bool on) { _pref_wasapi_exclusive = on; }
+	void set_wasapi_exclusive_active (bool on) { _wasapi_exclusive_active = on; }
 	void set_current_devices (const wchar_t* in, const wchar_t* out);
 	void set_pref_devices (const wchar_t* in, const wchar_t* out);
 	void set_systemic_latency (uint32_t in_frames, uint32_t out_frames);
@@ -72,10 +80,16 @@ public:
 	void set_vst3_hint (const wchar_t* text);
 	/** scan_count = full list size; names[0..name_count) shown under hint. */
 	void set_vst3_catalog (int scan_count, const wchar_t names[][kCatalogNameLen], int name_count);
+	void set_vst2_catalog (int scan_count, const wchar_t names[][kCatalogNameLen], int name_count);
+	/** 0 = VST3 browser tab, 1 = VST2 browser tab. */
+	void set_plugin_tab (int tab_0_vst3_1_vst2);
+	int plugin_tab () const { return _plugin_tab; }
 	/** Live insert name for accent highlight (empty → no highlight). */
 	void set_vst3_loaded_name (const wchar_t* name);
+	void set_vst2_loaded_name (const wchar_t* name);
 	void set_vst3_bypassed (bool on) { _vst3_bypassed = on; }
 	void set_vst3_ok (bool on) { _vst3_ok = on; }
+	void set_vst2_ok (bool on) { _vst2_ok = on; }
 	void set_vst3_param_count (int n);
 	void set_status (const wchar_t* text);
 
@@ -103,12 +117,18 @@ private:
 	D2D1_RECT_F _per_auto;
 	D2D1_RECT_F _per_480;
 	D2D1_RECT_F _per_512;
+	D2D1_RECT_F _mode_shared;
+	D2D1_RECT_F _mode_exclusive;
 	D2D1_RECT_F _click_btn;
 	D2D1_RECT_F _snap_btn;
 	D2D1_RECT_F _vst3_rescan_btn;
 	D2D1_RECT_F _vst3_bypass_btn;
 	D2D1_RECT_F _vst3_param_reset_btn[EngineSnapshot::kMaxVst3Params];
 	D2D1_RECT_F _vst3_unload_btn;
+	D2D1_RECT_F _tab_vst3_btn;
+	D2D1_RECT_F _tab_vst2_btn;
+	D2D1_RECT_F _vst2_rescan_btn;
+	D2D1_RECT_F _ace_reverb_btn;
 	D2D1_RECT_F _vst3_catalog_row[kMaxCatalog];
 	D2D1_RECT_F _out_prev;
 	D2D1_RECT_F _out_next;
@@ -120,12 +140,18 @@ private:
 	bool        _click_on;
 	bool        _snap_on;
 	bool        _vst3_ok;
+	bool _vst2_ok;
 	int         _vst3_param_count;
 	bool        _vst3_bypassed;
+	int _plugin_tab; /* 0=VST3 1=VST2 */
 	bool        _separate_io;
 	uint32_t    _cur_period;
 	uint32_t    _cur_sr;
 	uint32_t    _pref_period;
+
+	bool _pref_wasapi_exclusive;
+	bool _wasapi_exclusive_active;
+
 	uint32_t    _sys_in;
 	uint32_t    _sys_out;
 	wchar_t     _cur_backend[32];
@@ -139,5 +165,9 @@ private:
 	int         _vst3_catalog_count;
 	wchar_t     _vst3_catalog[kMaxCatalog][kCatalogNameLen];
 	wchar_t     _vst3_loaded_name[kCatalogNameLen];
+	int _vst2_scan_count;
+	int _vst2_catalog_count;
+	wchar_t _vst2_catalog[kMaxCatalog][kCatalogNameLen];
+	wchar_t _vst2_loaded_name[kCatalogNameLen];
 	wchar_t     _status[80];
 };

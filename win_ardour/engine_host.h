@@ -54,30 +54,11 @@ struct EngineMidiNoteSnap {
 	bool    selected = false;
 };
 
-struct EnginePluginSnap {
-	wchar_t name[48];
-	wchar_t unique_id[72];
-	bool    is_instrument;
-};
-
-struct EnginePluginSlotSnap {
-	wchar_t name[48];
-	wchar_t unique_id[72];
-	bool    active;
-};
-
-struct EnginePluginParamSnap {
-	wchar_t name[32];
-	float   value; /* plugin units */
-	float   norm; /* 0..1 UI */
-	bool    toggled;
-};
-
 struct EngineSnapshot {
 	static constexpr int kMeters = 16; /* max audio tracks (Editor lanes / meters) */
 	static constexpr int kMaxMarkers = 8;
 	static constexpr int kMaxMidiDevices = 16;
-	static constexpr int kMaxMidiNotes = 96;
+	static constexpr int kMaxMidiNotes = 256;
 
 	bool         available = false; /* compiled with AIRDOUR_WIN_SHELL_WITH_ENGINE */
 	bool         running = false;
@@ -225,7 +206,6 @@ struct EngineSnapshot {
 	uint64_t     callback_avg_us = 0;
 	uint64_t     callback_count = 0;
 	uint64_t     xrun_count = 0; /* Session + backend underruns */
-	float        gain = 0.85f; /* track 0 stub/session gain */
 	float        meter_peak[kMeters] = {}; /* linear 0..1 */
 	bool         meter_clip[kMeters] = {}; /* ≥0 dBFS / PeakMeter MeterMaxPeak */
 	int          track_meter_point[kMeters] = {2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2}; /* 0=In 1=Pre 2=Post 3=Out (skip Custom) */
@@ -291,10 +271,11 @@ struct EngineSnapshot {
 	int          listen_mode = 0; /* 0=Solo 1=PFL 2=AFL (RC solo-control-is-listen + listen-position) */
 	float        click_gain = 1.f; /* Config click_gain linear coeff (1.0 = unity) */
 	int          audio_track_count = 0; /* Session audio tracks (1..kMeters) */
-	int          midi_track_count = 0; /* 0 or 1 in this shell */
+	int midi_track_count = 0;           /* 0..kMeters MIDI tracks */
 	static constexpr int kTrackNameLen = 32;
 	wchar_t      track_name[kMeters][kTrackNameLen] = {}; /* Session Route names */
-	wchar_t      midi_track_name[kTrackNameLen] = {};
+	wchar_t midi_track_name[kTrackNameLen] = {};          /* active MIDI track name */
+	wchar_t midi_track_names[kMeters][kTrackNameLen] = {}; /* all MIDI strip labels */
 	uint32_t     track_color[kMeters] = {}; /* PresentationInfo RGBA (RRGGBBAA); 0=unset */
 	float        track_gain[kMeters] = {}; /* Route gain_control mirror after reorder */
 	bool         track_in_group[kMeters] = {}; /* member of Session RouteGroup */
@@ -335,17 +316,21 @@ struct EngineSnapshot {
 	/* Preferences (RC Config + WinShellPrefs instant.xml). */
 	std::wstring pref_backend = L"Dummy"; /* "Dummy" or "WASAPI" */
 	uint32_t     pref_period_frames = 0; /* 0 = Auto */
+
+	bool pref_wasapi_exclusive = false;
+	bool wasapi_exclusive_active = false;
+
 	bool         pref_snap_default = false;
 	bool         pref_click_default = true; /* mirrors Config clicking when saved */
 	static constexpr int kPrefsHintLen = 96;
 	wchar_t      vst3_path_hint[kPrefsHintLen] = {};
 	/* Last VST3 scan catalog (Prefs list; scan-only safe when count=0). */
-	static constexpr int kMaxVst3Catalog = 8;
+	static constexpr int kMaxVst3Catalog = 64;
 	int          vst3_scan_count = 0; /* full PluginManager VST3 list size */
 	int          vst3_catalog_count = 0; /* names stored below (≤kMaxVst3Catalog) */
 	wchar_t      vst3_catalog_name[kMaxVst3Catalog][40] = {};
 	/* VST3 DSP insert on Audio 2 (D2D host params; no GTK editor). */
-	static constexpr int kMaxVst3Params = 3;
+	static constexpr int kMaxVst3Params = 12;
 	static constexpr int kVst3NameLen = 40;
 	static constexpr int kVst3ParamNameLen = 24;
 	bool         vst3_ok = false; /* PluginInsert live on Audio 2 */
@@ -354,14 +339,49 @@ struct EngineSnapshot {
 	wchar_t      vst3_name[kVst3NameLen] = {};
 	wchar_t      vst3_param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
 	float        vst3_param_norm[kMaxVst3Params] = {}; /* 0..1 interface */
+	/* Per-route insert rack (Phase 2). */
+	static constexpr int kMaxInsertSlots = 8;
+	static constexpr int kInsertNameLen = 40;
+	struct InsertSlotSnap {
+		bool ok = false;
+		bool bypassed = false;
+		bool is_instrument = false;
+		int param_count = 0;
+		wchar_t name[kInsertNameLen] = {};
+		wchar_t param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
+		float param_norm[kMaxVst3Params] = {};
+	};
+	int insert_slot_count[kMeters] = {};
+	InsertSlotSnap insert_slots[kMeters][kMaxInsertSlots] = {};
+	int master_insert_count = 0;
+	InsertSlotSnap master_inserts[kMaxInsertSlots] = {};
+	/* VST2 catalog (Phase 3/4). */
+	static constexpr int kMaxVst2Catalog = 64;
+	int vst2_scan_count = 0;
+	int vst2_catalog_count = 0;
+	wchar_t vst2_catalog_name[kMaxVst2Catalog][40] = {};
+	bool vst2_ok = false;
+	bool vst2_bypassed = false;
+	bool vst2_bridged_32 = false; /* hosted via x86 bridge */
+	int vst2_param_count = 0;
+	wchar_t vst2_name[kVst3NameLen] = {};
+	wchar_t vst2_param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
+	float vst2_param_norm[kMaxVst3Params] = {};
+	/* Piano-roll viewport (Phase 1) — full MIDI range model. */
+	int midi_pitch_lo = 48;    /* viewport bottom */
+	int midi_pitch_hi = 71;    /* viewport top */
+	int active_midi_track = 0; /* which MIDI track piano-roll edits */
 	/* Audio devices + measured systemic latency. */
 	std::wstring audio_in_name; /* current backend device ("Default" when unset) */
 	std::wstring audio_out_name;
 	std::wstring pref_in_device; /* persisted WinShellPrefs input-device */
 	std::wstring pref_out_device;
 	bool         separate_io_devices = false; /* backend uses separate in/out names */
-	uint32_t     systemic_in_frames = 0; /* backend-reported, excludes one period */
-	uint32_t     systemic_out_frames = 0;
+	uint32_t systemic_in_frames = 0;          /* measured/systemic capture latency */
+	uint32_t systemic_out_frames = 0;         /* measured/systemic playback latency */
+
+	bool capture_rate_mismatch = false;
+
 	/* Recent sessions (WinShellRecent instant.xml, beside WinShellPrefs). */
 	static constexpr int kMaxRecent = 8;
 	static constexpr int kRecentLabelLen = 48;
@@ -373,8 +393,8 @@ struct EngineSnapshot {
 	static_assert (kMeters == 16, "per-meter defaults are listed for sixteen lanes");
 };
 
-static_assert (sizeof (EngineSnapshot) < 256 * 1024,
-               "EngineSnapshot must stay small enough to copy per UI tick");
+static_assert (sizeof (EngineSnapshot) < 512 * 1024,
+	       "EngineSnapshot must stay small enough to copy per UI tick");
 
 class EngineHost
 {
@@ -395,6 +415,8 @@ public:
 	/** Write WinShellPrefs + Config::save_state (clicking). */
 	bool save_shell_prefs ();
 	void set_pref_backend (const std::string& name); /* Dummy / WASAPI */
+	void set_pref_wasapi_exclusive (bool on);
+	bool pref_wasapi_exclusive () const { return _pref_wasapi_exclusive; }
 	void set_pref_period_frames (uint32_t frames);
 	void set_pref_snap_default (bool on);
 	/** Click default → Config::set_clicking (+ save on save_shell_prefs). */
@@ -485,7 +507,6 @@ public:
 
 	void poll ();
 
-	void  set_gain (float linear);
 	void  set_track_gain (int track, float linear);
 	bool  set_midi_gain (float linear);
 	/**
@@ -495,7 +516,6 @@ public:
 	bool reset_all_faders ();
 	/** Drop gains → reset_all → verify ≈1.0. For --smoke-fader-reset-all. */
 	bool smoke_fader_reset_all ();
-	float gain () const;
 
 	/** Arm / disarm a track for recording (Session rec-enable control). */
 	bool set_track_armed (int track, bool armed);
@@ -744,7 +764,6 @@ public:
 
 	/** Aux bus return (wet) gain coeff 0..1. Double-click → unity. */
 	bool  set_aux_return (float gain_0_1);
-	float aux_return () const;
 	/** Ensure Aux → set 0.5 → set 1.0. For --smoke-aux-return. */
 	bool smoke_aux_return ();
 
@@ -1671,6 +1690,58 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 */
 	bool attach_midi_synth ();
 
+	/** Select which MIDI track the piano-roll edits (0..midi_track_count-1). */
+	bool set_active_midi_track (int index);
+	int active_midi_track () const { return _snap.active_midi_track; }
+
+	/** Scroll piano-roll viewport by ±semitones (clamped to 0..127). */
+	bool set_midi_pitch_viewport (int lo, int hi);
+	bool scroll_midi_pitch_viewport (int delta_semitones);
+
+	/**
+	 * Ensure at least `count` Session MidiTracks (creates as needed).
+	 * Caps at EngineSnapshot::kMeters. For --smoke-midi-multi.
+	 */
+	bool ensure_midi_track_count (int count);
+	bool smoke_midi_multi ();
+
+	/**
+	 * Attach a VST3 instrument (is_instrument) from the scanned catalog by
+	 * index onto the active MIDI track. Soft-PASS when catalog empty.
+	 */
+	bool attach_vst3_instrument_by_index (int index);
+	bool smoke_vst3_instrument ();
+
+	/**
+	 * Generic insert rack (Phase 2): append/remove/bypass/param on any route.
+	 * kind: 0=ACE LV2 by URI helper, 1=VST3 catalog index, 2=VST2 catalog index.
+	 */
+	bool insert_rack_slot (int track, int kind, int catalog_index);
+	bool remove_rack_slot (int track, int slot);
+	bool set_rack_slot_bypassed (int track, int slot, bool bypassed);
+	bool set_rack_slot_param (int track, int slot, int param, float norm_0_1);
+	void refresh_insert_rack_snap ();
+	bool smoke_fx_chain ();
+
+	/** Master bus multi-slot rack helpers. */
+	bool insert_master_rack_slot (int kind, int catalog_index);
+	bool remove_master_rack_slot (int slot);
+
+	/* --- VST2-64 / VST2-32 bridge (Phase 3/4) --- */
+	bool rescan_vst2 ();
+	void refresh_vst2_catalog_snap ();
+	/** Insert VST2 FX. track < 0 → Audio 2 (legacy); else audio track index. */
+	bool insert_vst2_by_index (int index, int track = -1);
+	bool unload_vst2 ();
+	bool set_vst2_param (int index, float norm_0_1);
+	bool set_vst2_bypassed (bool bypassed);
+	bool toggle_vst2_bypass ();
+	bool attach_vst2_instrument_by_index (int index);
+	bool smoke_vst2 ();
+	bool smoke_vst2_instrument ();
+	bool smoke_vst2_bridge ();
+	void refresh_vst2_params_from_insert ();
+
 	/**
 	 * Insert ACE Reverb (bundled LV2, no GTK UI) on an audio track pre-fader.
 	 * Default track 0 = Audio 1. Idempotent when already present.
@@ -1698,7 +1769,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * UI-thread safe Controllable::set_value.
 	 */
 	bool set_track_fx_param (int track, float value_0_1);
-	float track_fx_param (int track = 0) const;
 
 	/**
 	 * Reset mixer FX param 1..3 on track to insert defaults (Blend 0.3, EQ 0.5, …).
@@ -1825,7 +1895,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	/** Toggle UI-rate spectrum analyzer (Spec / Y). */
 	bool set_spectrum_enabled (bool on);
 	bool toggle_spectrum_enabled ();
-	bool spectrum_enabled () const { return _snap.spectrum_enabled; }
 	/** false = selected/Audio1; true = mix of audio tracks (master view). */
 	bool set_spectrum_master (bool master);
 	bool toggle_spectrum_master ();
@@ -1838,7 +1907,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	/** Toggle UI-rate phase / goniometer (Phase / X). */
 	bool set_correlation_enabled (bool on);
 	bool toggle_correlation_enabled ();
-	bool correlation_enabled () const { return _snap.correlation_enabled; }
 	bool set_correlation_master (bool master);
 	bool toggle_correlation_master ();
 
@@ -1850,7 +1918,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	/** Toggle UI-rate approximate LUFS (LUFS / J). */
 	bool set_loudness_enabled (bool on);
 	bool toggle_loudness_enabled ();
-	bool loudness_enabled () const { return _snap.loudness_enabled; }
 	bool set_loudness_master (bool master);
 	bool toggle_loudness_master ();
 
@@ -1930,7 +1997,8 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	 * onto Audio 2 (DSP-only). index is into the scanned list (same order
 	 * as vst3_catalog_*). Returns false when out of range / load fails.
 	 */
-	bool insert_vst3_by_index (int index);
+	/** Insert VST3 FX. track < 0 → Audio 2 (legacy); else audio track index. */
+	bool insert_vst3_by_index (int index, int track = -1);
 
 	/**
 	 * Rescan → insert index 0 when plugins exist → unload.
@@ -2457,6 +2525,9 @@ private:
 	uint32_t    _period_frames; /* 0 = Auto */
 	std::string _pref_backend; /* Dummy / WASAPI — next start if CLI omits --backend */
 	uint32_t    _pref_period_frames;
+
+	bool _pref_wasapi_exclusive;
+
 	bool        _pref_snap_default;
 	bool        _pref_click_default;
 	std::string _pref_input_device; /* persisted WinShellPrefs device names */
@@ -2479,7 +2550,6 @@ private:
 	std::string recovery_copy_path () const;
 	bool copy_snapshot_to_recovery ();
 	uint64_t snapshot_filetime (const std::string& session_dir, const std::string& snap) const;
-	float       _gain;
 	float       _track_gain[EngineSnapshot::kMeters];
 	EngineSnapshot _snap;
 
