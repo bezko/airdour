@@ -354,7 +354,6 @@ struct EngineSnapshot {
 	int insert_slot_count[kMeters] = {};
 	InsertSlotSnap insert_slots[kMeters][kMaxInsertSlots] = {};
 	int master_insert_count = 0;
-	InsertSlotSnap master_inserts[kMaxInsertSlots] = {};
 	/* VST2 catalog (Phase 3/4). */
 	static constexpr int kMaxVst2Catalog = 64;
 	int vst2_scan_count = 0;
@@ -416,7 +415,6 @@ public:
 	bool save_shell_prefs ();
 	void set_pref_backend (const std::string& name); /* Dummy / WASAPI */
 	void set_pref_wasapi_exclusive (bool on);
-	bool pref_wasapi_exclusive () const { return _pref_wasapi_exclusive; }
 	void set_pref_period_frames (uint32_t frames);
 	void set_pref_snap_default (bool on);
 	/** Click default → Config::set_clicking (+ save on save_shell_prefs). */
@@ -1692,7 +1690,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 
 	/** Select which MIDI track the piano-roll edits (0..midi_track_count-1). */
 	bool set_active_midi_track (int index);
-	int active_midi_track () const { return _snap.active_midi_track; }
 
 	/** Scroll piano-roll viewport by ±semitones (clamped to 0..127). */
 	bool set_midi_pitch_viewport (int lo, int hi);
@@ -1713,11 +1710,10 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 	bool smoke_vst3_instrument ();
 
 	/**
-	 * Generic insert rack (Phase 2): append/remove/bypass/param on any route.
+	 * Generic insert rack (Phase 2): append/bypass/param on any route.
 	 * kind: 0=ACE LV2 by URI helper, 1=VST3 catalog index, 2=VST2 catalog index.
 	 */
 	bool insert_rack_slot (int track, int kind, int catalog_index);
-	bool remove_rack_slot (int track, int slot);
 	bool set_rack_slot_bypassed (int track, int slot, bool bypassed);
 	bool set_rack_slot_param (int track, int slot, int param, float norm_0_1);
 	void refresh_insert_rack_snap ();
@@ -1725,7 +1721,6 @@ bool add_skip_range (float start_sec, float end_sec, const std::string& name = s
 
 	/** Master bus multi-slot rack helpers. */
 	bool insert_master_rack_slot (int kind, int catalog_index);
-	bool remove_master_rack_slot (int slot);
 
 	/* --- VST2-64 / VST2-32 bridge (Phase 3/4) --- */
 	bool rescan_vst2 ();

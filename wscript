@@ -1028,6 +1028,11 @@ def sub_config_and_use(conf, name, has_objects = True):
 
 def configure(conf):
     set_version ()
+    # Pin the MSVC arch before compiler_c auto-loads the msvc tool. Otherwise a
+    # Developer Prompt (or ilammy/msvc-dev-cmd) can make waf accept the wrong
+    # first target and fail inside waf-print-msvc-*.bat.
+    if Options.options.dist_target == 'msvc':
+        conf.env['MSVC_TARGETS'] = ['x64']
     conf.load('compiler_c')
     conf.load('compiler_cxx')
     if Options.options.dist_target == 'mingw':
@@ -1036,7 +1041,6 @@ def configure(conf):
         conf.load('clang_compilation_database')
 
     if Options.options.dist_target == 'msvc':
-        conf.env['MSVC_TARGETS'] = ['x64']
         conf.load('msvc')
         # Optional: gendef.py no-ops without llvm-nm. Required only when generating .def from DLLs.
         conf.find_program('llvm-nm', var = 'llvm_nm', mandatory = False)

@@ -47,7 +47,7 @@ Prefer vcpkg (x64-windows) with binary caching:
   glib libxml2 libsndfile curl libarchive liblo taglib
   overlay glibmm-2.4 + sigc++-2.0 (not stock glibmm 2.68+)
   rubberband vamp-sdk lilv fftw3 aubio
-  pthreads4w (until Win32 thread migration completes)
+  pthreads4w
 Non-UI third-party still linked: fluidsynth, zita-resampler/convolver,
   qm-dsp, vamp-plugins, hidapi, aaf, ptformat, libltc, boost (headers).
 Cairo is an optional shell blit (feature gtk-libs / Install-HeadlessDeps -WithGtkLibs).

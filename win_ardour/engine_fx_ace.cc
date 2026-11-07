@@ -114,9 +114,6 @@ EngineHost::refresh_insert_rack_snap ()
 		}
 	}
 	_snap.master_insert_count = 0;
-	for (int s = 0; s < EngineSnapshot::kMaxInsertSlots; ++s) {
-		_snap.master_inserts[s] = EngineSnapshot::InsertSlotSnap ();
-	}
 	if (!_impl) {
 		return;
 	}
@@ -173,9 +170,6 @@ EngineHost::refresh_insert_rack_snap ()
 	}
 	int mn = std::max (0, std::min (EngineSnapshot::kMaxInsertSlots, _impl->master_rack_count));
 	_snap.master_insert_count = mn;
-	for (int s = 0; s < mn; ++s) {
-		fill_slot_from_insert (_snap.master_inserts[s], _impl->master_rack[s].lock ());
-	}
 }
 
 bool
@@ -271,33 +265,6 @@ EngineHost::insert_rack_slot (int track, int kind, int catalog_index)
 }
 
 bool
-EngineHost::remove_rack_slot (int track, int slot)
-{
-	if (!_impl || track < 0 || track >= EngineSnapshot::kMeters) {
-		return false;
-	}
-	int n = _impl->rack_slot_count[track];
-	if (slot < 0 || slot >= n) {
-		return false;
-	}
-	std::shared_ptr<ARDOUR::PluginInsert> pi = _impl->rack_slots[track][slot].lock ();
-	if (pi && _impl->tracks.size () > (size_t)track && _impl->tracks[track]) {
-		try {
-			_impl->tracks[track]->remove_processor (pi);
-		} catch (...) {
-		}
-	}
-	for (int i = slot; i < n - 1; ++i) {
-		_impl->rack_slots[track][i] = _impl->rack_slots[track][i + 1];
-	}
-	_impl->rack_slots[track][n - 1].reset ();
-	_impl->rack_slot_count[track] = n - 1;
-	refresh_insert_rack_snap ();
-	_snap.detail = L"rack slot removed";
-	return true;
-}
-
-bool
 EngineHost::set_rack_slot_bypassed (int track, int slot, bool bypassed)
 {
 	if (!_impl || track < 0 || track >= EngineSnapshot::kMeters) {
@@ -390,33 +357,6 @@ EngineHost::insert_master_rack_slot (int kind, int catalog_index)
 }
 
 bool
-EngineHost::remove_master_rack_slot (int slot)
-{
-	if (!_impl) {
-		return false;
-	}
-	int n = _impl->master_rack_count;
-	if (slot < 0 || slot >= n) {
-		return false;
-	}
-	std::shared_ptr<ARDOUR::PluginInsert> pi = _impl->master_rack[slot].lock ();
-	std::shared_ptr<ARDOUR::Route> master = _impl->session ? _impl->session->master_out () : std::shared_ptr<ARDOUR::Route> ();
-	if (pi && master) {
-		try {
-			master->remove_processor (pi);
-		} catch (...) {
-		}
-	}
-	for (int i = slot; i < n - 1; ++i) {
-		_impl->master_rack[i] = _impl->master_rack[i + 1];
-	}
-	_impl->master_rack[n - 1].reset ();
-	_impl->master_rack_count = n - 1;
-	refresh_insert_rack_snap ();
-	return true;
-}
-
-bool
 EngineHost::smoke_fx_chain ()
 {
 	if (!_impl || !_impl->session) {
@@ -462,11 +402,6 @@ EngineHost::insert_rack_slot (int, int, int)
 	return false;
 }
 bool
-EngineHost::remove_rack_slot (int, int)
-{
-	return false;
-}
-bool
 EngineHost::set_rack_slot_bypassed (int, int, bool)
 {
 	return false;
@@ -478,11 +413,6 @@ EngineHost::set_rack_slot_param (int, int, int, float)
 }
 bool
 EngineHost::insert_master_rack_slot (int, int)
-{
-	return false;
-}
-bool
-EngineHost::remove_master_rack_slot (int)
 {
 	return false;
 }

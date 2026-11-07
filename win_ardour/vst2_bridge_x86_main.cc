@@ -1,7 +1,8 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Win32 (x86) VST2 bridge process. Built with -A Win32 on MSVC.
+ * Win32 (x86) VST2 bridge process. Built by the vst2-bridge-x86 CMake preset
+ * from an x86 MSVC prompt. Ninja does not accept -A Win32.
  * Loads a 32-bit VST2 DLL and services SharedState ops from the x64 host.
  */
 
@@ -140,7 +141,6 @@ handle_op ()
 			g_view->hdr.status = 1;
 		}
 		break;
-	case Op::Close:
 	case Op::Shutdown:
 		close_plugin ();
 		break;
@@ -244,11 +244,6 @@ handle_op ()
 			g_view->hdr.status = 1;
 		}
 		break;
-	case Op::Idle:
-		if (g_effect && g_effect->dispatcher) {
-			g_effect->dispatcher (g_effect, 19 /*effEditIdle*/, 0, 0, nullptr, 0.f);
-		}
-		break;
 	default:
 		break;
 	}
@@ -298,7 +293,7 @@ wmain (int argc, wchar_t** argv)
 		Op op = (Op)g_view->hdr.op;
 		handle_op ();
 		SetEvent (g_ack);
-		if (op == Op::Shutdown || op == Op::Close) {
+		if (op == Op::Shutdown) {
 			break;
 		}
 	}

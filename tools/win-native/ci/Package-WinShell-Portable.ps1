@@ -3,7 +3,7 @@
 #
 # Modes:
 #   Engine  — exe linked with libardour + Dummy/WASAPI + ACE LV2
-#   UiOnly  — D2D shell without engine (what GHA can build today)
+#   UiOnly  — D2D shell without engine
 #
 # Config:
 #   Release — Ninja presets (build-ninja-engine / build-ninja-ui) are Release (/MD)
@@ -128,20 +128,53 @@ Copy-Item -Force $ShellExe (Join-Path $stage "airdour_win_shell.exe")
 $copied = New-Object System.Collections.Generic.List[string]
 $copied.Add("airdour_win_shell.exe")
 
-# Optional VST2-32 bridge (Win32 helper built with -A Win32 / AIRDOUR_BUILD_VST2_BRIDGE_X86).
-$bridgeCandidates = @(
-    (Join-Path (Split-Path $ShellExe -Parent) "ardour-vst2-bridge-x86.exe"),
-    (Join-Path $RepoRoot "build-win32-vst2-bridge\artifacts\Release\ardour-vst2-bridge-x86.exe"),
-    (Join-Path $RepoRoot "build-win32-vst2-bridge\artifacts\Debug\ardour-vst2-bridge-x86.exe"),
-    (Join-Path $RepoRoot "build-win64-gui-engine-rel\artifacts\Release\ardour-vst2-bridge-x86.exe")
-)
-foreach ($bridge in $bridgeCandidates) {
-    if ($bridge -and (Test-Path $bridge)) {
-        Copy-Item -Force $bridge (Join-Path $stage "ardour-vst2-bridge-x86.exe")
-        $copied.Add("ardour-vst2-bridge-x86.exe")
-        Write-Host "  staged VST2-32 bridge from $bridge"
-        break
+# Optional VST2-32 bridge. The supported build is the x86 preset
+# (build-win32-vst2-bridge\artifacts\ardour-vst2-bridge-x86.exe, Ninja
+# single-config). Visual Studio -A Win32 writes artifacts\<Config>\.
+# Never search the x64 shell tree: an x64 image with this name is not a helper.
+function Get-PeMachine([string]$Path) {
+    $fs = $null
+    try {
+        $fs = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        if ($fs.Length -lt 64) { return $null }
+        $hdr = New-Object byte[] 64
+        if ($fs.Read($hdr, 0, 64) -ne 64) { return $null }
+        if ($hdr[0] -ne 0x4D -or $hdr[1] -ne 0x5A) { return $null }
+        $peOff = [BitConverter]::ToInt32($hdr, 0x3C)
+        if ($peOff -lt 0 -or ($peOff + 6) -gt $fs.Length) { return $null }
+        $fs.Position = $peOff
+        $pe = New-Object byte[] 6
+        if ($fs.Read($pe, 0, 6) -ne 6) { return $null }
+        if ($pe[0] -ne 0x50 -or $pe[1] -ne 0x45 -or $pe[2] -ne 0 -or $pe[3] -ne 0) { return $null }
+        return [BitConverter]::ToUInt16($pe, 4)
+    } catch {
+        return $null
+    } finally {
+        if ($fs) { $fs.Dispose() }
     }
+}
+
+$bridgeCandidates = New-Object System.Collections.Generic.List[string]
+# Segments, not a backslash string, so Join-Path uses the host separator.
+$bridgeRoot = Join-Path (Join-Path $RepoRoot "build-win32-vst2-bridge") "artifacts"
+$bridgeCandidates.Add((Join-Path $bridgeRoot "ardour-vst2-bridge-x86.exe"))
+$vsConfig = if ($Config -eq "Debug") { "Debug" } else { "Release" }
+$bridgeCandidates.Add((Join-Path (Join-Path $bridgeRoot $vsConfig) "ardour-vst2-bridge-x86.exe"))
+if ($ShellExe) {
+    $bridgeCandidates.Add((Join-Path (Split-Path $ShellExe -Parent) "ardour-vst2-bridge-x86.exe"))
+}
+foreach ($bridge in $bridgeCandidates) {
+    if (-not $bridge -or -not (Test-Path -LiteralPath $bridge)) { continue }
+    $machine = Get-PeMachine $bridge
+    if ($machine -ne 0x014C) {
+        $shown = if ($null -eq $machine) { "not a PE" } else { "0x{0:X4}" -f $machine }
+        Write-Warning "Skipping VST2-32 bridge $bridge (PE machine $shown, want i386 0x014C)"
+        continue
+    }
+    Copy-Item -Force $bridge (Join-Path $stage "ardour-vst2-bridge-x86.exe")
+    $copied.Add("ardour-vst2-bridge-x86.exe")
+    Write-Host "  staged VST2-32 bridge from $bridge"
+    break
 }
 
 if ($Mode -eq "Engine") {
@@ -306,7 +339,7 @@ Honest limits
 -------------
 - No GTK plugin UIs. Mixer shows FX name / BYP / Blend.
 - Default Engine package is MSVC Release (/MD). Pass -Config Debug for the Debug slice.
-- GitHub Actions publishes UiOnly when waf+vcpkg engine libs are not in CI yet.
+- An Engine package runs the DAW (Dummy and WASAPI). A UiOnly package is the shell with --no-engine.
 - Installer: Package-WinShell-Nsis.ps1 (NSIS, open source → dist\*-setup.exe).
 
 Smoke examples (Engine)

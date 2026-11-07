@@ -2,25 +2,23 @@
 layout: null
 ---
 <!DOCTYPE html>
-<!-- GitHub Pages publishes the repository root, so this file is the homepage.
-     The styled page also lives in docs/. Keep the two copies in step. -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Airdour — a Windows DAW you can actually run</title>
-  <meta name="description" content="Airdour is a Windows-native DAW: the Ardour engine, a Direct2D shell, WASAPI shared by default (exclusive optional), and an MCP server for assistants. GPL-2.0.">
+  <meta name="description" content="Airdour is a Windows-native DAW: the Ardour engine, a Direct2D shell, and WASAPI shared by default (exclusive optional). GPL-2.0.">
   <link rel="canonical" href="https://bezko.github.io/airdour/">
   <meta name="theme-color" content="#0a0d12">
   <meta name="color-scheme" content="dark">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://bezko.github.io/airdour/">
   <meta property="og:title" content="Airdour — a Windows DAW you can actually run">
-  <meta property="og:description" content="The Ardour engine in a native Win32 shell. Direct2D draws the session. WASAPI shared is the default; exclusive is optional. An MCP server lets an assistant drive the mix.">
+  <meta property="og:description" content="The Ardour engine in a native Win32 shell. Direct2D draws the session. WASAPI shared is the default; exclusive is optional.">
   <meta property="og:image" content="https://bezko.github.io/airdour/docs/og.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Airdour — a Windows DAW you can actually run">
-  <meta name="twitter:description" content="The Ardour engine in a native Win32 shell. Direct2D, WASAPI shared by default, and an MCP server on localhost.">
+  <meta name="twitter:description" content="The Ardour engine in a native Win32 shell. Direct2D and WASAPI shared by default (exclusive optional).">
   <meta name="twitter:image" content="https://bezko.github.io/airdour/docs/og.png">
   <link rel="icon" href="docs/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="docs/site.css">
@@ -49,7 +47,6 @@ layout: null
       <nav class="nav" id="site-nav" data-nav>
         <a href="#shell">Shell</a>
         <a href="#engine">Engine</a>
-        <a href="#agents">Agents</a>
         <a href="#keys">Keys</a>
         <a href="#download">Download</a>
         <a class="nav-git" href="https://github.com/bezko/airdour">GitHub</a>
@@ -62,7 +59,7 @@ layout: null
       <div class="hero-copy">
         <p class="kicker">Windows 10 / 11 · x64 · GPL-2.0</p>
         <h1>A Windows DAW you can actually run.</h1>
-        <p class="lede">Airdour keeps the Ardour engine and drops the GTK2, X11, and ASIO baggage. Direct2D draws the session. WASAPI shared is the default and plays it beside the rest of the desktop; exclusive is optional and falls back to shared. An MCP server on localhost lets an assistant run the transport.</p>
+        <p class="lede">Airdour keeps the Ardour engine and drops the GTK2, X11, and ASIO baggage. Direct2D draws the session. WASAPI shared is the default and plays it beside the rest of the desktop; exclusive is optional and falls back to shared.</p>
         <div class="cta">
           <a class="btn btn-primary" href="#download">Download the shell</a>
           <a class="btn btn-ghost" href="https://github.com/bezko/airdour">View the source</a>
@@ -74,11 +71,7 @@ layout: null
           </div>
           <div>
             <dt>Audio</dt>
-            <dd>WASAPI shared default</dd>
-          </div>
-          <div>
-            <dt>Agents</dt>
-            <dd>MCP :4820</dd>
+            <dd>WASAPI shared by default</dd>
           </div>
         </dl>
       </div>
@@ -214,11 +207,6 @@ layout: null
           <span role="cell" data-col="Airdour">WinMME, in and out</span>
         </div>
         <div class="compare-row" role="row">
-          <span role="rowheader">Assistants</span>
-          <span role="cell" data-col="Upstream">OSC and Lua</span>
-          <span role="cell" data-col="Airdour">MCP over HTTP on localhost</span>
-        </div>
-        <div class="compare-row" role="row">
           <span role="rowheader">Build</span>
           <span role="cell" data-col="Upstream">MinGW / MSYS2</span>
           <span role="cell" data-col="Airdour">Visual Studio 2022, CMake, Waf</span>
@@ -260,7 +248,7 @@ layout: null
       <div class="section-head">
         <p class="kicker">libardour · wasapi</p>
         <h2>Shared by default.</h2>
-        <p>The audio callback runs in WASAPI shared mode unless exclusive is turned on, at MMCSS Pro Audio priority. Shared mode leaves the device available to the rest of the system. Exclusive falls back to shared when the device or format refuses it. The backend walks the hardware period ladder and converts float32, int16, int24, and int32 on the way in.</p>
+        <p>The audio callback runs in WASAPI shared mode unless exclusive is turned on, at MMCSS Pro Audio priority. Shared mode leaves the device available to the rest of the system. Exclusive render falls back to shared when the device or format refuses it; capture stays shared. The backend walks the hardware period ladder and converts float32, int16, int24, and int32 on the way in.</p>
       </div>
       <div class="split">
         <div>
@@ -273,31 +261,6 @@ layout: null
             <li>64-bit VST2 in process, and 32-bit VST2 through <code>ardour-vst2-bridge-x86.exe</code></li>
             <li>Headless master bounce to 16-bit WAV (TPDF dither, <code>D_Tri</code>)</li>
           </ul>
-        </div>
-      </div>
-    </section>
-
-    <section class="band" id="agents">
-      <div class="section-head">
-        <p class="kicker">mcp_http · experimental</p>
-        <h2>An assistant can drive the session.</h2>
-        <p>Enable MCPHttp under Preferences → Control Surfaces. The server listens at <code>http://127.0.0.1:4820/mcp</code>. Tool names use a slash: <code>transport/play</code>, <code>tracks/add</code>, <code>plugin/set_parameter</code>, <code>midi_note/import_json</code>.</p>
-      </div>
-      <div class="split code-split">
-        <div>
-          <ul class="tools">
-            <li><code>transport/play</code><span>Start, stop, locate, loop, record</span></li>
-            <li><code>tracks/add</code><span>Tracks, buses, faders, pan, mute, solo</span></li>
-            <li><code>plugin/add</code><span>Scan, insert, bypass, set a parameter</span></li>
-            <li><code>region/split</code><span>Move, split, gain, normalize</span></li>
-            <li><code>midi_note/import_json</code><span>Notes in bars and beats, drums included</span></li>
-          </ul>
-        </div>
-        <div class="codeblock">
-          <p class="code-label">Codex, pointed at the local server</p>
-          <pre><code>codex mcp add ardour_http \
-  --url http://127.0.0.1:4820/mcp</code></pre>
-          <p class="fine">The surface speaks streamable MCP over HTTP, not SSE. Underscore and dotted tool names are accepted as aliases. It binds to localhost only.</p>
         </div>
       </div>
     </section>

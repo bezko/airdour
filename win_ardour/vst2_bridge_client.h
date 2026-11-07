@@ -13,7 +13,7 @@ namespace vst2_bridge {
 
 struct MidiEventWire;
 
-/** Absolute path to ardour-vst2-bridge-x86.exe beside the shell, or empty. */
+/** Absolute path to an i386 ardour-vst2-bridge-x86.exe beside the shell, or empty. */
 std::string bridge_exe_path ();
 
 /** True when PE Machine == IMAGE_FILE_MACHINE_I386 (0x014c). */

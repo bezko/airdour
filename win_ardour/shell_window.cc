@@ -13934,7 +13934,6 @@ ShellWindow::sync_prefs_from_engine ()
 		_prefs.set_vst2_loaded_name (nullptr);
 	}
 	_prefs.set_vst3_ok (_engine_snap.vst3_ok);
-	_prefs.set_vst2_ok (_engine_snap.vst2_ok);
 	_prefs.set_vst3_param_count (_engine_snap.vst3_ok ? _engine_snap.vst3_param_count : 0);
 	_prefs.set_vst3_bypassed (_engine_snap.vst3_bypassed);
 }

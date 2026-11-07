@@ -1,7 +1,7 @@
 ; Airdour Windows installer
 ; Compiler: NSIS 3 (open source, https://nsis.sourceforge.io/)
 ; Payload: the portable shell tree from Package-WinShell-Portable.ps1
-;   (UiOnly on GitHub Actions, Engine when that stage is packaged on a laptop).
+;   (Engine on the GitHub release workflow; UiOnly only when no waf tree is staged).
 ;
 ;   makensis /DVERSION=0.1.0 /DPRODUCT_VERSION=0.1.0.0 ^
 ;     /DSOURCE_DIR=C:/build/shell-stage ^
@@ -80,7 +80,7 @@ VIAddVersionKey "LegalCopyright" "GPL-2.0"
 !define MUI_ABORTWARNING
 !define MUI_UNABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "Airdour Setup"
-!define MUI_WELCOMEPAGE_TEXT "This installs Airdour for the current user. No administrator prompt.$\r$\n$\r$\nDefault folder: %LOCALAPPDATA%\Airdour$\r$\n$\r$\nThe Windows shell is Win32 + Direct2D. Audio is WASAPI, shared by default, with optional exclusive. GitHub Actions builds install the UI shell; a machine with the engine stage installs Dummy, WASAPI, and the bundled plugins that were packaged with it.$\r$\n$\r$\nAirdour is free software under the GNU GPL v2."
+!define MUI_WELCOMEPAGE_TEXT "This installs Airdour for the current user. No administrator prompt.$\r$\n$\r$\nDefault folder: %LOCALAPPDATA%\Airdour$\r$\n$\r$\nThe Windows shell is Win32 + Direct2D. An engine package includes WASAPI (shared by default, with optional exclusive render and shared fallback; capture stays shared), the Dummy backend, and the bundled plugins. A UI-only package runs the shell without the engine.$\r$\n$\r$\nAirdour is free software under the GNU GPL v2."
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_TEXT "Launch Airdour"
 !define MUI_FINISHPAGE_RUN_FUNCTION LaunchAirdour

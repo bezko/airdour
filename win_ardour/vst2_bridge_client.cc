@@ -132,6 +132,20 @@ wait_op (BridgeProc& b, Op op, DWORD timeout_ms)
 	return b.view->hdr.status == 0;
 }
 
+std::string
+i386_exe_or_empty (const std::wstring& candidate)
+{
+	DWORD attr = GetFileAttributesW (candidate.c_str ());
+	if (attr == INVALID_FILE_ATTRIBUTES || (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+		return std::string ();
+	}
+	std::string utf8 = wide_to_utf8 (candidate);
+	if (!dll_is_i386 (utf8)) {
+		return std::string ();
+	}
+	return utf8;
+}
+
 } // namespace
 
 std::string
@@ -147,16 +161,11 @@ bridge_exe_path ()
 	if (slash == std::wstring::npos) {
 		return std::string ();
 	}
-	std::wstring exe = path.substr (0, slash + 1) + L"ardour-vst2-bridge-x86.exe";
-	DWORD attr = GetFileAttributesW (exe.c_str ());
-	if (attr == INVALID_FILE_ATTRIBUTES) {
-		exe = path.substr (0, slash + 1) + L"vst2-bridge-x86.exe";
-		attr = GetFileAttributesW (exe.c_str ());
-		if (attr == INVALID_FILE_ATTRIBUTES) {
-			return std::string ();
-		}
+	std::string found = i386_exe_or_empty (path.substr (0, slash + 1) + L"ardour-vst2-bridge-x86.exe");
+	if (found.empty ()) {
+		found = i386_exe_or_empty (path.substr (0, slash + 1) + L"vst2-bridge-x86.exe");
 	}
-	return wide_to_utf8 (exe);
+	return found;
 }
 
 bool
