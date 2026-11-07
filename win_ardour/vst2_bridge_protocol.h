@@ -19,17 +19,12 @@ static constexpr uint32_t kMaxBlock = 8192;
 static constexpr uint32_t kMaxMidiEvents = 256;
 
 enum class Op : uint32_t {
-	Nop = 0,
 	Open = 1,
-	Close = 2,
 	SetBlockSize = 3,
 	SetSampleRate = 4,
 	Process = 5,
 	GetParameter = 6,
 	SetParameter = 7,
-	GetChunk = 8,
-	SetChunk = 9,
-	Idle = 10,
 	Shutdown = 11,
 };
 
@@ -53,7 +48,6 @@ struct SharedHeader {
 	float param_value;
 	float sample_rate;
 	uint32_t midi_count;
-	uint32_t chunk_bytes;
 	uint32_t n_params; /* filled by Open */
 	wchar_t plugin_path[kMaxPathChars];
 	char error[128];
@@ -70,16 +64,6 @@ struct SharedState {
 	SharedAudio audio;
 };
 #pragma pack(pop)
-
-inline const wchar_t*
-shm_name_for_pid (unsigned long host_pid, wchar_t* buf, size_t n)
-{
-	/* Caller formats: AirdourVST2Bridge-<pid> */
-	(void)host_pid;
-	(void)buf;
-	(void)n;
-	return buf;
-}
 
 } /* namespace vst2_bridge */
 } /* namespace airdour */

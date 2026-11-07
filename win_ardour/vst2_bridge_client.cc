@@ -150,11 +150,7 @@ bridge_exe_path ()
 	std::wstring exe = path.substr (0, slash + 1) + L"ardour-vst2-bridge-x86.exe";
 	DWORD attr = GetFileAttributesW (exe.c_str ());
 	if (attr == INVALID_FILE_ATTRIBUTES) {
-		exe = path.substr (0, slash + 1) + L"vst2-bridge-x86.exe";
-		attr = GetFileAttributesW (exe.c_str ());
-		if (attr == INVALID_FILE_ATTRIBUTES) {
-			return std::string ();
-		}
+		return std::string ();
 	}
 	return wide_to_utf8 (exe);
 }
