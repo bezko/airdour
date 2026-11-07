@@ -1,7 +1,8 @@
 # Packages the staged Windows release zip for GitHub Releases.
 # Always builds the CI spine zip (wasapi_io smoke + sources).
-# Also builds a portable win_shell zip when airdour_win_shell.exe is available
-# (UiOnly on GHA; Engine when waf libs exist on a laptop agent).
+# Also builds a portable win_shell zip when airdour_win_shell.exe is available.
+# Pass -Mode Engine -WafLibsDir build-rel\libs for the functional DAW package
+# (libardour + Dummy/WASAPI + bundled LV2). UiOnly is the shell without that tree.
 # When a shell stage exists, build the NSIS installer (+ always installer-src zip).
 param(
     [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -10,6 +11,9 @@ param(
     [string]$BuildDir = "",
     [string]$ShellExe = "",
     [string]$WafLibsDir = "",
+    [string]$VcpkgInstalled = "",
+    [ValidateSet("Auto", "Engine", "UiOnly")][string]$Mode = "Auto",
+    [ValidateSet("Auto", "Release", "Debug")][string]$Config = "Auto",
     [string]$GitSha = "unknown",
     [string]$GitRef = "unknown",
     [switch]$BootstrapNsis
@@ -103,23 +107,23 @@ The release installer is NSIS (open source). airdour.nsi + Package-WinShell-Nsis
 compile a per-user setup.exe from a portable shell stage. airdour.iss is the
 optional Inno Setup script.
 
-On GitHub Actions (windows-latest)
-----------------------------------
-CI builds a UiOnly shell and publishes airdour-*-win64-setup-ui.exe
-(NSIS via Package-WinShell-Nsis.ps1). Install for the current user:
+GitHub Actions release (windows-2022)
+------------------------------------
+The tag workflow builds the engine-linked shell and publishes:
+  airdour-*-win64-shell.zip
+  airdour-*-win64-setup.exe
+Install for the current user (the /D= path is last and is not quoted):
 
-  airdour-*-win64-setup-ui.exe /S /D=C:\Airdour
+  airdour-*-win64-setup.exe /S /D=C:\Airdour
 
-Full Engine deps (waf libardour + vcpkg) do NOT fit the default GHA job yet.
+A UI-only package, when one is produced, is named *-setup-ui.exe.
 
-On a laptop with Engine Release trees
--------------------------------------
+Rebuild on a laptop
+-------------------
 1. Package portable Engine stage/zip:
    powershell -File Package-WinShell-Portable.ps1 -RepoRoot <repo> -OutDir dist -Version $Version -Mode Engine -Config Release
 2. Build the NSIS installer (per-user, %LOCALAPPDATA%\Airdour):
    powershell -File Package-WinShell-Nsis.ps1 -RepoRoot <repo> -OutDir dist -Version $Version -RefreshPortable -BootstrapNsis
-
-Attach airdour-*-win64-setup.exe (Engine) to the GitHub Release alongside CI UiOnly artifacts.
 "@
 Set-Content -Path (Join-Path $instSrc "README.txt") -Value $instReadme -Encoding utf8
 $instSrcZip = Join-Path $OutDir "airdour-$Version-win64-installer-src.zip"
@@ -132,7 +136,7 @@ try {
 }
 Write-Host "Created $instSrcZip"
 
-# Portable win_shell zip (best available: Engine on laptop, UiOnly on GHA)
+# Portable win_shell zip. -Mode Engine requires the waf libs and vcpkg bin.
 $shellZip = $null
 try {
     $packShell = Join-Path $RepoRoot "tools\win-native\ci\Package-WinShell-Portable.ps1"
@@ -145,19 +149,44 @@ try {
     }
     if ($ShellExe) { $shellArgs.ShellExe = $ShellExe }
     elseif ($BuildDir) {
-        # Same single-config preset layout the wasapi lib search already accepts.
-        $shellCandidate = Join-Path $BuildDir "artifacts\airdour_win_shell.exe"
-        if (Test-Path $shellCandidate) { $shellArgs.ShellExe = $shellCandidate }
+        foreach ($c in @(
+            (Join-Path $BuildDir "artifacts\airdour_win_shell.exe"),
+            (Join-Path $BuildDir "artifacts\Release\airdour_win_shell.exe"),
+            (Join-Path $BuildDir "artifacts\Debug\airdour_win_shell.exe")
+        )) {
+            if (Test-Path $c) { $shellArgs.ShellExe = $c; break }
+        }
     }
     if ($WafLibsDir) { $shellArgs.WafLibsDir = $WafLibsDir }
+    if ($VcpkgInstalled) { $shellArgs.VcpkgInstalled = $VcpkgInstalled }
+    if ($Mode -ne "Auto") { $shellArgs.Mode = $Mode }
+    if ($Config -ne "Auto") { $shellArgs.Config = $Config }
     & $packShell @shellArgs | Out-Null
     $shellZip = Get-ChildItem -Path $OutDir -Filter "airdour-$Version-win64-shell*.zip" -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
 } catch {
+    if ($Mode -eq "Engine") { throw }
     Write-Warning "Portable win_shell zip skipped: $($_.Exception.Message)"
 }
 
-# NSIS installer from shell-stage (UiOnly on GHA; Engine on a laptop).
+if ($Mode -eq "Engine") {
+    $engineStage = Join-Path $OutDir "shell-stage"
+    foreach ($rel in @(
+        "airdour_win_shell.exe",
+        "ardour.dll",
+        "backends\wasapi\wasapi_audiobackend.dll",
+        "backends\dummy\dummy_audiobackend.dll",
+        "run-airdour.bat"
+    )) {
+        $p = Join-Path $engineStage $rel
+        if (-not (Test-Path $p)) { throw "Engine package is missing $rel" }
+    }
+    if (-not $shellZip -or $shellZip -notmatch 'win64-shell\.zip$') {
+        throw "Engine package did not produce airdour-$Version-win64-shell.zip"
+    }
+}
+
+# NSIS installer from shell-stage (Engine when backends were staged, else UiOnly).
 $setupExe = $null
 $shellStage = Join-Path $OutDir "shell-stage"
 if (-not (Test-Path (Join-Path $shellStage "airdour_win_shell.exe"))) {

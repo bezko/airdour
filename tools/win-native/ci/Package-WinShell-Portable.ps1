@@ -306,7 +306,7 @@ Honest limits
 -------------
 - No GTK plugin UIs. Mixer shows FX name / BYP / Blend.
 - Default Engine package is MSVC Release (/MD). Pass -Config Debug for the Debug slice.
-- GitHub Actions publishes UiOnly when waf+vcpkg engine libs are not in CI yet.
+- An Engine package runs the DAW (Dummy and WASAPI). A UiOnly package is the shell with --no-engine.
 - Installer: Package-WinShell-Nsis.ps1 (NSIS, open source → dist\*-setup.exe).
 
 Smoke examples (Engine)
