@@ -687,10 +687,7 @@ public:
 	 */
 	virtual float dsp_load () const = 0;
 
-	/**
-	 * Optional process-cycle timing (microseconds) and underrun count.
-	 * Default zeros; WASAPI shared fills these for laptop perf smoke.
-	 */
+	/** Optional process-cycle timing (microseconds) and underrun count. Default zeros. */
 	virtual void process_callback_stats (uint64_t& last_us, uint64_t& max_us,
 	                                     uint64_t& avg_us, uint64_t& count,
 	                                     uint64_t& xruns) const

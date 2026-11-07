@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * MIDI sequencing helpers extracted from engine_host (Phase 0/1):
+ * MIDI sequencing helpers extracted from engine_host:
  * multi-MIDI tracks, piano-roll viewport, VST3 instrument attach smokes.
  */
 

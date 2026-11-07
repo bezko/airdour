@@ -269,7 +269,7 @@ jobs:
             ## Airdour Windows release (`${{ steps.ver.outputs.version }}`)
 
             **Brand:** Airdour · **GUI:** Win32 + Direct2D/DirectWrite (no GTK2)
-            **Audio path:** WASAPI shared (Dummy backend included). No ASIO / DirectSound.
+            **Audio path:** WASAPI shared by default; optional exclusive render with shared fallback (no ASIO / DirectSound). Capture stays shared.
 
             Unzip `airdour-*-win64-shell.zip` and run `run-airdour.bat`, or install:
 

@@ -2,8 +2,9 @@
 
 ## Locked audio target
 
-- **WASAPI shared mode only** — `libs/backends/wasapi/`
-- **Not** WASAPI exclusive / DirectSound / ASIO
+- **WASAPI shared by default** — `libs/backends/wasapi/`
+- **Optional exclusive** render; shared fallback if the device or format refuses it. Capture stays shared
+- **Not** DirectSound / ASIO
 - PortAudio is **not** on the default Windows-only product path
 
 ## Local prerequisites
@@ -11,7 +12,7 @@
 1. Visual Studio 2022+ (Desktop C++, MSVC) + Windows 10/11 SDK (x64)
 2. CMake ≥ 3.20
 3. vcpkg at a **short path** (recommended `C:\vcpkg`) — see `Install-HeadlessDeps.ps1`
-4. **No** Steinberg ASIO SDK; **no** GTK2 / `libs/tk` / Cairo canvas (GUI is `win_ardour` Direct2D)
+4. **No** Steinberg ASIO SDK; **no** GTK2 / `libs/tk`. Product UI is `win_ardour` Direct2D. Optional Cairo blit is not the UI (see below)
 
 ## Quick smoke (what CI builds)
 
@@ -130,5 +131,5 @@ Optional MSVC **Cairo** shell blit (not product UI): `-WithGtkLibs` → feature 
 
 ## Success for this phase
 
-- Shared-mode device I/O through `ARDOUR::AudioBackend` on win64
+- WASAPI device I/O (shared by default, optional exclusive) through `ARDOUR::AudioBackend` on win64
 - CI publishes reproducible win64 smoke/release zips

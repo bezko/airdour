@@ -2,7 +2,7 @@
  * Copyright (C) 2026 Airdour contributors
  *
  * Shared-memory + event protocol for hosting 32-bit VST2 in a Win32 bridge
- * process from the x64 Airdour shell (Phase 4).
+ * process from the x64 Airdour shell.
  */
 #pragma once
 

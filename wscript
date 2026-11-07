@@ -905,7 +905,7 @@ def options(opt):
     opt.add_option('--with-backends', type='string', action='store', default='', dest='with_backends',
                     help='Specify which backend modules are to be included(jack,alsa,portaudio,coreaudio,pulseaudio,wasapi,dummy)')
     opt.add_option('--windows-only', action='store_true', default=False, dest='windows_only',
-                    help='Airdour: force Windows-only product graph (WASAPI shared + dummy; drop Linux/mac helpers)')
+                    help='Airdour: force Windows-only product graph (WASAPI shared by default, optional exclusive, + dummy; drop Linux/mac helpers)')
     opt.add_option('--backtrace', action='store_true', default=False, dest='backtrace',
                     help='Compile with -rdynamic -- allow obtaining backtraces from within Ardour')
     opt.add_option('--no-carbon', action='store_true', default=False, dest='nocarbon',
@@ -1481,7 +1481,7 @@ int main () { __int128 x = 0; return 0; }
     if backends == ['']:
         backends = ['dummy']
         if windows_only:
-            # Product audio path: native WASAPI shared mode.
+            # Product audio path: native WASAPI (shared by default; optional exclusive).
             backends += ['wasapi']
         else:
             autowaf.check_pkg(conf, 'jack', uselib_store='JACK', atleast_version='1.9.10', mandatory=False)

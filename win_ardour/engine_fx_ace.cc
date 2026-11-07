@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Insert-rack / ACE FX chain helpers (Phase 2).
+ * Insert-rack / ACE FX chain helpers.
  */
 
 #include "engine_host.h"

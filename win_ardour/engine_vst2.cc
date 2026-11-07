@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Windows VST2-64 shell hosting + VST2-32 bridge hooks (Phase 3/4).
+ * Windows VST2-64 shell hosting and VST2-32 bridge hooks.
  */
 
 #include "engine_host.h"

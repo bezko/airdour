@@ -315,7 +315,7 @@ Version: $Version
 Git: $GitRef @ $GitSha
 Mode: $Mode
 Config: $Config
-Audio: WASAPI shared (engine) or UI-only (--no-engine)
+Audio: WASAPI shared by default, exclusive optional (engine) or UI-only (--no-engine)
 CRT: $crtNote
 
 How to run
@@ -332,7 +332,7 @@ ardour-vst2-bridge-x86.exe  Optional VST2-32 host (when staged)
 run-airdour.bat         Sets PATH / ARDOUR_DLL_PATH / ARDOUR_BACKEND_PATH
 backends\               Dummy + WASAPI backend DLLs (Engine mode)
 panners\                libardour panner plugins (Engine mode)
-LV2\                    Bundled LV2 plugins (Engine mode)
+LV2\                    ACE LV2: Reasonable Synth, Reverb, Comp, EQ, Delay, Limiter, Gate
 *.dll                   waf + vcpkg (+ CRT redistributables)
 
 Honest limits
@@ -361,7 +361,7 @@ mode:    $Mode
 config:  $Config
 exe:     airdour_win_shell.exe
 gui:     Win32 + Direct2D/DirectWrite (no GTK2)
-audio:   $(if ($Mode -eq 'Engine') { 'WASAPI shared + Dummy backends bundled' } else { 'UI-only (--no-engine); backends not bundled' })
+audio:   $(if ($Mode -eq 'Engine') { 'WASAPI (shared default, exclusive optional) + Dummy backends bundled' } else { 'UI-only (--no-engine); backends not bundled' })
 crt:     $crtNote
 
 Files copied: $($copied.Count)

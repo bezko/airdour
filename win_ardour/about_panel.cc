@@ -98,8 +98,8 @@ AboutPanel::draw_about (UiDraw& ui) const
 	                 ui::ColorToken::TextSecondary, D2D1::RectF (x0, y, x1, y + row));
 	y += row;
 
-	ui.text_vcenter (L"Audio  ·  WASAPI shared (Dummy for headless)", ui::TextRole::Body,
-	                 ui::ColorToken::TextSecondary, D2D1::RectF (x0, y, x1, y + row));
+	ui.text_vcenter (L"Audio  ·  WASAPI shared default (exclusive optional)", ui::TextRole::Body,
+			 ui::ColorToken::TextSecondary, D2D1::RectF (x0, y, x1, y + row));
 	y += row;
 
 	ui.text_vcenter (L"UI  ·  Win32 + Direct2D / DirectWrite", ui::TextRole::Body,
@@ -157,7 +157,7 @@ AboutPanel::draw_splash (ID2D1RenderTarget* rt,
 	                   accent);
 
 	wchar_t sub[96];
-	_snwprintf_s (sub, _TRUNCATE, L"v%s  ·  WASAPI shared  ·  Direct2D", kVersion);
+	_snwprintf_s (sub, _TRUNCATE, L"v%s  ·  WASAPI shared default  ·  Direct2D", kVersion);
 	rt->DrawTextW (sub, (UINT32)wcslen (sub), fmt_meta,
 	               D2D1::RectF (cx - 220.f * dpi_scale, brand_r.bottom + 16.f * dpi_scale,
 	                            cx + 220.f * dpi_scale, brand_r.bottom + 40.f * dpi_scale),

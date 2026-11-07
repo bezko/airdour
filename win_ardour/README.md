@@ -37,7 +37,7 @@ cmake --build build-win64-gui-engine-rel --config Release --target airdour_win_s
 win_ardour\run-engine-shell-release.bat --timeout 6 --backend WASAPI --smoke-perf
 ```
 
-Uses `build-rel/` (`/MD /O2`). Expect ~11% DSP / ~116 MB WS vs Debug ~60%+ / ~410 MB.
+Uses `build-rel/` (`/MD /O2`).
 
 ### Debug engine (laptop)
 
@@ -81,7 +81,7 @@ Engine builds also **copy** `ptformat.dll` / `ardour.dll` / … next to the exe 
 
 ## Session / PeakMeter / Editor / Record / Import / Save / Export / Undo / Loop / MIDI
 
-Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI 1** so mixer PeakMeters attach. Editor lanes read playlist peaks via `AudioRegion::read_peaks` — **empty tracks stay empty**. Mixer **R · arm** + **+ FX** (ACE Reverb on Audio 1, headless insert); transport **Rec** / **Loop** / **Mark** / **Import** / **Save** / **Open** / **Export**. **Export** bounces the master bus to a 16-bit WAV (ExportHandler, no GTK). **Ctrl+Z / Ctrl+Y** undo/redo; click a region to select; **Delete** removes it. **Loop** / **Mark** on the Editor ruler. **MIDI:** WASAPI uses real **WinMME** (not PortAudio); Dummy prefers loopback. Editor **piano-roll** (C3–B4): click/drag to draw notes, click to select, **Delete** removes; notes live in Session `MidiModel`. **ACE Reasonable Synth** (bundled LV2) sits on MIDI 1 and routes audio to master so notes are audible through Dummy/WASAPI shared — no MIDI hardware required. Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** then `ExitProcess(0)`.
+Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI 1** so mixer PeakMeters attach. Editor lanes read playlist peaks via `AudioRegion::read_peaks` — **empty tracks stay empty**. Mixer **R · arm** + **+ FX** (ACE Reverb on Audio 1, headless insert); transport **Rec** / **Loop** / **Mark** / **Import** / **Save** / **Open** / **Export**. **Export** bounces the master bus to a 16-bit WAV with TPDF dither (`D_Tri`; ExportHandler, no GTK). **Ctrl+Z / Ctrl+Y** undo/redo; click a region to select; **Delete** removes it. **Loop** / **Mark** on the Editor ruler. **MIDI:** WASAPI uses real **WinMME** (not PortAudio); Dummy prefers loopback. Editor **piano-roll** (C3–B4): click/drag to draw notes, click to select, **Delete** removes; notes live in Session `MidiModel`. **ACE Reasonable Synth** (bundled LV2) sits on MIDI 1 and routes audio to master so notes are audible through Dummy/WASAPI shared — no MIDI hardware required. Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** then `ExitProcess(0)`.
 
 `--smoke-<name>` is not a closed list. The full set is whatever `run_smoke_check` / `has_smoke` dispatch in `shell_window.cc`. Rows below are examples.
 

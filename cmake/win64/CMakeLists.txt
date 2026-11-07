@@ -1,7 +1,7 @@
 # Airdour win64 / MSVC
 #
-# Audio product path: WASAPI shared (libs/backends/wasapi).
-# Exclusive / DirectSound / ASIO: out of scope.
+# Audio product path: WASAPI shared by default (libs/backends/wasapi).
+# Optional exclusive render falls back to shared. DirectSound / ASIO: out of scope.
 # GTK chrome: out of scope — D2D shell is product UI.
 
 cmake_minimum_required(VERSION 3.20)

@@ -1,11 +1,11 @@
 # Airdour
 
-> **A lightweight, Windows-native Digital Audio Workstation (DAW)** powered by the Ardour 9 audio engine, a hardware-accelerated **Win32 + Direct2D / DirectWrite** shell, and a native **WASAPI shared-mode** audio backend with **WinMME MIDI**.
+> **A lightweight, Windows-native Digital Audio Workstation (DAW)** powered by the Ardour 9 audio engine, a hardware-accelerated **Win32 + Direct2D / DirectWrite** shell, and a native **WASAPI** audio backend (shared by default, optional exclusive) with **WinMME MIDI**.
 
 [![Windows MSVC CI](https://github.com/bezko/airdour/actions/workflows/windows-msvc.yml/badge.svg)](https://github.com/bezko/airdour/actions/workflows/windows-msvc.yml)
 [![License: GPL-2.0](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](COPYING)
 [![Platform: Windows x64](https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0078D6.svg)](cmake/win64/CMakeLists.txt)
-[![Audio: WASAPI Shared](https://img.shields.io/badge/Audio-WASAPI%20Shared-success.svg)](libs/backends/wasapi/README.md)
+[![Audio: WASAPI](https://img.shields.io/badge/Audio-WASAPI-success.svg)](libs/backends/wasapi/README.md)
 [![UI: Direct2D](https://img.shields.io/badge/UI-Direct2D%20%2B%20DirectWrite-purple.svg)](win_ardour/README.md)
 [![Project site](https://img.shields.io/badge/site-bezko.github.io%2Fairdour-25d9bc)](https://bezko.github.io/airdour/)
 
@@ -17,9 +17,9 @@
 2. [Core Innovations & Technical Differentiators](#core-innovations--technical-differentiators)
 3. [Subsystems](#subsystems)
    - [Direct2D Native GUI Shell (`win_ardour`)](#1-direct2d-native-gui-shell-win_ardour)
-   - [WASAPI Shared-Mode Backend (`libs/backends/wasapi`)](#2-wasapi-shared-mode-backend-libsbackendswasapi)
+   - [WASAPI Backend (`libs/backends/wasapi`)](#2-wasapi-backend-libsbackendswasapi)
    - [Headless Engine Core (`hardour` / `libardour`)](#3-headless-engine-core-hardour--libardour)
-   - [DSP Engine & Audio Effects (ACE LV2 & VST3)](#4-dsp-engine--audio-effects-ace-lv2--vst3)
+   - [DSP Engine & Audio Effects](#4-dsp-engine--audio-effects)
    - [Editing, Time-Stretching & Pitch-Shifting](#5-editing-time-stretching--pitch-shifting)
    - [Real-time Analysis & Metering](#6-real-time-analysis--metering)
 4. [Keyboard Shortcuts Reference](#keyboard-shortcuts-reference)
@@ -78,7 +78,7 @@ flowchart TD
     end
 
     subgraph AudioBackends ["Audio & MIDI I/O Layer"]
-        WASAPI["WASAPI Shared Audio Backend (wasapi_backend.cc)"]
+        WASAPI["WASAPI Backend, shared by default (wasapi_backend.cc)"]
         WinMME["WinMME MIDI Subsystem (winmmemidi_io.cc)"]
         Dummy["Dummy Audio Backend (Headless / Testing)"]
         MMCSS["MMCSS Pro Audio Thread Priority"]
@@ -88,6 +88,7 @@ flowchart TD
     subgraph DSP ["Plugin & Signal Processing Layer"]
         ACE["Headless ACE LV2 Plugins\n(Reverb, EQ, Comp, Gate, Limiter, Delay, Synth)"]
         VST3["VST3 Host (DSP-only scan and process)"]
+        VST2["VST2-64 in process · VST2-32 bridge"]
         RB["RubberBand (Time-Stretch & Pitch-Shift)"]
     end
 
@@ -95,7 +96,7 @@ flowchart TD
     EH --> Session
     Session --> AudioBackends
     AudioTrack --> DSP
-    MidiTrack --> ACE
+    MidiTrack --> DSP
 ```
 
 ### Threading Architecture
@@ -112,10 +113,8 @@ flowchart TD
 | Feature | Upstream Ardour (Windows) | Airdour |
 | :--- | :--- | :--- |
 | **Windowing & GUI Toolkit** | GTK2 + X11 compatibility shims + Cairo | **Native Win32 + Direct2D + DirectWrite** |
-| **Audio Backend** | PortAudio / ASIO third-party drivers required | **Native WASAPI Shared-Mode** (Zero driver install) |
+| **Audio Backend** | PortAudio / ASIO third-party drivers required | **Native WASAPI** (shared by default; optional exclusive; no driver install) |
 | **MIDI Subsystem** | PortAudio MIDI Bridge / ALSA-layer emulation | **Native WinMME subsystem** ([winmmemidi_io.cc](libs/backends/portaudio/winmmemidi_io.cc)) |
-| **Startup Memory Footprint** | ~400 MB – 600 MB working set | **~116 MB** working set in Release engine |
-| **DSP Overhead** | High due to POSIX translation layers | **~11% DSP load** baseline on standard mobile hardware |
 | **Toolchain & Compiler** | MinGW / MSYS2 / GCC cross-compilation | **Visual Studio 2022 (MSVC / cl.exe) + CMake + Waf** |
 | **Package Format** | Installer requiring extensive GTK runtime | **Self-contained portable ZIP** and an NSIS installer |
 
@@ -133,11 +132,11 @@ Located in [`win_ardour/`](win_ardour/README.md), the user interface is complete
 - **Mixer Strips**: Vertical channel strips featuring level faders, pan azimuth knobs, aux send controls, peak-hold clip indicators, Mute, Solo, and Record-Arm toggles.
 - **Transient Overlays**: Dismissible startup splash, interactive shortcuts reference overlay (`F1` / `?`), Preferences modal, Session History navigator, and Recent Sessions drawer.
 
-### 2. WASAPI Shared-Mode Backend (`libs/backends/wasapi`)
+### 2. WASAPI Backend (`libs/backends/wasapi`)
 
 Located in [`libs/backends/wasapi/`](libs/backends/wasapi/README.md), implementing the full `ARDOUR::AudioBackend` interface.
 
-- **Shared Mode Exclusivity**: Operates exclusively in Windows shared mode (`AUDCLNT_SHAREMODE_SHARED`). Users can mix DAW audio with YouTube, Spotify, and browser playback simultaneously without audio device lockouts.
+- **Shared by default**: Opens `AUDCLNT_SHAREMODE_SHARED`, so other programs can play at the same time. **Exclusive render is optional** (Preferences Shared/Exclusive, `AudioBackend::set_exclusive_mode`, or `AIRDOUR_WASAPI_EXCLUSIVE=1`). If the device or format refuses exclusive, the backend opens shared. Capture stays shared.
 - **Period Laddering & Rate Adaptation**: Dynamically negotiates formats using `IMMDeviceEnumerator` and `IAudioClient3::InitializeSharedAudioStream`. Snaps to hardware engine period fundamentals (e.g. 128, 240, 256, or 480 samples).
 - **Float & Integer Conversion**: Optimized SIMD-compatible sample format translation routines for IEEE 32-bit float, 16-bit PCM, 24-bit PCM, and 32-bit PCM.
 - **WinMME MIDI Driver**: Native Win32 MIDI input and output ports with millisecond-accurate timestamping, GS Wavetable routing, and loopback compatibility.
@@ -145,9 +144,9 @@ Located in [`libs/backends/wasapi/`](libs/backends/wasapi/README.md), implementi
 ### 3. Headless Engine Core (`hardour` / `libardour`)
 
 The Ardour DAW engine can run fully decoupled from any GUI:
-- **`ExportHandler`**: Headless master bus WAV rendering engine supporting stem exports and full-mix bounces (`airdour_win_shell`: `Ctrl+E` or `--smoke-export`).
+- **`ExportHandler`**: Headless master-bus bounce to 16-bit WAV with TPDF dither (`D_Tri`), plus stem export (`airdour_win_shell`: `Ctrl+E` or `--smoke-export`).
 
-### 4. DSP Engine & Audio Effects (ACE LV2 & VST3)
+### 4. DSP Engine & Audio Effects
 
 Airdour embeds native, headless LV2 audio processing plugins pre-wired into session tracks:
 
@@ -159,11 +158,12 @@ Airdour embeds native, headless LV2 audio processing plugins pre-wired into sess
 - **Audio 6 — ACE Gate**: Noise gate with configurable threshold and hold parameters.
 - **MIDI 1 — ACE Reasonable Synth**: Built-in LV2 synthesizer that converts MIDI note sequences to audible audio out of the box with zero external sound fonts or plugins required.
 - **VST3 Host Architecture**: Integrated VST3 plugin scanning (`VST3_SUPPORT`) for standard Windows system paths (`C:\Program Files\Common Files\VST3`) and custom `VST3_PATH` locations.
+- **Also in the shell**: more than one MIDI track, a per-track and master insert rack, in-process VST2-64, and out-of-process VST2-32 (`ardour-vst2-bridge-x86.exe`). Current behavior is in [`win_ardour/README.md`](win_ardour/README.md).
 
 ### 5. Editing, Time-Stretching & Pitch-Shifting
 
 The editing engine provides instant non-destructive audio manipulation:
-- **Non-destructive Region Editing**: Region trimming, body moving, splitting (`S`), fades and crossfades (`F`), region duplicate (`D`), and deletion (`Delete`).
+- **Non-destructive Region Editing**: Region trimming, body moving, splitting (`S`), fades and crossfades (`F`), region duplicate (`Ctrl+D`), and deletion (`Delete`).
 - **RubberBand Integration**: Headless pitch-shifting (`R` / `Shift+R` semitones) and time-stretching (`T` / `Shift+T` 1.5× / 0.75×) via the integrated RubberBand library.
 - **Clean-up & Mastering Operations**: Normalize to -1 dBFS (`N`), reverse playback (`V`), silence stripping at -40 dBFS threshold (`I`), track bounce-in-place (`B`), and track freezing (`Z`).
 
@@ -178,63 +178,7 @@ Hardware-accelerated visual meters rendered via Direct2D:
 
 ## Keyboard Shortcuts Reference
 
-Airdour provides a rapid, single-key workflow designed for efficiency. Press `F1` or `?` at any time to display the in-app interactive overlay.
-
-| Category | Shortcut | Description |
-| :--- | :--- | :--- |
-| **Transport** | `Space` | Play / Stop transport |
-| | `L` | Toggle transport loop range |
-| | `P` | Toggle punch in/out range |
-| | `[` / `]` | Set loop range start / end at current playhead |
-| | `Shift+[` / `Shift+]` | Set punch range start / end at current playhead |
-| | `C` | Toggle count-in before recording |
-| | `K` | Toggle metronome click |
-| | `+` / `-` | Increase / decrease tempo by 1 BPM |
-| | `Home` / `0` | Reset editor view / return to playhead |
-| **Arrangement & Editing** | `S` | Split selected region at playhead |
-| | `F` | Apply fade / crossfade affordance to selection |
-| | `Delete` | Remove selected audio/MIDI region or note |
-| | `T` / `Shift+T` | RubberBand time-stretch: 1.5× slow / 0.75× speed-up |
-| | `R` / `Shift+R` | RubberBand pitch-shift: +1 / -1 semitone (duration preserved) |
-| | `V` | Reverse selected audio region |
-| | `N` | Normalize selected audio region to -1 dBFS peak |
-| | `I` | Strip silence from region (-40 dBFS threshold) |
-| | `B` | Consolidate / bounce selection in place |
-| | `Z` | Freeze / unfreeze focused audio track |
-| | `G` / `Shift+G` | Toggle grid snap on/off / cycle snap density |
-| | `M` / `Shift+M` | Add / remove timeline location marker |
-| **MIDI & Piano-Roll** | `Q` | Quantize selected MIDI notes to snap grid |
-| | `,` / `.` | Transpose MIDI notes: -1 / +1 semitone (`Shift` for ±12 semitones) |
-| | `↑` / `↓` | Adjust note velocity: +1 / -1 (`Shift` for ±8 velocity) |
-| | `Alt+←` / `Alt+→` | Trim note length: - / + snap unit (`Shift` for larger steps) |
-| | `Ctrl+C` / `X` / `V` | Copy / Cut / Paste MIDI notes at playhead |
-| | `H` / `Shift+H` | Apply MIDI humanize timing and velocity jitter |
-| | `F4` | Toggle MIDI step-recording mode (QWERTY piano keys `Z`-`M` / `Q`-`U`) |
-| | `F5` | Cycle MIDI chord mode (`Off` → `Major` → `Minor`) |
-| | `F6` | Toggle MIDI arpeggiator (`Shift` cycles Up / Down / Up-Down) |
-| | `F7` | Toggle MIDI scale lock (`Shift` cycles scale, `Ctrl` sets root) |
-| | `F8` | Cycle MIDI automation lane (`CC7 Vol` → `CC1 Mod` → `CC11 Expr` → `Pitch Bend` → `Pressure`) |
-| **Track & Mixing** | `F2` | Rename focused track |
-| | `Alt+↑` / `Alt+↓` | Reorder audio track vertically |
-| | `U` | Link / unlink selected tracks into a RouteGroup |
-| **Metering & Analysis** | `Y` / `Shift+Y` | Toggle Spectrum Analyzer / switch between Track & Master |
-| | `X` / `Shift+X` | Toggle Phase Correlation & Goniometer display |
-| | `J` / `Shift+J` | Toggle ITU-R BS.1770 K-weighted LUFS loudness meter |
-| **Navigation & Zoom** | `A` | Fit all regions horizontally into view |
-| | `Shift+A` | Fit entire session timeline into view |
-| | `E` | Zoom to fit current region selection |
-| | `Ctrl++` / `Ctrl+-` | Zoom in / Zoom out centered on view |
-| | `Mouse Wheel` | Horizontal zoom |
-| | `Shift+Wheel` | Horizontal scroll across timeline |
-| | `←` / `→` | Nudge editor view left / right (`Shift` for large page) |
-| **System & Files** | `Ctrl+S` | Save session state (`.ardour` XML format) |
-| | `Ctrl+O` | Browse and open existing session folder |
-| | `Ctrl+Shift+O` | Toggle Recent Sessions dropdown menu |
-| | `Ctrl+E` | Export master bus mixdown to 16-bit PCM WAV |
-| | `Ctrl+Z` / `Ctrl+Y` | Session Undo / Redo |
-| | `Ctrl+,` | Open Preferences dialog |
-| | `F3` | Open About dialog |
-| | `Esc` | Dismiss open overlays / Close dialogs |
+Press `F1` or `?` in the shell. `ShellWindow::draw_help_overlay` in [`win_ardour/shell_window.cc`](win_ardour/shell_window.cc) is the binding list. A short subset is on the [project site](https://bezko.github.io/airdour/#keys).
 
 ---
 
@@ -255,7 +199,8 @@ Usage: airdour_win_shell.exe [OPTIONS]
 - `--no-splash`: Suppress the startup splash screen.
 
 ### Automated Smoke Test Flags
-Run any flag in combination with `--timeout 3` to verify subsystem health headlessly:
+
+`--smoke-<name>` is not a closed list. The set is whatever `ShellWindow::run_smoke_check` / `has_smoke` dispatch in [`win_ardour/shell_window.cc`](win_ardour/shell_window.cc). The rows below are examples. Run a flag with `--timeout 3` for a headless pass:
 
 | Flag | Subsystem Tested | Success Criteria |
 | :--- | :--- | :--- |
@@ -280,6 +225,11 @@ Run any flag in combination with `--timeout 3` to verify subsystem health headle
 | `--smoke-consolidate` | Bounce-in-Place | Renders selection with track gain/plugins directly onto a new audio file. |
 | `--smoke-freeze` | Track Freezing | Bounces track audio and disables real-time DSP load. |
 | `--smoke-perf` | Performance Profiling | Samples WASAPI callback jitter, CPU %, xrun count, and memory working set. |
+| `--smoke-midi-multi` | Multi-MIDI | Creates two MIDI tracks and a note on each. |
+| `--smoke-fx-chain` | Insert rack | Exercises per-track and master rack slots. |
+| `--smoke-vst2` | VST2-64 | Scans and inserts a VST2 audio effect when the catalog has one. |
+| `--smoke-vst2-bridge` | VST2-32 bridge | Opens the x86 bridge when `AIRDOUR_SMOKE_VST2_32` points at an i386 DLL. |
+| `--smoke-vst3-instrument` | VST3 instrument | Attaches a catalog instrument to the active MIDI track. |
 
 ---
 
@@ -353,7 +303,7 @@ The script [`tools/win-native/ci/Package-WinShell-Portable.ps1`](tools/win-nativ
 - `airdour_win_shell.exe`
 - All required dynamic libraries (`ardour.dll`, `pbd.dll`, `temporal.dll`, `ptformat.dll`, vcpkg CRT runtime)
 - Panner modules (`pan1in2out.dll`, `panbalance.dll`, `panvbap.dll`)
-- Bundled LV2 plugins (ACE Reverb, ACE Reasonable Synth)
+- Bundled ACE LV2 plugins: Reasonable Synth, Reverb, Compressor, EQ, Delay, Limiter, and Gate
 - Self-contained launcher script (`run-airdour.bat`)
 
 ```powershell
@@ -374,12 +324,10 @@ The script [`tools/win-native/ci/Package-WinShell-Installer.ps1`](tools/win-nati
 ## Technical Constraints & Design Decisions
 
 > [!NOTE]
-> **Why WASAPI Shared Mode exclusively?**  
-> Professional audio software on Windows often mandates ASIO drivers. However, proprietary ASIO drivers introduce setup friction, lock the audio device exclusively (preventing audio playback from web browsers or reference tracks), and vary wildly in stability across consumer USB interfaces. Airdour achieves reliable ~10 ms latency on commodity hardware via WASAPI shared mode and MMCSS Pro Audio scheduling without requiring user-installed driver packages.
+> **WASAPI.** Shared mode is the default, so other programs can keep playing. Exclusive render is optional and falls back to shared when the device or format refuses it. No ASIO driver.
 
-> [!WARNING]
-> **No Cairo canvas.** Cairo is still optionally linked into `airdour_win_shell`.  
-> Upstream Ardour relies on GTK2, `gtkmm2`, and Cairo. On Windows, GTK2 is obsolete, lacks high-DPI handling, requires massive runtime DLL bundles, and suffers from rendering latency. In Airdour, the entire GTK2 subsystem has been purged from the Windows build graph (`AIRDOUR_WINDOWS_ONLY`).
+> [!NOTE]
+> **UI.** The shell is Win32 + Direct2D. Cairo is an optional blit for waves, spectrum, and automation (`AIRDOUR_HAVE_CAIRO`), not the product canvas. GTK2 is not the Windows UI.
 
 > [!IMPORTANT]
 > **Windows Synchronization Primitives**  
@@ -400,7 +348,7 @@ airdour/
 │   ├── ardour/                   # Core DAW engine library (libardour)
 │   ├── backends/
 │   │   ├── dummy/                # Null audio driver for testing
-│   │   └── wasapi/               # Native Windows WASAPI shared audio & WinMME MIDI backend
+│   │   └── wasapi/               # Native Windows WASAPI (shared default) & WinMME MIDI backend
 │   ├── evoral/                   # Event graph and MIDI timeline representation
 │   ├── midi++2/                  # MIDI transport and message processing
 │   ├── pbd/                      # Platform abstraction, threading, and base data structures
