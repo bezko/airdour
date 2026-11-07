@@ -99,7 +99,7 @@ AboutPanel::draw_about (UiDraw& ui) const
 	y += row;
 
 	ui.text_vcenter (L"Audio  ·  WASAPI shared default (exclusive optional)", ui::TextRole::Body,
-	                 ui::ColorToken::TextSecondary, D2D1::RectF (x0, y, x1, y + row));
+			 ui::ColorToken::TextSecondary, D2D1::RectF (x0, y, x1, y + row));
 	y += row;
 
 	ui.text_vcenter (L"UI  ·  Win32 + Direct2D / DirectWrite", ui::TextRole::Body,
