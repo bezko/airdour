@@ -7753,14 +7753,12 @@ ShellWindow::layout_panes ()
 	const float hist_need = 128.f * _dpi_scale;
 	const int n_mix_need = std::max (1, n_mixer_strips ());
 	float min_strip_need = _engine_snap.mixer_narrow ? 52.f * _dpi_scale
-	                                                : 64.f * _dpi_scale;
+							 : 64.f * _dpi_scale;
 	if (_mixer_force_min_w > 1.f) {
 		min_strip_need = _mixer_force_min_w * _dpi_scale;
 	}
-	const float strips_need = min_strip_need * (float)n_mix_need
-	                          + strip_gap_need * (float)std::max (0, n_mix_need - 1);
-	const float mixer_need = strips_need + mon_need + hist_need
-	                         + strip_gap_need * 2.f + mix_inset_need * 2.f;
+	const float strips_need = min_strip_need * (float)n_mix_need + strip_gap_need * (float)std::max (0, n_mix_need - 1);
+	const float mixer_need = strips_need + mon_need + hist_need + strip_gap_need * 2.f + mix_inset_need * 2.f;
 	float split = left + body_span * 0.64f;
 	float mixer_w = right - (split + gap * 0.5f);
 	const float editor_min = 480.f * _dpi_scale;
