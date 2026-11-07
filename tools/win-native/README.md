@@ -64,7 +64,6 @@ building a UI-only exe, and stages the waf DLLs at build time.
 Default backends: **dummy** + **wasapi**. Needs the MSVC deps above **plus** the glibmm-2.4 overlay.
 
 Run the suite against any configured tree: `tools\win-native\run-smoke-suite.cmd [build-dir]`.
-Basic install/zip packaging: `cmake --install build-ninja-ui` / `cpack --config build-ninja-ui\CPackConfig.cmake`.
 
 ## Formatting
 

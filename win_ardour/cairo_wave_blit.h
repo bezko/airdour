@@ -1,10 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Thin Cairo→D2D bridge for Editor ink (waveforms, automation curves,
- * fade wedges, MIDI notes). Reuses the libs/canvas ImageSurface pattern
- * (offline ARGB32) without linking libs/canvas or opening GTK windows.
- * Product chrome stays D2D.
+ * Thin Cairo→D2D bridge for peaks, automation, bars, and points.
  */
 
 #pragma once

@@ -21,8 +21,6 @@
 namespace ui {
 
 enum class ColorToken : int {
-	WindowTop,
-	WindowBottom,
 	Surface,
 	SurfaceRaised,
 	Card,
@@ -46,12 +44,10 @@ enum class ColorToken : int {
 	Loop,
 	Punch,
 	Marker,
-	Selection,
 	Playhead,
 	Midi,
 	Clip,
 	Peak,
-	Rms,
 	MeterHot,
 	MeterHold,
 	GridBar,
@@ -121,18 +117,7 @@ struct ThemeColors {
 };
 
 struct ThemeMetrics {
-	float radius_sm;
-	float radius_md;
 	float radius_lg;
-	float space_1;
-	float space_2;
-	float space_3;
-	float space_4;
-	float space_5;
-	float space_6;
-	float stroke_hair;
-	float stroke;
-	float stroke_focus;
 	float brand_h;
 	float transport_h;
 	float status_h;
@@ -169,8 +154,6 @@ make_theme ()
 	Theme t {};
 	D2D1_COLOR_F* c = t.colors.v;
 
-	c[static_cast<int> (ColorToken::WindowTop)]     = rgb (0x0a0d12);
-	c[static_cast<int> (ColorToken::WindowBottom)]  = rgb (0x121821);
 	c[static_cast<int> (ColorToken::Surface)]       = rgb (0x11161d);
 	c[static_cast<int> (ColorToken::SurfaceRaised)] = rgb (0x18202a);
 	c[static_cast<int> (ColorToken::Card)]          = rgb (0x151c25);
@@ -194,30 +177,17 @@ make_theme ()
 	c[static_cast<int> (ColorToken::Loop)]          = rgb (0xf0a93b);
 	c[static_cast<int> (ColorToken::Punch)]         = rgb (0xe8574a);
 	c[static_cast<int> (ColorToken::Marker)]        = rgb (0xd6e36b);
-	c[static_cast<int> (ColorToken::Selection)]     = rgb (0x3fc3e8);
 	c[static_cast<int> (ColorToken::Playhead)]      = rgb (0xffd24a);
 	c[static_cast<int> (ColorToken::Midi)]          = rgb (0x46c2e8);
 	c[static_cast<int> (ColorToken::Clip)]          = rgb (0xff5d45);
 	c[static_cast<int> (ColorToken::Peak)]          = rgb (0x35e6c8);
-	c[static_cast<int> (ColorToken::Rms)]           = rgb (0x1c7a6e);
 	c[static_cast<int> (ColorToken::MeterHot)]      = rgb (0xf26b3a);
 	c[static_cast<int> (ColorToken::MeterHold)]     = rgb (0xf4f8fa);
 	c[static_cast<int> (ColorToken::GridBar)]       = rgb (0x9fb3c4);
 	c[static_cast<int> (ColorToken::GridBeat)]      = rgb (0x8095a8);
 	c[static_cast<int> (ColorToken::Shadow)]        = rgb (0x000000);
 
-	t.metrics.radius_sm = 3.f;
-	t.metrics.radius_md = 6.f;
 	t.metrics.radius_lg = 10.f;
-	t.metrics.space_1 = 2.f;
-	t.metrics.space_2 = 4.f;
-	t.metrics.space_3 = 8.f;
-	t.metrics.space_4 = 12.f;
-	t.metrics.space_5 = 16.f;
-	t.metrics.space_6 = 24.f;
-	t.metrics.stroke_hair = 1.f;
-	t.metrics.stroke = 1.25f;
-	t.metrics.stroke_focus = 2.f;
 	t.metrics.brand_h = 56.f;
 	t.metrics.transport_h = 88.f;
 	t.metrics.status_h = 32.f;

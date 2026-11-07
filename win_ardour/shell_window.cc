@@ -125,7 +125,6 @@ ShellWindow::ShellWindow ()
 	, _mouse_x (0.f)
 	, _mouse_y (0.f)
 	, _mouse_tracking (false)
-	, _running (false)
 	, _start_tick (0)
 	, _timeout_secs (0)
 	, _drag (DragMode::None)
@@ -225,6 +224,7 @@ ShellWindow::ShellWindow ()
 		_mixers[i].set_gain (0.85f - 0.04f * (float)i);
 		_mixers[i].set_midi_strip (false);
 		_group_pick[i] = false;
+		_fx_rack_slot[i] = 0;
 	}
 	for (int i = 0; i < kMixerStripsMax; ++i) {
 		if (i >= kTracksMax) {
@@ -240,6 +240,37 @@ ShellWindow::ShellWindow ()
 	for (int i = 0; i < 128; ++i) {
 		_step_piano_held[i] = false;
 	}
+}
+
+uint8_t
+ShellWindow::midi_view_lo () const
+{
+	int lo = _engine_snap.midi_pitch_lo;
+	if (lo < 0)
+		lo = 0;
+	if (lo > 127)
+		lo = 127;
+	return (uint8_t)lo;
+}
+
+uint8_t
+ShellWindow::midi_view_hi () const
+{
+	int hi = _engine_snap.midi_pitch_hi;
+	if (hi < 0)
+		hi = 0;
+	if (hi > 127)
+		hi = 127;
+	int lo = (int)midi_view_lo ();
+	if (hi < lo)
+		hi = lo;
+	return (uint8_t)hi;
+}
+
+int
+ShellWindow::midi_view_rows () const
+{
+	return (int)midi_view_hi () - (int)midi_view_lo () + 1;
 }
 
 ShellWindow::~ShellWindow ()
@@ -1993,6 +2024,20 @@ ShellWindow::attach_engine (const std::string& backend_name,
 	run_smoke_check (ok, "vst3-status-unload", [this]() { return smoke_vst3_status_unload (); });
 	run_smoke_check (ok, "vst3-status-bypass", [this]() { return smoke_vst3_status_bypass (); });
 	run_smoke_check (ok, "vst3-status-param-reset", [this]() { return smoke_vst3_status_param_reset (); });
+	run_smoke_check (ok, "midi-multi", [this] () { return _engine.smoke_midi_multi (); });
+	run_smoke_check (ok, "vst3-instrument", [this] () { return _engine.smoke_vst3_instrument (); });
+	run_smoke_check (ok, "fx-chain", [this] () {
+		if (!_engine.smoke_fx_chain ()) {
+			return false;
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_fx_from_engine ();
+		return true;
+	});
+	run_smoke_check (ok, "vst2", [this] () { return _engine.smoke_vst2 (); });
+	run_smoke_check (ok, "vst2-instrument", [this] () { return _engine.smoke_vst2_instrument (); });
+	run_smoke_check (ok, "vst2-bridge", [this] () { return _engine.smoke_vst2_bridge (); });
 	run_smoke_check (ok, "meter-clip-led", [this]() { return smoke_meter_clip_led (); });
 	run_smoke_check (ok, "export-stems", [this]() { return _engine.smoke_export_stems (); });
 	run_smoke_check (ok, "mute-all", [this]() { return _engine.smoke_mute_all (); });
@@ -2228,7 +2273,6 @@ ShellWindow::sync_transport_tempo_from_engine ()
 	_transport.set_tempo_bpm (_engine_snap.tempo_bpm);
 	_transport.set_count_in_enabled (_engine_snap.count_in_enabled);
 	_transport.set_click_enabled (_engine_snap.click_enabled);
-	_transport.set_click_gain (_engine_snap.click_gain);
 }
 
 void
@@ -2270,9 +2314,17 @@ int
 ShellWindow::n_mixer_strips () const
 {
 	int n = n_audio_lanes ();
-	if (_engine_snap.midi_track_ok || _engine_snap.midi_track_count > 0 || !_engine_snap.session_ok) {
-		++n;
+	int nm = _engine_snap.midi_track_count;
+	if (nm < 0) {
+		nm = 0;
 	}
+	if (nm == 0 && (_engine_snap.midi_track_ok || !_engine_snap.session_ok)) {
+		nm = 1;
+	}
+	if (nm > kMidiStripsMax) {
+		nm = kMidiStripsMax;
+	}
+	n += nm;
 	if (n > kMixerStripsMax) {
 		n = kMixerStripsMax;
 	}
@@ -2283,6 +2335,55 @@ int
 ShellWindow::midi_mixer_index () const
 {
 	return n_audio_lanes ();
+}
+
+int
+ShellWindow::n_midi_mixer_strips () const
+{
+	int nm = _engine_snap.midi_track_count;
+	if (nm < 0) {
+		nm = 0;
+	}
+	if (nm == 0 && (_engine_snap.midi_track_ok || !_engine_snap.session_ok)) {
+		nm = 1;
+	}
+	if (nm > kMidiStripsMax) {
+		nm = kMidiStripsMax;
+	}
+	return nm;
+}
+
+int
+ShellWindow::midi_track_from_mixer (int mixer_index) const
+{
+	const int mi0 = midi_mixer_index ();
+	const int nm = n_midi_mixer_strips ();
+	if (mixer_index < mi0 || mixer_index >= mi0 + nm) {
+		return -1;
+	}
+	return mixer_index - mi0;
+}
+
+bool
+ShellWindow::activate_midi_mixer_strip (int mixer_index)
+{
+	const int m = midi_track_from_mixer (mixer_index);
+	if (m < 0 || !_engine.is_linked ()) {
+		return false;
+	}
+	if (_engine_snap.active_midi_track == m) {
+		return true;
+	}
+	if (!_engine.set_active_midi_track (m)) {
+		return false;
+	}
+	_engine.poll ();
+	_engine_snap = _engine.snapshot ();
+	sync_track_labels_from_engine ();
+	sync_mixer_arm_from_engine ();
+	sync_mixer_mute_solo_from_engine ();
+	sync_mixer_group_from_engine ();
+	return true;
 }
 
 void
@@ -2301,13 +2402,22 @@ ShellWindow::sync_track_labels_from_engine ()
 		_mixers[i].set_color (i < EngineSnapshot::kMeters ? _engine_snap.track_color[i] : 0);
 		_mixers[i].set_midi_strip (false);
 	}
-	const int mi = midi_mixer_index ();
-	if (mi >= 0 && mi < kMixerStripsMax) {
-		if (_engine_snap.midi_track_name[0] != L'\0') {
-			_mixers[mi].set_label (_engine_snap.midi_track_name);
-		} else {
-			_mixers[mi].set_label (L"MIDI 1");
+	const int mi0 = midi_mixer_index ();
+	const int nm = n_midi_mixer_strips ();
+	for (int m = 0; m < nm; ++m) {
+		const int mi = mi0 + m;
+		if (mi < 0 || mi >= kMixerStripsMax) {
+			break;
 		}
+		wchar_t lab[32];
+		if (m < EngineSnapshot::kMeters && _engine_snap.midi_track_names[m][0] != L'\0') {
+			wcsncpy_s (lab, _engine_snap.midi_track_names[m], _TRUNCATE);
+		} else if (m == 0 && _engine_snap.midi_track_name[0] != L'\0') {
+			wcsncpy_s (lab, _engine_snap.midi_track_name, _TRUNCATE);
+		} else {
+			_snwprintf_s (lab, _TRUNCATE, L"MIDI %d", m + 1);
+		}
+		_mixers[mi].set_label (lab);
 		_mixers[mi].set_color (0);
 		_mixers[mi].set_midi_strip (true);
 	}
@@ -2346,13 +2456,24 @@ ShellWindow::sync_mixer_group_from_engine ()
 	_transport.set_spectrum_enabled (_engine_snap.spectrum_enabled);
 	_transport.set_correlation_enabled (_engine_snap.correlation_enabled);
 	_transport.set_loudness_enabled (_engine_snap.loudness_enabled);
+
+	/* Active MIDI strip selection chrome (piano-roll edits this track). */
+	const int mi0 = midi_mixer_index ();
+	const int nm = n_midi_mixer_strips ();
+	for (int m = 0; m < nm; ++m) {
+		const int mi = mi0 + m;
+		if (mi >= 0 && mi < kMixerStripsMax) {
+			_mixers[mi].set_selected (m == _engine_snap.active_midi_track);
+		}
+	}
 }
 
 void
 ShellWindow::sync_mixer_arm_from_engine ()
 {
 	const int na = n_audio_lanes ();
-	const int mi = midi_mixer_index ();
+	const int mi0 = midi_mixer_index ();
+	const int nm = n_midi_mixer_strips ();
 	for (int i = 0; i < kMixerStripsMax; ++i) {
 		_mixers[i].set_armed (false);
 		_mixers[i].set_record_safe (false);
@@ -2361,8 +2482,12 @@ ShellWindow::sync_mixer_arm_from_engine ()
 		_mixers[i].set_armed (_engine_snap.track_armed[i]);
 		_mixers[i].set_record_safe (_engine_snap.track_record_safe[i]);
 	}
-	if (mi >= 0 && mi < kMixerStripsMax) {
-		_mixers[mi].set_armed (_engine_snap.midi_armed);
+	for (int m = 0; m < nm; ++m) {
+		const int mi = mi0 + m;
+		if (mi < 0 || mi >= kMixerStripsMax) {
+			break;
+		}
+		_mixers[mi].set_armed (m == _engine_snap.active_midi_track && _engine_snap.midi_armed);
 		_mixers[mi].set_record_safe (false);
 	}
 	_transport.set_record_armed (_engine_snap.session_record_armed);
@@ -2386,17 +2511,23 @@ void
 ShellWindow::sync_mixer_mute_solo_from_engine ()
 {
 	const int na = n_audio_lanes ();
-	const int mi = midi_mixer_index ();
+	const int mi0 = midi_mixer_index ();
+	const int nm = n_midi_mixer_strips ();
 	for (int i = 0; i < na && i < EngineSnapshot::kMeters; ++i) {
 		_mixers[i].set_muted (_engine_snap.track_muted[i]);
 		_mixers[i].set_mute_points (_engine_snap.track_mute_points[i]);
 		_mixers[i].set_soloed (_engine_snap.track_soloed[i]);
 		_mixers[i].set_route_active (_engine_snap.track_active[i]);
 	}
-	if (mi >= 0 && mi < kMixerStripsMax) {
-		_mixers[mi].set_muted (_engine_snap.midi_muted);
+	for (int m = 0; m < nm; ++m) {
+		const int mi = mi0 + m;
+		if (mi < 0 || mi >= kMixerStripsMax) {
+			break;
+		}
+		const bool active = (m == _engine_snap.active_midi_track);
+		_mixers[mi].set_muted (active && _engine_snap.midi_muted);
 		_mixers[mi].set_mute_points (0);
-		_mixers[mi].set_soloed (_engine_snap.midi_soloed);
+		_mixers[mi].set_soloed (active && _engine_snap.midi_soloed);
 		_mixers[mi].set_route_active (true);
 	}
 }
@@ -2852,6 +2983,33 @@ ShellWindow::sync_mixer_fx_from_engine ()
 {
 	for (int i = 0; i < kTracks; ++i) {
 		_mixers[i].set_fx_can_unload (false);
+		/* Prefer Phase-2 insert rack when populated (Ctrl+click cycles slot). */
+		if (i < EngineSnapshot::kMeters && _engine_snap.insert_slot_count[i] > 0) {
+			int slot_i = _fx_rack_slot[i];
+			const int nslots = _engine_snap.insert_slot_count[i];
+			if (slot_i < 0 || slot_i >= nslots) {
+				slot_i = 0;
+				_fx_rack_slot[i] = 0;
+			}
+			const EngineSnapshot::InsertSlotSnap& slot = _engine_snap.insert_slots[i][slot_i];
+			if (slot.ok && slot.name[0] != L'\0') {
+				wchar_t label[40];
+				if (nslots > 1) {
+					_snwprintf_s (label, _TRUNCATE, L"%s ·%d/%d", slot.name,
+						      slot_i + 1, nslots);
+				} else {
+					wcsncpy_s (label, slot.name, _TRUNCATE);
+				}
+				_mixers[i].set_fx_label (label);
+				_mixers[i].set_fx_bypassed (slot.bypassed);
+				const int n = slot.param_count > 3 ? 3 : slot.param_count;
+				_mixers[i].set_fx_param_count (n);
+				_mixers[i].set_fx_param (slot.param_count > 0 ? slot.param_norm[0] : 0.5f);
+				_mixers[i].set_fx_param2 (slot.param_count > 1 ? slot.param_norm[1] : 0.5f);
+				_mixers[i].set_fx_param3 (slot.param_count > 2 ? slot.param_norm[2] : 0.5f);
+				continue;
+			}
+		}
 		if (i == 0 && _engine_snap.track_fx_ok && !_engine_snap.track_fx_name.empty ()) {
 			_mixers[i].set_fx_label (_engine_snap.track_fx_name.c_str ());
 			_mixers[i].set_fx_bypassed (_engine_snap.track_fx_bypassed);
@@ -2862,10 +3020,8 @@ ShellWindow::sync_mixer_fx_from_engine ()
 			_mixers[i].set_fx_label (_engine_snap.vst3_name);
 			_mixers[i].set_fx_bypassed (_engine_snap.vst3_bypassed);
 			_mixers[i].set_fx_can_unload (true);
-			const int n = (_engine_snap.vst3_param_count > 0)
-			                  ? (std::min) (_engine_snap.vst3_param_count,
-			                               EngineSnapshot::kMaxVst3Params)
-			                  : 0;
+			const int n = _engine_snap.vst3_param_count > 3 ? 3
+									: (_engine_snap.vst3_param_count > 0 ? _engine_snap.vst3_param_count : 0);
 			_mixers[i].set_fx_param_count (n);
 			_mixers[i].set_fx_param (
 			    (_engine_snap.vst3_param_count > 0) ? _engine_snap.vst3_param_norm[0] : 0.5f);
@@ -2873,8 +3029,26 @@ ShellWindow::sync_mixer_fx_from_engine ()
 			    (_engine_snap.vst3_param_count > 1) ? _engine_snap.vst3_param_norm[1] : 0.5f);
 			_mixers[i].set_fx_param3 (
 			    (_engine_snap.vst3_param_count > 2) ? _engine_snap.vst3_param_norm[2] : 0.5f);
-		} else if (i == 1 && _engine_snap.track_comp_ok
-		           && !_engine_snap.track_comp_name.empty ()) {
+		} else if (i == 1 && _engine_snap.vst2_ok && _engine_snap.vst2_name[0] != L'\0') {
+			wchar_t label[40];
+			if (_engine_snap.vst2_bridged_32) {
+				_snwprintf_s (label, _TRUNCATE, L"%s 32", _engine_snap.vst2_name);
+			} else {
+				wcsncpy_s (label, _engine_snap.vst2_name, _TRUNCATE);
+			}
+			_mixers[i].set_fx_label (label);
+			_mixers[i].set_fx_bypassed (_engine_snap.vst2_bypassed);
+			_mixers[i].set_fx_can_unload (true);
+			const int n = _engine_snap.vst2_param_count > 3 ? 3
+									: (_engine_snap.vst2_param_count > 0 ? _engine_snap.vst2_param_count : 0);
+			_mixers[i].set_fx_param_count (n);
+			_mixers[i].set_fx_param (
+				(_engine_snap.vst2_param_count > 0) ? _engine_snap.vst2_param_norm[0] : 0.5f);
+			_mixers[i].set_fx_param2 (
+				(_engine_snap.vst2_param_count > 1) ? _engine_snap.vst2_param_norm[1] : 0.5f);
+			_mixers[i].set_fx_param3 (
+				(_engine_snap.vst2_param_count > 2) ? _engine_snap.vst2_param_norm[2] : 0.5f);
+		} else if (i == 1 && _engine_snap.track_comp_ok && !_engine_snap.track_comp_name.empty ()) {
 			wchar_t label[40];
 			if (_engine_snap.track_comp_sidechain) {
 				_snwprintf_s (label, _TRUNCATE, L"%s SC",
@@ -2887,30 +3061,26 @@ ShellWindow::sync_mixer_fx_from_engine ()
 			_mixers[i].set_fx_param_count (2);
 			_mixers[i].set_fx_param (_engine_snap.track_comp_threshold_norm);
 			_mixers[i].set_fx_param2 (_engine_snap.track_comp_ratio_norm);
-		} else if (i == 2 && _engine_snap.track_eq_ok
-		           && !_engine_snap.track_eq_name.empty ()) {
+		} else if (i == 2 && _engine_snap.track_eq_ok && !_engine_snap.track_eq_name.empty ()) {
 			_mixers[i].set_fx_label (_engine_snap.track_eq_name.c_str ());
 			_mixers[i].set_fx_bypassed (_engine_snap.track_eq_bypassed);
 			_mixers[i].set_fx_param_count (3);
 			_mixers[i].set_fx_param (_engine_snap.track_eq_gain_l_norm);
 			_mixers[i].set_fx_param2 (_engine_snap.track_eq_gain_m_norm);
 			_mixers[i].set_fx_param3 (_engine_snap.track_eq_gain_h_norm);
-		} else if (i == 3 && _engine_snap.track_delay_ok
-		           && !_engine_snap.track_delay_name.empty ()) {
+		} else if (i == 3 && _engine_snap.track_delay_ok && !_engine_snap.track_delay_name.empty ()) {
 			_mixers[i].set_fx_label (_engine_snap.track_delay_name.c_str ());
 			_mixers[i].set_fx_bypassed (_engine_snap.track_delay_bypassed);
 			_mixers[i].set_fx_param_count (2);
 			_mixers[i].set_fx_param (_engine_snap.track_delay_time_norm);
 			_mixers[i].set_fx_param2 (_engine_snap.track_delay_feedback_norm);
-		} else if (i == 4 && _engine_snap.track_limiter_ok
-		           && !_engine_snap.track_limiter_name.empty ()) {
+		} else if (i == 4 && _engine_snap.track_limiter_ok && !_engine_snap.track_limiter_name.empty ()) {
 			_mixers[i].set_fx_label (_engine_snap.track_limiter_name.c_str ());
 			_mixers[i].set_fx_bypassed (_engine_snap.track_limiter_bypassed);
 			_mixers[i].set_fx_param_count (2);
 			_mixers[i].set_fx_param (_engine_snap.track_limiter_ceiling_norm);
 			_mixers[i].set_fx_param2 (_engine_snap.track_limiter_release_norm);
-		} else if (i == 5 && _engine_snap.track_gate_ok
-		           && !_engine_snap.track_gate_name.empty ()) {
+		} else if (i == 5 && _engine_snap.track_gate_ok && !_engine_snap.track_gate_name.empty ()) {
 			_mixers[i].set_fx_label (_engine_snap.track_gate_name.c_str ());
 			_mixers[i].set_fx_bypassed (_engine_snap.track_gate_bypassed);
 			_mixers[i].set_fx_param_count (2);
@@ -3480,10 +3650,24 @@ ShellWindow::tick_smoke_record (DWORD now)
 		_engine_snap = _engine.snapshot ();
 		sync_mixer_arm_from_engine ();
 		_smoke_record = SmokeRecordPhase::Done;
+		const bool have_take = _engine_snap.track_has_regions[0];
 		std::fprintf (stderr,
-		              "airdour_win_shell: smoke-record done — track0 regions=%d\n",
-		              _engine_snap.track_has_regions[0] ? 1 : 0);
+			      "airdour_win_shell: smoke-record done — track0 regions=%d mismatch=%d\n",
+			      have_take ? 1 : 0,
+			      _engine_snap.capture_rate_mismatch ? 1 : 0);
 		std::fflush (stderr);
+		if (!have_take) {
+			if (_engine_snap.capture_rate_mismatch) {
+				std::fprintf (stderr,
+					      "airdour_win_shell: smoke-record FAILED "
+					      "(no region — capture was resampling; check input arm/path)\n");
+			} else {
+				std::fprintf (stderr,
+					      "airdour_win_shell: smoke-record FAILED (no region after take)\n");
+			}
+			std::fflush (stderr);
+			_smoke_failed = true;
+		}
 		/* Leave early so ExitProcess is less likely to race Butler after a take. */
 		PostQuitMessage (0);
 	}
@@ -6502,8 +6686,8 @@ ShellWindow::smoke_midi_audition_ghost ()
 		_engine.silence_midi_audition ();
 		return false;
 	}
-	float row_h = h / (float)kMidiPitchRows;
-	int row = (int)(kMidiPitchHi - pitch);
+	float row_h = h / (float)midi_view_rows ();
+	int row = (int)(midi_view_hi () - pitch);
 	float y0 = piano.top + (float)row * row_h;
 	float y1 = y0 + row_h;
 	if (y0 < piano.top - 1.f || y1 > piano.bottom + 1.f) {
@@ -6819,8 +7003,8 @@ ShellWindow::smoke_midi_step_piano_highlight ()
 		clear_step_piano_held ();
 		return false;
 	}
-	int row = (int)(kMidiPitchHi - pitch);
-	float row_h = h / (float)kMidiPitchRows;
+	int row = (int)(midi_view_hi () - pitch);
+	float row_h = h / (float)midi_view_rows ();
 	float y0 = piano.top + (float)row * row_h;
 	float y1 = y0 + row_h;
 	if (y0 < piano.top - 1.f || y1 > piano.bottom + 1.f) {
@@ -8326,6 +8510,15 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			           && !(GetKeyState (VK_MENU) & 0x8000)) {
 				/* Ctrl+L = lock / unlock selected region (blocks move/trim). */
 				do_toggle_selection_locked ();
+			} else if ((GetKeyState (VK_MENU) & 0x8000) && (GetKeyState (VK_SHIFT) & 0x8000) && !(GetKeyState (VK_CONTROL) & 0x8000)) {
+				/* Alt+Shift+L — cycle Solo → PFL → AFL → Solo. */
+				if (_engine.is_linked () && _engine_snap.session_ok) {
+					_engine.cycle_listen_mode ();
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_mixer_listen_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+				}
 			} else {
 				do_toggle_loop ();
 			}
@@ -8335,21 +8528,6 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				/* Alt+O = toggle region opaque / transparent. */
 				do_toggle_selection_opaque ();
 			}
-		} else if ((GetKeyState (VK_MENU) & 0x8000)
-		           && (GetKeyState (VK_SHIFT) & 0x8000)
-		           && !(GetKeyState (VK_CONTROL) & 0x8000)
-		           && (wparam == 'L' || wparam == 'l')) {
-			/* Alt+Shift+L — cycle Solo → PFL → AFL → Solo. */
-			if (_engine.is_linked () && _engine_snap.session_ok) {
-				_engine.cycle_listen_mode ();
-				_engine.poll ();
-				_engine_snap = _engine.snapshot ();
-				sync_mixer_listen_from_engine ();
-				InvalidateRect (_hwnd, nullptr, FALSE);
-			}
-		} else if (!(GetKeyState (VK_MENU) & 0x8000)
-		           && (wparam == 'L' || wparam == 'l')) {
-			do_toggle_loop ();
 		} else if (wparam == 'P' || wparam == 'p') {
 			if ((GetKeyState (VK_CONTROL) & 0x8000)
 			    && (GetKeyState (VK_SHIFT) & 0x8000)
@@ -9027,13 +9205,11 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		int fi = hit_mixer_fader (x, y);
 		if (fi >= 0 && _engine.is_linked () && _engine_snap.session_ok) {
 			_mixers[fi].set_gain (1.f);
-			if (fi == midi_mixer_index ()) {
+			if (midi_track_from_mixer (fi) >= 0) {
+				(void)activate_midi_mixer_strip (fi);
 				_engine.set_midi_gain (1.f);
 			} else {
 				_engine.set_track_gain (fi, 1.f);
-				if (fi == 0) {
-					_engine_snap.gain = 1.f;
-				}
 			}
 			_engine.poll ();
 			_engine_snap = _engine.snapshot ();
@@ -9064,9 +9240,10 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 		}
 		int lab = hit_mixer_label (x, y);
 		if (lab >= 0) {
-			const int mi = midi_mixer_index ();
-			if (lab == mi) {
-				prompt_rename_track (0, true);
+			const int midi_i = midi_track_from_mixer (lab);
+			if (midi_i >= 0) {
+				(void)activate_midi_mixer_strip (lab);
+				prompt_rename_track (midi_i, true);
 			} else if (lab < n_audio_lanes ()) {
 				_focus_audio_track = lab;
 				refresh_automation_lane ();
@@ -9217,14 +9394,14 @@ ShellWindow::midi_pitch_at_y (float y) const
 		t = 0.999f;
 	}
 	/* Top of lane = high pitch (piano-roll convention). */
-	int row = (int)(t * (float)kMidiPitchRows);
+	int row = (int)(t * (float)midi_view_rows ());
 	if (row < 0) {
 		row = 0;
 	}
-	if (row >= kMidiPitchRows) {
-		row = kMidiPitchRows - 1;
+	if (row >= midi_view_rows ()) {
+		row = midi_view_rows () - 1;
 	}
-	return (uint8_t)(kMidiPitchHi - row);
+	return (uint8_t)(midi_view_hi () - row);
 }
 
 int
@@ -9522,13 +9699,23 @@ ShellWindow::on_mouse_wheel (WPARAM wparam, LPARAM lparam)
 		return true;
 	}
 	int lane = hit_editor_lane (x, y);
-	bool over_editor = (lane >= 0) || hit_editor_ruler (x, y) || hit_midi_lane (x, y)
-	                   || _midi_cc_lane.hit (_midi_cc_lane_bounds, x, y);
+	bool over_midi = hit_midi_lane (x, y);
+	bool over_editor = (lane >= 0) || hit_editor_ruler (x, y) || over_midi || _midi_cc_lane.hit (_midi_cc_lane_bounds, x, y);
 	if (!over_editor) {
 		return false;
 	}
 	if (lane < 0) {
 		lane = 0;
+	}
+
+	/* Ctrl+Alt+wheel over piano-roll → scroll pitch viewport (full 0..127). */
+	if (over_midi && (GetKeyState (VK_CONTROL) & 0x8000) && (GetKeyState (VK_MENU) & 0x8000)) {
+		int step = (delta > 0) ? 12 : -12;
+		if (_engine.scroll_midi_pitch_viewport (step)) {
+			_engine_snap = _engine.snapshot ();
+			InvalidateRect (_hwnd, nullptr, FALSE);
+		}
+		return true;
 	}
 
 	/* Alt+wheel → vertical lane scroll. */
@@ -10286,9 +10473,10 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 
 	int lab = hit_mixer_label (x, y);
 	if (lab >= 0) {
-		const int mi = midi_mixer_index ();
-		if (lab == mi) {
-			/* Double-click rename is handled in WM_LBUTTONDBLCLK. */
+		if (midi_track_from_mixer (lab) >= 0) {
+			/* Click MIDI strip → make it the piano-roll / instrument target. */
+			(void)activate_midi_mixer_strip (lab);
+			InvalidateRect (_hwnd, nullptr, FALSE);
 			return true;
 		}
 		if (lab < n_audio_lanes ()) {
@@ -10381,7 +10569,8 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 				_engine_snap = _engine.snapshot ();
 				sync_mixer_arm_from_engine ();
 			} else {
-				if (arm == midi_mixer_index ()) {
+				if (midi_track_from_mixer (arm) >= 0) {
+					(void)activate_midi_mixer_strip (arm);
 					_engine.toggle_midi_armed ();
 				} else {
 					_engine.toggle_track_armed (arm);
@@ -10411,12 +10600,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 	int mute_i = hit_mixer_mute (x, y);
 	if (mute_i >= 0) {
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
-			if ((GetKeyState (VK_CONTROL) & 0x8000) != 0
-			    && mute_i != midi_mixer_index ()
-			    && mute_i < EngineSnapshot::kMeters) {
+			if ((GetKeyState (VK_CONTROL) & 0x8000) != 0 && midi_track_from_mixer (mute_i) < 0 && mute_i < EngineSnapshot::kMeters) {
 				/* Ctrl+click Mute → cycle mute points Main↔AllPoints. */
 				_engine.cycle_track_mute_points (mute_i);
-			} else if (mute_i == midi_mixer_index ()) {
+			} else if (midi_track_from_mixer (mute_i) >= 0) {
+				(void)activate_midi_mixer_strip (mute_i);
 				_engine.toggle_midi_muted ();
 			} else {
 				_engine.toggle_track_muted (mute_i);
@@ -10435,13 +10623,14 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 			const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
 			const bool ctrl = (GetKeyState (VK_CONTROL) & 0x8000) != 0;
 			const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
-			if (shift && solo_i != midi_mixer_index ()) {
+			if (shift && midi_track_from_mixer (solo_i) < 0) {
 				/* Shift+click Solo → toggle solo-isolate. */
 				_engine.toggle_track_solo_isolated (solo_i);
-			} else if (ctrl && solo_i != midi_mixer_index ()) {
+			} else if (ctrl && midi_track_from_mixer (solo_i) < 0) {
 				/* Ctrl+click Solo → toggle solo-safe. */
 				_engine.toggle_track_solo_safe (solo_i);
-			} else if (solo_i == midi_mixer_index ()) {
+			} else if (midi_track_from_mixer (solo_i) >= 0) {
+				(void)activate_midi_mixer_strip (solo_i);
 				if (alt) {
 					_engine.exclusive_solo_midi ();
 				} else {
@@ -10738,6 +10927,28 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		if (_engine.is_linked () && _engine.snapshot ().session_ok) {
 			const bool alt = (GetKeyState (VK_MENU) & 0x8000) != 0;
 			const bool shift = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
+			const bool ctrl = (GetKeyState (VK_CONTROL) & 0x8000) != 0;
+			if (ctrl && fxi < EngineSnapshot::kMeters && _engine_snap.insert_slot_count[fxi] > 1) {
+				/* Ctrl+click FX → cycle visible rack slot. */
+				_fx_rack_slot[fxi] =
+					(_fx_rack_slot[fxi] + 1) % _engine_snap.insert_slot_count[fxi];
+				sync_mixer_fx_from_engine ();
+				InvalidateRect (_hwnd, nullptr, FALSE);
+				return true;
+			}
+			if (fxi < EngineSnapshot::kMeters && _engine_snap.insert_slot_count[fxi] > 0 && !alt && !shift) {
+				/* Click FX on a populated rack → bypass that slot. */
+				const int slot = _fx_rack_slot[fxi];
+				if (slot >= 0 && slot < _engine_snap.insert_slot_count[fxi] && _engine_snap.insert_slots[fxi][slot].ok) {
+					const bool next = !_engine_snap.insert_slots[fxi][slot].bypassed;
+					_engine.set_rack_slot_bypassed (fxi, slot, next);
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_mixer_fx_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+					return true;
+				}
+			}
 			if (alt && shift) {
 				/* Alt+Shift+click FX → activate every shell ACE insert. */
 				_engine.set_all_fx_bypassed (false);
@@ -10810,13 +11021,11 @@ ShellWindow::on_mouse_down (LPARAM lparam)
 		_drag = DragMode::Fader;
 		_drag_index = mi;
 		_mixers[mi].drag_to (y);
-		if (mi == midi_mixer_index ()) {
+		if (midi_track_from_mixer (mi) >= 0) {
+			(void)activate_midi_mixer_strip (mi);
 			_engine.set_midi_gain (_mixers[mi].gain ());
 		} else {
 			_engine.set_track_gain (mi, _mixers[mi].gain ());
-			if (mi == 0) {
-				_engine_snap.gain = _mixers[0].gain ();
-			}
 		}
 		SetCapture (_hwnd);
 		SetCursor (LoadCursorW (nullptr, IDC_SIZENS));
@@ -11008,7 +11217,7 @@ ShellWindow::on_mouse_move (LPARAM lparam)
 
 	if (_drag == DragMode::Fader && _drag_index >= 0 && _drag_index < n_mixer_strips ()) {
 		if (_mixers[_drag_index].drag_to (y)) {
-			if (_drag_index == midi_mixer_index ()) {
+			if (midi_track_from_mixer (_drag_index) >= 0) {
 				_engine.set_midi_gain (_mixers[_drag_index].gain ());
 			} else {
 				_engine.set_track_gain (_drag_index, _mixers[_drag_index].gain ());
@@ -11706,11 +11915,20 @@ ShellWindow::on_tick ()
 		_mixers[i].meter_tick (dt);
 	}
 	{
-		const int mi = midi_mixer_index ();
-		if (mi >= 0 && mi < kMixerStripsMax
-		    && (_engine_snap.midi_track_ok || _engine_snap.midi_track_count > 0)) {
-			_mixers[mi].set_meter_peak (_engine_snap.midi_activity, false);
-			_mixers[mi].meter_tick (dt);
+		const int mi0 = midi_mixer_index ();
+		const int nm = n_midi_mixer_strips ();
+		if (_engine_snap.midi_track_ok || _engine_snap.midi_track_count > 0) {
+			for (int m = 0; m < nm; ++m) {
+				const int mi = mi0 + m;
+				if (mi < 0 || mi >= kMixerStripsMax) {
+					break;
+				}
+				const float peak = (m == _engine_snap.active_midi_track)
+							   ? _engine_snap.midi_activity
+							   : 0.f;
+				_mixers[mi].set_meter_peak (peak, false);
+				_mixers[mi].meter_tick (dt);
+			}
 		}
 	}
 	sync_mixer_fx_from_engine ();
@@ -12419,8 +12637,9 @@ ShellWindow::draw_loop_overlay ()
 		if (w < 4.f) {
 			continue;
 		}
-		float bot = (i == 0 && _auto_lane_bounds.bottom > lb.bottom)
-		            ? _auto_lane_bounds.bottom : lb.bottom;
+		float bot = (i == _auto_lane_track && _auto_lane_bounds.bottom > lb.bottom)
+				    ? _auto_lane_bounds.bottom
+				    : lb.bottom;
 		float x0 = lb.left + n0 * w;
 		float x1 = lb.left + n1 * w;
 		_rt->FillRectangle (D2D1::RectF (x0, lb.top, x1, bot), _brush_loop);
@@ -12685,7 +12904,6 @@ ShellWindow::draw_editor_pane ()
 		    D2D1_ANTIALIAS_MODE_ALIASED);
 	}
 
-	float label_w = 64.f * _dpi_scale;
 	float view0 = _lanes[0].strip.view_start_sec ();
 	float span = std::max (0.001f, _lanes[0].strip.view_span_sec ());
 	const int n_lanes_draw = n_audio_lanes ();
@@ -12697,7 +12915,6 @@ ShellWindow::draw_editor_pane ()
 		}
 		D2D1_RECT_F label_rc = D2D1::RectF (
 			r.left + inset, lb.top, lb.left - 4.f * _dpi_scale, label_bot);
-		(void)label_w;
 		const bool focused = (i == _focus_audio_track);
 		_ui.text_vcenter (_lanes[i].label, ui::TextRole::Section,
 		                  focused ? ui::ColorToken::TextPrimary
@@ -12867,23 +13084,34 @@ ShellWindow::draw_midi_lane ()
 	float inset = 12.f * _dpi_scale;
 	D2D1_RECT_F label_rc = D2D1::RectF (
 		_editor_pane.left + inset, r.top, r.left - 4.f * _dpi_scale, r.bottom);
-	const wchar_t* midi_lab = (_engine_snap.midi_track_name[0] != L'\0')
-		? _engine_snap.midi_track_name : L"MIDI 1";
-	_ui.text_vcenter (midi_lab, ui::TextRole::Section,
-	                  _engine_snap.midi_track_ok ? ui::ColorToken::TextPrimary
-	                                             : ui::ColorToken::TextMuted,
-	                  label_rc);
+	{
+		wchar_t midi_lab_buf[40];
+		const wchar_t* midi_lab = (_engine_snap.midi_track_name[0] != L'\0')
+						  ? _engine_snap.midi_track_name
+						  : L"MIDI 1";
+		if (_engine_snap.midi_track_count > 1) {
+			_snwprintf_s (midi_lab_buf, _TRUNCATE, L"%s ·%d/%d",
+				      midi_lab,
+				      _engine_snap.active_midi_track + 1,
+				      _engine_snap.midi_track_count);
+			midi_lab = midi_lab_buf;
+		}
+		_ui.text_vcenter (midi_lab, ui::TextRole::Section,
+				  _engine_snap.midi_track_ok ? ui::ColorToken::TextPrimary
+							     : ui::ColorToken::TextMuted,
+				  label_rc);
+	}
 
 	_ui.fill_round (r, 4.f, ui::ColorToken::Control, 0.16f);
 	_ui.stroke_round (r, 4.f, ui::ColorToken::Border, 1.f, 0.8f);
 
-	const int keys = kMidiPitchRows;
+	const int keys = midi_view_rows ();
 	float h = piano.bottom - piano.top;
 	float row_h = h / (float)keys;
 	const bool step_on = _engine_snap.midi_step_enabled;
 	for (int k = 0; k < keys; ++k) {
 		float y0 = piano.top + (float)k * row_h;
-		uint8_t pitch = (uint8_t)(kMidiPitchHi - k);
+		uint8_t pitch = (uint8_t)(midi_view_hi () - k);
 		int pc = pitch % 12;
 		bool black = (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10);
 		if (black) {
@@ -12899,12 +13127,19 @@ ShellWindow::draw_midi_lane ()
 			_ui.fill_round (D2D1::RectF (piano.left, y0, piano.right, y0 + row_h - 0.5f),
 			                0.f, ui::ColorToken::Accent, 0.32f);
 		}
+		/* Octave gutter: C labels on white-key C rows. */
+		if (pc == 0 && row_h >= 10.f * _dpi_scale) {
+			wchar_t oct[8];
+			_snwprintf_s (oct, _TRUNCATE, L"C%d", (int)pitch / 12 - 1);
+			_ui.text_vcenter (oct, ui::TextRole::Caption, ui::ColorToken::TextMuted,
+					  D2D1::RectF (piano.left + 2.f * _dpi_scale, y0,
+						       piano.left + 28.f * _dpi_scale, y0 + row_h));
+		}
 	}
 
 	/* Audition ghost — full-width wash on the sounding pitch row. */
-	if (_engine_snap.midi_audition_pitch >= kMidiPitchLo
-	    && _engine_snap.midi_audition_pitch <= kMidiPitchHi) {
-		int arow = (int)(kMidiPitchHi - _engine_snap.midi_audition_pitch);
+	if (_engine_snap.midi_audition_pitch >= midi_view_lo () && _engine_snap.midi_audition_pitch <= midi_view_hi ()) {
+		int arow = (int)(midi_view_hi () - _engine_snap.midi_audition_pitch);
 		float ay0 = piano.top + (float)arow * row_h;
 		_ui.fill_round (D2D1::RectF (piano.left, ay0, piano.right, ay0 + row_h - 0.5f),
 		                0.f, ui::ColorToken::Accent, 0.28f);
@@ -12938,7 +13173,7 @@ ShellWindow::draw_midi_lane ()
 	}
 	for (int i = 0; i < _engine_snap.midi_note_count; ++i) {
 		const EngineMidiNoteSnap& n = _engine_snap.midi_notes[i];
-		if (n.pitch < kMidiPitchLo || n.pitch > kMidiPitchHi) {
+		if (n.pitch < midi_view_lo () || n.pitch > midi_view_hi ()) {
 			continue;
 		}
 		float t0 = n.start_sec;
@@ -12955,7 +13190,7 @@ ShellWindow::draw_midi_lane ()
 		if (x1 - x0 < 2.f) {
 			x1 = x0 + 2.f;
 		}
-		int row = (int)(kMidiPitchHi - n.pitch);
+		int row = (int)(midi_view_hi () - n.pitch);
 		float row_top = piano.top + (float)row * row_h + 1.f;
 		float row_bot = row_top + row_h - 2.f;
 		float vmin = 3.f * _dpi_scale;
@@ -13050,7 +13285,7 @@ ShellWindow::draw_midi_lane ()
 		}
 		float x0 = _lanes[0].strip.x_at_time (r, t0);
 		float x1 = _lanes[0].strip.x_at_time (r, t1);
-		int row = (int)(kMidiPitchHi - _midi_draw_pitch);
+		int row = (int)(midi_view_hi () - _midi_draw_pitch);
 		float y0 = piano.top + (float)row * row_h + 1.f;
 		float y1 = y0 + row_h - 2.f;
 		const D2D1_RECT_F nr = D2D1::RectF (x0, y0, x1, y1);
@@ -13088,8 +13323,8 @@ ShellWindow::draw_midi_lane ()
 		}
 		float x0 = _lanes[0].strip.x_at_time (r, t0);
 		float x1 = _lanes[0].strip.x_at_time (r, t1);
-		int row0 = (int)(kMidiPitchHi - p1);
-		int row1 = (int)(kMidiPitchHi - p0);
+		int row0 = (int)(midi_view_hi () - p1);
+		int row1 = (int)(midi_view_hi () - p0);
 		float y0 = piano.top + (float)row0 * row_h;
 		float y1 = piano.top + (float)(row1 + 1) * row_h;
 		_brush_accent->SetOpacity (0.22f);
@@ -13651,22 +13886,36 @@ ShellWindow::sync_prefs_from_engine ()
 	_prefs.set_pref_backend (_engine_snap.pref_backend.c_str ());
 	_prefs.set_current_period (_engine_snap.period_frames, _engine_snap.sample_rate);
 	_prefs.set_pref_period (_engine_snap.pref_period_frames);
+	_prefs.set_pref_wasapi_exclusive (_engine_snap.pref_wasapi_exclusive);
+	_prefs.set_wasapi_exclusive_active (_engine_snap.wasapi_exclusive_active);
 	_prefs.set_current_devices (_engine_snap.audio_in_name.c_str (), _engine_snap.audio_out_name.c_str ());
 	_prefs.set_pref_devices (_engine_snap.pref_in_device.c_str (), _engine_snap.pref_out_device.c_str ());
 	_prefs.set_systemic_latency (_engine_snap.systemic_in_frames, _engine_snap.systemic_out_frames);
 	_prefs.set_separate_devices (_engine_snap.separate_io_devices);
+	if (_engine_snap.capture_rate_mismatch) {
+		_prefs.set_status (L"Capture resampling — mix rate ≠ render (WASAPI)");
+	}
 	_prefs.set_click_default (_engine_snap.pref_click_default);
 	_prefs.set_snap_default (_engine_snap.pref_snap_default);
 	_prefs.set_vst3_hint (_engine_snap.vst3_path_hint);
 	_prefs.set_vst3_catalog (_engine_snap.vst3_scan_count,
 	                         _engine_snap.vst3_catalog_name,
 	                         _engine_snap.vst3_catalog_count);
+	_prefs.set_vst2_catalog (_engine_snap.vst2_scan_count,
+				 _engine_snap.vst2_catalog_name,
+				 _engine_snap.vst2_catalog_count);
 	if (_engine_snap.vst3_ok && _engine_snap.vst3_name[0] != L'\0') {
 		_prefs.set_vst3_loaded_name (_engine_snap.vst3_name);
 	} else {
 		_prefs.set_vst3_loaded_name (nullptr);
 	}
+	if (_engine_snap.vst2_ok && _engine_snap.vst2_name[0] != L'\0') {
+		_prefs.set_vst2_loaded_name (_engine_snap.vst2_name);
+	} else {
+		_prefs.set_vst2_loaded_name (nullptr);
+	}
 	_prefs.set_vst3_ok (_engine_snap.vst3_ok);
+	_prefs.set_vst2_ok (_engine_snap.vst2_ok);
 	_prefs.set_vst3_param_count (_engine_snap.vst3_ok ? _engine_snap.vst3_param_count : 0);
 	_prefs.set_vst3_bypassed (_engine_snap.vst3_bypassed);
 }
@@ -13701,11 +13950,35 @@ ShellWindow::apply_prefs_vst3_catalog_click (int index)
 		InvalidateRect (_hwnd, nullptr, FALSE);
 		return;
 	}
-	if (_engine.insert_vst3_by_index (index)) {
-		_prefs.set_status (L"VST3 inserted");
+	const int tab = _prefs.plugin_tab ();
+	bool ok = false;
+	if (tab == 1) {
+		/* VST2: Shift → instrument on MIDI; else FX into Audio-2 / rack. */
+		const bool want_inst = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
+		if (want_inst) {
+			ok = _engine.attach_vst2_instrument_by_index (index);
+			_prefs.set_status (ok ? L"VST2 instrument" : L"VST2 instrument skipped");
+		} else if (_engine.insert_rack_slot (1, 2, index)) {
+			ok = true;
+			_prefs.set_status (L"VST2 → rack Audio 2");
+		} else {
+			ok = _engine.insert_vst2_by_index (index);
+			_prefs.set_status (ok ? L"VST2 inserted" : L"VST2 insert skipped");
+		}
 	} else {
-		_prefs.set_status (L"VST3 insert skipped");
+		const bool want_inst = (GetKeyState (VK_SHIFT) & 0x8000) != 0;
+		if (want_inst) {
+			ok = _engine.attach_vst3_instrument_by_index (index);
+			_prefs.set_status (ok ? L"VST3 instrument" : L"VST3 instrument skipped");
+		} else if (_engine.insert_rack_slot (0, 1, index)) {
+			ok = true;
+			_prefs.set_status (L"VST3 → rack Audio 1");
+		} else {
+			ok = _engine.insert_vst3_by_index (index);
+			_prefs.set_status (ok ? L"VST3 inserted" : L"VST3 insert skipped");
+		}
 	}
+	(void)ok;
 	_engine.poll ();
 	_engine_snap = _engine.snapshot ();
 	sync_mixer_fx_from_engine ();
@@ -13829,7 +14102,6 @@ ShellWindow::smoke_vst3_mixer_unload ()
 	}
 	/* Center of unload chip = right edge of FX row. */
 	const D2D1_RECT_F& b = _mixers[1].bounds ();
-	float fx_top = b.top + 80.f * _dpi_scale; /* approximate; use hit scan */
 	bool hit = false;
 	for (float y = b.top; y < b.bottom; y += 2.f * _dpi_scale) {
 		for (float x = b.right - 20.f * _dpi_scale; x < b.right; x += 2.f * _dpi_scale) {
@@ -13849,7 +14121,6 @@ after_hit:
 		              "airdour_win_shell: smoke-vst3-mixer-unload FAILED (× not hittable)\n");
 		return false;
 	}
-	(void)fx_top;
 	if (_engine_snap.vst3_ok) {
 		std::fprintf (stderr,
 		              "airdour_win_shell: smoke-vst3-mixer-unload FAILED (still loaded)\n");
@@ -14681,6 +14952,14 @@ ShellWindow::apply_prefs_hit (PrefsHit hit)
 	case PrefsHit::Period512:
 		_engine.set_pref_period_frames (512);
 		break;
+	case PrefsHit::WasapiShared:
+		_engine.set_pref_wasapi_exclusive (false);
+		_prefs.set_status (L"Shared mode — applies on audio restart");
+		break;
+	case PrefsHit::WasapiExclusive:
+		_engine.set_pref_wasapi_exclusive (true);
+		_prefs.set_status (L"Exclusive mode — applies on audio restart");
+		break;
 	case PrefsHit::ClickToggle:
 		_engine.set_pref_click_default (!_engine.snapshot ().pref_click_default);
 		break;
@@ -14692,6 +14971,40 @@ ShellWindow::apply_prefs_hit (PrefsHit hit)
 			_prefs.set_status (L"VST3 rescanned");
 		} else {
 			_prefs.set_status (L"VST3 rescan failed");
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_fx_from_engine ();
+		sync_prefs_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	case PrefsHit::PluginTabVst3:
+		_prefs.set_plugin_tab (0);
+		_prefs.set_status (L"Plugin browser: VST3");
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	case PrefsHit::PluginTabVst2:
+		_prefs.set_plugin_tab (1);
+		_prefs.set_status (L"Plugin browser: VST2 (Shift+click = instrument)");
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	case PrefsHit::Vst2Rescan:
+		if (_engine.rescan_vst2 ()) {
+			_prefs.set_status (L"VST2 rescanned");
+		} else {
+			_prefs.set_status (L"VST2 rescan failed");
+		}
+		_engine.poll ();
+		_engine_snap = _engine.snapshot ();
+		sync_mixer_fx_from_engine ();
+		sync_prefs_from_engine ();
+		InvalidateRect (_hwnd, nullptr, FALSE);
+		return;
+	case PrefsHit::InsertAceReverb:
+		if (_engine.insert_rack_slot (0, 0, 0) || _engine.insert_track_fx (0)) {
+			_prefs.set_status (L"ACE Reverb on Audio 1");
+		} else {
+			_prefs.set_status (L"ACE Reverb insert failed");
 		}
 		_engine.poll ();
 		_engine_snap = _engine.snapshot ();
@@ -14824,7 +15137,6 @@ ShellWindow::draw_help_overlay ()
 		{ L"Alt+B / Alt+click FX", L"Bypass all ACE inserts" },
 		{ L"Alt+Shift+B / Alt+Shift+click FX", L"Activate all ACE inserts" },
 		{ L"Z", L"Freeze / unfreeze focused audio track" },
-		{ L"G / Shift+G", L"Snap on/off · cycle density" },
 		{ L"Status snap chip", L"Show density · click to cycle" },
 		{ nullptr, L"MARKERS & RANGES" },
 		{ L"M / Shift+M", L"Add / remove marker" },
@@ -14935,6 +15247,7 @@ ShellWindow::draw_help_overlay ()
 		{ L"Shift+click meter", L"Cycle meter tap In/Pre/Post/Out" },
 		{ L"Ctrl+click meter", L"Cycle meter type Peak↔K14" },
 		{ L"Ctrl+click Send", L"Mute / unmute Aux send (Sm)" },
+		{ L"Ctrl+click FX", L"Cycle mixer insert-rack slot" },
 		{ L"Dbl-click FX param", L"Reset FX knob to insert default" },
 		{ L"Dbl-click fader/pan", L"Reset fader → unity · pan → center" },
 		{ L"Dbl-click send", L"Reset aux send → 0 (off)" },
@@ -15202,6 +15515,9 @@ ShellWindow::on_paint ()
 		const float pill_rad = pill_h * 0.5f / _dpi_scale;
 		_ui.fill_round (pill, pill_rad, ui::ColorToken::Control, 0.85f);
 		_ui.stroke_round (pill, pill_rad, ui::ColorToken::Border, 1.f);
+		if (_transport_playing || _transport.recording ()) {
+			_ui.pulse_glow (pill, pill_rad, state_color, _pulse);
+		}
 		const float dot = 6.f * _dpi_scale;
 		const float dot_x = pill_x + 12.f * _dpi_scale;
 		_ui.fill_round (D2D1::RectF (dot_x, pill_y + (pill_h - dot) * 0.5f,
@@ -15510,11 +15826,10 @@ ShellWindow::run_message_loop (unsigned timeout_secs)
 	_timeout_secs = timeout_secs;
 	_start_tick = GetTickCount ();
 	_last_tick_ms = _start_tick;
-	_running = true;
 	_engine_snap = _engine.snapshot ();
 
 	MSG msg = {};
-	while (_running && GetMessageW (&msg, nullptr, 0, 0) > 0) {
+	while (GetMessageW (&msg, nullptr, 0, 0) > 0) {
 		TranslateMessage (&msg);
 		DispatchMessageW (&msg);
 	}

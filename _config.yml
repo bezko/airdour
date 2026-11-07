@@ -1,0 +1,6 @@
+# GitHub Pages publishes the repository root with jekyll-theme-primer.
+# Leave the theme in place for Markdown, but do not let jekyll-readme-index
+# replace the designed homepage (index.html) with README.md.
+theme: jekyll-theme-primer
+readme_index:
+  enabled: false

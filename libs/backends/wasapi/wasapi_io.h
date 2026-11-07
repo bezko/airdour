@@ -14,7 +14,7 @@
 #include <vector>
 
 /**
- * WASAPI shared-mode I/O (AUDCLNT_SHAREMODE_SHARED only).
+ * WASAPI I/O — shared mode by default; optional exclusive render when requested.
  *
  * Real COM lives behind _WIN32. Non-Windows builds keep honest stubs so
  * headers parse and the backend module can still be syntax-checked.
@@ -40,9 +40,15 @@ public:
 	/** Resolve UI name or raw id to an IMMDevice id; empty string = system default. */
 	std::string resolve_device_id (const std::string& name_or_id, bool want_input) const;
 
+	/** Request exclusive-mode render on the next open() (falls back to shared). */
+	void set_exclusive (bool on) { _exclusive_requested = on; }
+	bool exclusive_requested () const { return _exclusive_requested; }
+	bool exclusive_active () const { return _exclusive_active; }
+
 	/**
-	 * Open shared-mode render (+ optional capture).
-	 * Adopts the device mix format sample rate (shared-mode requirement).
+	 * Open render (+ optional capture). Shared by default; exclusive when requested
+	 * and the device accepts the format (else soft-falls back to shared).
+	 * Adopts the device mix format sample rate in shared mode.
 	 * frames_per_period == 0 → Auto: try IAudioClient3 low periods (128/240/256…)
 	 * then fall back toward ~10 ms. Non-zero requests that period (snapped to quantum)
 	 * with the same fallback ladder on failure.
@@ -64,6 +70,20 @@ public:
 	uint32_t default_period_frames () const { return _default_period_frames; }
 	uint32_t min_period_frames () const { return _min_period_frames; }
 
+	/**
+	 * Measured stream latencies from IAudioClient::GetStreamLatency (frames),
+	 * captured at open. Zero when unavailable / not open.
+	 */
+	uint32_t measured_playback_latency_frames () const { return _measured_playback_latency; }
+	uint32_t measured_capture_latency_frames () const { return _measured_capture_latency; }
+	/**
+	 * True when capture mix rate ≠ render mix rate.
+	 * Capture may still be active via cubic resample into the render clock.
+	 */
+	bool capture_rate_mismatch () const { return _capture_rate_mismatch; }
+	bool capture_enabled () const { return _capture_channels > 0 && _open; }
+	float capture_sample_rate () const { return _capture_sample_rate; }
+
 	/** Laptop-oriented period list derived from the last open/enum quantum. */
 	void recommended_buffer_sizes (std::vector<uint32_t>& sizes) const;
 
@@ -84,6 +104,8 @@ public:
 
 private:
 	bool     _open;
+	bool     _exclusive_requested;
+	bool     _exclusive_active;
 	float    _sample_rate;
 	uint32_t _period_frames;
 	uint32_t _default_period_frames;
@@ -92,6 +114,11 @@ private:
 	uint32_t _playback_channels;
 	uint32_t _mix_bits;
 	bool     _mix_is_float;
+	uint32_t _measured_playback_latency;
+	uint32_t _measured_capture_latency;
+	bool     _capture_rate_mismatch;
+	float _capture_sample_rate; /* native capture mix rate (may ≠ _sample_rate) */
+	double _cap_resample_phase; /* fractional read cursor in capture-rate samples */
 
 	mutable std::vector<DeviceInfo> _cached_devices;
 

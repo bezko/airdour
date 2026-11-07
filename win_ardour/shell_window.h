@@ -51,7 +51,8 @@ class ShellWindow
 {
 public:
 	static constexpr int kTracksMax = EngineSnapshot::kMeters;
-	static constexpr int kMixerStripsMax = kTracksMax + 1;
+	static constexpr int kMidiStripsMax = 4; /* visible MIDI mixer strips */
+	static constexpr int kMixerStripsMax = kTracksMax + kMidiStripsMax;
 	/* Legacy aliases used by older loops — prefer n_audio_lanes(). */
 	static constexpr int kTracks = kTracksMax;
 	static constexpr int kMixerStrips = kMixerStripsMax;
@@ -121,9 +122,13 @@ private:
 		EditorScroll /* drag editor lane scrollbar thumb */
 	};
 
-	static constexpr uint8_t kMidiPitchLo = 48; /* C3 */
-	static constexpr uint8_t kMidiPitchHi = 71; /* B4 */
+	/* Defaults; live viewport is EngineSnapshot::midi_pitch_lo/hi (scrollable). */
+	static constexpr uint8_t kMidiPitchLo = 48; /* C3 default */
+	static constexpr uint8_t kMidiPitchHi = 71; /* B4 default */
 	static constexpr int     kMidiPitchRows = (int)(kMidiPitchHi - kMidiPitchLo + 1);
+	uint8_t midi_view_lo () const;
+	uint8_t midi_view_hi () const;
+	int midi_view_rows () const;
 
 	enum class SmokeRecordPhase {
 		Off,
@@ -317,7 +322,11 @@ private:
 	void do_set_aux_return (float gain_0_1);
 	int  n_audio_lanes () const;
 	int  n_mixer_strips () const;
+	int n_midi_mixer_strips () const;
 	int  midi_mixer_index () const;
+	/** Mixer strip → MIDI track index, or −1 if not a MIDI strip. */
+	int midi_track_from_mixer (int mixer_index) const;
+	bool activate_midi_mixer_strip (int mixer_index);
 	void sync_track_labels_from_engine ();
 	void sync_mixer_gains_from_engine ();
 	void sync_mixer_group_from_engine ();
@@ -491,12 +500,12 @@ void do_toggle_selection_muted ();
 	float _mouse_x;
 	float _mouse_y;
 	bool _mouse_tracking;
-	bool _running;
 	DWORD _start_tick;
 	unsigned _timeout_secs;
 	DragMode _drag;
 	int _drag_index;
 	int _focus_audio_track; /* last mixer/editor label click for rename/reorder */
+	int _fx_rack_slot[kTracksMax]; /* which insert-rack slot the mixer FX chip shows */
 	bool _group_pick[kTracksMax]; /* Shift+click candidates for Grp */
 	float _pan_last_x;
 	float _pan_last_y;

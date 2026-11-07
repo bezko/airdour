@@ -1,7 +1,4 @@
-# Airdour win64 / MSVC first-slice spine
-#
-# Stages:
-#   1) wasapi_io_smoke     — WasapiIO + Windows SDK only (CI green path)
+# Airdour win64 / MSVC
 #
 # Audio product path: WASAPI shared (libs/backends/wasapi).
 # Exclusive / DirectSound / ASIO: out of scope.
@@ -54,11 +51,6 @@ set(CMAKE_MAP_IMPORTED_CONFIG_RELEASE RelWithDebInfo Release MinSizeRel "")
 set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO RelWithDebInfo Release MinSizeRel "")
 set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL MinSizeRel Release RelWithDebInfo "")
 
-set(AIRDOUR_DEPS_ROOT "" CACHE PATH "MSVC dependency root (glib, sndfile, …)")
-if(AIRDOUR_DEPS_ROOT)
-  list(APPEND CMAKE_PREFIX_PATH "${AIRDOUR_DEPS_ROOT}")
-endif()
-
 set(AIRDOUR_SRC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 
 # Single source of truth for the vcpkg x64-windows prefix. Honors the vcpkg
@@ -82,10 +74,6 @@ function(airdour_import_vcpkg_lib _target _libname)
     IMPORTED_LOCATION_DEBUG "${AIRDOUR_VCPKG_PREFIX}/debug/lib/${_libname}.lib"
   )
 endfunction()
-
-# --- Slice order (full product) ---
-# 1. pbd  2. temporal / midipp / evoral  3. ardour  4. dummy + wasapi  5. headless
-# glibmm-2.4 + sigc++-2.0: overlay ports in tools/win-native/overlays.
 
 set(WASAPI_IO_SOURCES
   "${AIRDOUR_SRC_ROOT}/libs/backends/wasapi/wasapi_io.cc"
@@ -119,6 +107,12 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     "${AIRDOUR_SRC_ROOT}/win_ardour/ui_draw.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/shell_window.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/engine_host.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/engine_midi.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/engine_fx_ace.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/engine_vst3.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/engine_vst2.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/vst2_bridge_client.cc"
+    "${AIRDOUR_SRC_ROOT}/win_ardour/vst2_bridge_processor.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/wave_strip.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/cairo_wave_blit.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/transport_bar.cc"
@@ -176,6 +170,7 @@ if(AIRDOUR_BUILD_WIN_SHELL)
       PLATFORM_WINDOWS=1
       AIRDOUR_WINDOWS_ONLY=1
       VST3_SUPPORT=1
+      WINDOWS_VST_SUPPORT=1
       WAF_BUILD=1
       LOCALEDIR=\"\"
       PROGRAM_NAME=\"Airdour\"
@@ -343,6 +338,7 @@ if(BUILD_TESTING AND AIRDOUR_BUILD_WIN_SHELL)
     set(_engine_smokes
       tracks mute-solo pan pan-width send send-pan mixer-reset track-color
       edit snap tempo click history prefs zoom locate master-fx
+      midi-multi fx-chain vst2 vst2-bridge vst3-instrument
     )
     foreach(_smoke IN LISTS _engine_smokes)
       add_test(NAME "shell_engine_${_smoke}"
@@ -358,19 +354,30 @@ if(BUILD_TESTING AND AIRDOUR_BUILD_WIN_SHELL)
   endif()
 endif()
 
-# --- Install / CPack (basic portable tree; richer packaging lives in
-#     tools/win-native/ci/Package-*.ps1) ---
-if(AIRDOUR_BUILD_WIN_SHELL)
-  install(TARGETS airdour_win_shell RUNTIME DESTINATION .)
-  if(AIRDOUR_WIN_SHELL_WITH_ENGINE)
-    install(FILES ${_waf_runtime_dlls} DESTINATION . OPTIONAL)
-    install(FILES "${AIRDOUR_SRC_ROOT}/win_ardour/run-engine-shell-release.bat"
-            DESTINATION . OPTIONAL)
+# --- VST2-32 bridge (Win32 / x86 helper; build with -A Win32 or a second preset) ---
+option(AIRDOUR_BUILD_VST2_BRIDGE_X86 "Build ardour-vst2-bridge-x86.exe (Win32)" OFF)
+if(AIRDOUR_BUILD_VST2_BRIDGE_X86 AND WIN32)
+  add_executable(ardour-vst2-bridge-x86
+    "${AIRDOUR_SRC_ROOT}/win_ardour/vst2_bridge_x86_main.cc"
+  )
+  target_include_directories(ardour-vst2-bridge-x86 PRIVATE
+    "${AIRDOUR_SRC_ROOT}/win_ardour"
+  )
+  target_compile_definitions(ardour-vst2-bridge-x86 PRIVATE
+    UNICODE _UNICODE PLATFORM_WINDOWS=1
+  )
+  target_link_libraries(ardour-vst2-bridge-x86 PRIVATE user32)
+  set_target_properties(ardour-vst2-bridge-x86 PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
+    OUTPUT_NAME "ardour-vst2-bridge-x86"
+  )
+  if(AIRDOUR_BUILD_WIN_SHELL)
+    add_custom_command(TARGET airdour_win_shell POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:ardour-vst2-bridge-x86>"
+        "$<TARGET_FILE_DIR:airdour_win_shell>/ardour-vst2-bridge-x86.exe"
+      COMMENT "Stage VST2-32 bridge beside win_shell"
+      VERBATIM
+    )
   endif()
-  set(CPACK_GENERATOR "ZIP")
-  set(CPACK_PACKAGE_NAME "airdour")
-  set(CPACK_PACKAGE_VENDOR "Airdour")
-  set(CPACK_PACKAGE_VERSION "9")
-  set(CPACK_PACKAGE_FILE_NAME "airdour-win64")
-  include(CPack)
 endif()
