@@ -2988,6 +2988,14 @@ RCOptionEditor::RCOptionEditor ()
 	add_option (_("Appearance/Waveform"), wfsh);
 	add_option (_("Appearance/Waveform"), new OptionEditorBlank ());
 
+	add_option (_("Appearance/Waveform"),
+		 new BoolOption (
+			 "apply-envelope-to-waveforms",
+			 _("Apply region gain envelope to waveforms"),
+			 sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::get_apply_envelope_to_waveforms),
+			 sigc::mem_fun (UIConfiguration::instance(), &UIConfiguration::set_apply_envelope_to_waveforms)
+			 ));
+
 	/* The names of these controls must be the same as those given in MixerStrip
 	   for the actual widgets being controlled.
 	*/
@@ -3449,6 +3457,15 @@ These settings will only take effect after %1 is restarted.\n\
 		     sigc::mem_fun (*_rc_config, &RCConfiguration::get_automation_follows_regions),
 		     sigc::mem_fun (*_rc_config, &RCConfiguration::set_automation_follows_regions)
 		     ));
+
+	add_option (_("Editor"),
+		new BoolOption (
+		    "automation-follows-content",
+		    _("Move region automation and envelope when audio content is shifted"),
+		    sigc::mem_fun (*_rc_config, &RCConfiguration::get_automation_follows_content),
+		    sigc::mem_fun (*_rc_config, &RCConfiguration::set_automation_follows_content)
+		    ));
+
 
 	bo = new BoolOption (
 		     "new-automation-points-on-lane",
