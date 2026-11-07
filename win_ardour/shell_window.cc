@@ -8512,6 +8512,15 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 			           && !(GetKeyState (VK_MENU) & 0x8000)) {
 				/* Ctrl+L = lock / unlock selected region (blocks move/trim). */
 				do_toggle_selection_locked ();
+			} else if ((GetKeyState (VK_MENU) & 0x8000) && (GetKeyState (VK_SHIFT) & 0x8000) && !(GetKeyState (VK_CONTROL) & 0x8000)) {
+				/* Alt+Shift+L — cycle Solo → PFL → AFL → Solo. */
+				if (_engine.is_linked () && _engine_snap.session_ok) {
+					_engine.cycle_listen_mode ();
+					_engine.poll ();
+					_engine_snap = _engine.snapshot ();
+					sync_mixer_listen_from_engine ();
+					InvalidateRect (_hwnd, nullptr, FALSE);
+				}
 			} else {
 				do_toggle_loop ();
 			}
@@ -8521,21 +8530,6 @@ ShellWindow::handle_message (UINT msg, WPARAM wparam, LPARAM lparam)
 				/* Alt+O = toggle region opaque / transparent. */
 				do_toggle_selection_opaque ();
 			}
-		} else if ((GetKeyState (VK_MENU) & 0x8000)
-		           && (GetKeyState (VK_SHIFT) & 0x8000)
-		           && !(GetKeyState (VK_CONTROL) & 0x8000)
-		           && (wparam == 'L' || wparam == 'l')) {
-			/* Alt+Shift+L — cycle Solo → PFL → AFL → Solo. */
-			if (_engine.is_linked () && _engine_snap.session_ok) {
-				_engine.cycle_listen_mode ();
-				_engine.poll ();
-				_engine_snap = _engine.snapshot ();
-				sync_mixer_listen_from_engine ();
-				InvalidateRect (_hwnd, nullptr, FALSE);
-			}
-		} else if (!(GetKeyState (VK_MENU) & 0x8000)
-		           && (wparam == 'L' || wparam == 'l')) {
-			do_toggle_loop ();
 		} else if (wparam == 'P' || wparam == 'p') {
 			if ((GetKeyState (VK_CONTROL) & 0x8000)
 			    && (GetKeyState (VK_SHIFT) & 0x8000)
@@ -12651,8 +12645,9 @@ ShellWindow::draw_loop_overlay ()
 		if (w < 4.f) {
 			continue;
 		}
-		float bot = (i == 0 && _auto_lane_bounds.bottom > lb.bottom)
-		            ? _auto_lane_bounds.bottom : lb.bottom;
+		float bot = (i == _auto_lane_track && _auto_lane_bounds.bottom > lb.bottom)
+				    ? _auto_lane_bounds.bottom
+				    : lb.bottom;
 		float x0 = lb.left + n0 * w;
 		float x1 = lb.left + n1 * w;
 		_rt->FillRectangle (D2D1::RectF (x0, lb.top, x1, bot), _brush_loop);
