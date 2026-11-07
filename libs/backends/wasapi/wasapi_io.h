@@ -52,6 +52,8 @@ public:
 	 * frames_per_period == 0 → Auto: try IAudioClient3 low periods (128/240/256…)
 	 * then fall back toward ~10 ms. Non-zero requests that period (snapped to quantum)
 	 * with the same fallback ladder on failure.
+	 * Exclusive event mode adopts GetBufferSize as the period and prerolls one
+	 * silent buffer before Start. Shared mode keeps padding-sized writes.
 	 */
 	int open (const std::string& output_name_or_id,
 	          const std::string& input_name_or_id,
@@ -88,7 +90,7 @@ public:
 	void recommended_buffer_sizes (std::vector<uint32_t>& sizes) const;
 
 	/**
-	 * Event-driven shared-mode cycle (call in order each period):
+	 * Event-driven cycle (call in order each period):
 	 *   wait_for_period() → read_capture() → (engine process) → write_playback()
 	 * Buffers are float32 interleaved.
 	 * @return 1 on event, 0 on timeout, <0 on error
@@ -97,8 +99,9 @@ public:
 	/** @return frames written into capture buffer, or <0 on error */
 	int read_capture (float* interleaved_capture, uint32_t max_frames);
 	/**
-	 * Push one period of interleaved playback.
-	 * @return frames written, -2 if short write (underrun-ish), <0 on hard error
+	 * Push playback. Shared mode writes up to one period (GetCurrentPadding).
+	 * Exclusive event mode writes the whole endpoint buffer.
+	 * @return frames written, -2 if shared short write, <0 on hard error
 	 */
 	int write_playback (const float* interleaved_playback, uint32_t max_frames);
 

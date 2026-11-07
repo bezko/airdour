@@ -533,7 +533,7 @@ public:
 	virtual float    sample_rate () const                                   = 0;
 	virtual uint32_t buffer_size () const                                   = 0;
 	virtual bool     interleaved () const                                   = 0;
-	/** True when capture was skipped (e.g. WASAPI mix-rate mismatch). Default false. */
+	/** True when capture is resampled to the render rate (e.g. WASAPI mix-rate mismatch). Default false. */
 	virtual bool capture_rate_mismatch () const { return false; }
 	/** Request exclusive-mode device access (WASAPI). No-op on other backends. */
 	virtual void set_exclusive_mode (bool) {}

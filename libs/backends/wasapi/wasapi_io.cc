@@ -32,13 +32,6 @@
 #include <functiondiscoverykeys_devpkey.h>
 #include <avrt.h>
 
-#ifndef AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM
-#define AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM 0x80000000
-#endif
-#ifndef AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY
-#define AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY 0x08000000
-#endif
-
 struct WasapiIO::ComState {
 	IMMDeviceEnumerator* enumerator;
 	IAudioClient* render_client;
@@ -691,14 +684,6 @@ WasapiIO::open (const std::string& output_name_or_id,
 				opened = true;
 				_exclusive_active = true;
 				period = excl_period;
-				std::fprintf (stderr,
-					      "wasapi: opened exclusive period=%u (%.2f ms @ %.0f Hz)\n",
-					      (unsigned)period,
-					      (_sample_rate > 0.f)
-						      ? (1000.0 * (double)period / (double)_sample_rate)
-						      : 0.0,
-					      (double)_sample_rate);
-				std::fflush (stderr);
 			} else {
 				std::fprintf (stderr,
 					      "wasapi: exclusive Initialize failed hr=0x%lx — recreating for shared\n",
@@ -832,9 +817,23 @@ WasapiIO::open (const std::string& output_name_or_id,
 	}
 
 	hr = _com->render_client->GetBufferSize (&_com->render_buffer_frames);
-	if (FAILED (hr)) {
+	if (FAILED (hr) || _com->render_buffer_frames == 0) {
 		close ();
 		return -1;
+	}
+	/* Exclusive event packets must be the allocated buffer, which can
+	 * differ from the duration passed to Initialize. */
+	if (_exclusive_active) {
+		_period_frames = _com->render_buffer_frames;
+		std::fprintf (stderr,
+			      "wasapi: opened exclusive period=%u (requested %u, %.2f ms @ %.0f Hz)\n",
+			      (unsigned)_period_frames,
+			      (unsigned)period,
+			      (_sample_rate > 0.f)
+				      ? (1000.0 * (double)_period_frames / (double)_sample_rate)
+				      : 0.0,
+			      (double)_sample_rate);
+		std::fflush (stderr);
 	}
 
 	hr = _com->render_client->GetService (__uuidof (IAudioRenderClient), (void**)&_com->render);
@@ -915,6 +914,23 @@ WasapiIO::open (const std::string& output_name_or_id,
 				_capture_rate_mismatch = false;
 				_capture_sample_rate = _sample_rate;
 			}
+		}
+	}
+
+	/* Exclusive event mode ping-pongs two buffers. The first must be
+	 * released full before Start; an empty start halts the device. */
+	if (_exclusive_active) {
+		BYTE* silence = 0;
+		const UINT32 n = _com->render_buffer_frames;
+		hr = _com->render->GetBuffer (n, &silence);
+		if (FAILED (hr) || !silence) {
+			close ();
+			return -1;
+		}
+		hr = _com->render->ReleaseBuffer (n, AUDCLNT_BUFFERFLAGS_SILENT);
+		if (FAILED (hr)) {
+			close ();
+			return -1;
 		}
 	}
 
@@ -1227,21 +1243,31 @@ WasapiIO::write_playback (const float* interleaved_playback, uint32_t max_frames
 	}
 
 	const uint32_t period = std::min (_period_frames, max_frames ? max_frames : _period_frames);
-	UINT32 padding = 0;
-	HRESULT hr = _com->render_client->GetCurrentPadding (&padding);
-	if (FAILED (hr)) {
-		return -1;
-	}
-	UINT32 available = (_com->render_buffer_frames > padding)
-				   ? (_com->render_buffer_frames - padding)
-				   : 0;
-	if (available == 0) {
-		return -2;
+	UINT32 frames = 0;
+	if (_exclusive_active) {
+		/* Packet size is the endpoint buffer. Padding and short writes
+		 * return AUDCLNT_E_BUFFER_SIZE_ERROR and stop the device. */
+		frames = _com->render_buffer_frames;
+		if (frames == 0 || frames != period) {
+			return -1;
+		}
+	} else {
+		UINT32 padding = 0;
+		HRESULT hr = _com->render_client->GetCurrentPadding (&padding);
+		if (FAILED (hr)) {
+			return -1;
+		}
+		UINT32 available = (_com->render_buffer_frames > padding)
+					   ? (_com->render_buffer_frames - padding)
+					   : 0;
+		if (available == 0) {
+			return -2;
+		}
+		frames = std::min (period, available);
 	}
 
-	UINT32 frames = std::min (period, available);
 	BYTE* data = 0;
-	hr = _com->render->GetBuffer (frames, &data);
+	HRESULT hr = _com->render->GetBuffer (frames, &data);
 	if (FAILED (hr) || !data) {
 		return -1;
 	}
@@ -1252,7 +1278,7 @@ WasapiIO::write_playback (const float* interleaved_playback, uint32_t max_frames
 	if (FAILED (hr)) {
 		return -1;
 	}
-	if (frames < period) {
+	if (!_exclusive_active && frames < period) {
 		return -2;
 	}
 	return (int)frames;
