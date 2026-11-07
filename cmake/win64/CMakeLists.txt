@@ -109,7 +109,6 @@ if(AIRDOUR_BUILD_WIN_SHELL)
     "${AIRDOUR_SRC_ROOT}/win_ardour/engine_host.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/engine_midi.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/engine_fx_ace.cc"
-    "${AIRDOUR_SRC_ROOT}/win_ardour/engine_vst3.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/engine_vst2.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/vst2_bridge_client.cc"
     "${AIRDOUR_SRC_ROOT}/win_ardour/vst2_bridge_processor.cc"

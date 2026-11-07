@@ -30,7 +30,6 @@ Vst2BridgeProcessor::Vst2BridgeProcessor (ARDOUR::Session& s,
 	, _plugin_path (plugin_dll_path)
 	, _bridged_ok (false)
 	, _as_instrument (as_instrument)
-	, _configured_rate (false)
 	, _sample_rate ((float)s.nominal_sample_rate ())
 	, _block_size (s.get_block_size ())
 	, _param_count (0)
@@ -56,7 +55,6 @@ Vst2BridgeProcessor::Vst2BridgeProcessor (ARDOUR::Session& s,
 		}
 		(void)set_sample_rate (_plugin_path, _sample_rate);
 		(void)set_block_size (_plugin_path, (uint32_t)_block_size);
-		_configured_rate = true;
 	}
 	set_display_to_user (true);
 }

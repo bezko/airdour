@@ -39,8 +39,6 @@ public:
 	int set_block_size (pframes_t nframes) override;
 
 	bool bridged_ok () const { return _bridged_ok; }
-	bool is_instrument () const { return _as_instrument; }
-	const std::string& plugin_path () const { return _plugin_path; }
 
 	int param_count () const { return _param_count; }
 	float get_param_norm (int index) const;
@@ -54,7 +52,6 @@ private:
 	std::string _plugin_path;
 	bool _bridged_ok;
 	bool _as_instrument;
-	bool _configured_rate;
 	float _sample_rate;
 	pframes_t _block_size;
 	int _param_count;
