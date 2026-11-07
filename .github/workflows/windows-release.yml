@@ -7,8 +7,7 @@
 # Publishes a functional win64 release from windows-2022:
 #   1) airdour-*-win64-shell.zip — portable engine shell (Dummy + WASAPI + LV2)
 #   2) airdour-*-win64-setup.exe — NSIS installer of that engine stage (per-user)
-#   3) airdour-*-win64-ci.zip — WASAPI sources + BUILD_STATUS
-#   4) airdour-*-win64-installer-src.zip — airdour.nsi + packaging scripts
+#   3) airdour-*-win64-installer-src.zip — airdour.nsi + packaging scripts
 #
 # The job builds vcpkg, the waf Release engine, and the CMake engine shell,
 # then smokes the packaged tree with --backend Dummy.
@@ -159,7 +158,6 @@ jobs:
           Get-ChildItem dist -Filter "*.exe" | ForEach-Object {
             Write-Host "EXE $($_.Name) ($([int]($_.Length/1KB)) KB)"
           }
-          Get-Content (Join-Path dist stage BUILD_STATUS.txt) -ErrorAction SilentlyContinue
           $shellZip = Get-ChildItem dist -Filter "airdour-*-win64-shell.zip" | Select-Object -First 1
           if (-not $shellZip) { throw "Engine zip airdour-*-win64-shell.zip was not produced" }
           echo "shell_zip=$($shellZip.FullName)" >> $env:GITHUB_OUTPUT
@@ -285,7 +283,6 @@ jobs:
             ### Artifacts
             - `airdour-*-win64-shell.zip` — portable engine shell: `libardour`, Dummy, WASAPI, bundled LV2, vcpkg DLLs
             - `airdour-*-win64-setup.exe` — NSIS per-user installer of that same tree
-            - `airdour-*-win64-ci.zip` — WASAPI sources + BUILD_STATUS
             - `airdour-*-win64-installer-src.zip` — `airdour.nsi` + packaging scripts
 
             CI smokes this package with `run-airdour.bat --timeout 3 --backend Dummy`.

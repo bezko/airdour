@@ -1,6 +1,5 @@
-# Packages the staged Windows release zip for GitHub Releases.
-# Always builds the CI spine zip (wasapi_io smoke + sources).
-# Also builds a portable win_shell zip when airdour_win_shell.exe is available.
+# Packages the Windows release assets for GitHub Releases.
+# Builds a portable win_shell zip when airdour_win_shell.exe is available.
 # Pass -Mode Engine -WafLibsDir build-rel\libs for the functional DAW package
 # (libardour + Dummy/WASAPI + bundled LV2). UiOnly is the shell without that tree.
 # When a shell stage exists, build the NSIS installer (+ always installer-src zip).
@@ -27,67 +26,8 @@ if (-not [System.IO.Path]::IsPathRooted($OutDir)) {
 $OutDir = [System.IO.Path]::GetFullPath($OutDir)
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
-$stage = Join-Path $OutDir "stage"
-if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
-New-Item -ItemType Directory -Force -Path $stage | Out-Null
-
-# Docs + product path notes
-Copy-Item (Join-Path $RepoRoot "tools\win-native\README.md") (Join-Path $stage "WIN-NATIVE-README.md")
-Copy-Item (Join-Path $RepoRoot "libs\backends\wasapi\README.md") (Join-Path $stage "WASAPI-README.md")
-Copy-Item (Join-Path $RepoRoot "COPYING") (Join-Path $stage "COPYING") -ErrorAction SilentlyContinue
-
-# WASAPI sources (auditable snapshot in the release)
-$wasapiSrc = Join-Path $stage "src\backends\wasapi"
-New-Item -ItemType Directory -Force -Path $wasapiSrc | Out-Null
-Copy-Item (Join-Path $RepoRoot "libs\backends\wasapi\*") $wasapiSrc -Recurse -Force
-
-# CMake spine
-$cmakeOut = Join-Path $stage "cmake\win64"
-New-Item -ItemType Directory -Force -Path $cmakeOut | Out-Null
-Copy-Item (Join-Path $RepoRoot "cmake\win64\*") $cmakeOut -Recurse -Force
-
-# Smoke build product if present
-$binDir = Join-Path $stage "bin"
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-$smokeLib = $null
-if ($BuildDir) {
-    $candidates = @(
-        (Join-Path $BuildDir "artifacts\airdour_wasapi_io.lib"),
-        (Join-Path $BuildDir "artifacts\Release\airdour_wasapi_io.lib"),
-        (Join-Path $BuildDir "artifacts\Debug\airdour_wasapi_io.lib"),
-        (Join-Path $BuildDir "Release\airdour_wasapi_io.lib"),
-        (Join-Path $BuildDir "Debug\airdour_wasapi_io.lib")
-    )
-    foreach ($c in $candidates) {
-        if (Test-Path $c) {
-            Copy-Item $c $binDir -Force
-            $smokeLib = Join-Path $binDir (Split-Path $c -Leaf)
-            break
-        }
-    }
-}
-
-& (Join-Path $RepoRoot "tools\win-native\ci\Write-BuildStatus.ps1") `
-    -OutFile (Join-Path $stage "BUILD_STATUS.txt") `
-    -GitSha $GitSha `
-    -GitRef $GitRef `
-    -WasapiSmokePath $(if ($smokeLib) { $smokeLib } else { "" })
-
-$zipName = "airdour-$Version-win64-ci.zip"
-$zipPath = Join-Path $OutDir $zipName
-if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
-
-# Compress contents of stage/ (not the stage folder itself)
-Push-Location $stage
-try {
-    Compress-Archive -Path * -DestinationPath $zipPath -Force
-} finally {
-    Pop-Location
-}
-Write-Host "Created $zipPath"
-
-# Always publish installer source scripts (GHA + laptop) so Engine setup can be
-# rebuilt offline when full Engine deps are not in CI.
+# Always publish installer source scripts so the Engine setup can be rebuilt
+# offline.
 $instSrc = Join-Path $OutDir "installer-src-stage"
 if (Test-Path $instSrc) { Remove-Item -Recurse -Force $instSrc }
 New-Item -ItemType Directory -Force -Path $instSrc | Out-Null
@@ -207,7 +147,6 @@ $setupExe = Get-ChildItem -Path $OutDir -Filter "airdour-$Version-win64-setup*.e
     Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
 if (-not $setupExe) { throw "NSIS installer was not produced" }
 
-Write-Output $zipPath
 Write-Output $instSrcZip
 if ($shellZip) { Write-Output $shellZip }
 if ($setupExe) { Write-Output $setupExe }

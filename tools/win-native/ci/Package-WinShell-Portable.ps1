@@ -3,7 +3,7 @@
 #
 # Modes:
 #   Engine  — exe linked with libardour + Dummy/WASAPI + ACE LV2
-#   UiOnly  — D2D shell without engine (what GHA can build today)
+#   UiOnly  — D2D shell without engine
 #
 # Config:
 #   Release — Ninja presets (build-ninja-engine / build-ninja-ui) are Release (/MD)
