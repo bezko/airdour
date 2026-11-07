@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * x64 host-side client for ardour-vst2-bridge-x86.exe (Phase 4).
+ * x64 host-side client for ardour-vst2-bridge-x86.exe.
  */
 #pragma once
 

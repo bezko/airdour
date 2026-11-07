@@ -203,7 +203,7 @@ jobs:
             ## Airdour Windows release (`${{ steps.ver.outputs.version }}`)
 
             **Brand:** Airdour · **GUI:** Win32 + Direct2D/DirectWrite (no GTK2)
-            **Audio path:** WASAPI shared only (no ASIO / DirectSound / exclusive)
+            **Audio path:** WASAPI shared by default; optional exclusive render with shared fallback (no ASIO / DirectSound). Capture stays shared.
 
             ### Artifacts from GitHub Actions (`windows-latest`)
             - `airdour-*-win64-ci.zip` — WASAPI I/O smoke lib + sources + BUILD_STATUS

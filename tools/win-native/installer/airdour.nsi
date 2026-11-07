@@ -80,7 +80,7 @@ VIAddVersionKey "LegalCopyright" "GPL-2.0"
 !define MUI_ABORTWARNING
 !define MUI_UNABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "Airdour Setup"
-!define MUI_WELCOMEPAGE_TEXT "This installs Airdour for the current user. No administrator prompt.$\r$\n$\r$\nDefault folder: %LOCALAPPDATA%\Airdour$\r$\n$\r$\nThe Windows shell is Win32 + Direct2D. Audio is WASAPI shared mode. GitHub Actions builds install the UI shell; a machine with the engine stage installs Dummy, WASAPI, and the bundled plugins that were packaged with it.$\r$\n$\r$\nAirdour is free software under the GNU GPL v2."
+!define MUI_WELCOMEPAGE_TEXT "This installs Airdour for the current user. No administrator prompt.$\r$\n$\r$\nDefault folder: %LOCALAPPDATA%\Airdour$\r$\n$\r$\nThe Windows shell is Win32 + Direct2D. Audio is WASAPI, shared by default, with optional exclusive. GitHub Actions builds install the UI shell; a machine with the engine stage installs Dummy, WASAPI, and the bundled plugins that were packaged with it.$\r$\n$\r$\nAirdour is free software under the GNU GPL v2."
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_TEXT "Launch Airdour"
 !define MUI_FINISHPAGE_RUN_FUNCTION LaunchAirdour

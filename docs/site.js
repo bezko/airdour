@@ -50,10 +50,6 @@
       if (i === meters.length - 1) wave = 0.55 + 0.3 * Math.abs(Math.sin(now / 420));
       bar.style.height = Math.round(wave * 100) + "%";
     });
-    if (cpu) {
-      var load = 9 + Math.round(4 * Math.abs(Math.sin(now / 700)));
-      cpu.textContent = load + "%";
-    }
     raf = window.requestAnimationFrame(paint);
   }
 
@@ -66,7 +62,7 @@
       if (reduce) {
         pos = 0.62;
         render();
-        if (cpu) cpu.textContent = "12%";
+        if (cpu) cpu.textContent = "—";
         return;
       }
       raf = window.requestAnimationFrame(paint);
@@ -74,7 +70,7 @@
     }
     if (raf) window.cancelAnimationFrame(raf);
     raf = 0;
-    if (cpu) cpu.textContent = "11%";
+    if (cpu) cpu.textContent = "—";
     render();
   }
 

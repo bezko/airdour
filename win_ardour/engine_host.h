@@ -339,7 +339,7 @@ struct EngineSnapshot {
 	wchar_t      vst3_name[kVst3NameLen] = {};
 	wchar_t      vst3_param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
 	float        vst3_param_norm[kMaxVst3Params] = {}; /* 0..1 interface */
-	/* Per-route insert rack (Phase 2). */
+	/* Per-route insert rack. */
 	static constexpr int kMaxInsertSlots = 8;
 	static constexpr int kInsertNameLen = 40;
 	struct InsertSlotSnap {
@@ -367,7 +367,7 @@ struct EngineSnapshot {
 	wchar_t vst2_name[kVst3NameLen] = {};
 	wchar_t vst2_param_name[kMaxVst3Params][kVst3ParamNameLen] = {};
 	float vst2_param_norm[kMaxVst3Params] = {};
-	/* Piano-roll viewport (Phase 1) — full MIDI range model. */
+	/* Piano-roll viewport — full MIDI range; lo/hi are the visible window. */
 	int midi_pitch_lo = 48;    /* viewport bottom */
 	int midi_pitch_hi = 71;    /* viewport top */
 	int active_midi_track = 0; /* which MIDI track piano-roll edits */
@@ -851,7 +851,7 @@ public:
 	                                  float* x_norm,
 	                                  float* y_0_1,
 	                                  int max_n);
-	/** Clear → 0/0.75/0.25 points → Play. For --smoke-send-automation. */
+	/** Clear → 0/0.75/0.25 points → Play. Called from --smoke-auto-lane-unify. */
 	bool smoke_send_automation ();
 	/**
 	 * Gain + pan + send automation smokes (unify lane). For --smoke-auto-lane-unify.
