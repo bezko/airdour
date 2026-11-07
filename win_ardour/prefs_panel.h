@@ -89,7 +89,6 @@ public:
 	void set_vst2_loaded_name (const wchar_t* name);
 	void set_vst3_bypassed (bool on) { _vst3_bypassed = on; }
 	void set_vst3_ok (bool on) { _vst3_ok = on; }
-	void set_vst2_ok (bool on) { _vst2_ok = on; }
 	void set_vst3_param_count (int n);
 	void set_status (const wchar_t* text);
 
@@ -140,7 +139,6 @@ private:
 	bool        _click_on;
 	bool        _snap_on;
 	bool        _vst3_ok;
-	bool _vst2_ok;
 	int         _vst3_param_count;
 	bool        _vst3_bypassed;
 	int _plugin_tab; /* 0=VST3 1=VST2 */
