@@ -155,7 +155,6 @@ Cflags: "-I`${includedir}"
 
 Write-Host "Installed prefix: $installed"
 Write-Host "CMake toolchain: $(Join-Path $VcpkgRoot 'scripts\buildsystems\vcpkg.cmake')"
-Write-Host "Pass -DVCPKG_MANIFEST_DIR=$ManifestDir when configuring cmake/win64."
 Write-Host "waf tip: --boost-include=$installed\include and PKG_CONFIG_PATH=$installed\lib\pkgconfig"
 Write-Host "Overlays: libsigcpp2 + glibmm24 provide sigc++-2.0 / glibmm-2.4 (see overlays/README.md)."
 if ($WithGtkLibs) {
