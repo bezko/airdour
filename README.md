@@ -7,6 +7,7 @@
 [![Platform: Windows x64](https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0078D6.svg)](cmake/win64/CMakeLists.txt)
 [![Audio: WASAPI Shared](https://img.shields.io/badge/Audio-WASAPI%20Shared-success.svg)](libs/backends/wasapi/README.md)
 [![UI: Direct2D](https://img.shields.io/badge/UI-Direct2D%20%2B%20DirectWrite-purple.svg)](win_ardour/README.md)
+[![Project site](https://img.shields.io/badge/site-bezko.github.io%2Fairdour-25d9bc)](https://bezko.github.io/airdour/)
 
 ---
 
