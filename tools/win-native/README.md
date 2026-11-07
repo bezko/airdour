@@ -114,7 +114,7 @@ Optional MSVC **Cairo** shell blit (not product UI): `-WithGtkLibs` → feature 
 3. [x] Overlay `glibmm-2.4` + `sigc++-2.0` installed; waf past glibmm
 4. [x] waf Windows-only configure green; MSVC link `libpbd` (`build\libs\pbd\pbd.dll`)
 5. [x] MSVC link `libardour` → `hardour` (dummy + WASAPI) — laptop
-6. [x] hardour engine-only smoke (dummy + WASAPI shared)
+6. [x] hardour session load (dummy + WASAPI shared)
 7. [x] Minimal Win32+D2D shell (`airdour_win_shell`) — laptop + CI target
 8. [ ] Tune period/CPU on a cheap laptop; measured WasapiIO latency
 9. [x] Port WinMME MIDI; grow `win_ardour` (engine attach, wave strip, FX)
