@@ -2,25 +2,23 @@
 layout: null
 ---
 <!DOCTYPE html>
-<!-- GitHub Pages publishes the repository root, so this file is the homepage.
-     The styled page also lives in docs/. Keep the two copies in step. -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Airdour — a Windows DAW you can actually run</title>
-  <meta name="description" content="Airdour is a Windows-native DAW: the Ardour engine, a Direct2D shell, WASAPI shared audio, and an MCP server for assistants. GPL-2.0.">
+  <meta name="description" content="Airdour is a Windows-native DAW: the Ardour engine, a Direct2D shell, and WASAPI shared audio. GPL-2.0.">
   <link rel="canonical" href="https://bezko.github.io/airdour/">
   <meta name="theme-color" content="#0a0d12">
   <meta name="color-scheme" content="dark">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://bezko.github.io/airdour/">
   <meta property="og:title" content="Airdour — a Windows DAW you can actually run">
-  <meta property="og:description" content="The Ardour engine in a native Win32 shell. Direct2D draws the session. WASAPI shared plays it. An MCP server lets an assistant drive the mix.">
+  <meta property="og:description" content="The Ardour engine in a native Win32 shell. Direct2D draws the session. WASAPI shared plays it.">
   <meta property="og:image" content="https://bezko.github.io/airdour/docs/og.png">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Airdour — a Windows DAW you can actually run">
-  <meta name="twitter:description" content="The Ardour engine in a native Win32 shell. Direct2D, WASAPI shared, and an MCP server on localhost.">
+  <meta name="twitter:description" content="The Ardour engine in a native Win32 shell. Direct2D and WASAPI shared.">
   <meta name="twitter:image" content="https://bezko.github.io/airdour/docs/og.png">
   <link rel="icon" href="docs/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="docs/site.css">
@@ -49,7 +47,6 @@ layout: null
       <nav class="nav" id="site-nav" data-nav>
         <a href="#shell">Shell</a>
         <a href="#engine">Engine</a>
-        <a href="#agents">Agents</a>
         <a href="#keys">Keys</a>
         <a href="#download">Download</a>
         <a class="nav-git" href="https://github.com/bezko/airdour">GitHub</a>
@@ -62,7 +59,7 @@ layout: null
       <div class="hero-copy">
         <p class="kicker">Windows 10 / 11 · x64 · GPL-2.0</p>
         <h1>A Windows DAW you can actually run.</h1>
-        <p class="lede">Airdour keeps the Ardour engine and drops the GTK2, X11, and ASIO baggage. Direct2D draws the session. WASAPI shared plays it beside the rest of the desktop. An MCP server on localhost lets an assistant run the transport.</p>
+        <p class="lede">Airdour keeps the Ardour engine and drops the GTK2, X11, and ASIO baggage. Direct2D draws the session. WASAPI shared plays it beside the rest of the desktop.</p>
         <div class="cta">
           <a class="btn btn-primary" href="#download">Download the shell</a>
           <a class="btn btn-ghost" href="https://github.com/bezko/airdour">View the source</a>
@@ -79,10 +76,6 @@ layout: null
           <div>
             <dt>Release engine</dt>
             <dd>~116 MB · ~11% DSP</dd>
-          </div>
-          <div>
-            <dt>Agents</dt>
-            <dd>MCP :4820</dd>
           </div>
         </dl>
       </div>
@@ -218,11 +211,6 @@ layout: null
           <span role="cell" data-col="Airdour">WinMME, in and out</span>
         </div>
         <div class="compare-row" role="row">
-          <span role="rowheader">Assistants</span>
-          <span role="cell" data-col="Upstream">OSC and Lua</span>
-          <span role="cell" data-col="Airdour">MCP over HTTP on localhost</span>
-        </div>
-        <div class="compare-row" role="row">
           <span role="rowheader">Build</span>
           <span role="cell" data-col="Upstream">MinGW / MSYS2</span>
           <span role="cell" data-col="Airdour">Visual Studio 2022, CMake, Waf</span>
@@ -284,31 +272,6 @@ layout: null
           <p class="stat">~116 MB <small>working set</small></p>
           <p class="fine">Those figures are from the project’s own Release build notes, on a normal laptop, against a Debug build nearer 60% DSP and 410 MB. They are a baseline, not a guarantee on every machine.</p>
         </aside>
-      </div>
-    </section>
-
-    <section class="band" id="agents">
-      <div class="section-head">
-        <p class="kicker">mcp_http · experimental</p>
-        <h2>An assistant can drive the session.</h2>
-        <p>Enable MCPHttp under Preferences → Control Surfaces. The server listens at <code>http://127.0.0.1:4820/mcp</code>. Tool names use a slash: <code>transport/play</code>, <code>tracks/add</code>, <code>plugin/set_parameter</code>, <code>midi_note/import_json</code>.</p>
-      </div>
-      <div class="split code-split">
-        <div>
-          <ul class="tools">
-            <li><code>transport/play</code><span>Start, stop, locate, loop, record</span></li>
-            <li><code>tracks/add</code><span>Tracks, buses, faders, pan, mute, solo</span></li>
-            <li><code>plugin/add</code><span>Scan, insert, bypass, set a parameter</span></li>
-            <li><code>region/split</code><span>Move, split, gain, normalize</span></li>
-            <li><code>midi_note/import_json</code><span>Notes in bars and beats, drums included</span></li>
-          </ul>
-        </div>
-        <div class="codeblock">
-          <p class="code-label">Codex, pointed at the local server</p>
-          <pre><code>codex mcp add ardour_http \
-  --url http://127.0.0.1:4820/mcp</code></pre>
-          <p class="fine">The surface speaks streamable MCP over HTTP, not SSE. Underscore and dotted tool names are accepted as aliases. It binds to localhost only.</p>
-        </div>
       </div>
     </section>
 
