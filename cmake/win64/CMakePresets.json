@@ -33,6 +33,19 @@
         "AIRDOUR_WIN_SHELL_WITH_ENGINE": "ON",
         "AIRDOUR_WAF_BUILD_DIR": "${sourceDir}/../../build-rel"
       }
+    },
+    {
+      "name": "vst2-bridge-x86",
+      "inherits": "base",
+      "displayName": "VST2-32 helper",
+      "description": "i386 ardour-vst2-bridge-x86.exe in its own tree. Configure from an x86 MSVC prompt (vcvarsall.bat x86). Ninja does not accept -A; an x64 cl.exe fails the architecture check. Does not build the win64 shell.",
+      "binaryDir": "${sourceDir}/../../build-win32-vst2-bridge",
+      "cacheVariables": {
+        "AIRDOUR_BUILD_VST2_BRIDGE_X86": "ON",
+        "AIRDOUR_BUILD_WIN_SHELL": "OFF",
+        "AIRDOUR_BUILD_WASAPI_IO_SMOKE": "OFF",
+        "BUILD_TESTING": "OFF"
+      }
     }
   ],
   "buildPresets": [
@@ -45,6 +58,11 @@
       "name": "engine",
       "configurePreset": "engine",
       "targets": ["airdour_win_shell"]
+    },
+    {
+      "name": "vst2-bridge-x86",
+      "configurePreset": "vst2-bridge-x86",
+      "targets": ["ardour-vst2-bridge-x86"]
     }
   ],
   "testPresets": [

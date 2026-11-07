@@ -26,8 +26,32 @@ cd ..\..
 build-ninja-ui\artifacts\airdour_win_shell.exe --timeout 3 --no-engine
 ```
 
-Presets live in `cmake\win64\CMakePresets.json` (`ui`, `engine`, all Ninja + Release).
+Presets live in `cmake\win64\CMakePresets.json` (`ui`, `engine`, `vst2-bridge-x86`, all Ninja + Release).
 Produces `airdour_wasapi_io.lib` (WasapiIO + Windows SDK) and `airdour_win_shell.exe` (Win32+D2D+DirectWrite, no GTK). The `ui` preset does **not** link libardour.
+
+### VST2-32 helper
+
+`ui` and `engine` are x64. They do not build `ardour-vst2-bridge-x86.exe`. Ninja does not accept `-A Win32`; it compiles with the `cl.exe` on PATH, and the helper option refuses a compiler that is not x86.
+
+From an **x86** VS developer prompt (`vcvarsall.bat x86`):
+
+```bat
+cd cmake\win64
+cmake --preset vst2-bridge-x86
+cmake --build --preset vst2-bridge-x86
+```
+
+Output: `build-win32-vst2-bridge\artifacts\ardour-vst2-bridge-x86.exe` (i386). Copy that exe next to `airdour_win_shell.exe` to exercise the bridge from a build tree. The portable packager stages this path when the PE machine is i386. It does not take a helper from the x64 shell tree.
+
+Visual Studio generators do accept `-A`. Use the same output directory so packaging finds it:
+
+```bat
+cmake -S cmake\win64 -B build-win32-vst2-bridge -G "Visual Studio 17 2022" -A Win32 ^
+  -DAIRDOUR_BUILD_VST2_BRIDGE_X86=ON -DAIRDOUR_BUILD_WIN_SHELL=OFF -DAIRDOUR_BUILD_WASAPI_IO_SMOKE=OFF
+cmake --build build-win32-vst2-bridge --config Release --target ardour-vst2-bridge-x86
+```
+
+That writes `build-win32-vst2-bridge\artifacts\Release\ardour-vst2-bridge-x86.exe`. Passing `-DAIRDOUR_BUILD_WIN_SHELL=ON` (or the wasapi smoke option) on either command still builds those targets; the preset turns them off so this tree is only the helper.
 
 The MSVC targets get `/utf-8 /Zc:__cplusplus /permissive- /W4`; set
 `-DAIRDOUR_WARNINGS_AS_ERRORS=ON` to add `/WX`.

@@ -354,9 +354,27 @@ if(BUILD_TESTING AND AIRDOUR_BUILD_WIN_SHELL)
   endif()
 endif()
 
-# --- VST2-32 bridge (Win32 / x86 helper; build with -A Win32 or a second preset) ---
-option(AIRDOUR_BUILD_VST2_BRIDGE_X86 "Build ardour-vst2-bridge-x86.exe (Win32)" OFF)
-if(AIRDOUR_BUILD_VST2_BRIDGE_X86 AND WIN32)
+# VST2-32 helper. Own x86 build tree (preset vst2-bridge-x86); the x64 shell
+# is a different configure. Ninja takes the architecture from cl.exe on PATH
+# and rejects -A. -A Win32 is only meaningful for the Visual Studio generator.
+option(AIRDOUR_BUILD_VST2_BRIDGE_X86 "Build ardour-vst2-bridge-x86.exe (separate x86 tree)" OFF)
+if(AIRDOUR_BUILD_VST2_BRIDGE_X86)
+  if(NOT WIN32)
+    message(FATAL_ERROR "AIRDOUR_BUILD_VST2_BRIDGE_X86 builds a Windows x86 executable.")
+  endif()
+  # WIN32 is true for x64. A 64-bit compile would emit an x64 image named
+  # ardour-vst2-bridge-x86.exe, which cannot load an i386 VST2 DLL.
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4 OR (MSVC AND NOT MSVC_CXX_ARCHITECTURE_ID STREQUAL "X86"))
+    message(FATAL_ERROR
+      "AIRDOUR_BUILD_VST2_BRIDGE_X86 requires an x86 (i386) compiler "
+      "(this configure: MSVC arch='${MSVC_CXX_ARCHITECTURE_ID}', pointer=${CMAKE_SIZEOF_VOID_P}). "
+      "Ninja does not accept -A Win32; it uses the cl.exe on PATH. "
+      "From an x86 Developer prompt (vcvarsall.bat x86), in cmake/win64: "
+      "cmake --preset vst2-bridge-x86 && cmake --build --preset vst2-bridge-x86. "
+      "Visual Studio generators may use -A Win32 with -B build-win32-vst2-bridge, "
+      "-DAIRDOUR_BUILD_VST2_BRIDGE_X86=ON, and -DAIRDOUR_BUILD_WIN_SHELL=OFF. "
+      "Do not pass this option to the x64 ui or engine presets.")
+  endif()
   add_executable(ardour-vst2-bridge-x86
     "${AIRDOUR_SRC_ROOT}/win_ardour/vst2_bridge_x86_main.cc"
   )
@@ -367,17 +385,15 @@ if(AIRDOUR_BUILD_VST2_BRIDGE_X86 AND WIN32)
     UNICODE _UNICODE PLATFORM_WINDOWS=1
   )
   target_link_libraries(ardour-vst2-bridge-x86 PRIVATE user32)
+  # wmain, same as airdour_win_shell. MSVC links that entry with no extra
+  # flag. MinGW does not, and -municode must stay on this target: applied
+  # globally it breaks CMake's compiler test (a plain main).
+  if(MINGW)
+    target_link_options(ardour-vst2-bridge-x86 PRIVATE "-municode")
+  endif()
   set_target_properties(ardour-vst2-bridge-x86 PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
     OUTPUT_NAME "ardour-vst2-bridge-x86"
   )
-  if(AIRDOUR_BUILD_WIN_SHELL)
-    add_custom_command(TARGET airdour_win_shell POST_BUILD
-      COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "$<TARGET_FILE:ardour-vst2-bridge-x86>"
-        "$<TARGET_FILE_DIR:airdour_win_shell>/ardour-vst2-bridge-x86.exe"
-      COMMENT "Stage VST2-32 bridge beside win_shell"
-      VERBATIM
-    )
-  endif()
+  message(STATUS "Airdour: ardour-vst2-bridge-x86 (x86 helper; not copied onto the win64 shell)")
 endif()

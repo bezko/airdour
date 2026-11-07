@@ -1,7 +1,8 @@
 /*
  * Copyright (C) 2026 Airdour contributors
  *
- * Win32 (x86) VST2 bridge process. Built with -A Win32 on MSVC.
+ * Win32 (x86) VST2 bridge process. Built by the vst2-bridge-x86 CMake preset
+ * from an x86 MSVC prompt. Ninja does not accept -A Win32.
  * Loads a 32-bit VST2 DLL and services SharedState ops from the x64 host.
  */
 
