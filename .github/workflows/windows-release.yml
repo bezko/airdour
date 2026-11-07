@@ -59,10 +59,10 @@ jobs:
           echo "prerelease=$pre" >> $env:GITHUB_OUTPUT
           Write-Host "version=$v prerelease=$pre"
 
-      - name: Setup MSVC developer environment
-        uses: ilammy/msvc-dev-cmd@v1
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          arch: x64
+          python-version: "3.12"
 
       - name: Setup CMake + Ninja
         uses: lukka/get-cmake@latest
@@ -80,6 +80,8 @@ jobs:
           .\tools\win-native\Install-HeadlessDeps.ps1 -VcpkgRoot C:\vcpkg
           if ($LASTEXITCODE -ne 0) { throw "Install-HeadlessDeps failed: $LASTEXITCODE" }
 
+      # Waf discovers MSVC via its own vcvarsall probe. Do not preload
+      # ilammy/msvc-dev-cmd first — that balloons PATH and the probe exits 255.
       - name: Configure waf engine (Release, MSVC)
         shell: cmd
         run: tools\win-native\configure-waf-release.cmd build-rel
@@ -87,6 +89,11 @@ jobs:
       - name: Build waf engine
         shell: cmd
         run: tools\win-native\build-waf-release.cmd build-rel
+
+      - name: Setup MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
 
       - name: Configure engine shell (preset)
         shell: pwsh
