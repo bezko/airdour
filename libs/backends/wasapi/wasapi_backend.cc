@@ -713,10 +713,10 @@ WasapiBackend::_start (bool for_latency_measurement)
 		return AudioDeviceOpenError;
 	}
 	if (_io.exclusive_requested () && !_io.exclusive_active ()) {
-		info << _("WASAPI: exclusive mode requested but shared fallback is active")
+		PBD::info << _("WASAPI: exclusive mode requested but shared fallback is active")
 		     << endmsg;
 	} else if (_io.exclusive_active ()) {
-		info << _("WASAPI: exclusive mode active") << endmsg;
+		PBD::info << _("WASAPI: exclusive mode active") << endmsg;
 	}
 
 	_samplerate = _io.sample_rate ();
