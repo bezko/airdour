@@ -910,7 +910,11 @@ Session::process_event (SessionEvent* ev)
 		if (ev->type != SessionEvent::Locate && ev->type != SessionEvent::AutoLoop) {
 			DEBUG_TRACE (DEBUG::SessionEvents, string_compose ("Postponing and moving event to immediate queue: %1 @ %2\n", enum_2_string (ev->type), _transport_sample));
 			immediate_events.insert (immediate_events.end(), ev);
-			_remove_event (ev);
+			/* Detach, do not remove: a scheduled event is still in `events`, and
+			   _remove_event () matches it by type + sample, finds ev itself, and
+			   deletes the very object this queue is about to run — which then
+			   deletes it a second time from a recycled pool slot. */
+			_detach_event (ev);
 			return;
 		}
 	}
@@ -979,6 +983,11 @@ Session::process_event (SessionEvent* ev)
 		break;
 
 	case SessionEvent::StartRoll:
+		/* A stop postponed while non-realtime work was pending is still sitting in
+		   the immediate queue, and this roll was run inline by merge_event() ahead
+		   of it — replaying it would stop the transport a cycle after it started.
+		*/
+		_drop_immediate_event (SessionEvent::EndRoll);
 		TFSM_ROLL ();
 		break;
 

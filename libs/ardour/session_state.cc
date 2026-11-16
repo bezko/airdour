@@ -1380,6 +1380,7 @@ Session::load_misc_port_state ()
 		return false;
 	}
 
+	PBD::Mutex::Lock lm (_misc_port_state_mutex);
 	delete _misc_port_state;
 	_misc_port_state = new XMLNode (*tree.root());
 
@@ -1391,34 +1392,40 @@ Session::save_misc_port_state () const
 {
 	const std::string rcfile = Glib::build_filename (user_config_directory(), "session_port.rc");
 	XMLTree tree;
-	XMLNode* root = _misc_port_state ? _misc_port_state : new XMLNode(X_("SessionPorts"));
+	{
+		PBD::Mutex::Lock lm (_misc_port_state_mutex);
+		if (!_misc_port_state) {
+			tree.set_root (new XMLNode (X_("SessionPorts")));
+		}
+		XMLNode* root = _misc_port_state ? _misc_port_state : tree.root ();
 
-	if (_click_io) {
-		root->remove_nodes ("Click");
-		XMLNode* node = root->add_child ("Click");
-		node->add_child_nocopy (_click_io->get_state ());
-		node->add_child_nocopy (_click_gain->get_state ());
+		if (_click_io) {
+			root->remove_nodes ("Click");
+			XMLNode* node = root->add_child ("Click");
+			node->add_child_nocopy (_click_io->get_state ());
+			node->add_child_nocopy (_click_gain->get_state ());
+		}
+
+		if (auditioner) {
+			auditioner->update_misc_port_state (*root);
+		}
+
+		if (_ltc_output_port) {
+			root->remove_nodes ("LTC");
+			XMLNode* node = root->add_child ("LTC");
+			node->add_child_nocopy (_ltc_output_port->get_state ());
+		}
+
+		/* Connection callbacks must not mutate the tree being serialized. */
+		if (_misc_port_state) {
+			tree.set_root (new XMLNode (*root));
+		}
 	}
-
-	if (auditioner) {
-		auditioner->update_misc_port_state (*root);
-	}
-
-	if (_ltc_output_port) {
-		root->remove_nodes ("LTC");
-		XMLNode* node = root->add_child ("LTC");
-		node->add_child_nocopy (_ltc_output_port->get_state ());
-	}
-
-	tree.set_root (root);
 	bool ok = tree.write (rcfile.c_str());
 
 	if (!ok) {
 		error << string_compose (_("port connections could not be saved to %1"), rcfile) << endmsg;
 	}
-
-	/* retain _misc_port_state */
-	tree.set_root (0);
 
 	return ok;
 }

@@ -83,6 +83,8 @@ Engine builds also **copy** `ptformat.dll` / `ardour.dll` / … next to the exe 
 
 Default: create a minimal unnamed Session with **3 empty audio tracks** + **MIDI 1** so mixer PeakMeters attach. Editor lanes read playlist peaks via `AudioRegion::read_peaks` — **empty tracks stay empty**. Mixer **R · arm** + **+ FX** (ACE Reverb on Audio 1, headless insert); transport **Rec** / **Loop** / **Mark** / **Import** / **Save** / **Open** / **Export**. **Export** bounces the master bus to a 16-bit WAV (ExportHandler, no GTK). **Ctrl+Z / Ctrl+Y** undo/redo; click a region to select; **Delete** removes it. **Loop** / **Mark** on the Editor ruler. **MIDI:** WASAPI uses real **WinMME** (not PortAudio); Dummy prefers loopback. Editor **piano-roll** (C3–B4): click/drag to draw notes, click to select, **Delete** removes; notes live in Session `MidiModel`. **ACE Reasonable Synth** (bundled LV2) sits on MIDI 1 and routes audio to master so notes are audible through Dummy/WASAPI shared — no MIDI hardware required. Interactive runs auto-Play; `--timeout` smoke **skips auto-roll** then `ExitProcess(0)`.
 
+`--smoke-<name>` is not a closed list. The full set is whatever `run_smoke_check` / `has_smoke` dispatch in `shell_window.cc`. Rows below are examples.
+
 | Flag / env | Effect |
 |------------|--------|
 | (default) | Session + PeakMeter + MIDI track/region; arm/rec/import/save/export/undo/loop/piano-roll UI live |

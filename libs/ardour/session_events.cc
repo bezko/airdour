@@ -335,6 +335,47 @@ SessionEventManager::_remove_event (SessionEvent* ev)
 	return ret;
 }
 
+/** Take @a ev out of the scheduled queue but leave it alive, for a caller that is
+ *  keeping it (e.g. moving it to the immediate queue). _remove_event() deletes any
+ *  event it finds, which for a scheduled event is ev itself.
+ */
+void
+SessionEventManager::_detach_event (SessionEvent* ev)
+{
+	for (Events::iterator i = events.begin(); i != events.end(); ++i) {
+		if (*i == ev) {
+			if (i == next_event) {
+				++next_event;
+			}
+			events.erase (i);
+			set_next_event ();
+			return;
+		}
+	}
+}
+
+/** Discard queued immediate events of @a type, keeping any scheduled ones. Used
+ *  when a later request supersedes an event that has not run yet.
+ */
+void
+SessionEventManager::_drop_immediate_event (SessionEvent::Type type)
+{
+	Events::iterator i, tmp;
+
+	for (i = immediate_events.begin(); i != immediate_events.end(); ) {
+
+		tmp = i;
+		++tmp;
+
+		if ((*i)->type == type) {
+			delete *i;
+			immediate_events.erase (i);
+		}
+
+		i = tmp;
+	}
+}
+
 void
 SessionEventManager::_clear_event_type (SessionEvent::Type type)
 {

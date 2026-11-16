@@ -733,8 +733,11 @@ Session::destroy ()
 
 	delete _engine_state;
 
-	delete _misc_port_state;
-	_misc_port_state = 0;
+	{
+		PBD::Mutex::Lock lm (_misc_port_state_mutex);
+		delete _misc_port_state;
+		_misc_port_state = 0;
+	}
 
 	delete state_tree;
 	state_tree = 0;
@@ -989,7 +992,8 @@ Session::reconnect_ltc_output ()
 	if (!_ltc_output_port) {
 		return;
 	}
-	XMLNode* n = _misc_port_state ? _misc_port_state->child ("LTC") : 0;
+	std::unique_ptr<XMLNode> state = misc_port_state ();
+	XMLNode* n = state ? state->child ("LTC") : 0;
 	XMLNode* p = n ? n->child ("Port") : 0;
 	if (p) {
 		PBD::Unwinder uw (_reconnecting_routes_in_progress, true);
@@ -1026,12 +1030,9 @@ Session::setup_click ()
 void
 Session::reconnect_click_output ()
 {
+	std::unique_ptr<XMLNode> state = misc_port_state ();
 	PBD::Unwinder uw (_reconnecting_routes_in_progress, true);
-	if (_misc_port_state) {
-		setup_click_state (_misc_port_state);
-	} else {
-		setup_click_state (0);
-	}
+	setup_click_state (state.get ());
 }
 
 void
@@ -1064,12 +1065,25 @@ Session::setup_click_state (const XMLNode* node)
 	_clicking = Config->get_clicking ();
 }
 
+std::unique_ptr<XMLNode>
+Session::misc_port_state () const
+{
+	PBD::Mutex::Lock lm (_misc_port_state_mutex);
+	return std::unique_ptr<XMLNode> (_misc_port_state ? new XMLNode (*_misc_port_state) : nullptr);
+}
+
+void
+Session::update_auditioner_port_state (Auditioner& source)
+{
+	PBD::Mutex::Lock lm (_misc_port_state_mutex);
+	if (_misc_port_state) {
+		source.update_misc_port_state (*_misc_port_state);
+	}
+}
+
 void
 Session::update_misc_port_state (IOChange change)
 {
-	if (!_misc_port_state) {
-		return;
-	}
 	if (0 == (change.type & IOChange::ConnectionsChanged)) {
 		return;
 	}
@@ -1077,6 +1091,11 @@ Session::update_misc_port_state (IOChange change)
 		return;
 	}
 	if (reconnection_in_progress ()) {
+		return;
+	}
+
+	PBD::Mutex::Lock lm (_misc_port_state_mutex);
+	if (!_misc_port_state) {
 		return;
 	}
 

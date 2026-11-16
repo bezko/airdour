@@ -70,26 +70,6 @@ public:
 	                                   float line_r, float line_g, float line_b);
 
 	/**
-	 * Fade-in / fade-out wedges (normalized edge + handle positions 0..1).
-	 * Selection fill stays D2D; wedges get Cairo AA fill.
-	 */
-	static bool blit_fade_wedges (ID2D1RenderTarget* rt,
-	                              const D2D1_RECT_F& dest,
-	                              float sel_n0, float sel_n1,
-	                              float fade_in_n, float fade_out_n,
-	                              float dpi_scale,
-	                              float r, float g, float b, float a);
-
-	/**
-	 * MIDI note rectangles (normalized within dest) with optional select stroke.
-	 */
-	static bool blit_midi_notes (ID2D1RenderTarget* rt,
-	                             const D2D1_RECT_F& dest,
-	                             const CairoMidiNoteBlit* notes,
-	                             size_t n,
-	                             float dpi_scale);
-
-	/**
 	 * Spectrum / meter bars from levels 0..1 (left→right, bottom-aligned).
 	 */
 	static bool blit_bars (ID2D1RenderTarget* rt,
@@ -143,17 +123,6 @@ public:
 	                                   const float*, size_t,
 	                                   const float*, const float*, size_t,
 	                                   float, float, float, float)
-	{
-		return false;
-	}
-	static bool blit_fade_wedges (ID2D1RenderTarget*, const D2D1_RECT_F&,
-	                              float, float, float, float, float,
-	                              float, float, float, float)
-	{
-		return false;
-	}
-	static bool blit_midi_notes (ID2D1RenderTarget*, const D2D1_RECT_F&,
-	                             const CairoMidiNoteBlit*, size_t, float)
 	{
 		return false;
 	}
