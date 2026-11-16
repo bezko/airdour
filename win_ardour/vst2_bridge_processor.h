@@ -34,9 +34,9 @@ public:
 	bool configure_io (ARDOUR::ChanCount in, ARDOUR::ChanCount out) override;
 
 	void run (ARDOUR::BufferSet& bufs, samplepos_t start_sample, samplepos_t end_sample,
-		  double speed, pframes_t nframes, bool result_required) override;
+		  double speed, ARDOUR::pframes_t nframes, bool result_required) override;
 
-	int set_block_size (pframes_t nframes) override;
+	int set_block_size (ARDOUR::pframes_t nframes) override;
 
 	bool bridged_ok () const { return _bridged_ok; }
 
@@ -53,7 +53,7 @@ private:
 	bool _bridged_ok;
 	bool _as_instrument;
 	float _sample_rate;
-	pframes_t _block_size;
+	ARDOUR::pframes_t _block_size;
 	int _param_count;
 	int _n_inputs;
 	int _n_outputs;

@@ -54,7 +54,7 @@ Vst2BridgeProcessor::Vst2BridgeProcessor (ARDOUR::Session& s,
 			}
 		}
 		(void)set_sample_rate (_plugin_path, _sample_rate);
-		(void)set_block_size (_plugin_path, (uint32_t)_block_size);
+		(void)airdour::vst2_bridge::set_block_size (_plugin_path, (uint32_t)_block_size);
 	}
 	set_display_to_user (true);
 }
@@ -94,7 +94,7 @@ Vst2BridgeProcessor::configure_io (ARDOUR::ChanCount in, ARDOUR::ChanCount out)
 }
 
 int
-Vst2BridgeProcessor::set_block_size (pframes_t nframes)
+Vst2BridgeProcessor::set_block_size (ARDOUR::pframes_t nframes)
 {
 	_block_size = nframes;
 	if (_bridged_ok) {
@@ -105,14 +105,14 @@ Vst2BridgeProcessor::set_block_size (pframes_t nframes)
 
 void
 Vst2BridgeProcessor::run (ARDOUR::BufferSet& bufs, samplepos_t /*start_sample*/,
-			  samplepos_t /*end_sample*/, double /*speed*/, pframes_t nframes,
+			  samplepos_t /*end_sample*/, double /*speed*/, ARDOUR::pframes_t nframes,
 			  bool result_required)
 {
 	if (!check_active () || !_bridged_ok || !result_required || nframes == 0) {
 		return;
 	}
 
-	pframes_t frames = nframes;
+	ARDOUR::pframes_t frames = nframes;
 	if (frames > airdour::vst2_bridge::kMaxBlock) {
 		frames = airdour::vst2_bridge::kMaxBlock;
 	}
