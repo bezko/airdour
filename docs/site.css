@@ -584,3 +584,110 @@ kbd {
   html { scroll-behavior: auto; }
   .lamp { box-shadow: none; }
 }
+
+/* User manual (/docs/user-manual.html). Prose column with figures and tables
+   allowed to run the full width of the wrap. */
+.doc-wrap {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: clamp(28px, 5vw, 56px) var(--pad) 40px;
+}
+.doc-crumb { margin-bottom: 20px; }
+.doc-crumb a { color: var(--muted); text-decoration: none; }
+.doc-crumb a:hover { color: var(--text); }
+.doc h1 {
+  margin: 0 0 22px;
+  max-width: none;
+  font-size: clamp(1.9rem, 4vw, 2.6rem);
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+}
+.doc h2 {
+  margin: 52px 0 16px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  font-size: clamp(1.3rem, 2.3vw, 1.62rem);
+  line-height: 1.25;
+}
+.doc h3 {
+  margin: 34px 0 10px;
+  font-size: 1.1rem;
+  line-height: 1.35;
+  color: var(--text);
+}
+.doc h4 {
+  margin: 24px 0 8px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.doc p, .doc > ol, .doc > ul, .doc blockquote, .doc h2, .doc h3, .doc h4 {
+  max-width: 76ch;
+}
+/* Screenshots keep the full wrap width instead of the measure of the prose. */
+.doc p:has(img) { max-width: none; }
+.doc p, .doc li, .doc td { color: var(--dim); }
+.doc strong { color: var(--text); }
+.doc em { color: var(--muted); }
+.doc ul, .doc ol { padding-left: 1.35em; }
+.doc li { margin: 7px 0; }
+.doc li > p { margin: 6px 0; }
+.doc hr { border: 0; border-top: 1px solid var(--line); margin: 44px 0; }
+.doc blockquote {
+  margin: 22px 0;
+  padding: 14px 18px;
+  background: var(--card);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 10px 10px 0;
+}
+.doc blockquote p { margin: 0; }
+.doc img {
+  width: 100%;
+  height: auto;
+  margin: 20px 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.doc table {
+  width: 100%;
+  margin: 20px 0;
+  border-collapse: collapse;
+  font-size: 0.93rem;
+}
+.doc th, .doc td {
+  padding: 9px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+.doc thead th {
+  color: var(--text);
+  background: var(--raised);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.doc code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--control);
+  color: var(--text);
+}
+.doc pre {
+  margin: 18px 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.doc pre code { padding: 0; background: none; font-size: 0.86rem; }
+@media (max-width: 760px) {
+  .doc table { display: block; overflow-x: auto; }
+  .doc-wrap { padding-top: 24px; }
+}

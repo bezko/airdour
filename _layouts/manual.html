@@ -1,0 +1,63 @@
+---
+layout: null
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page.title }} — Airdour</title>
+  <meta name="description" content="{{ page.description }}">
+  <link rel="canonical" href="https://bezko.github.io/airdour/docs/user-manual.html">
+  <meta name="theme-color" content="#0a0d12">
+  <meta name="color-scheme" content="dark">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="site.css">
+</head>
+<body>
+  <a class="skip" href="#content">Skip to content</a>
+
+  <header class="top" data-top>
+    <div class="top-inner">
+      <a class="brand" href="../" aria-label="Airdour, home">
+        <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="6" fill="#11161d"/>
+          <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="5.25" fill="none" stroke="#36445a"/>
+          <path d="M6 23V15M10 23V11M14 23V7M18 23V13M22 23V17" stroke="#25d9bc" stroke-width="1.8" stroke-linecap="round"/>
+          <path d="M23 6l6 5.2h-6z" fill="#ffd24a"/>
+        </svg>
+        <span class="brand-name">Airdour</span>
+        <span class="brand-tag">win64</span>
+      </a>
+
+      <button class="menu" type="button" aria-expanded="false" aria-controls="site-nav" data-menu>
+        <span class="menu-bars" aria-hidden="true"></span>
+        Menu
+      </button>
+
+      <nav class="nav" id="site-nav" data-nav>
+        <a href="../#shell">Shell</a>
+        <a href="../#engine">Engine</a>
+        <a href="../#keys">Keys</a>
+        <a href="../#download">Download</a>
+        <a href="user-manual.html" aria-current="page">Manual</a>
+        <a class="nav-git" href="https://github.com/bezko/airdour">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="content" class="doc-wrap">
+    <p class="kicker doc-crumb"><a href="../">Airdour</a> · User manual · v0.1.0 alpha</p>
+    <article class="doc">
+{{ content }}
+    </article>
+  </main>
+
+  <footer class="foot">
+    <p>Airdour is <a href="https://github.com/bezko/airdour/blob/master/COPYING">GPL-2.0</a>. It is based on <a href="https://ardour.org/">Ardour</a>, created by Paul Davis and the Ardour community.</p>
+    <p><a href="https://github.com/bezko/airdour">bezko/airdour</a> · <a href="../">Home</a></p>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>
