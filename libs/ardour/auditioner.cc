@@ -186,7 +186,8 @@ Auditioner::unload_synth (bool need_lock)
 int
 Auditioner::connect ()
 {
-	XMLNode const* mns = _session.misc_port_state () ? _session.misc_port_state ()->child ("Auditioner") : 0;
+	std::unique_ptr<XMLNode> state = _session.misc_port_state ();
+	XMLNode const* mns = state ? state->child ("Auditioner") : 0;
 	XMLNode const* node = 0;
 
 	string left;
@@ -642,9 +643,7 @@ Auditioner::output_changed (IOChange change)
 	if (_session.reconnection_in_progress ()) {
 		return;
 	}
-	if (_session.misc_port_state ()) {
-		update_misc_port_state (*_session.misc_port_state ());
-	}
+	_session.update_auditioner_port_state (*this);
 }
 
 ChanCount

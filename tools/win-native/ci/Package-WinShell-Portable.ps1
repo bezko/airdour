@@ -185,6 +185,25 @@ if ($Mode -eq "Engine") {
         }
     }
 
+    # VST3 out-of-process scanner. PluginManager looks for it beside the libardour
+    # DLL and in its fst\ subdir, and it runs as a child process that resolves its
+    # own imports from its own directory — so it ships next to the engine DLLs.
+    # Without it a packaged build scans zero VST3s and cannot host a VSTi.
+    foreach ($scanner in @("ardour-vst3-scanner.exe", "ardour-vst-scanner.exe")) {
+        $candidates = @(
+            (Join-Path $WafLibsDir ("ardour\fst\" + $scanner)),
+            (Join-Path $WafLibsDir ("fst\" + $scanner)),
+            (Join-Path $WafLibsDir ("ardour\" + $scanner))
+        )
+        $src = $null
+        foreach ($c in $candidates) { if (Test-Path $c) { $src = $c; break } }
+        if (-not $src) { Write-Warning "Missing scanner $scanner"; continue }
+        Copy-FileSafe $src $stage | Out-Null
+        Copy-FileSafe $src (Join-Path $stage "fst") | Out-Null
+        Copy-FileSafe $src (Join-Path $stage "ardour\fst") | Out-Null
+        $copied.Add($scanner)
+    }
+
     $lv2Root = Join-Path $stage "LV2"
     New-Item -ItemType Directory -Force -Path $lv2Root | Out-Null
     foreach ($bundle in @("reasonablesynth.lv2", "a-reverb.lv2", "a-comp.lv2", "a-eq.lv2", "a-delay.lv2", "a-limiter.lv2", "a-gate.lv2")) {
@@ -245,6 +264,25 @@ if ($Mode -eq "Engine") {
     }
 }
 
+# Airdour's own instruments + chorus. The first-run demo session is built from
+# these classes, so a package without the bundle opens to silence.
+if ($Mode -eq "Engine") {
+    $artifacts = Split-Path $ShellExe -Parent
+    $bundle = Join-Path $artifacts "vst3\AirdourSynths.vst3"
+    if (-not (Test-Path $bundle)) {
+        $bundle = Join-Path $RepoRoot "build-ninja-engine\artifacts\vst3\AirdourSynths.vst3"
+    }
+    $module = Join-Path $bundle "Contents\x86_64-win\AirdourSynths.vst3"
+    if (Test-Path $module) {
+        $vst3Dest = Join-Path $stage "VST3\AirdourSynths.vst3\Contents\x86_64-win"
+        New-Item -ItemType Directory -Force -Path $vst3Dest | Out-Null
+        Copy-Item -Force $module $vst3Dest
+        $copied.Add("AirdourSynths.vst3")
+    } else {
+        Write-Warning "Missing AirdourSynths.vst3 - the demo session will have no instruments"
+    }
+}
+
 $launcher = @"
 @echo off
 REM Portable Airdour (win_shell) launcher - unzip and run. Brand=Airdour.
@@ -254,6 +292,7 @@ cd /d "%~dp0"
 set "PATH=%CD%;%PATH%"
 set "ARDOUR_DLL_PATH=%CD%"
 set "ARDOUR_BACKEND_PATH=%CD%\backends\dummy;%CD%\backends\wasapi"
+set "VST3_PATH=%CD%\VST3"
 if "%~1"=="" (
   if exist "%CD%\backends\wasapi\wasapi_audiobackend.dll" (
     airdour_win_shell.exe --backend WASAPI
@@ -299,6 +338,7 @@ run-airdour.bat         Sets PATH / ARDOUR_DLL_PATH / ARDOUR_BACKEND_PATH
 backends\               Dummy + WASAPI backend DLLs (Engine mode)
 panners\                libardour panner plugins (Engine mode)
 LV2\                    ACE Reasonable Synth + Reverb + Compressor (Engine mode)
+VST3\                   Airdour Drums / Mono / FM / Chorus (first-run demo)
 *.dll                   waf + vcpkg (+ CRT redistributables)
 
 Honest limits
@@ -316,6 +356,13 @@ run-airdour.bat --timeout 10 --backend Dummy --smoke-plugin
 run-airdour.bat --timeout 2 --no-engine
 "@
 Set-Content -Path (Join-Path $stage "README.txt") -Value $readme -Encoding utf8
+
+# Release notes are the user-facing description of the build; ship them with it.
+$notes = Join-Path $RepoRoot "ALPHA-RELEASE.md"
+if (Test-Path $notes) {
+    Copy-Item -Force $notes (Join-Path $stage "RELEASE-NOTES.md")
+    $copied.Add("RELEASE-NOTES.md")
+}
 
 $status = @"
 Airdour portable win_shell package

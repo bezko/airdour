@@ -2,7 +2,9 @@
 # Always builds the CI spine zip (wasapi_io smoke + sources).
 # Also builds a portable win_shell zip when airdour_win_shell.exe is available
 # (UiOnly on GHA; Engine when waf libs exist on a laptop agent).
-# When a shell stage exists, best-effort Inno installer (+ always installer-src zip).
+# When a shell stage exists, build the Inno installer (+ always installer-src zip).
+# Mode/Config are forwarded to the portable packager so an Engine release produces
+# an Engine setup.exe (a UiOnly/Debug stage would install a shell with no audio).
 param(
     [Parameter(Mandatory = $true)][string]$RepoRoot,
     [Parameter(Mandatory = $true)][string]$OutDir,
@@ -12,6 +14,8 @@ param(
     [string]$WafLibsDir = "",
     [string]$GitSha = "unknown",
     [string]$GitRef = "unknown",
+    [ValidateSet("Auto", "Engine", "UiOnly")][string]$Mode = "Auto",
+    [ValidateSet("Auto", "Release", "Debug")][string]$Config = "Auto",
     [switch]$BootstrapInno
 )
 
@@ -135,6 +139,8 @@ try {
         Version  = $Version
         GitSha   = $GitSha
         GitRef   = $GitRef
+        Mode     = $Mode
+        Config   = $Config
     }
     if ($ShellExe) { $shellArgs.ShellExe = $ShellExe }
     elseif ($BuildDir) {
@@ -167,6 +173,8 @@ if ((Test-Path (Join-Path $shellStage "airdour_win_shell.exe"))) {
             GitSha    = $GitSha
             GitRef    = $GitRef
         }
+        # A release is not a release without a setup.exe; bootstrap Inno Setup so
+        # the installer is produced instead of skipped on a machine without ISCC.
         if ($BootstrapInno) { $instArgs.BootstrapInno = $true }
         & $packInst @instArgs | Out-Null
         $setupExe = Get-ChildItem -Path $OutDir -Filter "airdour-$Version-win64-setup*.exe" -ErrorAction SilentlyContinue |

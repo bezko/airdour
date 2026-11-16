@@ -27,6 +27,7 @@
 #include "automation_lane.h"
 #include "engine_host.h"
 #include "history_panel.h"
+#include "menu_bar.h"
 #include "mixer_strip.h"
 #include "prefs_panel.h"
 #include "recent_panel.h"
@@ -36,6 +37,7 @@
 #include "loudness_panel.h"
 #include "spectrum_panel.h"
 #include "transport_bar.h"
+#include "ui_draw.h"
 #include "wave_strip.h"
 
 #pragma comment(lib, "d2d1.lib")
@@ -48,8 +50,8 @@
 class ShellWindow
 {
 public:
-	static constexpr int kTracksMax = 6; /* matches EngineSnapshot::kMeters */
-	static constexpr int kMixerStripsMax = 7; /* up to 6 audio + 1 MIDI */
+	static constexpr int kTracksMax = EngineSnapshot::kMeters;
+	static constexpr int kMixerStripsMax = kTracksMax + 1;
 	/* Legacy aliases used by older loops — prefer n_audio_lanes(). */
 	static constexpr int kTracks = kTracksMax;
 	static constexpr int kMixerStrips = kMixerStripsMax;
@@ -59,7 +61,16 @@ public:
 
 	void set_smoke_flags (const std::set<std::string>& flags) { _smoke_flags = flags; }
 	bool has_smoke (const std::string& name) const { return _smoke_flags.count (name) > 0; }
-	void add_smoke_flag (const std::string& name) { _smoke_flags.insert (name); }
+
+	/**
+	 * Save one PNG of the client area once the window has been up for after_ms,
+	 * then leave the message loop. --shot PATH: the frame a user would see,
+	 * written where an unattended run can read it back.
+	 */
+	void request_shot (const std::string& path, unsigned after_ms);
+
+	/** Test-only seam (win_ardour/tests/shell_probe.h); compiled nowhere else. */
+	friend struct ShellWindowProbe;
 
 	bool create (HINSTANCE instance, int show_cmd);
 	/** Show brief branded splash (ignored if already dismissed / --no-splash). */
@@ -74,86 +85,14 @@ public:
 	 */
 	bool attach_engine (const std::string& backend_name,
 	                    unsigned smoke_timeout_secs = 0,
-	                    bool smoke_import = false,
-	                    bool smoke_record = false,
-	                    bool smoke_save_load = false,
-	                    bool smoke_export = false,
-	                    bool smoke_undo = false,
-	                    bool smoke_loop = false,
-	                    bool smoke_midi = false,
-	                    bool smoke_midi_edit = false,
-	                    bool smoke_plugin = false,
-	                    bool smoke_perf = false,
 	                    const std::string& open_session_path = std::string (),
-	                    unsigned period_frames = 0,
-	                    bool smoke_vst3 = false,
-	                    bool smoke_mute_solo = false,
-	                    bool smoke_meter_point = false,
-	                    bool smoke_pan = false,
-	                    bool smoke_pan_width = false,
-	                    bool smoke_send = false,
-	                    bool smoke_send_mute = false,
-	                    bool smoke_send_pan = false,
-	                    bool smoke_automation = false,
-	                    bool smoke_edit = false,
-	                    bool smoke_snap = false,
-	                    bool smoke_punch = false,
-	                    bool smoke_tempo = false,
-	                    bool smoke_click = false,
-	                    bool smoke_tracks = false,
-	                    bool smoke_stereo_track = false,
-	                    bool smoke_rename = false,
-	                    bool smoke_group = false,
-	                    bool smoke_monitor = false,
-	                    bool smoke_locate = false,
-	                    bool smoke_zoom = false,
-	                    bool smoke_history = false,
-	                    bool smoke_prefs = false,
-	                    bool smoke_recent = false,
-	                    bool smoke_recovery = false,
-	                    bool smoke_stretch = false,
-	                    bool smoke_pitch = false,
-	                    bool smoke_reverse = false,
-	                    bool smoke_normalize = false,
-	                    bool smoke_strip_silence = false,
-	                    bool smoke_consolidate = false,
-	                    bool smoke_freeze = false,
-	                    bool smoke_comp = false,
-	                    bool smoke_comp_sc_hotkey = false,
-	                    bool smoke_eq = false,
-	                    bool smoke_delay = false,
-	                    bool smoke_limiter = false,
-	                    bool smoke_gate = false,
-	                    bool smoke_spectrum = false,
-	                    bool smoke_correlation = false,
-	                    bool smoke_loudness = false,
-	                    bool smoke_midi_quantize = false,
-	                    bool smoke_midi_transpose = false,
-	                    bool smoke_midi_velocity = false,
-	                    bool smoke_midi_length = false,
-	                    bool smoke_midi_clipboard = false,
-	                    bool smoke_midi_humanize = false,
-	                    bool smoke_midi_step = false,
-	                    bool smoke_midi_chord = false,
-	                    bool smoke_midi_arp = false,
-	                    bool smoke_midi_scale = false,
-	                    bool smoke_midi_cc = false,
-	                    bool smoke_midi_bend = false,
-	                    bool smoke_midi_pressure = false,
-	                    bool smoke_locate_selection = false,
-	                    bool smoke_pan_automation = false,
-	                    bool smoke_auto_lane_unify = false,
-	                    bool smoke_auto_state = false,
-	                    bool smoke_pan_auto_state = false,
-	                    bool smoke_send_auto_state = false,
-	                    bool smoke_auto_state_unify = false,
-	                    bool smoke_master_fx = false,
-	                    bool smoke_mixer_reset = false,
-	                    bool smoke_send_reset = false,
-	                    bool smoke_track_color = false);
+	                    unsigned period_frames = 0);
 	int  run_message_loop (unsigned timeout_secs);
 
 	HWND hwnd () const { return _hwnd; }
+
+	/** Create a named session at a full folder path. For --new-session. */
+	void new_session_at_path (const std::string& path);
 
 private:
 	enum class DragMode {
@@ -180,18 +119,27 @@ private:
 		RegionMovePending, /* click on selection body; may become move */
 		RegionMove, /* drag selected region body */
 		MidiDraw, /* click/drag on MIDI piano-roll to create a note */
+		MidiMarquee, /* Shift+drag empty piano-roll → box-select notes */
 		MidiVelocity, /* drag velocity lane → set selected/all note velocity */
 		MidiTrimStart, /* drag note left edge → trim start */
 		MidiTrimEnd, /* drag note right edge → trim end */
+		MidiMove, /* drag note body → relocate in time + pitch */
 		TrackReorderPending, /* mixer label click; may become reorder drag */
 		TrackReorder, /* drag mixer strip label to reorder */
 		RulerScrub, /* drag editor ruler → continuous locate */
-		Shuttle /* drag transport Scrub strip → varispeed */
+		Shuttle, /* drag transport Scrub strip → varispeed */
+		EditorScroll /* drag editor lane scrollbar thumb */
 	};
 
 	static constexpr uint8_t kMidiPitchLo = 48; /* C3 */
 	static constexpr uint8_t kMidiPitchHi = 71; /* B4 */
 	static constexpr int     kMidiPitchRows = (int)(kMidiPitchHi - kMidiPitchLo + 1);
+
+	/* Piano-roll pitch window: kMidiPitchRows rows ending at _midi_pitch_top.
+	 * PageUp/PageDown slide it an octave and step entry follows what is shown,
+	 * so the drum kit (36..46) is reachable from the same key bed as C4. */
+	uint8_t _midi_pitch_top = kMidiPitchHi;
+	int midi_pitch_lo () const { return (int)_midi_pitch_top - (kMidiPitchRows - 1); }
 
 	enum class SmokeRecordPhase {
 		Off,
@@ -217,10 +165,13 @@ private:
 	void on_resize (UINT width, UINT height);
 	void on_dpi_changed (UINT dpi, const RECT* suggested);
 	void on_paint ();
+	/** Copy the just-painted frame out of the GDI-compatible back buffer to PNG. */
+	bool write_shot (HDC dc);
 	void on_tick ();
 	void layout_panes ();
 	void draw_editor_pane ();
 	void draw_automation_lane ();
+	void draw_editor_scrollbar ();
 	void cycle_auto_lane_kind ();
 	int  auto_lane_track () const;
 	void refresh_automation_lane ();
@@ -239,12 +190,35 @@ private:
 	void toggle_about ();
 	void sync_prefs_from_engine ();
 	void apply_prefs_hit (PrefsHit hit);
+	void apply_vst3_param_reset (int index);
+	void apply_prefs_vst3_catalog_click (int index);
+	bool smoke_vst3_prefs_click ();
 	void transport_play ();
 	void transport_stop ();
 	void transport_toggle ();
 	void transport_toggle_record ();
 	void prompt_import_audio ();
+	int  import_target_track () const;
 	void do_save_session ();
+	void do_new_session ();
+	/** Open File ▸ Airdour Demo Song: reopen <Documents>\Airdour\Airdour Demo or
+	 * build it. Starts the transport. Returns false when no demo could be made. */
+	bool do_open_demo_song ();
+	/** First launch only: open the demo instead of an empty session. */
+	bool ensure_first_run_demo ();
+	/** Slide the piano-roll pitch window by whole semitones (octave steps). */
+	void shift_midi_pitch_view (int semitones);
+	/** Park the pitch window on the notes of the bound part. */
+	void focus_piano_roll_on_part ();
+	/** Log transport progress while the first-run demo plays. */
+	void log_demo_progress ();
+	bool _demo_active = false;
+	/* AIRDOUR_DEMO_TRACE: print the per-second transport trace the
+	 * first-launch acceptance check reads. Off for ordinary launches. */
+	bool _demo_trace = false;
+	unsigned long long _demo_last_log_ms = 0;
+	void do_save_session_as ();
+	void do_open_session_folder ();
 	void prompt_open_session ();
 	void toggle_recent_menu ();
 	void sync_recent_from_engine ();
@@ -258,6 +232,10 @@ private:
 	void do_undo_to_index (int index);
 	void sync_history_from_engine ();
 	void do_delete_selection ();
+	/** Clear automation for the active MIDI CC/bend/pressure/PolyAT lane. */
+	bool do_clear_active_midi_cc_lane ();
+	/** Write CC points → clear via shell path → assert empty. */
+	bool smoke_midi_cc_clear ();
 	void do_split_at_playhead ();
 	void do_apply_crossfade ();
 	void do_stretch_selection (float time_ratio = 1.5f);
@@ -270,9 +248,22 @@ private:
 	void sync_transport_freeze_from_engine ();
 	void do_toggle_snap ();
 	void do_cycle_snap_density ();
+	/** " ON·beat" / " OFF" style suffix for editor caption. */
+	const wchar_t* snap_caption_suffix () const;
+	bool smoke_snap_density_label ();
+	bool smoke_snap_ruler_ticks ();
+	/** Count bar / subdiv ticks that draw_editor_ruler would paint. */
+	void count_snap_ruler_ticks (int* out_bar, int* out_subdiv) const;
+	/** Status-bar snap density chip (Bar/Beat/1/2/1/4) when snap is on. */
+	bool hit_status_snap (float x, float y) const;
+	bool status_snap_center (float* out_x, float* out_y) const;
+	bool smoke_snap_status_chip ();
 	void do_quantize_midi_notes ();
+	void do_legato_midi_notes ();
+	void do_force_midi_note_length ();
 	void do_transpose_midi_notes (int semitones);
 	void do_nudge_midi_velocity (int delta);
+	void do_force_midi_velocity (int velocity);
 	void do_nudge_midi_length (float delta_sec);
 	void do_copy_midi_notes ();
 	void do_cut_midi_notes ();
@@ -316,6 +307,35 @@ private:
 	void do_apply_or_clear_group ();
 	void do_scroll_mixer (float delta_px);
 	bool smoke_mixer_scroll_layout ();
+	/** Import → select → set sync mid → assert D2D x maps inside strip. */
+	bool smoke_region_sync_draw ();
+	bool smoke_vst3_mixer_unload ();
+	bool smoke_vst3_mixer_bypass ();
+	bool smoke_vst3_mixer_param_reset ();
+	bool smoke_vst3_catalog_highlight ();
+	bool smoke_vst3_prefs_bypass ();
+	bool smoke_vst3_prefs_param_reset ();
+	bool smoke_vst3_prefs_unload ();
+	bool smoke_vst3_status_unload ();
+	bool smoke_vst3_status_bypass ();
+	bool smoke_vst3_status_param_reset ();
+	bool hit_status_vst3_unload (float x, float y) const;
+	bool hit_status_vst3_bypass (float x, float y) const;
+	int hit_status_vst3_param_reset (float x, float y) const;
+	bool status_vst3_unload_center (float* out_x, float* out_y) const;
+	bool status_vst3_bypass_center (float* out_x, float* out_y) const;
+	bool status_vst3_param_reset_center (int index, float* out_x, float* out_y) const;
+	void do_cycle_vst3_insert (int dir);
+	bool smoke_midi_step_piano_highlight ();
+	bool smoke_meter_clip_led ();
+	bool smoke_midi_playhead_draw ();
+	/** Bottom Y of editor content (lanes + MIDI + CC) for overlays/grid. */
+	float editor_content_bottom () const;
+	/** Punch wash + grid lines reach MIDI/CC; layout bottoms non-empty. */
+	bool smoke_midi_punch_grid ();
+	/** Audition a pitch → assert snap + piano row geometry for ghost wash. */
+	bool smoke_midi_audition_ghost ();
+	bool smoke_midi_outside_ranges_wash ();
 	void do_toggle_group_relative ();
 	void do_cycle_group_color ();
 	void do_toggle_focused_track_active ();
@@ -336,7 +356,31 @@ private:
 	void sync_mixer_gains_from_engine ();
 	void sync_mixer_group_from_engine ();
 	void draw_editor_grid ();
+	void draw_loop_overlay ();
 	void draw_punch_overlay ();
+	/** Truncate marker name for ruler draw (ellipsis when longer than max_chars). */
+	static void format_marker_ruler_label (const wchar_t* name, wchar_t* out, size_t out_len,
+	                                       int max_chars = 8);
+	bool smoke_marker_name_ellipsis ();
+	/** Assert stronger region marquee wash opacities. For --smoke-selection-marquee-tint. */
+	bool smoke_selection_marquee_tint ();
+	/** Assert muted selection hatch cue. For --smoke-selection-mute-wash. */
+	bool smoke_selection_mute_wash ();
+	/** Marker hairlines across MIDI piano-roll + CC (audio lanes already draw). */
+	void draw_midi_marker_overlay ();
+	/** Markers present + MIDI/CC layout; hairline x maps on-lane. */
+	bool smoke_midi_marker_overlay ();
+	/** Ruler edge caption rect for loop/punch In/Out (false if range inactive / off-view). */
+	bool loop_punch_edge_label_rect (bool is_loop, bool is_start, D2D1_RECT_F* out) const;
+	bool loop_punch_edge_tick_rect (bool is_loop, bool is_start, D2D1_RECT_F* out) const;
+	bool smoke_loop_punch_edge_labels ();
+	bool smoke_loop_punch_edge_ticks ();
+	/** Assert amber≠crimson + stronger wash opacities. For --smoke-punch-loop-tint. */
+	bool smoke_punch_loop_tint ();
+	/** Assert soft hatch when loop range idle. For --smoke-loop-inactive-hatch. */
+	bool smoke_loop_inactive_hatch ();
+	/** Assert soft hatch when punch disarmed. For --smoke-punch-inactive-hatch. */
+	bool smoke_punch_inactive_hatch ();
 	void do_toggle_comp_sidechain ();
 	void do_add_marker_at_playhead ();
 	void do_remove_marker_at_playhead ();
@@ -402,7 +446,6 @@ void do_toggle_selection_muted ();
 	void do_lower_selection (bool to_bottom);
 	void do_toggle_selection_opaque ();
 	void prompt_export_selection_wav ();
-	void do_export_selection ();
 	void do_punch_from_selection ();
 	void prompt_rename_selected_region ();
 	void do_loop_from_selection ();
@@ -412,6 +455,10 @@ void do_toggle_selection_muted ();
 	void do_set_region_envelope_mid (float coeff_0_1);
 	bool hit_region_envelope_mid (float x, float y, int* out_lane) const;
 	bool envelope_mid_from_y (int lane, float y, float* out_coeff) const;
+	/** Draw selected-region envelope polyline + mid tip cap (matches hit pad). */
+	void draw_region_envelope ();
+	/** Ensure envelope, verify curve+mid geometry under hit pad. --smoke-envelope-mid-handle */
+	bool smoke_envelope_mid_handle ();
 	void do_toggle_fade_active ();
 	void do_toggle_region_position_lock ();
 	void do_skip_range_from_selection ();
@@ -428,10 +475,18 @@ void do_toggle_selection_muted ();
 	bool hit_editor_ruler (float x, float y) const;
 	bool hit_midi_lane (float x, float y) const;
 	bool hit_midi_velocity_lane (float x, float y) const;
+	/**
+	 * Among notes covering x's time, pick the velocity-bar hit: innermost
+	 * bar containing y, else tallest bar (chord-aware). Returns snap index
+	 * or -1.
+	 */
+	int  pick_midi_velocity_note_at (float x, float y) const;
 	D2D1_RECT_F midi_piano_rect () const;
 	D2D1_RECT_F midi_velocity_rect () const;
 	int  midi_velocity_at_y (float y) const;
 	uint8_t midi_pitch_at_y (float y) const;
+	/** Two overlapping notes → Vel pick selects by bar height, not first. */
+	bool smoke_midi_vel_chord ();
 	float midi_time_at_x (float x) const;
 	int  hit_editor_lane (float x, float y) const;
 	int  hit_mixer_fader (float x, float y) const;
@@ -452,8 +507,18 @@ void do_toggle_selection_muted ();
 	void client_from_lparam (LPARAM lparam, float* out_x, float* out_y) const;
 	bool on_mouse_wheel (WPARAM wparam, LPARAM lparam);
 	bool on_mouse_down (LPARAM lparam);
+	bool on_mouse_down_right (LPARAM lparam);
+	/**
+	 * Right-click menu for mixer strip `strip`: the strip commands plus one row
+	 * per scanned VST3, so an effect can be placed without opening Prefs.
+	 */
+	void open_strip_context_menu (int strip, float x, float y);
 	bool on_mouse_move (LPARAM lparam);
 	void on_mouse_up ();
+	void apply_menu_command (MenuCommand cmd, int payload = -1);
+	bool smoke_ui_layout ();
+	/** Grow to EngineSnapshot::kMeters, verify lane scroll, shrink back. */
+	bool smoke_track_capacity ();
 	float stub_meter_peak (int track, float dt) const;
 	void tick_smoke_record (DWORD now);
 
@@ -462,22 +527,39 @@ void do_toggle_selection_muted ();
 	UINT _height;
 	UINT _dpi;
 	float _dpi_scale;
+	float _mouse_x;
+	float _mouse_y;
+	bool _mouse_tracking;
 	bool _running;
 	DWORD _start_tick;
 	unsigned _timeout_secs;
 	DragMode _drag;
 	int _drag_index;
 	int _focus_audio_track; /* last mixer/editor label click for rename/reorder */
+	/**
+	 * Strip menu origin, kept so that scanning plugins can re-open the menu in
+	 * place instead of telling the user to right-click again.
+	 */
+	float _strip_ctx_x;
+	float _strip_ctx_y;
+	int   _strip_ctx_strip;
 	bool _group_pick[kTracksMax]; /* Shift+click candidates for Grp */
 	float _pan_last_x;
+	float _pan_last_y;
 	float _pan_down_x;
 	float _pan_down_y;
 	float _region_move_grab_offset_sec; /* pointer time − region start at grab */
 	float _midi_draw_start_sec;
 	uint8_t _midi_draw_pitch;
+	float _midi_marquee_t0;
+	uint8_t _midi_marquee_p0;
 	int     _midi_vel_drag; /* live preview 1..127 while MidiVelocity drag */
 	float   _midi_trim_start_sec; /* live preview while MidiTrim* drag */
 	float   _midi_trim_end_sec;
+	float   _midi_move_origin_sec; /* note start at MidiMove grab */
+	int     _midi_move_origin_pitch; /* note pitch at MidiMove grab */
+	float   _midi_move_preview_sec; /* live preview start */
+	int     _midi_move_preview_pitch; /* live preview pitch */
 	bool    _step_piano_held[128]; /* multi-key latch while step-record on */
 	int     _step_piano_held_count;
 
@@ -489,6 +571,8 @@ void do_toggle_selection_muted ();
 	DWORD            _smoke_record_start_ms;
 	bool             _smoke_failed; /* any --smoke-* reported FAILED */
 	bool             _help_visible;
+	int              _help_scroll;
+	int              _help_scroll_max;
 	bool             _prefs_visible;
 	DWORD            _splash_shown_ms; /* 0 = no auto-dismiss timer */
 
@@ -499,12 +583,24 @@ void do_toggle_selection_muted ();
 	D2D1_RECT_F _midi_lane;
 	D2D1_RECT_F _auto_lane_bounds;
 	D2D1_RECT_F _midi_cc_lane_bounds;
+	/* Editor lane scrolling: lanes keep a minimum height and scroll vertically. */
+	float       _editor_scroll_y;
+	float       _editor_scroll_max;
+	float       _editor_lanes_top;
+	float       _editor_lanes_bot;
+	int         _editor_scroll_focus; /* last focused lane auto-scrolled to */
+	D2D1_RECT_F _editor_scrollbar;
+	int         _auto_lane_track; /* focused audio track owning the auto lane */
 	D2D1_RECT_F _mixer_pane;
 	D2D1_RECT_F _mixer_strips_clip; /* strips area left of History (for scroll clip) */
 	float       _mixer_scroll_x; /* px; strips content offset */
 	float       _mixer_scroll_max; /* layout-computed */
 	float       _mixer_force_min_w; /* smoke: force min strip width (0 = default) */
 	D2D1_RECT_F _status_bar;
+	D2D1_RECT_F _status_vst3_bypass_btn; /* BYP chip when vst3_ok */
+	D2D1_RECT_F _status_vst3_param_reset_btn[EngineSnapshot::kMaxVst3Params];
+	D2D1_RECT_F _status_vst3_unload_btn; /* × chip when vst3_ok */
+	D2D1_RECT_F _status_snap_btn; /* snap density chip left of DSP meter */
 
 	ID2D1Factory*             _d2d_factory;
 	IDWriteFactory*           _dwrite_factory;
@@ -528,11 +624,14 @@ void do_toggle_selection_muted ();
 	IDWriteTextFormat*        _fmt_body;
 	IDWriteTextFormat*        _fmt_meta;
 	IDWriteTextFormat*        _fmt_pane;
+	UiDraw                    _ui;
 
 	float _pulse;
 	EngineHost     _engine;
 	EngineSnapshot _engine_snap;
 	TransportBar   _transport;
+	MenuBar        _menu_bar;
+	D2D1_RECT_F    _menu_bar_bounds;
 	EditorLane     _lanes[kTracks];
 	AutomationLane _auto_lane;
 	AutomationLane _midi_cc_lane;
@@ -556,5 +655,11 @@ void do_toggle_selection_muted ();
 	int            _midi_cc_number; /* 7 Vol / 1 Mod / 11 Expr / -1 Bend / -2 Pressure */
 
 	std::set<std::string> _smoke_flags;
+
+	/** --shot PATH: one frame, saved, then the loop ends. */
+	std::string _shot_path;
+	DWORD       _shot_after_ms = 0;
+	bool        _shot_taken = false;
+
 	void run_smoke_check (bool ok, const char* name, std::function<bool()> fn, bool select_lanes = false);
 };

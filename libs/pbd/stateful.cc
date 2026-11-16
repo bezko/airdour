@@ -44,7 +44,10 @@ int Stateful::loading_state_version = 0;
 
 thread_local bool Stateful::_regenerate_xml_or_string_ids (false);
 
-#ifdef MINGW_NATIVE_TLS
+/* MSVC cannot export thread_local data from a DLL, so it takes the same
+ * accessor route as MinGW: libardour would otherwise import a symbol that
+ * pbd.dll has no way to export. */
+#if defined(MINGW_NATIVE_TLS) || defined(_MSC_VER)
 bool& Stateful::_regenerate_xml_or_string_ids_ref ()
 {
 	return _regenerate_xml_or_string_ids;

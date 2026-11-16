@@ -34,6 +34,7 @@
 #include "audio_utils.h"
 #include "debug.h"
 #include "wasapi_backend.h"
+#include "../master_tap.h"
 #include "winmmemidi_output_device.h"
 
 using namespace ARDOUR;
@@ -76,8 +77,36 @@ WasapiAudioPort::WasapiAudioPort (WasapiBackend& b, const std::string& name, Por
 WasapiAudioPort::~WasapiAudioPort () {}
 
 void*
-WasapiAudioPort::get_buffer (pframes_t /*nframes*/)
+WasapiAudioPort::get_buffer (pframes_t nframes)
 {
+	/* Ardour collects an input port by reading it, so an input has to return
+	 * the sum of the outputs connected to it - the same contract the Dummy
+	 * backend implements. Returning only this port's own buffer left every
+	 * summed signal (track feeds, master input, monitor to the device) silent. */
+	if (is_input ()) {
+		const size_t n = std::min<size_t> (nframes ? nframes : 8192u, 8192u);
+		const std::set<BackendPortPtr>& connections = get_connections ();
+		bool have_source = false;
+		for (std::set<BackendPortPtr>::const_iterator it = connections.begin ();
+		     it != connections.end (); ++it) {
+			std::shared_ptr<WasapiAudioPort> source = std::dynamic_pointer_cast<WasapiAudioPort> (*it);
+			if (!source || !source->is_output ()) {
+				continue;
+			}
+			const Sample* src = source->const_buffer ();
+			if (!have_source) {
+				memcpy (_buffer, src, n * sizeof (Sample));
+				have_source = true;
+			} else {
+				for (size_t s = 0; s < n; ++s) {
+					_buffer[s] += src[s];
+				}
+			}
+		}
+		if (!have_source) {
+			memset (_buffer, 0, n * sizeof (Sample));
+		}
+	}
 	return _buffer;
 }
 
@@ -777,6 +806,9 @@ WasapiBackend::_start (bool for_latency_measurement)
 bool
 WasapiBackend::start_main_process_thread ()
 {
+	/* Set the diagnostic tap up here, on this thread, not in the callback. */
+	AirdourMasterTap::instance ().prepare ((uint32_t)_samplerate);
+
 	if (pbd_realtime_pthread_create ("WASAPI Main", PBD_SCHED_FIFO, PBD_RT_PRI_MAIN,
 	                                 PBD_RT_STACKSIZE_PROC, &_main_thread,
 	                                 main_process_thread, this)) {
@@ -908,14 +940,23 @@ WasapiBackend::run_one_cycle ()
 		memset (play, 0, (size_t)nframes * (size_t)n_out * sizeof (float));
 	}
 	i = 0;
+	const float* tap_l = nullptr;
+	const float* tap_r = nullptr;
 	for (std::vector<BackendPortPtr>::const_iterator it = _system_outputs.begin ();
 	     it != _system_outputs.end (); ++it, ++i) {
 		float* buf = (float*)(*it)->get_buffer (nframes);
+		if (i == 0) {
+			tap_l = buf;
+		} else if (i == 1) {
+			tap_r = buf;
+		}
 		if (play && i < n_out) {
 			wasapi_interleave (buf, play, nframes, i, n_out);
 		}
 	}
 
+	/* Diagnostic tap: the bus outputs, before they are interleaved for the device. */
+	AirdourMasterTap::instance ().capture (tap_l, tap_r, (uint32_t)nframes);
 	int wr = _io.write_playback (play, _buffer_size);
 	if (wr == -2) {
 		++_xrun_count;

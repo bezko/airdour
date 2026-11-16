@@ -187,6 +187,8 @@ protected:
 	void replace_event (SessionEvent::Type, samplepos_t action_sample, samplepos_t target = 0);
 	bool _replace_event (SessionEvent*);
 	bool _remove_event (SessionEvent *);
+	void _detach_event (SessionEvent *);
+	void _drop_immediate_event (SessionEvent::Type);
 	void _clear_event_type (SessionEvent::Type);
 
 	void add_event (samplepos_t action_sample, SessionEvent::Type type, samplepos_t target_sample = 0);

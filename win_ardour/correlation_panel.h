@@ -26,14 +26,11 @@ public:
 
 	void layout (const D2D1_RECT_F& bounds);
 	void set_visible (bool on) { _visible = on; }
-	bool visible () const { return _visible; }
 
 	/** Correlation −1..+1 (UI-smoothed). */
 	void set_correlation (float r);
 	void set_gonio (const float* x, const float* y, int count);
 	void set_label (const wchar_t* label);
-
-	bool hit (float x, float y) const;
 
 	void draw (ID2D1RenderTarget* rt,
 	           ID2D1SolidColorBrush* brand,
@@ -43,8 +40,6 @@ public:
 	           ID2D1SolidColorBrush* edge,
 	           IDWriteTextFormat* fmt,
 	           float dpi_scale) const;
-
-	const D2D1_RECT_F& bounds () const { return _bounds; }
 
 private:
 	D2D1_RECT_F _bounds;

@@ -34,6 +34,7 @@
 #endif
 
 #include "dummy_audiobackend.h"
+#include "../master_tap.h"
 #include "dummy_midi_seq.h"
 
 #include "pbd/error.h"
@@ -46,6 +47,7 @@
 #include "pbd/i18n.h"
 
 using namespace ARDOUR;
+
 
 static std::string s_instance_name;
 size_t DummyAudioBackend::_max_buffer_size = 8192;
@@ -431,6 +433,9 @@ DummyAudioBackend::_start (bool /*for_latency_measurement*/)
 
 	engine.reconnect_ports ();
 	_port_change_flag.store (0);
+
+	/* Set the diagnostic tap up here, on this thread, not in the callback. */
+	AirdourMasterTap::instance ().prepare ((uint32_t)_samplerate);
 
 	bool ok = _realtime;
 	if (_realtime && pbd_realtime_pthread_create ("Dummy Main", PBD_SCHED_FIFO, PBD_RT_PRI_MAIN, PBD_RT_STACKSIZE_PROC, &_main_thread, pthread_process, this)) {
@@ -934,6 +939,17 @@ DummyAudioBackend::main_process_thread ()
 			return 0;
 		}
 		_processed_samples += samples_per_period;
+		{
+			/* Diagnostic tap: the bus outputs the device would receive. */
+			const uint32_t n = (uint32_t)samples_per_period;
+			const float* l = _system_outputs.size () > 0
+			                     ? (const float*)_system_outputs[0]->get_buffer (n)
+			                     : nullptr;
+			const float* r = _system_outputs.size () > 1
+			                     ? (const float*)_system_outputs[1]->get_buffer (n)
+			                     : l;
+			AirdourMasterTap::instance ().capture (l, r, n);
+		}
 
 		if (_device == _("Loopback") && _midi_mode != MidiToAudio) {
 			int opn = 0;

@@ -296,7 +296,7 @@ Run any flag in combination with `--timeout 3` to verify subsystem health headle
 | `--smoke-strip-silence`| Silence Detection | Splits audio regions at -40 dBFS threshold boundaries. |
 | `--smoke-consolidate` | Bounce-in-Place | Renders selection with track gain/plugins directly onto a new audio file. |
 | `--smoke-freeze` | Track Freezing | Bounces track audio and disables real-time DSP load. |
-| `--smoke-perf` | Performance Profiling | Samples WASAPI callback jitter, CPU %, xrun count, and memory working set. |
+| `--smoke-perf` | Performance Profiling | Samples WASAPI callback jitter, CPU %, xrun count, and memory working set — once stopped, once rolling, one PERF line per window. |
 
 ---
 

@@ -4,6 +4,7 @@
 
 #include "monitor_strip.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
@@ -43,7 +44,7 @@ MonitorStrip::layout (const D2D1_RECT_F& bounds, float dpi_scale)
 {
 	_strip = bounds;
 	float pad = 8.f * dpi_scale;
-	float y = _strip.top + 28.f * dpi_scale;
+	float y = _strip.top + 32.f * dpi_scale;
 	float btn_h = 26.f * dpi_scale;
 	float gap = 6.f * dpi_scale;
 	_dim_btn = D2D1::RectF (_strip.left + pad, y, _strip.right - pad, y + btn_h);
@@ -134,42 +135,28 @@ MonitorStrip::hit_test (float x, float y) const
 }
 
 void
-MonitorStrip::draw (ID2D1RenderTarget* rt,
-                    ID2D1SolidColorBrush* brand,
-                    ID2D1SolidColorBrush* body,
-                    ID2D1SolidColorBrush* accent,
-                    ID2D1SolidColorBrush* pane,
-                    ID2D1SolidColorBrush* edge,
-                    IDWriteTextFormat* fmt_title,
-                    IDWriteTextFormat* fmt_meta,
-                    float dpi_scale) const
+MonitorStrip::draw (UiDraw& ui) const
 {
-	if (!rt) {
-		return;
-	}
+	const D2D1_RECT_F& p = _strip;
+	const float s = ui.dpi_scale ();
+	const float hair = std::max (1.f, s);
 
-	rt->FillRectangle (_strip, pane);
-	rt->DrawRectangle (_strip, edge, 1.f);
-	rt->FillRectangle (
-		D2D1::RectF (_strip.left, _strip.top, _strip.left + 3.f * dpi_scale, _strip.bottom),
-		accent);
+	ui.card (p);
 
-	DWRITE_TEXT_ALIGNMENT ta = fmt_title->GetTextAlignment ();
-	fmt_title->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-	rt->DrawTextW (L"Monitor", 7, fmt_title,
-	               D2D1::RectF (_strip.left, _strip.top + 4.f * dpi_scale,
-	                            _strip.right, _strip.top + 26.f * dpi_scale),
-	               brand);
-	fmt_title->SetTextAlignment (ta);
-
-	DWRITE_TEXT_ALIGNMENT ta_m = fmt_meta->GetTextAlignment ();
-	DWRITE_PARAGRAPH_ALIGNMENT pa_m = fmt_meta->GetParagraphAlignment ();
-	fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_CENTER);
-	fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+	const float header_h = 26.f * s;
+	ui.text_vcenter (L"Monitor", ui::TextRole::Section,
+	                 _available ? ui::ColorToken::TextPrimary
+	                            : ui::ColorToken::TextMuted,
+	                 D2D1::RectF (p.left + 12.f * s, p.top,
+	                              p.right - 12.f * s, p.top + header_h));
+	ui.divider (D2D1::RectF (p.left + 8.f * s, p.top + header_h,
+	                         p.right - 8.f * s, p.top + header_h + hair));
 
 	auto draw_btn = [&] (const D2D1_RECT_F& r, const wchar_t* label, bool on) {
-		rt->FillRectangle (r, on ? accent : edge);
-		rt->DrawTextW (label, (UINT32)wcslen (label), fmt_meta, r, brand);
+		UiDraw::ButtonStyle st;
+		st.label = label;
+		st.latched = on;
+		ui.button (r, st);
 	};
 
 	if (_available) {
@@ -186,30 +173,29 @@ MonitorStrip::draw (ID2D1RenderTarget* rt,
 			draw_btn (_lim_btn, L"MLim", !_master_lim_bypassed);
 		}
 	} else {
-		rt->FillRectangle (_dim_btn, edge);
-		rt->DrawTextW (L"—", 1, fmt_meta, _dim_btn, body);
+		ui.fill_round (_dim_btn, 4.f, ui::ColorToken::Control, 0.4f);
+		ui.stroke_round (_dim_btn, 4.f, ui::ColorToken::Border, 1.f, 0.6f);
+		ui.text_vcenter (L"—", ui::TextRole::Body, ui::ColorToken::TextDisabled,
+		                 _dim_btn, DWRITE_TEXT_ALIGNMENT_CENTER);
 	}
 
 	if (_aux_ok && _aux_track.bottom > _aux_track.top) {
-		float label_bot = _aux_track.top - 2.f * dpi_scale;
-		rt->DrawTextW (L"Aux", 3, fmt_meta,
-		               D2D1::RectF (_strip.left, label_bot - 14.f * dpi_scale,
-		                            _strip.right, label_bot),
-		               brand);
-		rt->FillRectangle (_aux_track, edge);
+		float label_bot = _aux_track.top - 2.f * s;
+		ui.text_vcenter (L"Aux", ui::TextRole::Caption, ui::ColorToken::TextMuted,
+		                 D2D1::RectF (p.left, label_bot - 14.f * s, p.right, label_bot),
+		                 DWRITE_TEXT_ALIGNMENT_CENTER);
+		ui.fill_round (_aux_track, 3.f, ui::ColorToken::Control);
+		ui.stroke_round (_aux_track, 3.f, ui::ColorToken::Border, 1.f, 0.8f);
 		float h = _aux_track.bottom - _aux_track.top;
 		float fill_top = _aux_track.bottom - h * _aux_return;
-		rt->FillRectangle (
-			D2D1::RectF (_aux_track.left, fill_top, _aux_track.right, _aux_track.bottom),
-			accent);
-		float kn_y = fill_top;
-		float kn_h = 4.f * dpi_scale;
-		rt->FillRectangle (
-			D2D1::RectF (_aux_track.left - 3.f * dpi_scale, kn_y - kn_h * 0.5f,
-			             _aux_track.right + 3.f * dpi_scale, kn_y + kn_h * 0.5f),
-			brand);
+		if (fill_top < _aux_track.bottom - 1.f) {
+			ui.fill_round (D2D1::RectF (_aux_track.left, fill_top,
+			                             _aux_track.right, _aux_track.bottom),
+			                3.f, ui::ColorToken::Accent, 0.85f);
+		}
+		float kn_h = 4.f * s;
+		ui.fill_round (D2D1::RectF (_aux_track.left - 3.f * s, fill_top - kn_h * 0.5f,
+		                             _aux_track.right + 3.f * s, fill_top + kn_h * 0.5f),
+		                2.f, ui::ColorToken::TextPrimary, 0.9f);
 	}
-
-	fmt_meta->SetTextAlignment (ta_m);
-	fmt_meta->SetParagraphAlignment (pa_m);
 }

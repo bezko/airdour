@@ -128,51 +128,34 @@ RecentPanel::hit_test (float x, float y) const
 }
 
 void
-RecentPanel::draw (ID2D1RenderTarget* rt,
-                   ID2D1SolidColorBrush* brand,
-                   ID2D1SolidColorBrush* body,
-                   ID2D1SolidColorBrush* accent,
-                   ID2D1SolidColorBrush* pane,
-                   ID2D1SolidColorBrush* edge,
-                   IDWriteTextFormat* fmt_meta,
-                   float dpi_scale) const
+RecentPanel::draw (UiDraw& ui) const
 {
-	if (!rt || !_visible) {
+	if (!ui.ready () || !_visible) {
 		return;
 	}
 
-	rt->FillRectangle (_menu, pane);
-	rt->DrawRectangle (_menu, accent, 1.25f * dpi_scale);
+	const float s = ui.dpi_scale ();
+	ui.shadow (_menu, 8.f);
+	ui.fill_round (_menu, 8.f, ui::ColorToken::SurfaceRaised);
+	ui.stroke_round (_menu, 8.f, ui::ColorToken::BorderStrong, 1.f);
 
-	auto draw_row = [&] (const D2D1_RECT_F& r, const wchar_t* text, bool accent_fill) {
-		if (accent_fill) {
-			rt->FillRectangle (r, edge);
-		}
-		DWRITE_TEXT_ALIGNMENT ta = fmt_meta->GetTextAlignment ();
-		DWRITE_PARAGRAPH_ALIGNMENT pa = fmt_meta->GetParagraphAlignment ();
-		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
-		fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-		rt->DrawTextW (text, (UINT32)wcslen (text), fmt_meta,
-		               D2D1::RectF (r.left + 8.f * dpi_scale, r.top, r.right - 6.f * dpi_scale, r.bottom),
-		               brand);
-		fmt_meta->SetTextAlignment (ta);
-		fmt_meta->SetParagraphAlignment (pa);
+	const float pad = 6.f * s;
+	auto row_text = [&] (const D2D1_RECT_F& r, const wchar_t* text,
+	                     ui::ColorToken color, ui::TextRole role) {
+		ui.text_vcenter (text, role, color,
+		                 D2D1::RectF (r.left + pad + 2.f * s, r.top,
+		                              r.right - pad, r.bottom));
 	};
 
-	draw_row (_browse_btn, L"Browse…", true);
+	/* Browse row — primary action. */
+	ui.fill_round (_browse_btn, 5.f, ui::ColorToken::Accent, 0.14f);
+	row_text (_browse_btn, L"Browse…", ui::ColorToken::Accent, ui::TextRole::Body);
 
 	if (_row_count == 0) {
-		D2D1_RECT_F hint = D2D1::RectF (_browse_btn.left, _browse_btn.bottom,
-		                                _browse_btn.right, _clear_btn.top);
-		DWRITE_TEXT_ALIGNMENT ta = fmt_meta->GetTextAlignment ();
-		DWRITE_PARAGRAPH_ALIGNMENT pa = fmt_meta->GetParagraphAlignment ();
-		fmt_meta->SetTextAlignment (DWRITE_TEXT_ALIGNMENT_LEADING);
-		fmt_meta->SetParagraphAlignment (DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-		rt->DrawTextW (L"(no recent sessions)", 20, fmt_meta,
-		               D2D1::RectF (hint.left + 8.f * dpi_scale, hint.top, hint.right, hint.bottom),
-		               body);
-		fmt_meta->SetTextAlignment (ta);
-		fmt_meta->SetParagraphAlignment (pa);
+		const D2D1_RECT_F hint = D2D1::RectF (_browse_btn.left, _browse_btn.bottom,
+		                                      _browse_btn.right, _clear_btn.top);
+		row_text (hint, L"(no recent sessions)", ui::ColorToken::TextMuted,
+		          ui::TextRole::Caption);
 	} else {
 		for (int i = 0; i < _row_count; ++i) {
 			wchar_t line[160];
@@ -181,9 +164,15 @@ RecentPanel::draw (ID2D1RenderTarget* rt,
 			} else {
 				wcsncpy_s (line, _label[i], _TRUNCATE);
 			}
-			draw_row (_row_btn[i], line, false);
+			row_text (_row_btn[i], line, ui::ColorToken::TextSecondary,
+			          ui::TextRole::Body);
 		}
+		ui.divider (D2D1::RectF (_clear_btn.left + pad, _clear_btn.top,
+		                          _clear_btn.right - pad,
+		                          _clear_btn.top + std::max (1.f, s)));
 	}
 
-	draw_row (_clear_btn, L"Clear recent", _row_count > 0);
+	ui.fill_round (_clear_btn, 5.f, ui::ColorToken::Control, 0.5f);
+	row_text (_clear_btn, L"Clear recent", ui::ColorToken::TextSecondary,
+	          ui::TextRole::Body);
 }
