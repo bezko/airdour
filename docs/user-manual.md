@@ -1,7 +1,7 @@
 ---
 layout: manual
 title: User manual
-description: Feature-by-feature guide to Airdour 0.1.0 alpha: workspace, transport, menus, editor, piano roll, mixer, plug-ins, metering, sessions, shortcuts and the command line.
+description: "Feature-by-feature guide to Airdour 0.1.0 alpha: workspace, transport, menus, editor, piano roll, mixer, plug-ins, metering, sessions, shortcuts and the command line."
 ---
 
 # Airdour — User Manual
