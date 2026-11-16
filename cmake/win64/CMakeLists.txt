@@ -310,9 +310,14 @@ if(AIRDOUR_BUILD_WIN_SHELL)
   endif()
 
   # Console subsystem so --timeout smoke logs are capturable; still creates a HWND.
+  # Session startup recurses through the state/XML and route-graph code far
+  # deeper than the 1 MB Windows default main-thread stack, so reserve the
+  # 32 MB that the engine build needs (without it every --smoke-* dies with
+  # STATUS_STACK_OVERFLOW right after the window appears).
   set_target_properties(airdour_win_shell PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/artifacts"
     OUTPUT_NAME "airdour_win_shell"
+    LINK_OPTIONS "/STACK:33554432"
   )
 endif()
 
