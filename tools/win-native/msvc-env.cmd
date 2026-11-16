@@ -69,6 +69,24 @@ set "VCINSTALLDIR="
 set "VCToolsInstallDir="
 set "VCToolsVersion="
 set "VSCMD_VER="
+rem libs/ardour/wscript runs conf.find_program('ml64', var='AS'). Waf consults
+rem AS before searching PATH, so resolve MASM here instead of loading the full
+rem Developer Prompt (which inflates PATH and breaks the waf MSVC probe).
+set "AS="
+set "ASANY="
+set "VSINSTALL="
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if exist "%VSWHERE%" (
+  for /f "usebackq delims=" %%p in (`"%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALL=%%p"
+)
+if defined VSINSTALL (
+  for /f "usebackq delims=" %%m in (`where /r "%VSINSTALL%\VC\Tools\MSVC" ml64.exe 2^>nul`) do (
+    set "ASANY=%%m"
+    echo %%m| findstr /i /c:"\Hostx64\x64\" >nul && set "AS=%%m"
+  )
+)
+if not defined AS if defined ASANY set "AS=%ASANY%"
+if defined AS (echo waf-probe MASM: %AS%) else (echo WARNING: ml64.exe not found - waf configure may fail the ml64 check.)
 echo waf-probe PATH length: 
 powershell -NoProfile -Command "Write-Host $env:PATH.Length"
 exit /b 0
