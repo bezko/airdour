@@ -14214,6 +14214,13 @@ EngineHost::remove_midi_track ()
 		std::shared_ptr<Route> r = _impl->midi_track;
 		_impl->midi_region.reset ();
 		_impl->midi_track.reset ();
+		/* Drop every other reference too: a surviving shared_ptr keeps the
+		 * route alive, and its ports stay registered under the old name, so
+		 * the next MIDI track fails to register "MIDI 1/midi_in 1". */
+		_impl->midi_tracks.clear ();
+		_impl->midi_regions.clear ();
+		_impl->active_midi_track = 0;
+		_snap.active_midi_track = 0;
 		_impl->midi_synth_ok = false;
 		_impl->midi_synth_to_master = false;
 		_impl->midi_synth_name.clear ();
