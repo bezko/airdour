@@ -28,6 +28,63 @@
 
 #pragma comment(lib, "ole32.lib")
 
+#ifdef AIRDOUR_WIN_SHELL_WITH_ENGINE
+#include "pbd/error.h"
+#include "pbd/receiver.h"
+
+namespace {
+
+/*
+ * Ardour's info/warning/error transmitters are silent unless something is
+ * listening, and PBD::fatal ends the process on Windows. Without a listener an
+ * engine start that bails out says nothing at all and merely exits 1, so route
+ * every channel to stderr where the smoke logs can see it.
+ */
+class StderrReceiver : public Receiver
+{
+  public:
+	StderrReceiver ()
+	{
+		listen_to (PBD::info);
+		listen_to (PBD::warning);
+		listen_to (PBD::error);
+		listen_to (PBD::fatal);
+	}
+
+  protected:
+	void receive (Transmitter::Channel ch, const char* msg) override
+	{
+		const char* tag = "info";
+
+		switch (ch) {
+		case Transmitter::Debug:
+			tag = "debug";
+			break;
+		case Transmitter::Info:
+			tag = "info";
+			break;
+		case Transmitter::Warning:
+			tag = "warning";
+			break;
+		case Transmitter::Error:
+			tag = "error";
+			break;
+		case Transmitter::Fatal:
+			tag = "fatal";
+			break;
+		case Transmitter::Throw:
+			tag = "throw";
+			break;
+		}
+
+		std::fprintf (stderr, "airdour_win_shell: %s: %s", tag, msg);
+		std::fflush (stderr);
+	}
+};
+
+} /* anonymous namespace */
+#endif /* AIRDOUR_WIN_SHELL_WITH_ENGINE */
+
 static unsigned
 parse_timeout (int argc, wchar_t** argv)
 {
@@ -125,6 +182,9 @@ parse_smoke_flags (int argc, wchar_t** argv)
 int
 wmain (int argc, wchar_t** argv)
 {
+#ifdef AIRDOUR_WIN_SHELL_WITH_ENGINE
+	static StderrReceiver log_receiver;
+#endif
 	unsigned timeout = parse_timeout (argc, argv);
 	std::string backend = parse_backend (argc, argv);
 	unsigned period = parse_period (argc, argv);
