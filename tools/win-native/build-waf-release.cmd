@@ -14,6 +14,15 @@ python waf build -o "%WAF_OUT%" -j %NUMBER_OF_PROCESSORS% --targets=libpbd,libte
 set "WAF_RC=%ERRORLEVEL%"
 if not "%WAF_RC%"=="0" exit /b %WAF_RC%
 
+rem waf only posts the task generators named by --targets, so the anonymous
+rem subst tgens that render the LV2 RDF files never run: the bundles would get
+rem their DLL but no manifest.ttl and lilv would fail to load them. Render the
+rem RDF files here with waf's own substitution (@LIB_EXT@ is the only token in
+rem these templates) for every bundle whose plugin binary was linked above.
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+ "Get-ChildItem '%WAF_OUT%\libs\LV2' -Directory -Filter '*.lv2' | ForEach-Object { $b = $_.FullName; $s = Join-Path '%ROOT%\libs\plugins' $_.Name; if (Test-Path -PathType Container $s) { Get-ChildItem $s -Filter '*.ttl.in' | ForEach-Object { [IO.File]::WriteAllText((Join-Path $b $_.BaseName), [IO.File]::ReadAllText($_.FullName).Replace('@LIB_EXT@', '.dll')) } } }"
+if errorlevel 1 exit /b 1
+
 rem Panner modules are dlopen'd from <dll dir>\panners (panner_search_path) and
 rem the bundled LV2s are scanned in <dll dir>\LV2, but waf writes them under
 rem libs\panners\<variant> and libs\LV2. Without this stage, Session startup
